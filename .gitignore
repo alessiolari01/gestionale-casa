@@ -1,0 +1,11 @@
+# Build Rust
+/target/
+
+# Segreti e configurazione locale
+.env
+
+# Dati locali: database e foto/PDF caricati dagli utenti
+/data/
+
+# File di sistema
+.DS_Store

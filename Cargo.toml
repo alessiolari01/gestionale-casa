@@ -1,0 +1,21 @@
+[package]
+name = "gestionale-casa"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+
+# Le dipendenze non sono ancora fissate qui: verranno aggiunte con
+# `cargo add <nome>` mano a mano che si implementano i moduli, così da
+# prendere sempre le versioni correnti da crates.io invece di numeri scritti
+# a mano che rischiano di essere già superati.
+#
+# Dipendenze previste per i prossimi passi (schema dati core):
+#   cargo add tokio --features rt-multi-thread,macros
+#   cargo add teloxide --features macros
+#   cargo add sqlx --features runtime-tokio-rustls,sqlite
+#   cargo add serde --features derive
+#   cargo add dotenvy
+#   cargo add anyhow
+#   cargo add tracing tracing-subscriber
+
+[dependencies]
