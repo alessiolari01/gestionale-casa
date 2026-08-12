@@ -12,8 +12,7 @@ installare per chi lo usa: basta scrivere al bot.
 
 - [x] Step 1 — Scheletro del progetto
 - [x] Step 2 — Schema dati core
-- [x] Step 3 — Codice base backend Telegram + whitelist
-- [ ] Verifica Step 3 sul Galaxy S9 (`cargo test`, `cargo run`, `/ping`)
+- [x] Step 3 — Backend Telegram + whitelist, verificato sul Galaxy S9
 - [ ] Step 4 — Connessione SQLite + migration automatiche
 - [ ] Modulo oggetti
 - [ ] Modulo vestiti
@@ -22,17 +21,27 @@ installare per chi lo usa: basta scrivere al bot.
 
 ### Passo corrente
 
-Il codice per il primo backend Telegram è pronto. Prima di aggiungere nuove
-funzioni va verificato sul Galaxy S9 che:
+Lo **Step 3 è stato verificato realmente sul Galaxy S9**:
 
-1. `cargo test` completi i test della whitelist;
-2. `cargo run` si colleghi correttamente a Telegram;
-3. `/ping` risponda `Pong! Gestionale Casa è online.`;
-4. una chat non autorizzata non possa usare il bot.
+1. `cargo test` è completato correttamente;
+2. il backend si collega alle API Telegram;
+3. `/ping` risponde `Pong! Gestionale Casa è online.`;
+4. `/start` risponde con i comandi disponibili;
+5. un secondo account Telegram, non presente in `ALLOWED_CHAT_IDS`, non riceve
+   alcuna risposta dal bot.
 
-Al primo `cargo test`/`cargo run` verrà creato anche `Cargo.lock`: non va
-eliminato né aggiunto a `.gitignore`, perché servirà a registrare le versioni
-delle dipendenze realmente verificate sul dispositivo.
+Durante il primo test è comparso un errore `openssl-sys`: il Galaxy S9 era
+ancora sul `Cargo.toml` dello Step 2, che attivava le feature predefinite di
+Teloxide e quindi `native-tls`. Riallineando il repository allo Step 3,
+Teloxide usa `rustls` come previsto e la compilazione riesce senza OpenSSL
+nativo. Il dettaglio è registrato in `CHANGELOG.md`.
+
+Il prossimo sviluppo è lo **Step 4 — SQLite operativo**: connessione al
+database, creazione delle cartelle, foreign key, migration automatiche e un
+primo comando `/status`.
+
+`Cargo.lock`, generato sul Galaxy S9 durante la compilazione verificata, va
+versionato nel repository appena trasferito dal telefono al PC.
 
 Il dettaglio di cosa è cambiato rispetto allo step precedente e del prossimo
 step previsto è sempre registrato in `CHANGELOG.md`.

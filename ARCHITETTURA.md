@@ -181,10 +181,10 @@ comandi del bot previsti e casi d'uso.
 1. ~~**Scheletro iniziale**~~ — fatto.
 2. ~~**Schema dati core**~~ — fatto, vedi `docs/schema-core.md` e
    `migrations/20260812120000_schema_core.sql`.
-3. **Base backend Telegram + whitelist** — codice implementato; da verificare
-   sul Galaxy S9 con `cargo test`, `cargo run` e `/ping`.
-4. **Connessione SQLite + migrazioni automatiche** — prossimo step dopo la
-   verifica del bot.
+3. ~~**Base backend Telegram + whitelist**~~ — implementato e verificato sul
+   Galaxy S9: test automatici superati, `/start` e `/ping` operativi, whitelist
+   verificata anche da un secondo account non autorizzato.
+4. **Connessione SQLite + migrazioni automatiche** — prossimo step.
 5. **Oggetti generici** — catalogo libero, base concettuale anche per gli
    altri moduli.
 6. **Vestiti** — capi, materiali, taglie, stagionalità, outfit.

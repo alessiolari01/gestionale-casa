@@ -4,7 +4,7 @@ Questo file registra gli step del progetto in ordine cronologico. Ogni step
 spiega da quale stato si partiva, cosa è stato modificato, cosa è stato
 verificato e quale sarà il passo successivo.
 
-## Step 3 — Base backend Telegram e whitelist — 2026-08-12
+## Step 3 — Base backend Telegram e whitelist — 2026-08-12 → 2026-08-13
 
 ### Stato precedente
 
@@ -31,32 +31,65 @@ sul Galaxy S9 tramite Termux.
 - aggiunti i comandi `/start` e `/ping`;
 - le chat non autorizzate vengono ignorate senza eseguire comandi;
 - aggiornato `migrations/README.md` perché lo schema core esiste già;
-- aggiornata la roadmap e la documentazione dello stato del progetto.
+- aggiornata la roadmap e introdotto questo diario di sviluppo.
 
-### Verifiche
+### Verifiche effettuate sul Galaxy S9
 
-- struttura e file controllati sullo ZIP ricevuto;
-- nessun token Telegram reale o altro segreto evidente trovato nei file
-  versionati;
-- la migration core era già stata verificata separatamente: creazione delle
-  cinque tabelle, vincolo `CHECK` sul tipo e cancellazione `CASCADE` delle
-  foto funzionanti;
-- **compilazione ed esecuzione del nuovo backend da verificare sul Galaxy S9**:
-  nell'ambiente usato per preparare questo ZIP non è disponibile Cargo.
+- `cargo test` completato correttamente;
+- entrambi gli unit test della whitelist superati;
+- `cargo run` avvia correttamente il backend e raggiunge le API Telegram;
+- `/ping` verificato con risposta `Pong! Gestionale Casa è online.`;
+- `/start` verificato con il messaggio di avvio e l'elenco dei comandi;
+- test end-to-end della whitelist eseguito da un secondo account Telegram non
+  presente in `ALLOWED_CHAT_IDS`: il bot non risponde, come previsto;
+- nessun token Telegram reale o altro segreto è presente nei file versionati.
+
+### Problema incontrato e risoluzione
+
+Al primo `cargo test` su Termux la compilazione si è fermata su
+`openssl-sys`. `cargo tree` ha mostrato la catena
+`teloxide default -> native-tls -> reqwest -> openssl-sys`.
+
+La causa non era il codice dello Step 3: il Galaxy S9 era ancora un commit
+indietro e il `Cargo.toml` locale apparteneva allo Step 2, con
+`teloxide = "0.17.0"`. Questa forma abilita le feature predefinite di
+Teloxide, tra cui `native-tls`.
+
+Dopo aver ripristinato il `Cargo.toml` locale e riallineato il telefono con
+`origin/main`, la dipendenza è diventata quella prevista:
+
+```toml
+teloxide = { version = "0.17", default-features = false, features = ["rustls", "ctrlc_handler"] }
+```
+
+La successiva compilazione e tutti i test sono andati a buon fine. Questa nota
+resta nel changelog per rendere riconoscibile lo stesso problema in futuro.
+
+### Stato finale dello step
+
+**Step 3 chiuso e verificato sul dispositivo di destinazione.**
+
+`Cargo.lock` è stato generato sul Galaxy S9 durante la compilazione verificata
+e va aggiunto al repository, così le versioni effettivamente testate delle
+dipendenze restano riproducibili.
 
 ### Prossimo passo standard
 
-**Step 4 — Test reale su Galaxy S9 + collegamento SQLite.**
+**Step 4 — SQLite operativo e stato del sistema.**
 
-Prima si eseguono `cargo test` e `cargo run` sul telefono e si verifica la
-risposta a `/ping`. `DATABASE_URL` resta predisposta in `.env.example`, ma non
-è ancora obbligatoria: verrà letta quando collegheremo SQLite. Il primo comando
-Cargo che risolve le dipendenze genererà
-anche `Cargo.lock`: trattandosi di un'applicazione, verrà mantenuto nel
-repository per fissare le versioni effettivamente verificate. Solo dopo il
-test positivo si implementa `src/db.rs`, si eseguono automaticamente le
-migration all'avvio e si aggiunge un comando di stato che confermi che
-Telegram e database siano entrambi operativi.
+Obiettivi previsti:
+
+1. aggiungere `sqlx` con supporto SQLite;
+2. leggere e validare `DATABASE_URL`;
+3. creare automaticamente `data/db/` se necessario;
+4. aprire SQLite con foreign key abilitate;
+5. eseguire automaticamente le migration presenti in `migrations/`;
+6. condividere il pool/database con il dispatcher Telegram;
+7. aggiungere `/status` per verificare bot, database e migration.
+
+Lo Step 4 non introduce ancora il modulo oggetti: deve prima dimostrare che la
+catena `Telegram -> Rust -> SQLite` funziona correttamente dall'inizio alla
+fine.
 
 ---
 
