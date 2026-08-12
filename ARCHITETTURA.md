@@ -171,21 +171,30 @@ cambia.
   verificata periodicamente (un backup mai testato non è un backup
   affidabile).
 
-## 6. Roadmap moduli
+## 6. Roadmap di sviluppo
 
-Ogni modulo verrà documentato in dettaglio in `docs/moduli/<nome>.md` prima
-di essere implementato, con schema dati, comandi del bot previsti e casi
-d'uso.
+Prima dei moduli funzionali viene completata e verificata l'infrastruttura
+minima comune. Ogni modulo verrà poi documentato in dettaglio in
+`docs/moduli/<nome>.md` prima di essere implementato, con schema dati,
+comandi del bot previsti e casi d'uso.
 
-1. ~~**Schema dati core**~~ — fatto, vedi `docs/schema-core.md` e
+1. ~~**Scheletro iniziale**~~ — fatto.
+2. ~~**Schema dati core**~~ — fatto, vedi `docs/schema-core.md` e
    `migrations/20260812120000_schema_core.sql`.
-2. **Oggetti generici** — catalogo libero, base concettuale anche per gli
+3. **Base backend Telegram + whitelist** — codice implementato; da verificare
+   sul Galaxy S9 con `cargo test`, `cargo run` e `/ping`.
+4. **Connessione SQLite + migrazioni automatiche** — prossimo step dopo la
+   verifica del bot.
+5. **Oggetti generici** — catalogo libero, base concettuale anche per gli
    altri moduli.
-3. **Vestiti** — capi, materiali, taglie, stagionalità, outfit.
-4. **Veicoli** — anagrafica veicoli, scadenze manutenzione, storico
+6. **Vestiti** — capi, materiali, taglie, stagionalità, outfit.
+7. **Veicoli** — anagrafica veicoli, scadenze manutenzione, storico
    interventi.
-5. **Ricette** — ricette con dosi scalabili, pianificazione pasti e
+8. **Ricette** — ricette con dosi scalabili, pianificazione pasti e
    aggregazione della lista della spesa.
+
+La cronologia dettagliata di ogni step, incluse verifiche e differenze
+rispetto allo stato precedente, è mantenuta in `CHANGELOG.md`.
 
 ## 7. Estensioni future (non nel perimetro attuale)
 

@@ -1,26 +1,47 @@
 # Gestionale Casa
 
 Gestionale personale per tenere traccia delle cose di casa (vestiti, veicoli,
-ricette, oggetti generici) tramite un bot Telegram. Nessuna app da installare
-per chi lo usa: basta scrivere al bot.
+ricette, oggetti generici) tramite un bot Telegram. Nessuna app dedicata da
+installare per chi lo usa: basta scrivere al bot.
 
-Per la descrizione completa dell'architettura, le decisioni di design e il
-"perché" delle scelte fatte, vedi **[ARCHITETTURA.md](./ARCHITETTURA.md)**.
+- Architettura e motivazioni: **[ARCHITETTURA.md](./ARCHITETTURA.md)**
+- Cronologia dettagliata degli step: **[CHANGELOG.md](./CHANGELOG.md)**
+- Schema dati core: **[docs/schema-core.md](./docs/schema-core.md)**
 
 ## Stato del progetto
 
-- [x] Scheletro del progetto
-- [x] Schema dati core (foto, categorie, promemoria) — vedi `docs/schema-core.md`
+- [x] Step 1 — Scheletro del progetto
+- [x] Step 2 — Schema dati core
+- [x] Step 3 — Codice base backend Telegram + whitelist
+- [ ] Verifica Step 3 sul Galaxy S9 (`cargo test`, `cargo run`, `/ping`)
+- [ ] Step 4 — Connessione SQLite + migration automatiche
 - [ ] Modulo oggetti
 - [ ] Modulo vestiti
 - [ ] Modulo veicoli
 - [ ] Modulo ricette
 
+### Passo corrente
+
+Il codice per il primo backend Telegram è pronto. Prima di aggiungere nuove
+funzioni va verificato sul Galaxy S9 che:
+
+1. `cargo test` completi i test della whitelist;
+2. `cargo run` si colleghi correttamente a Telegram;
+3. `/ping` risponda `Pong! Gestionale Casa è online.`;
+4. una chat non autorizzata non possa usare il bot.
+
+Al primo `cargo test`/`cargo run` verrà creato anche `Cargo.lock`: non va
+eliminato né aggiunto a `.gitignore`, perché servirà a registrare le versioni
+delle dipendenze realmente verificate sul dispositivo.
+
+Il dettaglio di cosa è cambiato rispetto allo step precedente e del prossimo
+step previsto è sempre registrato in `CHANGELOG.md`.
+
 ## Requisiti
 
 - Rust 1.82+ (`rustup`)
 - Un bot Telegram creato tramite [@BotFather](https://t.me/BotFather)
-- SQLite (incluso, nessuna installazione separata richiesta)
+- SQLite
 
 ## Setup su Termux (Android)
 
@@ -33,12 +54,23 @@ pkg install git rust sqlite
 git clone <url-del-tuo-repo> gestionale-casa
 cd gestionale-casa
 
-# Configura le variabili d'ambiente
+# Se le variabili non sono già state configurate nell'ambiente:
 cp .env.example .env
-# Apri .env e inserisci il token del bot (da @BotFather) e il tuo chat_id
+# Apri .env e inserisci token e chat_id. DATABASE_URL servirà dallo Step 4.
+# Non committare mai il file .env.
+
+# Primo controllo
+cargo test
 
 # Compila ed esegui
-cargo run --release
+cargo run
+```
+
+Quando il test base è concluso, per l'uso continuativo si userà una build
+release:
+
+```bash
+cargo build --release
 ```
 
 Per far partire il bot automaticamente all'accensione del telefono:
@@ -47,8 +79,10 @@ Per far partire il bot automaticamente all'accensione del telefono:
 2. Copia `scripts/termux-boot.sh` in `~/.termux/boot/`.
 3. Attiva `termux-wake-lock` all'avvio (già incluso nello script) così Android
    non sospende il processo.
-4. Disattiva l'ottimizzazione batteria per Termux nelle impostazioni Android
-   (altrimenti il sistema può comunque terminare il processo in background).
+4. Disattiva l'ottimizzazione batteria per Termux nelle impostazioni Android.
+
+> L'avvio automatico verrà considerato operativo solo dopo aver verificato il
+> backend manualmente sul Galaxy S9.
 
 ## Setup su Linux (Raspberry Pi / PC)
 
@@ -61,37 +95,43 @@ cd gestionale-casa
 cp .env.example .env
 # Inserisci token e chat_id in .env
 
+cargo test
 cargo build --release
 ```
 
-Per l'avvio automatico, usa `systemd` (vedi `scripts/gestionale-casa.service`
-una volta creato — verrà aggiunto quando il backend sarà pronto per il primo
-deploy reale).
+Per l'avvio automatico si userà `systemd`; il relativo service verrà aggiunto
+quando il backend sarà pronto per il primo deploy stabile.
 
 ## Struttura del repository
 
-```
+```text
 gestionale-casa/
-├── README.md              # questo file
-├── ARCHITETTURA.md         # descrizione completa dell'architettura
+├── README.md               # quick start e stato sintetico
+├── CHANGELOG.md            # diario degli step e prossimo passo
+├── ARCHITETTURA.md         # architettura e motivazioni delle scelte
 ├── Cargo.toml
 ├── src/
-│   ├── main.rs              # avvio bot, caricamento configurazione
-│   ├── config.rs            # lettura variabili d'ambiente
-│   ├── db.rs                # connessione database e migrazioni
-│   ├── auth.rs               # whitelist utenti autorizzati
-│   └── modules/               # un file per ciascun modulo funzionale
+│   ├── main.rs             # avvio bot e dispatcher Telegram
+│   ├── config.rs           # lettura e validazione configurazione
+│   ├── db.rs               # connessione database e migrazioni (step 4)
+│   ├── auth.rs             # whitelist chat autorizzate
+│   └── modules/            # un file per ciascun modulo funzionale
 │       ├── oggetti.rs
 │       ├── vestiti.rs
 │       ├── veicoli.rs
 │       └── ricette.rs
-├── migrations/              # file .sql di migrazione schema database
-├── scripts/                  # script di avvio e backup
-├── docs/moduli/              # documentazione dettagliata di ogni modulo
-└── data/                      # database e foto (NON versionato su git)
+├── migrations/             # file .sql di migrazione schema database
+├── scripts/                # script di avvio e backup
+├── docs/moduli/            # documentazione dettagliata dei moduli
+└── data/                   # database e foto (NON versionato su Git)
 ```
 
-## Documentazione dei moduli
+## Regola per gli step futuri
 
-Ogni modulo ha un file dedicato in `docs/moduli/`, aggiornato mano a mano
-che viene progettato e implementato.
+Ogni nuovo step deve:
+
+1. partire dallo stato dell'ultimo ZIP/repository;
+2. modificare solo ciò che serve allo scopo dello step;
+3. aggiornare `CHANGELOG.md` con differenze, verifiche e prossimo passo;
+4. aggiornare lo stato sintetico in questo README;
+5. evitare di dichiarare “fatto” ciò che non è stato realmente verificato.

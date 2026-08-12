@@ -1,11 +1,29 @@
-//! Whitelist degli utenti autorizzati a usare il bot.
+//! Whitelist delle chat autorizzate a usare il bot.
 //!
-//! Il bot deve rispondere solo ai `chat_id` presenti in `ALLOWED_CHAT_IDS`
-//! (vedi `config.rs`). Qualunque altro utente scriva al bot va ignorato o
-//! ricevere un messaggio esplicito di accesso negato — mai eseguire comandi
-//! per chat_id non in whitelist.
+//! In questa prima versione l'autorizzazione è basata sul `chat_id` di
+//! Telegram. Una chat non presente in `ALLOWED_CHAT_IDS` viene ignorata e
+//! nessun comando viene eseguito.
 
-// TODO: `is_authorized(chat_id: i64, allowed: &[i64]) -> bool`.
-// TODO: middleware/filtro da agganciare al dispatcher di teloxide così che
-//       ogni handler dei moduli lo erediti automaticamente, invece di
-//       doverlo controllare manualmente in ogni comando.
+/// Restituisce `true` se il `chat_id` è presente nella whitelist.
+pub fn is_authorized(chat_id: i64, allowed_chat_ids: &[i64]) -> bool {
+    allowed_chat_ids.contains(&chat_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chat_autorizzata() {
+        let allowed = vec![123_456_789, 987_654_321];
+
+        assert!(is_authorized(123_456_789, &allowed));
+    }
+
+    #[test]
+    fn chat_non_autorizzata() {
+        let allowed = vec![123_456_789, 987_654_321];
+
+        assert!(!is_authorized(111_111_111, &allowed));
+    }
+}
