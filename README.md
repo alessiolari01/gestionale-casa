@@ -10,7 +10,7 @@ Per la descrizione completa dell'architettura, le decisioni di design e il
 ## Stato del progetto
 
 - [x] Scheletro del progetto
-- [ ] Schema dati core (foto, categorie, promemoria)
+- [x] Schema dati core (foto, categorie, promemoria) — vedi `docs/schema-core.md`
 - [ ] Modulo oggetti
 - [ ] Modulo vestiti
 - [ ] Modulo veicoli

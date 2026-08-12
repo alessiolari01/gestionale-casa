@@ -92,6 +92,18 @@ noto per una gestione aggressiva dei processi in background):
 - L'ottimizzazione batteria per Termux va disattivata nelle impostazioni
   Android.
 
+### 2.6 Tabella `items` centrale per foto, tag e promemoria
+
+**Scelta**: ogni riga di ogni modulo (un vestito, un veicolo, una ricetta,
+un oggetto) è anche una riga in una tabella `items` comune. Foto, tag e
+promemoria fanno riferimento sempre a `items`, mai direttamente alle
+tabelle dei singoli moduli.
+
+**Perché**: senza questa tabella, foto/tag/promemoria andrebbero
+implementati e interrogati separatamente per ciascuno dei quattro moduli.
+Con `items` come punto comune, quella logica si scrive una volta sola.
+Dettagli completi in `docs/schema-core.md`.
+
 ## 3. Flusso dei dati
 
 ```mermaid
@@ -165,8 +177,8 @@ Ogni modulo verrà documentato in dettaglio in `docs/moduli/<nome>.md` prima
 di essere implementato, con schema dati, comandi del bot previsti e casi
 d'uso.
 
-1. **Schema dati core** — pattern condivisi da tutti i moduli: foto
-   allegate, categorie/tag, promemoria e scadenze.
+1. ~~**Schema dati core**~~ — fatto, vedi `docs/schema-core.md` e
+   `migrations/20260812120000_schema_core.sql`.
 2. **Oggetti generici** — catalogo libero, base concettuale anche per gli
    altri moduli.
 3. **Vestiti** — capi, materiali, taglie, stagionalità, outfit.
