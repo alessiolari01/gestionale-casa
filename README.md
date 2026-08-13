@@ -4,22 +4,31 @@ Gestionale personale per tenere traccia delle cose di casa (vestiti, veicoli,
 ricette, oggetti generici) tramite un bot Telegram. Nessuna app dedicata da
 installare per chi lo usa: basta scrivere al bot.
 
-- Architettura e motivazioni: **[ARCHITETTURA.md](./ARCHITETTURA.md)**
-- Cronologia dettagliata degli step: **[CHANGELOG.md](./CHANGELOG.md)**
-- Schema dati core: **[docs/schema-core.md](./docs/schema-core.md)**
+## Documentazione principale
+
+Prima di modificare il progetto, leggere nell'ordine:
+
+1. **[README.md](./README.md)** — stato sintetico, setup e workflow quotidiano;
+2. **[ARCHITETTURA.md](./ARCHITETTURA.md)** — scelte tecniche e motivazioni;
+3. **[CHANGELOG.md](./CHANGELOG.md)** — cronologia degli step e verifiche;
+4. **[docs/HANDOFF.md](./docs/HANDOFF.md)** — consegna completa per chi deve
+   continuare il progetto;
+5. **[docs/schema-core.md](./docs/schema-core.md)** — schema dati condiviso.
 
 ## Stato del progetto
 
 - [x] Step 1 — Scheletro del progetto
 - [x] Step 2 — Schema dati core
 - [x] Step 3 — Backend Telegram + whitelist, verificato sul Galaxy S9
-- [ ] Step 4 — Connessione SQLite + migration automatiche
+- [ ] Step 3.1 — Handoff, workflow Git, CI e Dependabot: configurato, da
+  verificare con il primo run GitHub Actions dopo il push
+- [ ] Step 4 — Connessione SQLite + migration automatiche + `/status`
 - [ ] Modulo oggetti
 - [ ] Modulo vestiti
 - [ ] Modulo veicoli
 - [ ] Modulo ricette
 
-### Passo corrente
+### Ultimo step funzionale verificato
 
 Lo **Step 3 è stato verificato realmente sul Galaxy S9**:
 
@@ -30,27 +39,109 @@ Lo **Step 3 è stato verificato realmente sul Galaxy S9**:
 5. un secondo account Telegram, non presente in `ALLOWED_CHAT_IDS`, non riceve
    alcuna risposta dal bot.
 
-Durante il primo test è comparso un errore `openssl-sys`: il Galaxy S9 era
+Durante il primo test era comparso un errore `openssl-sys`: il Galaxy S9 era
 ancora sul `Cargo.toml` dello Step 2, che attivava le feature predefinite di
 Teloxide e quindi `native-tls`. Riallineando il repository allo Step 3,
 Teloxide usa `rustls` come previsto e la compilazione riesce senza OpenSSL
-nativo. Il dettaglio è registrato in `CHANGELOG.md`.
+nativo. Il dettaglio resta documentato in `CHANGELOG.md`.
 
-Il prossimo sviluppo è lo **Step 4 — SQLite operativo**: connessione al
-database, creazione delle cartelle, foreign key, migration automatiche e un
-primo comando `/status`.
+`Cargo.lock` è già versionato ed è quello generato durante la build verificata
+sul Galaxy S9.
 
-`Cargo.lock`, generato sul Galaxy S9 durante la compilazione verificata, va
-versionato nel repository appena trasferito dal telefono al PC.
+### Passo corrente
 
-Il dettaglio di cosa è cambiato rispetto allo step precedente e del prossimo
-step previsto è sempre registrato in `CHANGELOG.md`.
+Lo **Step 3.1** non aggiunge funzioni al gestionale. Rende il repository più
+facile da mantenere e consegnare ad altri attraverso:
+
+- `docs/HANDOFF.md`;
+- workflow Git esplicito PC ↔ GitHub ↔ Galaxy S9;
+- CI GitHub Actions per formattazione, check, test, Clippy e controllo del
+  requisito minimo Rust 1.88;
+- Dependabot settimanale per Cargo e GitHub Actions, senza auto-merge.
+
+Lo Step 3.1 sarà considerato chiuso solo dopo che il workflow CI del relativo
+commit avrà completato con esito positivo.
+
+Il prossimo sviluppo funzionale rimane lo **Step 4 — SQLite operativo**:
+connessione al database, creazione delle cartelle, foreign key, migration
+automatiche e primo comando `/status`.
+
+## Fonte ufficiale e workflow corrente
+
+La **fonte ufficiale del progetto è il branch `main` su GitHub**:
+
+`https://github.com/alessiolari01/gestionale-casa`
+
+Gli ZIP sono solo snapshot/backup e non devono prevalere su un `main` più
+recente.
+
+Per il momento i ruoli sono:
+
+- **PC Windows**: sviluppo principale, modifica dei file, commit e push;
+- **GitHub `main`**: fonte ufficiale e punto di sincronizzazione;
+- **Galaxy S9 + Termux**: host reale del backend e dispositivo di test.
+
+### Flusso normale: modifica dal PC
+
+Prima di iniziare:
+
+```bash
+git status
+git pull --ff-only
+```
+
+Dopo le modifiche e i controlli:
+
+```bash
+git add .
+git commit -m "Descrizione dello step"
+git push
+```
+
+Poi sul Galaxy S9:
+
+```bash
+cd ~/gestionale-casa
+git status
+git pull --ff-only
+```
+
+Se lo step modifica il comportamento runtime, va poi verificato realmente
+sull'S9 prima di dichiararlo completato.
+
+### Eccezione: piccola modifica nata sull'S9
+
+Quando una modifica ha senso direttamente sul telefono (per esempio un file
+generato durante una build verificata), il flusso può essere invertito:
+
+```text
+S9 -> commit/push -> GitHub -> git pull --ff-only sul PC
+```
+
+Dopo il riallineamento si torna a usare normalmente il PC come punto di
+sviluppo. Evitare di modificare contemporaneamente gli stessi file su PC e
+S9.
+
+Il workflow completo, incluse gestione dei conflitti, segreti e consegna a
+terzi, è descritto in `docs/HANDOFF.md`.
+
+## Amministrazione remota futura
+
+L'accesso remoto diretto all'S9 **non fa parte dello Step 3.1**. In futuro è
+prevista una soluzione basata su **Tailscale + server OpenSSH in Termux**, in
+modo da amministrare il telefono dal PC anche fuori dalla stessa rete senza
+esporre una porta SSH direttamente a Internet.
+
+Questa estensione verrà progettata e testata in uno step dedicato; per ora il
+workflow GitHub resta il metodo ufficiale di gestione tra PC e S9.
 
 ## Requisiti
 
-- Rust 1.82+ (`rustup`)
-- Un bot Telegram creato tramite [@BotFather](https://t.me/BotFather)
-- SQLite
+- Rust **1.88+** per la dependency graph attualmente bloccata in `Cargo.lock`;
+- un bot Telegram creato tramite `@BotFather`;
+- SQLite (necessario dallo Step 4).
+
+Per uso normale è consigliato un toolchain Rust stable aggiornato.
 
 ## Setup su Termux (Android)
 
@@ -59,8 +150,8 @@ step previsto è sempre registrato in `CHANGELOG.md`.
 pkg update && pkg upgrade
 pkg install git rust sqlite
 
-# Clona il repository
-git clone <url-del-tuo-repo> gestionale-casa
+# Clona il repository ufficiale
+git clone https://github.com/alessiolari01/gestionale-casa.git
 cd gestionale-casa
 
 # Se le variabili non sono già state configurate nell'ambiente:
@@ -69,78 +160,91 @@ cp .env.example .env
 # Non committare mai il file .env.
 
 # Primo controllo
-cargo test
+cargo test --locked
 
 # Compila ed esegui
-cargo run
+cargo run --locked
 ```
 
 Quando il test base è concluso, per l'uso continuativo si userà una build
 release:
 
 ```bash
-cargo build --release
+cargo build --release --locked
 ```
 
 Per far partire il bot automaticamente all'accensione del telefono:
 
-1. Installa **Termux:Boot** (da F-Droid, non dal Play Store).
-2. Copia `scripts/termux-boot.sh` in `~/.termux/boot/`.
-3. Attiva `termux-wake-lock` all'avvio (già incluso nello script) così Android
-   non sospende il processo.
-4. Disattiva l'ottimizzazione batteria per Termux nelle impostazioni Android.
+1. installa **Termux:Boot** da una fonte compatibile con Termux;
+2. copia `scripts/termux-boot.sh` in `~/.termux/boot/`;
+3. attiva `termux-wake-lock` all'avvio, come previsto dallo script;
+4. disattiva l'ottimizzazione batteria per Termux nelle impostazioni Android.
 
-> L'avvio automatico verrà considerato operativo solo dopo aver verificato il
-> backend manualmente sul Galaxy S9.
+> L'avvio automatico va verificato separatamente prima di considerarlo parte
+> dell'esercizio stabile del servizio.
 
-## Setup su Linux (Raspberry Pi / PC)
+## Setup su Linux / futuro Raspberry Pi
 
 ```bash
 sudo apt update && sudo apt install git build-essential sqlite3
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
-git clone <url-del-tuo-repo> gestionale-casa
+git clone https://github.com/alessiolari01/gestionale-casa.git
 cd gestionale-casa
 cp .env.example .env
 # Inserisci token e chat_id in .env
 
-cargo test
-cargo build --release
+cargo test --locked
+cargo build --release --locked
 ```
 
 Per l'avvio automatico si userà `systemd`; il relativo service verrà aggiunto
-quando il backend sarà pronto per il primo deploy stabile.
+quando il backend sarà pronto per il primo deploy stabile su Linux.
 
 ## Struttura del repository
 
 ```text
 gestionale-casa/
-├── README.md               # quick start e stato sintetico
-├── CHANGELOG.md            # diario degli step e prossimo passo
-├── ARCHITETTURA.md         # architettura e motivazioni delle scelte
+├── .github/
+│   ├── workflows/
+│   │   └── ci.yml           # controlli automatici Rust
+│   └── dependabot.yml       # aggiornamenti dipendenze via PR
+├── README.md                # quick start e stato sintetico
+├── CHANGELOG.md             # diario degli step e verifiche
+├── ARCHITETTURA.md          # architettura e motivazioni delle scelte
 ├── Cargo.toml
+├── Cargo.lock               # versioni effettivamente bloccate/testate
 ├── src/
-│   ├── main.rs             # avvio bot e dispatcher Telegram
-│   ├── config.rs           # lettura e validazione configurazione
-│   ├── db.rs               # connessione database e migrazioni (step 4)
-│   ├── auth.rs             # whitelist chat autorizzate
-│   └── modules/            # un file per ciascun modulo funzionale
+│   ├── main.rs              # avvio bot e dispatcher Telegram
+│   ├── config.rs            # lettura e validazione configurazione
+│   ├── db.rs                # connessione database e migrazioni (Step 4)
+│   ├── auth.rs              # whitelist chat autorizzate
+│   └── modules/
 │       ├── oggetti.rs
 │       ├── vestiti.rs
 │       ├── veicoli.rs
 │       └── ricette.rs
-├── migrations/             # file .sql di migrazione schema database
-├── scripts/                # script di avvio e backup
-├── docs/moduli/            # documentazione dettagliata dei moduli
-└── data/                   # database e foto (NON versionato su Git)
+├── migrations/              # file .sql di modifica schema
+├── scripts/                 # avvio e backup
+├── docs/
+│   ├── HANDOFF.md           # istruzioni complete per continuare
+│   ├── schema-core.md
+│   └── moduli/
+└── data/                    # database e file locali, NON versionati
 ```
 
 ## Regola per gli step futuri
 
 Ogni nuovo step deve:
 
-1. partire dallo stato dell'ultimo ZIP/repository;
+1. partire dal `main` aggiornato (`git pull --ff-only`);
 2. modificare solo ciò che serve allo scopo dello step;
-3. aggiornare `CHANGELOG.md` con differenze, verifiche e prossimo passo;
-4. aggiornare lo stato sintetico in questo README;
-5. evitare di dichiarare “fatto” ciò che non è stato realmente verificato.
+3. aggiornare `CHANGELOG.md` con **stato precedente → modifiche → verifiche →
+   prossimo passo**;
+4. aggiornare lo stato sintetico nel README e, se cambia una decisione di
+   design, `ARCHITETTURA.md`;
+5. eseguire i controlli disponibili e verificare GitHub Actions dopo il push;
+6. effettuare sul Galaxy S9 i test runtime pertinenti;
+7. non dichiarare “fatto” ciò che non è stato realmente verificato;
+8. non committare mai `.env`, token Telegram, PAT GitHub, database reale o
+   altri segreti.

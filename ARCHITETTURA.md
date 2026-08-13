@@ -104,6 +104,23 @@ implementati e interrogati separatamente per ciascuno dei quattro moduli.
 Con `items` come punto comune, quella logica si scrive una volta sola.
 Dettagli completi in `docs/schema-core.md`.
 
+
+### 2.7 GitHub `main` come fonte ufficiale e ruoli dei dispositivi
+
+**Scelta**: il branch `main` su GitHub è la fonte ufficiale del progetto. Il
+PC Windows è il punto principale di sviluppo e gestione Git; il Galaxy S9 è
+l'host reale e l'ambiente di test runtime.
+
+**Perché**: separare i ruoli evita che ZIP, copie locali e modifiche parallele
+creino stati divergenti. Il workflow normale è `PC -> GitHub -> S9`; una
+modifica semplice nata sull'S9 può seguire temporaneamente
+`S9 -> GitHub -> PC`, dopodiché si torna al flusso principale. Gli
+aggiornamenti tra dispositivi usano preferibilmente `git pull --ff-only`, così
+una divergenza non produce automaticamente merge inattesi.
+
+Gli ZIP restano utili come snapshot o backup, ma non sostituiscono GitHub come
+fonte di verità. Le procedure operative complete sono in `docs/HANDOFF.md`.
+
 ## 3. Flusso dei dati
 
 ```mermaid
@@ -121,28 +138,36 @@ rete.
 
 ## 4. Struttura del repository
 
-```
+```text
 gestionale-casa/
-├── README.md            # quick start, comandi di installazione
-├── ARCHITETTURA.md       # questo file
+├── .github/
+│   ├── workflows/
+│   │   └── ci.yml             # CI Rust su push e pull request
+│   └── dependabot.yml         # aggiornamenti dipendenze tramite PR
+├── README.md                  # quick start e stato sintetico
+├── CHANGELOG.md               # diario degli step e verifiche
+├── ARCHITETTURA.md            # questo file
 ├── Cargo.toml
+├── Cargo.lock                 # dependency graph bloccata e versionata
 ├── src/
-│   ├── main.rs             # avvio del bot, dispatch dei comandi
-│   ├── config.rs           # caricamento di .env (token, whitelist utenti)
-│   ├── db.rs                # connessione SQLite e migrazioni
-│   ├── auth.rs               # whitelist chat_id autorizzati
-│   └── modules/                # logica specifica di ciascun modulo
+│   ├── main.rs                # avvio del bot, dispatch dei comandi
+│   ├── config.rs              # caricamento configurazione
+│   ├── db.rs                  # connessione SQLite e migrazioni (Step 4)
+│   ├── auth.rs                # whitelist chat_id autorizzati
+│   └── modules/
 │       ├── oggetti.rs
 │       ├── vestiti.rs
 │       ├── veicoli.rs
 │       └── ricette.rs
-├── migrations/            # file .sql, uno per ogni modifica allo schema
+├── migrations/                # una migration .sql per ogni modifica schema
 ├── scripts/
-│   ├── termux-boot.sh       # avvio automatico su Android
-│   └── backup.sh              # backup periodico di database e foto
-├── docs/moduli/              # un file .md per ciascun modulo, con lo
-│                               schema dati e le regole specifiche
-└── data/                       # database SQLite e foto (NON su git)
+│   ├── termux-boot.sh         # avvio automatico su Android
+│   └── backup.sh              # backup periodico (da irrobustire)
+├── docs/
+│   ├── HANDOFF.md             # consegna e workflow operativo
+│   ├── schema-core.md
+│   └── moduli/                # documentazione dei moduli funzionali
+└── data/                      # database e file personali, NON su Git
 ```
 
 **Perché file singoli per modulo invece di una cartella per modulo**: allo
@@ -165,8 +190,12 @@ cambia.
   amministratore.
 - **Aggiornamenti di sicurezza**: sistema operativo dell'host aggiornato
   regolarmente.
-- **Accesso remoto per manutenzione** (SSH o simili): se necessario, tramite
-  una VPN leggera (es. Tailscale) invece di esporre porte direttamente.
+- **Accesso remoto per manutenzione**: non è ancora implementato. In futuro si
+  valuterà Tailscale come rete privata tra PC e S9 e un normale server OpenSSH
+  in Termux, con autenticazione a chiave. Non verrà esposta una porta SSH
+  direttamente a Internet. Il server integrato di Tailscale SSH non è la
+  soluzione prevista sull'S9: su Android si userà Tailscale per la
+  connettività e OpenSSH/Termux per il servizio.
 - **Backup**: copia periodica di database e foto su storage esterno,
   verificata periodicamente (un backup mai testato non è un backup
   affidabile).
@@ -175,26 +204,28 @@ cambia.
 
 Prima dei moduli funzionali viene completata e verificata l'infrastruttura
 minima comune. Ogni modulo verrà poi documentato in dettaglio in
-`docs/moduli/<nome>.md` prima di essere implementato, con schema dati,
-comandi del bot previsti e casi d'uso.
+`docs/moduli/<nome>.md` prima di essere implementato.
 
-1. ~~**Scheletro iniziale**~~ — fatto.
-2. ~~**Schema dati core**~~ — fatto, vedi `docs/schema-core.md` e
-   `migrations/20260812120000_schema_core.sql`.
-3. ~~**Base backend Telegram + whitelist**~~ — implementato e verificato sul
-   Galaxy S9: test automatici superati, `/start` e `/ping` operativi, whitelist
-   verificata anche da un secondo account non autorizzato.
-4. **Connessione SQLite + migrazioni automatiche** — prossimo step.
-5. **Oggetti generici** — catalogo libero, base concettuale anche per gli
-   altri moduli.
-6. **Vestiti** — capi, materiali, taglie, stagionalità, outfit.
-7. **Veicoli** — anagrafica veicoli, scadenze manutenzione, storico
-   interventi.
-8. **Ricette** — ricette con dosi scalabili, pianificazione pasti e
-   aggregazione della lista della spesa.
+- ~~**Step 1 — Scheletro iniziale**~~ — fatto.
+- ~~**Step 2 — Schema dati core**~~ — fatto, vedi `docs/schema-core.md` e
+  `migrations/20260812120000_schema_core.sql`.
+- ~~**Step 3 — Base backend Telegram + whitelist**~~ — implementato e
+  verificato sul Galaxy S9: test automatici, `/start`, `/ping` e whitelist
+  end-to-end superati.
+- **Step 3.1 — Handoff, workflow Git e automazioni GitHub** — configurato;
+  deve essere considerato chiuso solo dopo un run CI verde su GitHub.
+- **Step 4 — Connessione SQLite + migrazioni automatiche + `/status`** —
+  prossimo step funzionale.
+- **Oggetti generici** — catalogo libero, base concettuale anche per gli altri
+  moduli.
+- **Vestiti** — capi, materiali, taglie, stagionalità, outfit.
+- **Veicoli** — anagrafica veicoli, scadenze manutenzione, storico interventi.
+- **Ricette** — ricette con dosi scalabili, pianificazione pasti e aggregazione
+  della lista della spesa.
 
-La cronologia dettagliata di ogni step, incluse verifiche e differenze
-rispetto allo stato precedente, è mantenuta in `CHANGELOG.md`.
+La cronologia dettagliata di ogni step, incluse verifiche e differenze rispetto
+allo stato precedente, è mantenuta in `CHANGELOG.md`. Il workflow operativo e
+le istruzioni per la consegna sono in `docs/HANDOFF.md`.
 
 ## 7. Estensioni future (non nel perimetro attuale)
 
@@ -203,3 +234,7 @@ rispetto allo stato precedente, è mantenuta in `CHANGELOG.md`.
   seriale al Raspberry Pi quando sarà in uso.
 - **Raspberry Pi come NAS personale**: ruolo tenuto separato dal backend a
   livello logico, con storage dedicato (disco USB esterno).
+- **Amministrazione remota del Galaxy S9**: step futuro separato basato, se i
+  test lo confermeranno, su Tailscale + server OpenSSH di Termux con chiavi SSH
+  e senza port forwarding pubblico. Deve includere test da reti differenti,
+  gestione del riavvio e comportamento Android in background.
