@@ -56,7 +56,7 @@ Backend Rust / Teloxide
       |
       +-- whitelist chat_id
       |
-      +-- SQLite (predisposto, collegamento nello Step 4)
+      +-- SQLite / SQLx (Step 4 implementato, da verificare)
       |
       +-- file locali in data/ (non versionati)
 ```
@@ -100,7 +100,7 @@ uno step modifica comportamento, dipendenze native, startup o integrazioni.
 
 È il punto centrale tra i dispositivi e la fonte ufficiale della cronologia.
 
-## 6. Stato del progetto dopo lo Step 3.1
+## 6. Stato del progetto
 
 Completati e verificati:
 
@@ -108,6 +108,10 @@ Completati e verificati:
 - Step 2 — schema dati core;
 - Step 3 — backend Telegram + whitelist;
 - Step 3.1 — handoff, workflow Git, CI e Dependabot.
+
+In implementazione/verifica:
+
+- Step 4 — SQLite operativo, migration automatiche e `/status`.
 
 Verifiche reali dello Step 3 sul Galaxy S9:
 
@@ -140,9 +144,45 @@ applicata e un controllo MSRV 1.88 non utile al progetto. Dopo `cargo fmt` sul
 Galaxy S9 e la semplificazione della CI su Rust stable, la run successiva ha
 superato `fmt`, `check`, `test` e `clippy`. Lo Step 3.1 è quindi chiuso.
 
-## 8. Workflow Git ufficiale attuale
 
-### 8.1 Regole generali
+## 8. Step 4 — SQLite runtime
+
+Lo Step 4 collega il backend Telegram allo schema SQLite gia' progettato.
+
+Decisioni attuali:
+
+- SQLx `0.8.6`, senza feature predefinite;
+- feature: `runtime-tokio`, `sqlite`, `migrate`, `macros`;
+- SQLite bundled: non dipende dalla libreria SQLite di sistema per il backend;
+- `DATABASE_URL` opzionale, default `sqlite://data/db/gestionale.db`;
+- foreign key abilitate esplicitamente nelle `SqliteConnectOptions`;
+- migration incorporate con `sqlx::migrate!()` e applicate ad ogni avvio;
+- `build.rs` forza la ricompilazione quando cambia `migrations/`;
+- `SqlitePool` condiviso tramite le dipendenze del dispatcher Teloxide;
+- `/status` verifica foreign key, numero di migration applicate e presenza della
+  tabella `items`;
+- `scripts/backup.sh` usa il comando `.backup` di SQLite, evitando una semplice
+  copia del file mentre il backend puo' essere attivo.
+
+Lo Step 4 **non e' chiuso** finche' non sono stati aggiornati e versionati i
+nuovi contenuti di `Cargo.lock`, la CI non e' verde e i test runtime non sono
+stati eseguiti sul Galaxy S9.
+
+Test runtime previsti:
+
+1. `cargo test --locked`;
+2. `cargo run --locked`;
+3. verifica creazione `data/db/gestionale.db`;
+4. `/ping` e `/start` ancora funzionanti;
+5. `/status` con database, foreign key, migration e schema core tutti validi;
+6. secondo avvio senza errori o riapplicazione distruttiva della migration.
+
+Dopo la chiusura dello Step 4, il prossimo sviluppo previsto e' **Step 5 —
+modulo Oggetti generici**.
+
+## 9. Workflow Git ufficiale attuale
+
+### 9.1 Regole generali
 
 - lavorare normalmente da un dispositivo alla volta;
 - prima di iniziare, verificare sempre `git status`;
@@ -151,7 +191,7 @@ superato `fmt`, `check`, `test` e `clippy`. Lo Step 3.1 è quindi chiuso.
 - GitHub `main` prevale sugli snapshot ZIP;
 - dopo un push, riallineare l'altro dispositivo prima di modificarlo.
 
-### 8.2 Flusso normale: sviluppo dal PC
+### 9.2 Flusso normale: sviluppo dal PC
 
 Sul PC:
 
@@ -183,7 +223,7 @@ git pull --ff-only
 
 Poi eseguire i test runtime richiesti dallo step.
 
-### 8.3 Eccezione: modifica nata sull'S9
+### 9.3 Eccezione: modifica nata sull'S9
 
 Una modifica piccola e strettamente legata all'ambiente S9 può essere
 committata dal telefono. Esempio già avvenuto: `Cargo.lock` generato nella
@@ -211,7 +251,7 @@ git pull --ff-only
 Dopo questo riallineamento, il PC torna a essere il punto principale di
 sviluppo.
 
-### 8.4 Se `git pull --ff-only` fallisce
+### 9.4 Se `git pull --ff-only` fallisce
 
 Non forzare e non usare subito `reset --hard`, `push --force` o merge casuali.
 Prima controllare:
@@ -226,13 +266,13 @@ git log --oneline --left-right HEAD...origin/main
 Capire quale dispositivo contiene modifiche non pubblicate prima di decidere
 come riallineare.
 
-## 9. Segreti e dati locali
+## 10. Segreti e dati locali
 
 Variabili previste:
 
 - `TELOXIDE_TOKEN` — segreto;
 - `ALLOWED_CHAT_IDS` — configurazione privata;
-- `DATABASE_URL` — entrerà in uso nello Step 4.
+- `DATABASE_URL` — configurazione non segreta; opzionale, con default `sqlite://data/db/gestionale.db`.
 
 Non committare:
 
@@ -245,7 +285,7 @@ Non committare:
 
 `.env.example` deve contenere solo nomi delle variabili ed esempi non reali.
 
-## 10. Controlli automatici
+## 11. Controlli automatici
 
 Il workflow `.github/workflows/ci.yml` viene eseguito su push e pull request
 verso `main` e controlla:
@@ -268,7 +308,7 @@ Dependabot controlla settimanalmente:
 Gli aggiornamenti devono arrivare come pull request da valutare; non è previsto
 auto-merge.
 
-## 11. Workflow futuro di amministrazione remota
+## 12. Workflow futuro di amministrazione remota
 
 **Non implementato al momento.**
 
@@ -303,23 +343,13 @@ supportato ufficialmente su Linux e macOS open-source, non su Android. Per
 l'S9 il progetto prevede quindi Tailscale come rete privata + OpenSSH di
 Termux come servizio SSH, non il server Tailscale SSH integrato.
 
-## 12. Prossimo step funzionale
+## 13. Prossimo step funzionale
 
-**Step 4 — SQLite operativo e stato del sistema.**
+**Step 4 è il passo corrente ed è implementato, ma ancora da verificare sul Galaxy S9.**
 
-Obiettivi già annunciati:
+Dopo la sua chiusura il prossimo sviluppo funzionale sarà **Step 5 — modulo Oggetti generici**. Prima dell'implementazione va aggiornata/creata la documentazione del modulo in `docs/moduli/`.
 
-1. aggiungere `sqlx` con supporto SQLite;
-2. leggere e validare `DATABASE_URL`;
-3. creare automaticamente `data/db/`;
-4. aprire SQLite con foreign key abilitate;
-5. eseguire automaticamente le migration;
-6. condividere il database con il dispatcher Telegram;
-7. aggiungere `/status` per verificare bot, database e migration.
-
-Lo Step 4 non deve ancora implementare il modulo oggetti.
-
-## 13. Regola di chiusura di ogni step
+## 14. Regola di chiusura di ogni step
 
 Ogni step deve lasciare documentati:
 

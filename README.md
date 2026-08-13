@@ -22,7 +22,7 @@ Prima di modificare il progetto, leggere nell'ordine:
 - [x] Step 3 — Backend Telegram + whitelist, verificato sul Galaxy S9
 - [x] Step 3.1 — Handoff, workflow Git, CI e Dependabot, verificato con
   GitHub Actions
-- [ ] Step 4 — Connessione SQLite + migration automatiche + `/status`
+- [ ] Step 4 — SQLite operativo + migration automatiche + `/status`: implementato, da verificare su S9
 - [ ] Modulo oggetti
 - [ ] Modulo vestiti
 - [ ] Modulo veicoli
@@ -66,9 +66,23 @@ Rust stable, una nuova esecuzione GitHub Actions ha completato con esito positiv
 
 ### Passo corrente
 
-Il prossimo sviluppo funzionale è lo **Step 4 — SQLite operativo**:
-connessione al database, creazione delle cartelle, foreign key, migration
-automatiche e primo comando `/status`.
+Lo **Step 4 — SQLite operativo** è implementato nel codice ma non è ancora
+dichiarato chiuso: va aggiornato `Cargo.lock`, deve passare la CI e deve essere
+verificato realmente sul Galaxy S9.
+
+Lo Step 4 aggiunge:
+
+- SQLx 0.8.6 con Tokio e SQLite bundled;
+- `DATABASE_URL`, con default `sqlite://data/db/gestionale.db`;
+- creazione automatica della cartella del database e del file SQLite;
+- foreign key abilitate esplicitamente su ogni connessione;
+- migration incorporate nel binario e applicate automaticamente all'avvio;
+- pool SQLite condiviso con il dispatcher Telegram;
+- comando `/status` per verificare database, foreign key, migration e schema core;
+- backup SQLite tramite `.backup` invece della copia diretta del file `.db`.
+
+Lo **Step 5 — modulo Oggetti generici** sarà il prossimo sviluppo funzionale
+solo dopo la chiusura e verifica dello Step 4.
 
 ## Fonte ufficiale e workflow corrente
 
@@ -143,7 +157,7 @@ workflow GitHub resta il metodo ufficiale di gestione tra PC e S9.
 
 - un toolchain Rust **stable aggiornato**;
 - un bot Telegram creato tramite `@BotFather`;
-- SQLite (necessario dallo Step 4).
+- SQLite CLI (`sqlite3`) per diagnostica e backup; SQLx usa SQLite bundled nel backend.
 
 Non viene dichiarata per ora una versione minima Rust (MSRV) formale: il progetto
 usa il `Cargo.lock` versionato, la CI verifica Rust stable e il Galaxy S9 resta
@@ -162,8 +176,8 @@ cd gestionale-casa
 
 # Se le variabili non sono già state configurate nell'ambiente:
 cp .env.example .env
-# Apri .env e inserisci token e chat_id. DATABASE_URL servirà dallo Step 4.
-# Non committare mai il file .env.
+# Apri .env e inserisci token e chat_id. DATABASE_URL e' opzionale: se manca,
+# viene usato sqlite://data/db/gestionale.db. Non committare mai il file .env.
 
 # Primo controllo
 cargo test --locked
@@ -220,10 +234,11 @@ gestionale-casa/
 ├── ARCHITETTURA.md          # architettura e motivazioni delle scelte
 ├── Cargo.toml
 ├── Cargo.lock               # versioni effettivamente bloccate/testate
+├── build.rs                  # ricompila se cambiano le migration
 ├── src/
 │   ├── main.rs              # avvio bot e dispatcher Telegram
 │   ├── config.rs            # lettura e validazione configurazione
-│   ├── db.rs                # connessione database e migrazioni (Step 4)
+│   ├── db.rs                # pool SQLite, migration e stato runtime
 │   ├── auth.rs              # whitelist chat autorizzate
 │   └── modules/
 │       ├── oggetti.rs

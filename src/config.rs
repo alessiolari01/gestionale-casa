@@ -6,6 +6,8 @@
 
 use anyhow::{bail, Context, Result};
 
+const DEFAULT_DATABASE_URL: &str = "sqlite://data/db/gestionale.db";
+
 /// Configurazione necessaria per avviare il backend.
 ///
 /// Non implementa `Debug` volutamente: il token Telegram non deve finire
@@ -14,6 +16,7 @@ use anyhow::{bail, Context, Result};
 pub struct Config {
     pub telegram_token: String,
     pub allowed_chat_ids: Vec<i64>,
+    pub database_url: String,
 }
 
 impl Config {
@@ -47,9 +50,17 @@ impl Config {
             bail!("ALLOWED_CHAT_IDS non contiene nessun chat ID");
         }
 
+        let database_url = std::env::var("DATABASE_URL")
+            .unwrap_or_else(|_| DEFAULT_DATABASE_URL.to_string());
+
+        if database_url.trim().is_empty() {
+            bail!("DATABASE_URL è vuota");
+        }
+
         Ok(Self {
             telegram_token,
             allowed_chat_ids,
+            database_url,
         })
     }
 }

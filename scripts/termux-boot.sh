@@ -4,7 +4,7 @@
 # (crea la cartella ~/.termux/boot/ se non esiste) e rendilo eseguibile:
 #   chmod +x ~/.termux/boot/termux-boot.sh
 
-# Impedisce ad Android di sospendere la CPU mentre il bot è in esecuzione.
+# Impedisce ad Android di sospendere la CPU mentre il bot e' in esecuzione.
 termux-wake-lock
 
 # Percorso del progetto: aggiorna se lo hai clonato altrove.
@@ -14,7 +14,7 @@ cd "$PROJECT_DIR" || exit 1
 
 # Riavvia automaticamente il processo se termina in modo inatteso.
 while true; do
-    cargo run --release
+    cargo run --release --locked
     echo "Il gestionale si e' fermato, riavvio tra 5 secondi..."
     sleep 5
 done

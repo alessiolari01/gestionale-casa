@@ -121,6 +121,32 @@ una divergenza non produce automaticamente merge inattesi.
 Gli ZIP restano utili come snapshot o backup, ma non sostituiscono GitHub come
 fonte di verità. Le procedure operative complete sono in `docs/HANDOFF.md`.
 
+### 2.8 SQLite runtime e migration automatiche
+
+**Scelta**: il backend usa SQLx 0.8.6 con driver SQLite bundled, runtime Tokio
+e migration incorporate nel binario. `DATABASE_URL` puo' sovrascrivere il
+percorso, ma il default e' `sqlite://data/db/gestionale.db`.
+
+**Perche'**: SQLite resta adatto a un gestionale personale su un solo host,
+mentre SQLx fornisce pool asincrono, gestione delle migration e una API Rust
+chiara senza introdurre un server database separato. La serie 0.8 viene usata
+intenzionalmente nello Step 4 per non imporre subito i requisiti toolchain piu'
+nuovi della serie 0.9 sul Galaxy S9. Dependabot potra' proporre upgrade futuri
+senza applicarli automaticamente.
+
+All'avvio `src/db.rs`:
+
+1. interpreta la URL SQLite;
+2. crea la cartella padre se manca;
+3. apre il database con `create_if_missing(true)`;
+4. abilita esplicitamente le foreign key;
+5. applica tutte le migration presenti in `migrations/`;
+6. rende disponibile un `SqlitePool` al dispatcher Telegram.
+
+Il file `build.rs` fa osservare a Cargo la cartella `migrations/`, cosi' nuove
+migration vengono incorporate anche con Rust stable. Il comando `/status`
+interroga lo stato reale del database senza modificare dati applicativi.
+
 ## 3. Flusso dei dati
 
 ```mermaid
@@ -149,10 +175,11 @@ gestionale-casa/
 ├── ARCHITETTURA.md            # questo file
 ├── Cargo.toml
 ├── Cargo.lock                 # dependency graph bloccata e versionata
+├── build.rs                    # ricompila se cambiano le migration
 ├── src/
 │   ├── main.rs                # avvio del bot, dispatch dei comandi
 │   ├── config.rs              # caricamento configurazione
-│   ├── db.rs                  # connessione SQLite e migrazioni (Step 4)
+│   ├── db.rs                  # pool SQLite, migration e stato runtime
 │   ├── auth.rs                # whitelist chat_id autorizzati
 │   └── modules/
 │       ├── oggetti.rs
@@ -162,7 +189,7 @@ gestionale-casa/
 ├── migrations/                # una migration .sql per ogni modifica schema
 ├── scripts/
 │   ├── termux-boot.sh         # avvio automatico su Android
-│   └── backup.sh              # backup periodico (da irrobustire)
+│   └── backup.sh              # backup consistente tramite API SQLite
 ├── docs/
 │   ├── HANDOFF.md             # consegna e workflow operativo
 │   ├── schema-core.md
@@ -215,9 +242,9 @@ minima comune. Ogni modulo verrà poi documentato in dettaglio in
 - ~~**Step 3.1 — Handoff, workflow Git e automazioni GitHub**~~ — chiuso e
   verificato con CI GitHub Actions verde (`fmt`, `check`, `test`, `clippy`).
 - **Step 4 — Connessione SQLite + migrazioni automatiche + `/status`** —
-  prossimo step funzionale.
-- **Oggetti generici** — catalogo libero, base concettuale anche per gli altri
-  moduli.
+  implementato; da verificare con CI e test runtime sul Galaxy S9.
+- **Step 5 — Oggetti generici** — prossimo step dopo la chiusura dello Step 4;
+  catalogo libero e base concettuale anche per gli altri moduli.
 - **Vestiti** — capi, materiali, taglie, stagionalità, outfit.
 - **Veicoli** — anagrafica veicoli, scadenze manutenzione, storico interventi.
 - **Ricette** — ricette con dosi scalabili, pianificazione pasti e aggregazione

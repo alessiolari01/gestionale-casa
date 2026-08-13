@@ -4,6 +4,63 @@ Questo file registra gli step del progetto in ordine cronologico. Ogni step
 spiega da quale stato si partiva, cosa è stato modificato, cosa è stato
 verificato e quale sarà il passo successivo.
 
+## Step 4 — SQLite operativo e stato del sistema — 2026-08-13
+
+### Stato precedente
+
+Lo Step 3.1 era chiuso con CI verde. Il bot Telegram e la whitelist erano gia'
+verificati sul Galaxy S9 e lo schema core SQLite esisteva come migration, ma
+`src/db.rs` era ancora uno scheletro: il backend non apriva alcun database e
+non eseguiva migration all'avvio.
+
+### Fatto in questo step
+
+- scelta SQLx 0.8.6 con `default-features = false` e sole feature necessarie:
+  Tokio, SQLite, migration e macro;
+- usato il driver SQLite bundled per ridurre le dipendenze native dell'host;
+- aggiunto `DATABASE_URL` alla configurazione con default
+  `sqlite://data/db/gestionale.db`;
+- implementato `src/db.rs` con creazione cartella/file, pool SQLite e foreign
+  key esplicitamente abilitate;
+- incorporate e applicate automaticamente le migration all'avvio;
+- aggiunto `build.rs` per far ricompilare il progetto quando cambia la cartella
+  `migrations/`;
+- condiviso `SqlitePool` con il dispatcher Teloxide;
+- aggiunto `/status` con verifica di database, foreign key, migration applicate
+  e presenza dello schema core;
+- aggiornato `/start` per mostrare anche `/status`;
+- aggiornati `.env.example`, README, architettura, handoff e documentazione
+  delle migration;
+- reso `scripts/backup.sh` consistente tramite l'API `.backup` di SQLite;
+- aggiornato `scripts/termux-boot.sh` a `cargo run --release --locked`.
+
+### Decisione sulla versione SQLx
+
+La serie SQLx 0.9 richiede un toolchain Rust molto recente. Per non introdurre
+un requisito non ancora verificato sull'host Android, lo Step 4 usa la serie
+0.8.6, che offre gia' tutte le funzionalita' necessarie. Gli aggiornamenti
+futuri possono essere valutati tramite le PR di Dependabot e testati sul Galaxy
+S9 prima del merge.
+
+### Stato dello step
+
+**Implementato, in attesa di verifica.**
+
+Non dichiarare chiuso lo Step 4 finche' non sono stati:
+
+1. rigenerato/versionato `Cargo.lock` con SQLx;
+2. superati `fmt`, `check`, `test` e `clippy` in GitHub Actions;
+3. eseguiti `cargo test --locked` e `cargo run --locked` sul Galaxy S9;
+4. verificato `/status`;
+5. verificato un secondo avvio del backend sullo stesso database.
+
+### Prossimo passo standard
+
+Dopo la chiusura dello Step 4: **Step 5 — progettazione e prima
+implementazione del modulo Oggetti generici**.
+
+---
+
 ## Step 3.1 — Handoff, workflow Git e automazioni GitHub — 2026-08-13
 
 ### Stato precedente
