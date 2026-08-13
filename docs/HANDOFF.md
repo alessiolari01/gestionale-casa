@@ -130,7 +130,7 @@ Lo Step 3.1 introduce solo infrastruttura di sviluppo/documentazione:
 - `.github/workflows/ci.yml`;
 - `.github/dependabot.yml`;
 - correzione della documentazione ormai obsoleta;
-- allineamento del requisito Rust alla dependency graph bloccata.
+- controlli automatici su Rust stable, senza fissare per ora un MSRV formale.
 
 Non introduce SQLite operativo e non aggiunge comandi Telegram.
 
@@ -251,11 +251,11 @@ verso `main` e controlla:
 1. `cargo fmt --all -- --check`;
 2. `cargo check --locked`;
 3. `cargo test --locked`;
-4. `cargo clippy --all-targets --locked -- -D warnings`;
-5. un job separato esegue `cargo check --locked` con Rust 1.88.
+4. `cargo clippy --all-targets --locked -- -D warnings`.
 
-La CI non sostituisce i test sul Galaxy S9: un runner Linux GitHub e Android
-Termux sono ambienti diversi.
+La CI usa un toolchain Rust stable aggiornato e non definisce, per ora, un MSRV
+(versione minima Rust) formale. La CI non sostituisce i test sul Galaxy S9: un
+runner Linux GitHub e Android Termux sono ambienti diversi.
 
 Dependabot controlla settimanalmente:
 

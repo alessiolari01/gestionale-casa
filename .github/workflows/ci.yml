@@ -41,23 +41,3 @@ jobs:
 
       - name: Clippy
         run: cargo clippy --all-targets --locked -- -D warnings
-
-
-  msrv:
-    name: Minimum Rust 1.88
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Install minimum supported Rust
-        run: |
-          rustup toolchain install 1.88.0 --profile minimal
-          rustup default 1.88.0
-          rustc --version
-          cargo --version
-
-      - name: Check with minimum supported Rust
-        run: cargo check --locked

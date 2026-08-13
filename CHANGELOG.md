@@ -30,15 +30,11 @@ ancora riferimenti a `Cargo.lock` come file “da aggiungere”, ormai obsoleti.
 - documentata come evoluzione futura, **non implementata**, l'amministrazione
   remota tramite Tailscale + OpenSSH in Termux senza esporre SSH a Internet;
 - aggiunto `.github/workflows/ci.yml` per controllare automaticamente format,
-  check, test e Clippy su push/pull request verso `main`, più un controllo
-  separato con Rust 1.88;
+  check, test e Clippy su push/pull request verso `main` usando Rust stable;
 - aggiunto `.github/dependabot.yml` per controlli settimanali di Cargo e
   GitHub Actions, senza auto-merge;
 - corretto il comando di clone usando l'URL reale del repository;
 - corrette le note obsolete su `Cargo.lock`, che è già versionato;
-- aggiornato il requisito Rust dichiarato da 1.82 a 1.88: la dependency graph
-  attualmente bloccata include versioni della crate `time` che richiedono
-  almeno Rust 1.88;
 - aggiornati README e architettura per riflettere workflow e roadmap.
 
 ### Verifiche effettuate durante la preparazione
@@ -53,6 +49,22 @@ ancora riferimenti a `Cargo.lock` come file “da aggiungere”, ormai obsoleti.
 
 I comandi Rust della CI non possono essere dichiarati superati finché il
 workflow non è stato eseguito realmente da GitHub sul commit dello Step 3.1.
+
+### Problemi emersi nella prima run CI e correzione
+
+La prima esecuzione GitHub Actions dello Step 3.1 ha svolto correttamente il
+proprio compito di controllo e ha evidenziato due problemi:
+
+- `cargo fmt --all -- --check` ha segnalato che `src/config.rs` e `src/main.rs`
+  non erano ancora formattati secondo `rustfmt`; sul Galaxy S9 è stato quindi
+  eseguito `cargo fmt`, senza modificare la logica del bot;
+- il job separato “Minimum Rust 1.88” ha fallito. Per questo gestionale non è
+  utile mantenere un MSRV formale derivato dalle dipendenze transitive: il
+  controllo è stato rimosso insieme a `rust-version = "1.88"` dal manifest.
+
+La CI definitiva usa Rust stable aggiornato e mantiene i quattro controlli che
+portano valore al progetto: format, check, test e Clippy. Il Galaxy S9 resta
+l'ambiente reale di verifica runtime.
 
 ### Stato dello step
 

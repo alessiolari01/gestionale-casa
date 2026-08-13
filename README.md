@@ -55,8 +55,7 @@ facile da mantenere e consegnare ad altri attraverso:
 
 - `docs/HANDOFF.md`;
 - workflow Git esplicito PC ↔ GitHub ↔ Galaxy S9;
-- CI GitHub Actions per formattazione, check, test, Clippy e controllo del
-  requisito minimo Rust 1.88;
+- CI GitHub Actions su Rust stable per formattazione, check, test e Clippy;
 - Dependabot settimanale per Cargo e GitHub Actions, senza auto-merge.
 
 Lo Step 3.1 sarà considerato chiuso solo dopo che il workflow CI del relativo
@@ -137,11 +136,13 @@ workflow GitHub resta il metodo ufficiale di gestione tra PC e S9.
 
 ## Requisiti
 
-- Rust **1.88+** per la dependency graph attualmente bloccata in `Cargo.lock`;
+- un toolchain Rust **stable aggiornato**;
 - un bot Telegram creato tramite `@BotFather`;
 - SQLite (necessario dallo Step 4).
 
-Per uso normale è consigliato un toolchain Rust stable aggiornato.
+Non viene dichiarata per ora una versione minima Rust (MSRV) formale: il progetto
+usa il `Cargo.lock` versionato, la CI verifica Rust stable e il Galaxy S9 resta
+l'ambiente reale di test runtime.
 
 ## Setup su Termux (Android)
 
