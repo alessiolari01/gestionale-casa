@@ -4,7 +4,7 @@ Questo file registra gli step del progetto in ordine cronologico. Ogni step
 spiega da quale stato si partiva, cosa è stato modificato, cosa è stato
 verificato e quale sarà il passo successivo.
 
-## Step 4 — SQLite operativo e stato del sistema — 2026-08-13
+## Step 4 — SQLite operativo e stato del sistema — 2026-08-13 → 2026-08-14
 
 ### Stato precedente
 
@@ -42,17 +42,36 @@ un requisito non ancora verificato sull'host Android, lo Step 4 usa la serie
 futuri possono essere valutati tramite le PR di Dependabot e testati sul Galaxy
 S9 prima del merge.
 
+### Verifiche effettuate sul Galaxy S9
+
+- toolchain verificato: `rustc 1.97.1` e `cargo 1.97.1`;
+- aggiunto SQLx 0.8.6 e rigenerato/versionato `Cargo.lock` direttamente sul
+  Galaxy S9;
+- `cargo check` completato correttamente con SQLx/SQLite;
+- `cargo tree -i openssl-sys -e features` conferma che `openssl-sys` non è
+  presente nella dependency graph;
+- `cargo test --locked` completato con 2 test superati e 0 falliti;
+- `cargo run --locked` avvia correttamente il backend;
+- creato realmente `data/db/gestionale.db`;
+- `/start` e `/ping` continuano a funzionare;
+- `/status` verifica correttamente database SQLite, foreign key, migration
+  applicata e presenza delle cinque tabelle core (`items`, `foto`, `tag`,
+  `item_tag`, `promemoria`);
+- un secondo avvio sullo stesso database funziona senza errori e senza
+  riapplicazione distruttiva della migration.
+
+Durante `cargo check`/`cargo test` Rust segnala una future incompatibility in
+`proc-macro-error2 v2.0.1`. Non è un errore attuale e non blocca lo Step 4; va
+rivalutata durante futuri aggiornamenti delle dipendenze, senza forzare upgrade
+non verificati sul Galaxy S9.
+
 ### Stato dello step
 
-**Implementato, in attesa di verifica.**
+**Step 4 chiuso e verificato sul dispositivo di destinazione.**
 
-Non dichiarare chiuso lo Step 4 finche' non sono stati:
-
-1. rigenerato/versionato `Cargo.lock` con SQLx;
-2. superati `fmt`, `check`, `test` e `clippy` in GitHub Actions;
-3. eseguiti `cargo test --locked` e `cargo run --locked` sul Galaxy S9;
-4. verificato `/status`;
-5. verificato un secondo avvio del backend sullo stesso database.
+La chiusura resta valida finché anche la CI GitHub Actions associata al commit
+di chiusura rimane verde; un eventuale fallimento della CI riapre lo step e va
+risolto prima di iniziare lo Step 5.
 
 ### Prossimo passo standard
 

@@ -22,7 +22,7 @@ Prima di modificare il progetto, leggere nell'ordine:
 - [x] Step 3 — Backend Telegram + whitelist, verificato sul Galaxy S9
 - [x] Step 3.1 — Handoff, workflow Git, CI e Dependabot, verificato con
   GitHub Actions
-- [ ] Step 4 — SQLite operativo + migration automatiche + `/status`: implementato, da verificare su S9
+- [x] Step 4 — SQLite operativo + migration automatiche + `/status`, verificato sul Galaxy S9
 - [ ] Modulo oggetti
 - [ ] Modulo vestiti
 - [ ] Modulo veicoli
@@ -30,7 +30,26 @@ Prima di modificare il progetto, leggere nell'ordine:
 
 ### Ultimo step funzionale verificato
 
-Lo **Step 3 è stato verificato realmente sul Galaxy S9**:
+Lo **Step 4 è stato verificato realmente sul Galaxy S9**. La catena
+`Telegram -> Rust -> SQLx -> SQLite` è ora operativa.
+
+Verifiche effettuate:
+
+1. `cargo check` con SQLx 0.8.6 completato correttamente;
+2. `cargo test --locked` completato con 2 test superati e 0 falliti;
+3. `openssl-sys` assente dalla dependency graph;
+4. `cargo run --locked` avvia il backend e crea `data/db/gestionale.db`;
+5. `/start`, `/ping` e `/status` funzionano;
+6. `/status` conferma foreign key attive, migration applicata e tutte le tabelle
+   dello schema core presenti;
+7. un secondo avvio sullo stesso database avviene senza errori e senza
+   riapplicare in modo distruttivo la migration.
+
+Il warning di compatibilità futura relativo a `proc-macro-error2 v2.0.1` non ha
+bloccato build o test ed è mantenuto come nota da rivalutare durante futuri
+aggiornamenti delle dipendenze.
+
+Per completezza, lo **Step 3** aveva già verificato realmente sul Galaxy S9:
 
 1. `cargo test` è completato correttamente;
 2. il backend si collega alle API Telegram;
@@ -66,23 +85,13 @@ Rust stable, una nuova esecuzione GitHub Actions ha completato con esito positiv
 
 ### Passo corrente
 
-Lo **Step 4 — SQLite operativo** è implementato nel codice ma non è ancora
-dichiarato chiuso: va aggiornato `Cargo.lock`, deve passare la CI e deve essere
-verificato realmente sul Galaxy S9.
+Lo **Step 4 — SQLite operativo** è chiuso e verificato sul Galaxy S9.
 
-Lo Step 4 aggiunge:
-
-- SQLx 0.8.6 con Tokio e SQLite bundled;
-- `DATABASE_URL`, con default `sqlite://data/db/gestionale.db`;
-- creazione automatica della cartella del database e del file SQLite;
-- foreign key abilitate esplicitamente su ogni connessione;
-- migration incorporate nel binario e applicate automaticamente all'avvio;
-- pool SQLite condiviso con il dispatcher Telegram;
-- comando `/status` per verificare database, foreign key, migration e schema core;
-- backup SQLite tramite `.backup` invece della copia diretta del file `.db`.
-
-Lo **Step 5 — modulo Oggetti generici** sarà il prossimo sviluppo funzionale
-solo dopo la chiusura e verifica dello Step 4.
+Il prossimo sviluppo funzionale è lo **Step 5 — modulo Oggetti generici**.
+Prima di implementarlo va definita/aggiornata la documentazione dedicata in
+`docs/moduli/`, chiarendo dati, comandi Telegram e casi d'uso. Lo Step 5 sarà
+il primo modulo applicativo costruito sopra l'infrastruttura Telegram + SQLite
+ora verificata.
 
 ## Fonte ufficiale e workflow corrente
 

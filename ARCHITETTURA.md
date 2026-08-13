@@ -241,9 +241,10 @@ minima comune. Ogni modulo verrà poi documentato in dettaglio in
   end-to-end superati.
 - ~~**Step 3.1 — Handoff, workflow Git e automazioni GitHub**~~ — chiuso e
   verificato con CI GitHub Actions verde (`fmt`, `check`, `test`, `clippy`).
-- **Step 4 — Connessione SQLite + migrazioni automatiche + `/status`** —
-  implementato; da verificare con CI e test runtime sul Galaxy S9.
-- **Step 5 — Oggetti generici** — prossimo step dopo la chiusura dello Step 4;
+- ~~**Step 4 — Connessione SQLite + migrazioni automatiche + `/status`**~~ —
+  chiuso e verificato sul Galaxy S9: database creato realmente, migration
+  applicata, `/status` operativo e secondo avvio sullo stesso DB superato.
+- **Step 5 — Oggetti generici** — prossimo step funzionale;
   catalogo libero e base concettuale anche per gli altri moduli.
 - **Vestiti** — capi, materiali, taglie, stagionalità, outfit.
 - **Veicoli** — anagrafica veicoli, scadenze manutenzione, storico interventi.

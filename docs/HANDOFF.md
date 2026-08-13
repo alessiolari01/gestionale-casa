@@ -56,7 +56,7 @@ Backend Rust / Teloxide
       |
       +-- whitelist chat_id
       |
-      +-- SQLite / SQLx (Step 4 implementato, da verificare)
+      +-- SQLite / SQLx (Step 4 verificato sul Galaxy S9)
       |
       +-- file locali in data/ (non versionati)
 ```
@@ -107,11 +107,12 @@ Completati e verificati:
 - Step 1 — scheletro;
 - Step 2 — schema dati core;
 - Step 3 — backend Telegram + whitelist;
-- Step 3.1 — handoff, workflow Git, CI e Dependabot.
-
-In implementazione/verifica:
-
+- Step 3.1 — handoff, workflow Git, CI e Dependabot;
 - Step 4 — SQLite operativo, migration automatiche e `/status`.
+
+Prossimo sviluppo funzionale:
+
+- Step 5 — modulo Oggetti generici.
 
 Verifiche reali dello Step 3 sul Galaxy S9:
 
@@ -159,23 +160,26 @@ Decisioni attuali:
 - migration incorporate con `sqlx::migrate!()` e applicate ad ogni avvio;
 - `build.rs` forza la ricompilazione quando cambia `migrations/`;
 - `SqlitePool` condiviso tramite le dipendenze del dispatcher Teloxide;
-- `/status` verifica foreign key, numero di migration applicate e presenza della
-  tabella `items`;
+- `/status` verifica foreign key, numero di migration applicate e presenza
+  delle cinque tabelle dello schema core (`items`, `foto`, `tag`, `item_tag`,
+  `promemoria`);
 - `scripts/backup.sh` usa il comando `.backup` di SQLite, evitando una semplice
   copia del file mentre il backend puo' essere attivo.
 
-Lo Step 4 **non e' chiuso** finche' non sono stati aggiornati e versionati i
-nuovi contenuti di `Cargo.lock`, la CI non e' verde e i test runtime non sono
-stati eseguiti sul Galaxy S9.
+Lo Step 4 è **chiuso e verificato sul Galaxy S9**. Sono stati eseguiti:
 
-Test runtime previsti:
+1. `cargo check` con SQLx 0.8.6;
+2. verifica dell'assenza di `openssl-sys`;
+3. `cargo test --locked` con 2 test superati;
+4. `cargo run --locked`;
+5. verifica della creazione reale di `data/db/gestionale.db`;
+6. `/start`, `/ping` e `/status`;
+7. verifica di foreign key, migration applicata e cinque tabelle core;
+8. secondo avvio sullo stesso database senza errori o riapplicazione
+   distruttiva della migration.
 
-1. `cargo test --locked`;
-2. `cargo run --locked`;
-3. verifica creazione `data/db/gestionale.db`;
-4. `/ping` e `/start` ancora funzionanti;
-5. `/status` con database, foreign key, migration e schema core tutti validi;
-6. secondo avvio senza errori o riapplicazione distruttiva della migration.
+Il warning Rust su `proc-macro-error2 v2.0.1` è una future incompatibility, non
+un errore attuale, e va rivalutato durante futuri upgrade delle dipendenze.
 
 Dopo la chiusura dello Step 4, il prossimo sviluppo previsto e' **Step 5 —
 modulo Oggetti generici**.
@@ -345,9 +349,11 @@ Termux come servizio SSH, non il server Tailscale SSH integrato.
 
 ## 13. Prossimo step funzionale
 
-**Step 4 è il passo corrente ed è implementato, ma ancora da verificare sul Galaxy S9.**
+**Step 4 è chiuso e verificato sul Galaxy S9.**
 
-Dopo la sua chiusura il prossimo sviluppo funzionale sarà **Step 5 — modulo Oggetti generici**. Prima dell'implementazione va aggiornata/creata la documentazione del modulo in `docs/moduli/`.
+Il prossimo sviluppo funzionale è **Step 5 — modulo Oggetti generici**. Prima
+dell'implementazione va aggiornata/creata la documentazione del modulo in
+`docs/moduli/`, definendo schema dati specifico, comandi Telegram e casi d'uso.
 
 ## 14. Regola di chiusura di ogni step
 
