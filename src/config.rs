@@ -23,15 +23,15 @@ impl Config {
         // nell'ambiente restano prioritarie.
         let _ = dotenvy::dotenv();
 
-        let telegram_token = std::env::var("TELOXIDE_TOKEN")
-            .context("Variabile TELOXIDE_TOKEN non trovata")?;
+        let telegram_token =
+            std::env::var("TELOXIDE_TOKEN").context("Variabile TELOXIDE_TOKEN non trovata")?;
 
         if telegram_token.trim().is_empty() {
             bail!("TELOXIDE_TOKEN è vuota");
         }
 
-        let raw_chat_ids = std::env::var("ALLOWED_CHAT_IDS")
-            .context("Variabile ALLOWED_CHAT_IDS non trovata")?;
+        let raw_chat_ids =
+            std::env::var("ALLOWED_CHAT_IDS").context("Variabile ALLOWED_CHAT_IDS non trovata")?;
 
         let allowed_chat_ids = raw_chat_ids
             .split(',')

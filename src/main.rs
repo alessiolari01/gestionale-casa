@@ -54,11 +54,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn handle_message(
-    bot: Bot,
-    msg: Message,
-    config: Arc<Config>,
-) -> ResponseResult<()> {
+async fn handle_message(bot: Bot, msg: Message, config: Arc<Config>) -> ResponseResult<()> {
     let chat_id = msg.chat.id.0;
 
     // Fail closed: una chat non presente in whitelist non riceve risposta e
