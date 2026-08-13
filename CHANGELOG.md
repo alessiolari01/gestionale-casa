@@ -47,8 +47,8 @@ ancora riferimenti a `Cargo.lock` come file “da aggiungere”, ormai obsoleti.
   documentata per i rispettivi strumenti;
 - la logica Rust del bot non è stata modificata.
 
-I comandi Rust della CI non possono essere dichiarati superati finché il
-workflow non è stato eseguito realmente da GitHub sul commit dello Step 3.1.
+La verifica automatica definitiva viene registrata nella sezione seguente, dopo
+le correzioni emerse dalla prima run GitHub Actions.
 
 ### Problemi emersi nella prima run CI e correzione
 
@@ -66,18 +66,21 @@ La CI definitiva usa Rust stable aggiornato e mantiene i quattro controlli che
 portano valore al progetto: format, check, test e Clippy. Il Galaxy S9 resta
 l'ambiente reale di verifica runtime.
 
+Dopo le correzioni è stata eseguita una nuova GitHub Action con esito positivo:
+
+- `cargo fmt --all -- --check` — superato;
+- `cargo check --locked` — superato;
+- `cargo test --locked` — superato;
+- `cargo clippy --all-targets --locked -- -D warnings` — superato.
+
 ### Stato dello step
 
-**Configurato, in attesa di verifica CI su GitHub.**
+**Step 3.1 chiuso e verificato tramite GitHub Actions.**
 
-Lo Step 3.1 sarà chiuso soltanto quando il primo run di `.github/workflows/ci.yml`
-sarà verde. Se `fmt` o Clippy segnalano problemi, vanno corrette solo le
-violazioni necessarie, documentando le modifiche prima di procedere allo Step
-4.
+La prima run fallita resta documentata perché dimostra il valore della CI e rende
+riconoscibili in futuro le correzioni effettuate.
 
 ### Prossimo passo standard
-
-Dopo la chiusura della CI:
 
 **Step 4 — SQLite operativo e stato del sistema**, come già annunciato nello
 Step 3.

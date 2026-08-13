@@ -20,8 +20,8 @@ Prima di modificare il progetto, leggere nell'ordine:
 - [x] Step 1 — Scheletro del progetto
 - [x] Step 2 — Schema dati core
 - [x] Step 3 — Backend Telegram + whitelist, verificato sul Galaxy S9
-- [ ] Step 3.1 — Handoff, workflow Git, CI e Dependabot: configurato, da
-  verificare con il primo run GitHub Actions dopo il push
+- [x] Step 3.1 — Handoff, workflow Git, CI e Dependabot, verificato con
+  GitHub Actions
 - [ ] Step 4 — Connessione SQLite + migration automatiche + `/status`
 - [ ] Modulo oggetti
 - [ ] Modulo vestiti
@@ -48,7 +48,7 @@ nativo. Il dettaglio resta documentato in `CHANGELOG.md`.
 `Cargo.lock` è già versionato ed è quello generato durante la build verificata
 sul Galaxy S9.
 
-### Passo corrente
+### Step 3.1 verificato
 
 Lo **Step 3.1** non aggiunge funzioni al gestionale. Rende il repository più
 facile da mantenere e consegnare ad altri attraverso:
@@ -58,10 +58,15 @@ facile da mantenere e consegnare ad altri attraverso:
 - CI GitHub Actions su Rust stable per formattazione, check, test e Clippy;
 - Dependabot settimanale per Cargo e GitHub Actions, senza auto-merge.
 
-Lo Step 3.1 sarà considerato chiuso solo dopo che il workflow CI del relativo
-commit avrà completato con esito positivo.
+La prima esecuzione della CI ha evidenziato due problemi di qualità/configurazione:
+formattazione Rust non ancora applicata e un controllo MSRV 1.88 troppo rigido per
+questo progetto. Dopo `cargo fmt` sul Galaxy S9 e la semplificazione della CI su
+Rust stable, una nuova esecuzione GitHub Actions ha completato con esito positivo
+`fmt`, `check`, `test` e `clippy`. Lo **Step 3.1 è quindi chiuso e verificato**.
 
-Il prossimo sviluppo funzionale rimane lo **Step 4 — SQLite operativo**:
+### Passo corrente
+
+Il prossimo sviluppo funzionale è lo **Step 4 — SQLite operativo**:
 connessione al database, creazione delle cartelle, foreign key, migration
 automatiche e primo comando `/status`.
 

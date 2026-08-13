@@ -100,13 +100,14 @@ uno step modifica comportamento, dipendenze native, startup o integrazioni.
 
 È il punto centrale tra i dispositivi e la fonte ufficiale della cronologia.
 
-## 6. Stato del progetto al passaggio Step 3 → Step 3.1
+## 6. Stato del progetto dopo lo Step 3.1
 
 Completati e verificati:
 
 - Step 1 — scheletro;
 - Step 2 — schema dati core;
-- Step 3 — backend Telegram + whitelist.
+- Step 3 — backend Telegram + whitelist;
+- Step 3.1 — handoff, workflow Git, CI e Dependabot.
 
 Verifiche reali dello Step 3 sul Galaxy S9:
 
@@ -134,9 +135,10 @@ Lo Step 3.1 introduce solo infrastruttura di sviluppo/documentazione:
 
 Non introduce SQLite operativo e non aggiunge comandi Telegram.
 
-**Criterio di chiusura:** il primo workflow CI dello Step 3.1 deve risultare
-verde su GitHub. Fino a quel momento lo step è “configurato / in verifica”,
-non “verificato”.
+**Chiusura verificata:** la prima run CI ha rilevato formattazione Rust non
+applicata e un controllo MSRV 1.88 non utile al progetto. Dopo `cargo fmt` sul
+Galaxy S9 e la semplificazione della CI su Rust stable, la run successiva ha
+superato `fmt`, `check`, `test` e `clippy`. Lo Step 3.1 è quindi chiuso.
 
 ## 8. Workflow Git ufficiale attuale
 
@@ -254,7 +256,8 @@ verso `main` e controlla:
 4. `cargo clippy --all-targets --locked -- -D warnings`.
 
 La CI usa un toolchain Rust stable aggiornato e non definisce, per ora, un MSRV
-(versione minima Rust) formale. La CI non sostituisce i test sul Galaxy S9: un
+(versione minima Rust) formale. La run di chiusura dello Step 3.1 ha superato
+tutti e quattro i controlli. La CI non sostituisce i test sul Galaxy S9: un
 runner Linux GitHub e Android Termux sono ambienti diversi.
 
 Dependabot controlla settimanalmente:

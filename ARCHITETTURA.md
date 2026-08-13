@@ -212,8 +212,8 @@ minima comune. Ogni modulo verrà poi documentato in dettaglio in
 - ~~**Step 3 — Base backend Telegram + whitelist**~~ — implementato e
   verificato sul Galaxy S9: test automatici, `/start`, `/ping` e whitelist
   end-to-end superati.
-- **Step 3.1 — Handoff, workflow Git e automazioni GitHub** — configurato;
-  deve essere considerato chiuso solo dopo un run CI verde su GitHub.
+- ~~**Step 3.1 — Handoff, workflow Git e automazioni GitHub**~~ — chiuso e
+  verificato con CI GitHub Actions verde (`fmt`, `check`, `test`, `clippy`).
 - **Step 4 — Connessione SQLite + migrazioni automatiche + `/status`** —
   prossimo step funzionale.
 - **Oggetti generici** — catalogo libero, base concettuale anche per gli altri
