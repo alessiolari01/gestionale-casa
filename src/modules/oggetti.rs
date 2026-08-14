@@ -385,14 +385,7 @@ pub async fn handle_callback(
             }
         }
         "oggetti:draft:description" => {
-            set_draft_field(
-                bot,
-                chat_id,
-                raw_chat_id,
-                sessions,
-                DraftField::Description,
-            )
-            .await?;
+            set_draft_field(bot, chat_id, raw_chat_id, sessions, DraftField::Description).await?;
         }
         "oggetti:draft:value" => {
             set_draft_field(
@@ -415,7 +408,8 @@ pub async fn handle_callback(
             .await?;
         }
         "oggetti:draft:back" => {
-            if let Some(ConversationState::EditingObject { draft, .. }) = sessions.get(raw_chat_id) {
+            if let Some(ConversationState::EditingObject { draft, .. }) = sessions.get(raw_chat_id)
+            {
                 sessions.set(
                     raw_chat_id,
                     ConversationState::EditingObject {
@@ -851,12 +845,11 @@ async fn no_active_draft(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
 
 async fn create_object(pool: &SqlitePool, draft: &ObjectDraft) -> anyhow::Result<i64> {
     let mut tx = pool.begin().await?;
-    let item_result: SqliteQueryResult = sqlx::query(
-        "INSERT INTO items (tipo, nome) VALUES ('oggetto', ?)",
-    )
-    .bind(&draft.name)
-    .execute(&mut *tx)
-    .await?;
+    let item_result: SqliteQueryResult =
+        sqlx::query("INSERT INTO items (tipo, nome) VALUES ('oggetto', ?)")
+            .bind(&draft.name)
+            .execute(&mut *tx)
+            .await?;
     let id = item_result.last_insert_rowid();
 
     insert_object_details(&mut tx, id, draft).await?;
@@ -1109,10 +1102,7 @@ fn other_details_keyboard() -> InlineKeyboardMarkup {
 }
 
 fn cancel_keyboard() -> InlineKeyboardMarkup {
-    InlineKeyboardMarkup::new(vec![vec![button(
-        "❌ Annulla",
-        "oggetti:draft:cancel",
-    )]])
+    InlineKeyboardMarkup::new(vec![vec![button("❌ Annulla", "oggetti:draft:cancel")]])
 }
 
 fn object_detail_keyboard() -> InlineKeyboardMarkup {
@@ -1180,7 +1170,10 @@ fn truncate_chars(value: &str, max_chars: usize) -> String {
     if value.chars().count() <= max_chars {
         return value.to_string();
     }
-    let mut truncated = value.chars().take(max_chars.saturating_sub(1)).collect::<String>();
+    let mut truncated = value
+        .chars()
+        .take(max_chars.saturating_sub(1))
+        .collect::<String>();
     truncated.push('…');
     truncated
 }
@@ -1391,9 +1384,18 @@ mod tests {
 
     #[test]
     fn date_vengono_normalizzate_e_validate() {
-        assert_eq!(parse_date_to_iso("14/05/2025").as_deref(), Some("2025-05-14"));
-        assert_eq!(parse_date_to_iso("2025-05-14").as_deref(), Some("2025-05-14"));
-        assert_eq!(parse_date_to_iso("29/02/2024").as_deref(), Some("2024-02-29"));
+        assert_eq!(
+            parse_date_to_iso("14/05/2025").as_deref(),
+            Some("2025-05-14")
+        );
+        assert_eq!(
+            parse_date_to_iso("2025-05-14").as_deref(),
+            Some("2025-05-14")
+        );
+        assert_eq!(
+            parse_date_to_iso("29/02/2024").as_deref(),
+            Some("2024-02-29")
+        );
         assert_eq!(parse_date_to_iso("29/02/2025"), None);
         assert_eq!(parse_date_to_iso("31/04/2025"), None);
     }
@@ -1461,12 +1463,11 @@ mod tests {
             .await
             .expect("item");
         let id = item.last_insert_rowid();
-        let result = sqlx::query(
-            "INSERT INTO oggetti (item_id, prezzo_acquisto_centesimi) VALUES (?, -1)",
-        )
-        .bind(id)
-        .execute(&pool)
-        .await;
+        let result =
+            sqlx::query("INSERT INTO oggetti (item_id, prezzo_acquisto_centesimi) VALUES (?, -1)")
+                .bind(id)
+                .execute(&pool)
+                .await;
         assert!(result.is_err());
     }
 }

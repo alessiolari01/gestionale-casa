@@ -126,7 +126,10 @@ async fn handle_callback(
     };
     let chat_id = message.chat.id;
     if !auth::is_authorized(chat_id.0, &config.allowed_chat_ids) {
-        tracing::warn!(chat_id = chat_id.0, "Callback ignorata da chat non autorizzata");
+        tracing::warn!(
+            chat_id = chat_id.0,
+            "Callback ignorata da chat non autorizzata"
+        );
         return respond(());
     }
 
