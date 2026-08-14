@@ -50,8 +50,8 @@ impl Config {
             bail!("ALLOWED_CHAT_IDS non contiene nessun chat ID");
         }
 
-        let database_url = std::env::var("DATABASE_URL")
-            .unwrap_or_else(|_| DEFAULT_DATABASE_URL.to_string());
+        let database_url =
+            std::env::var("DATABASE_URL").unwrap_or_else(|_| DEFAULT_DATABASE_URL.to_string());
 
         if database_url.trim().is_empty() {
             bail!("DATABASE_URL è vuota");
