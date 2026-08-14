@@ -1,7 +1,7 @@
 //! Punto di ingresso del Gestionale Casa.
 //!
-//! Step corrente: backend Telegram collegato a SQLite, migration automatiche
-//! e comando `/status` per verificare l'infrastruttura end-to-end.
+//! Step corrente: Step 5A, primo modulo applicativo "Oggetti generici" sopra
+//! l'infrastruttura Telegram + SQLx + SQLite verificata nello Step 4.
 
 mod auth;
 mod config;
@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use config::Config;
+use modules::oggetti::SessionStore;
 use sqlx::SqlitePool;
 use teloxide::{dptree, prelude::*};
 
@@ -23,7 +24,6 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = Arc::new(Config::load()?);
-
     tracing::info!(
         authorized_chats = config.allowed_chat_ids.len(),
         "Configurazione caricata"
@@ -31,30 +31,26 @@ async fn main() -> anyhow::Result<()> {
 
     let pool = db::connect(&config.database_url).await?;
     let database_status = db::status(&pool).await?;
-
     tracing::info!(
         applied_migrations = database_status.applied_migrations,
         schema_core = database_status.schema_core_present,
         "Database SQLite pronto"
     );
 
-    // Usiamo il token già validato da Config invece di Bot::from_env(),
-    // così un errore di configurazione produce un messaggio controllato.
     let bot = Bot::new(config.telegram_token.clone());
-
-    // get_me() verifica subito sia il token sia la raggiungibilità dell'API
-    // Telegram. Se fallisce, il programma termina con un errore esplicito.
     let me = bot
         .get_me()
         .await
         .context("Impossibile collegarsi al bot Telegram")?;
-
     tracing::info!(bot_username = ?me.username(), "Gestionale Casa online");
 
-    let handler = Update::filter_message().endpoint(handle_message);
+    let sessions = SessionStore::new();
+    let handler = dptree::entry()
+        .branch(Update::filter_message().endpoint(handle_message))
+        .branch(Update::filter_callback_query().endpoint(handle_callback));
 
     Dispatcher::builder(bot, handler)
-        .dependencies(dptree::deps![config, pool])
+        .dependencies(dptree::deps![config, pool, sessions])
         .enable_ctrlc_handler()
         .build()
         .dispatch()
@@ -68,11 +64,9 @@ async fn handle_message(
     msg: Message,
     config: Arc<Config>,
     pool: SqlitePool,
+    sessions: SessionStore,
 ) -> ResponseResult<()> {
     let chat_id = msg.chat.id.0;
-
-    // Fail closed: una chat non presente in whitelist non riceve risposta e
-    // soprattutto non può eseguire alcun comando.
     if !auth::is_authorized(chat_id, &config.allowed_chat_ids) {
         tracing::warn!(chat_id, "Messaggio ignorato da chat non autorizzata");
         return respond(());
@@ -82,70 +76,140 @@ async fn handle_message(
         return respond(());
     };
 
-    // Consideriamo solo la prima parola e rimuoviamo l'eventuale suffisso
-    // @nome_bot, utile se in futuro il bot verrà usato anche in un gruppo.
-    let command = text
-        .split_whitespace()
-        .next()
-        .unwrap_or_default()
-        .split('@')
-        .next()
-        .unwrap_or_default();
+    if modules::oggetti::handle_message(&bot, &msg, &pool, &sessions, text).await? {
+        return respond(());
+    }
 
+    let command = first_command(text);
     match command {
-        "/start" => {
-            bot.send_message(
-                msg.chat.id,
-                "Gestionale Casa attivo.\n\nComandi disponibili:\n/ping\n/status",
-            )
-            .await?;
+        Some("/start") => {
+            sessions.clear_chat(chat_id);
+            send_main_menu(&bot, msg.chat.id).await?;
         }
-        "/ping" => {
+        Some("/ping") => {
             bot.send_message(msg.chat.id, "Pong! Gestionale Casa è online.")
                 .await?;
         }
-        "/status" => match db::status(&pool).await {
-            Ok(status) => {
-                let fk = if status.foreign_keys_enabled {
-                    "✅"
-                } else {
-                    "❌"
-                };
-                let schema = if status.schema_core_present {
-                    "✅"
-                } else {
-                    "❌"
-                };
-
-                let message = format!(
-                    "🏠 Gestionale Casa\n\n\
-                     Bot Telegram: ✅\n\
-                     Database SQLite: ✅\n\
-                     Foreign key: {fk}\n\
-                     Migrazioni applicate: {}\n\
-                     Schema core: {schema}",
-                    status.applied_migrations
-                );
-
-                bot.send_message(msg.chat.id, message).await?;
-            }
-            Err(error) => {
-                tracing::error!(?error, "Errore durante /status");
-                bot.send_message(
-                    msg.chat.id,
-                    "⚠️ Il bot è online, ma non riesco a leggere lo stato del database.",
-                )
-                .await?;
-            }
-        },
-        _ => {
+        Some("/status") => {
+            send_status(&bot, msg.chat.id, &pool).await?;
+        }
+        Some(_) => {
             bot.send_message(
                 msg.chat.id,
-                "Comando non riconosciuto.\nUsa /start per vedere i comandi disponibili.",
+                "Comando non riconosciuto.\nUsa /start per aprire il menu principale.",
+            )
+            .await?;
+        }
+        None => {
+            bot.send_message(
+                msg.chat.id,
+                "Non c'è un'operazione attiva. Usa /start oppure i pulsanti del menu.",
             )
             .await?;
         }
     }
 
     respond(())
+}
+
+async fn handle_callback(
+    bot: Bot,
+    q: CallbackQuery,
+    config: Arc<Config>,
+    pool: SqlitePool,
+    sessions: SessionStore,
+) -> ResponseResult<()> {
+    bot.answer_callback_query(q.id.clone()).await?;
+
+    let Some(message) = q.regular_message() else {
+        return respond(());
+    };
+    let chat_id = message.chat.id;
+    if !auth::is_authorized(chat_id.0, &config.allowed_chat_ids) {
+        tracing::warn!(chat_id = chat_id.0, "Callback ignorata da chat non autorizzata");
+        return respond(());
+    }
+
+    let Some(data) = q.data.as_deref() else {
+        return respond(());
+    };
+
+    match data {
+        "menu:main" => {
+            sessions.clear_chat(chat_id.0);
+            send_main_menu(&bot, chat_id).await?;
+        }
+        "menu:soon" => {
+            bot.send_message(
+                chat_id,
+                "Questo modulo non è ancora implementato. Per ora è disponibile 📦 Oggetti.",
+            )
+            .await?;
+        }
+        "system:status" => {
+            send_status(&bot, chat_id, &pool).await?;
+        }
+        _ => {
+            if !modules::oggetti::handle_callback(&bot, chat_id, &pool, &sessions, data).await? {
+                bot.send_message(chat_id, "Pulsante non riconosciuto o non più valido.")
+                    .await?;
+            }
+        }
+    }
+
+    respond(())
+}
+
+async fn send_main_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
+    bot.send_message(
+        chat_id,
+        "🏠 Gestionale Casa\n\nScegli una sezione. I moduli non ancora disponibili sono indicati come prossimamente.\n\nComandi rapidi: /oggetti · /status · /ping",
+    )
+    .reply_markup(modules::oggetti::main_menu_keyboard())
+    .await?;
+    Ok(())
+}
+
+async fn send_status(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> ResponseResult<()> {
+    match db::status(pool).await {
+        Ok(status) => {
+            let fk = if status.foreign_keys_enabled {
+                "✅"
+            } else {
+                "❌"
+            };
+            let schema = if status.schema_core_present {
+                "✅"
+            } else {
+                "❌"
+            };
+            let message = format!(
+                "🏠 Gestionale Casa\n\n\
+                 Bot Telegram: ✅\n\
+                 Database SQLite: ✅\n\
+                 Foreign key: {fk}\n\
+                 Migrazioni applicate: {}\n\
+                 Schema core: {schema}",
+                status.applied_migrations
+            );
+            bot.send_message(chat_id, message).await?;
+        }
+        Err(error) => {
+            tracing::error!(?error, "Errore durante la lettura dello stato");
+            bot.send_message(
+                chat_id,
+                "⚠️ Il bot è online, ma non riesco a leggere lo stato del database.",
+            )
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+fn first_command(text: &str) -> Option<&str> {
+    let token = text.split_whitespace().next()?;
+    if !token.starts_with('/') {
+        return None;
+    }
+    token.split('@').next()
 }

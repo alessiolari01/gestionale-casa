@@ -227,6 +227,26 @@ cambia.
   verificata periodicamente (un backup mai testato non è un backup
   affidabile).
 
+## 5.1 Interfaccia applicativa dei moduli
+
+Dallo Step 5A l'interfaccia Telegram usa due ingressi paralleli:
+
+1. **inline keyboard**, pensata per l'uso quotidiano e come interfaccia
+   principale;
+2. **comandi testuali equivalenti**, utili come scorciatoie e per test/debug.
+
+Le due strade non duplicano la logica: convergono sulle stesse funzioni Rust e
+sulle stesse operazioni SQL. Per esempio `➕ Nuovo oggetto` e
+`/oggetto_nuovo` aprono lo stesso flusso.
+
+Le bozze non ancora salvate sono mantenute solo in memoria per chat. I dati
+persistenti vengono scritti esclusivamente quando l'utente conferma `✅ Salva`.
+Il salvataggio dell'oggetto avviene in una singola transazione che crea prima
+`items` e poi la riga specifica `oggetti`.
+
+Per importi monetari il progetto usa **centesimi interi**, non valori `REAL`,
+evitando errori di rappresentazione floating point.
+
 ## 6. Roadmap di sviluppo
 
 Prima dei moduli funzionali viene completata e verificata l'infrastruttura
@@ -244,8 +264,14 @@ minima comune. Ogni modulo verrà poi documentato in dettaglio in
 - ~~**Step 4 — Connessione SQLite + migrazioni automatiche + `/status`**~~ —
   chiuso e verificato sul Galaxy S9: database creato realmente, migration
   applicata, `/status` operativo e secondo avvio sullo stesso DB superato.
-- **Step 5 — Oggetti generici** — prossimo step funzionale;
-  catalogo libero e base concettuale anche per gli altri moduli.
+- **Step 5 — Oggetti generici** — in sviluppo.
+  - **Step 5A** — implementato, da verificare: tabella `oggetti`, menu con
+    inline keyboard e comandi equivalenti, creazione guidata, elenco, ricerca
+    e scheda singola.
+  - **Step 5B** — modifica ed eliminazione sicura.
+  - **Step 5C** — foto, documenti e tag.
+  - **Step 5D** — garanzie e promemoria.
+  - **Step 5E** — prestiti e storico.
 - **Vestiti** — capi, materiali, taglie, stagionalità, outfit.
 - **Veicoli** — anagrafica veicoli, scadenze manutenzione, storico interventi.
 - **Ricette** — ricette con dosi scalabili, pianificazione pasti e aggregazione

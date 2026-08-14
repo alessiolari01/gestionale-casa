@@ -13,7 +13,8 @@ Prima di modificare il progetto, leggere nell'ordine:
 3. **[CHANGELOG.md](./CHANGELOG.md)** — cronologia degli step e verifiche;
 4. **[docs/HANDOFF.md](./docs/HANDOFF.md)** — consegna completa per chi deve
    continuare il progetto;
-5. **[docs/schema-core.md](./docs/schema-core.md)** — schema dati condiviso.
+5. **[docs/schema-core.md](./docs/schema-core.md)** — schema dati condiviso;
+6. **[docs/moduli/oggetti.md](./docs/moduli/oggetti.md)** — specifica Step 5A.
 
 ## Stato del progetto
 
@@ -23,7 +24,8 @@ Prima di modificare il progetto, leggere nell'ordine:
 - [x] Step 3.1 — Handoff, workflow Git, CI e Dependabot, verificato con
   GitHub Actions
 - [x] Step 4 — SQLite operativo + migration automatiche + `/status`, verificato sul Galaxy S9
-- [ ] Modulo oggetti
+- [ ] Step 5 — Modulo oggetti
+  - [ ] Step 5A — anagrafica, pulsanti + comandi, creazione, elenco, ricerca e scheda
 - [ ] Modulo vestiti
 - [ ] Modulo veicoli
 - [ ] Modulo ricette
@@ -87,11 +89,18 @@ Rust stable, una nuova esecuzione GitHub Actions ha completato con esito positiv
 
 Lo **Step 4 — SQLite operativo** è chiuso e verificato sul Galaxy S9.
 
-Il prossimo sviluppo funzionale è lo **Step 5 — modulo Oggetti generici**.
-Prima di implementarlo va definita/aggiornata la documentazione dedicata in
-`docs/moduli/`, chiarendo dati, comandi Telegram e casi d'uso. Lo Step 5 sarà
-il primo modulo applicativo costruito sopra l'infrastruttura Telegram + SQLite
-ora verificata.
+È ora **implementato lo Step 5A — Oggetti generici**, ancora da verificare su
+GitHub Actions e sul Galaxy S9 prima di dichiararlo chiuso. Lo Step 5A aggiunge:
+
+- nuova migration `oggetti`, senza modificare la migration core già applicata;
+- menu Telegram con inline keyboard;
+- comandi testuali equivalenti ai pulsanti;
+- creazione rapida con solo nome oppure pannello dettagli opzionale;
+- salvataggio atomico `items + oggetti`;
+- elenco paginato, ricerca e scheda singola;
+- test automatici del parsing e della persistenza.
+
+La specifica del modulo è in `docs/moduli/oggetti.md`.
 
 ## Fonte ufficiale e workflow corrente
 
