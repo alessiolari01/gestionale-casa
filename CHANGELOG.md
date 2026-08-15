@@ -1,5 +1,22 @@
 # Diario di sviluppo
 
+
+## Step 6B — Storico trasversale globale + individuale — 2026-08-15 → 2026-08-16
+
+**Implementazione completata e verificata sul Galaxy S9; PR/CI/merge ancora necessari per la chiusura ufficiale.**
+
+Introdotte le tabelle `storico_entita`, `storico_eventi`, `storico_cambiamenti` e `storico_cambi_luogo`, con identità storiche permanenti, prima/dopo strutturato e snapshot dei luoghi. Il backfill non inventa eventi precedenti.
+
+Coperti gli eventi di oggetti, foto, case, stanze e luoghi; le modifiche no-op non generano eventi.
+
+6B.3A ha aggiunto storico globale/individuale, paginazione e dettaglio Telegram (`d106678`). 6B.3B ha aggiunto filtri combinabili per periodo, modulo, operazione, casa, stanza ed elemento, mantenuti durante paginazione e dettaglio.
+
+Verifiche finali: `cargo fmt`, `cargo check --locked`, **37/37 test**, Clippy `-D warnings` e runtime Telegram tutti verdi. Sul Galaxy S9, se il linker esaurisce memoria, usare `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_DEBUG=0 cargo test --locked -- --test-threads=1`.
+
+Prossimo passo dopo PR/CI/merge: **Step 6C — Contenitori e sotto-posizioni**.
+
+---
+
 ## Step 6A — Case, stanze e posizione strutturata — 2026-08-15
 
 - UX luoghi: distingue prima assegnazione, spostamento e rimozione; gli spostamenti mostrano origine e destinazione in preparazione allo storico dello Step 6B.

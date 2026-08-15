@@ -16,3 +16,4 @@ Un file per ciascun modulo, mantenuto insieme all'implementazione, con:
 - `vestiti.md` — futuro;
 - `veicoli.md` — futuro;
 - `ricette.md` — futuro.
+- [Storico](storico.md) — storico trasversale, prima/dopo, luoghi e filtri.

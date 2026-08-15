@@ -1,5 +1,14 @@
 # Gestionale Casa
 
+
+## Stato Step 6B
+
+Lo **Step 6B — Storico trasversale globale + individuale** è implementato e verificato sul Galaxy S9. Sono disponibili storico globale e individuale, dettaglio prima/dopo, paginazione e filtri combinabili per periodo, modulo, operazione, casa, stanza ed elemento.
+
+Verifica finale locale: **37/37 test**, Clippy con `-D warnings` e test runtime Telegram superati. Prima della chiusura ufficiale restano PR, CI GitHub verde e merge su `main`. Dopo il merge il prossimo sviluppo approvato è **Step 6C — Contenitori e sotto-posizioni**.
+
+Documentazione tecnica: `docs/moduli/storico.md`.
+
 Gestionale personale per tenere traccia delle cose di casa (vestiti, veicoli,
 ricette, oggetti generici) tramite un bot Telegram. Nessuna app dedicata da
 installare per chi lo usa: basta scrivere al bot.

@@ -389,3 +389,11 @@ L'interfaccia Telegram mantiene la regola già adottata nello Step 5A: pulsanti
 inline come percorso principale e comandi testuali equivalenti quando utili.
 Inoltre il backend invia una notifica di avvio alle chat autorizzate e `/status`
 fornisce sempre un pulsante per tornare al menu principale.
+
+## Storico trasversale — Step 6B
+
+Lo storico è un'infrastruttura condivisa, non specifica del modulo Oggetti. `storico_entita` mantiene un'identità storica permanente distinta dalla riga viva; `storico_eventi` contiene metadati e snapshot; `storico_cambiamenti` salva solo i campi realmente modificati; `storico_cambi_luogo` salva il prima/dopo strutturato di casa e stanza.
+
+Il testo Telegram viene generato dai dati strutturati. Le rinomine o cancellazioni future non riscrivono il passato grazie agli snapshot. Le modifiche no-op e la scelta dello stesso luogo non generano eventi. Quando modifica applicativa e storico appartengono alla stessa operazione DB, vengono salvati nella stessa transazione.
+
+La UI espone storico globale, storico individuale, dettaglio, paginazione e filtri combinabili. Lo stato dei filtri è codificato nei callback Telegram in forma compatta. Dettagli: `docs/moduli/storico.md`.

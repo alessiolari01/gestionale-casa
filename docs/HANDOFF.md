@@ -1,5 +1,20 @@
 # Handoff — Gestionale Casa
 
+
+## Stato corrente — Step 6B pronto per PR
+
+Lo Step 6B è implementato e verificato sul Galaxy S9 sul branch `step-6b-test`. Checkpoint noti: `a28bdf8` (storico trasversale) e `d106678` (UI Telegram), seguiti dal commit 6B.3B dei filtri globali.
+
+Verifiche finali locali: **37/37 test**, `cargo check --locked` verde, Clippy `-D warnings` verde e runtime Telegram verde.
+
+Non considerare ancora lo step nella baseline ufficiale finché PR, GitHub Actions verde e merge su `main` non sono completati. Dopo il merge riallineare S9 e PC a `main`.
+
+Problema operativo noto S9: il linker LLVM può esaurire memoria; usare se necessario `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_DEBUG=0 cargo test --locked -- --test-threads=1`.
+
+Prossimo step approvato dopo il merge: **6C — Contenitori e sotto-posizioni**.
+
+---
+
 ## Aggiornamento corrente — Step 6A in sviluppo
 
 - `main` contiene gli Step 5A, 5B e 5C chiusi e verificati;
