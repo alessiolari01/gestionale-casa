@@ -97,6 +97,8 @@ pub(crate) struct RoomChoice {
 
 #[derive(Debug, Clone, FromRow)]
 struct ItemLocation {
+    home_id: i64,
+    room_id: Option<i64>,
     home_name: Option<String>,
     room_name: Option<String>,
 }
@@ -1308,30 +1310,319 @@ pub(crate) async fn insert_item_location(
     Ok(())
 }
 
+pub(crate) async fn history_location_snapshot(
+    tx: &mut Transaction<'_, Sqlite>,
+    home_id: i64,
+    room_id: Option<i64>,
+) -> Result<crate::modules::storico::LocationSnapshot, sqlx::Error> {
+    let home_name: String = sqlx::query_scalar("SELECT nome FROM abitazioni WHERE id = ?")
+        .bind(home_id)
+        .fetch_one(&mut **tx)
+        .await?;
+    let home_history_id =
+        crate::modules::storico::ensure_entity(tx, "abitazione", home_id, &home_name).await?;
+
+    let (room_history_id, room_name) = if let Some(room_id) = room_id {
+        let room_name: String =
+            sqlx::query_scalar("SELECT nome FROM stanze WHERE id = ? AND abitazione_id = ?")
+                .bind(room_id)
+                .bind(home_id)
+                .fetch_one(&mut **tx)
+                .await?;
+        let history_id =
+            crate::modules::storico::ensure_entity(tx, "stanza", room_id, &room_name).await?;
+        (Some(history_id), Some(room_name))
+    } else {
+        (None, None)
+    };
+
+    Ok(crate::modules::storico::LocationSnapshot {
+        abitazione_storico_id: Some(home_history_id),
+        abitazione_nome: Some(home_name),
+        stanza_storico_id: room_history_id,
+        stanza_nome: room_name,
+    })
+}
+
+pub(crate) async fn history_item_location_snapshot(
+    tx: &mut Transaction<'_, Sqlite>,
+    item_id: i64,
+) -> Result<crate::modules::storico::LocationSnapshot, sqlx::Error> {
+    match get_item_location_tx(tx, item_id).await? {
+        Some(location) => history_snapshot_from_item_location(tx, &location).await,
+        None => Ok(crate::modules::storico::LocationSnapshot::default()),
+    }
+}
+
+async fn history_snapshot_from_item_location(
+    tx: &mut Transaction<'_, Sqlite>,
+    location: &ItemLocation,
+) -> Result<crate::modules::storico::LocationSnapshot, sqlx::Error> {
+    history_location_snapshot(tx, location.home_id, location.room_id).await
+}
+
+async fn history_item_identity(
+    tx: &mut Transaction<'_, Sqlite>,
+    item_id: i64,
+) -> Result<(i64, String), sqlx::Error> {
+    let name: String = sqlx::query_scalar("SELECT nome FROM items WHERE id = ?")
+        .bind(item_id)
+        .fetch_one(&mut **tx)
+        .await?;
+    let history_id = crate::modules::storico::ensure_entity(tx, "oggetto", item_id, &name).await?;
+    Ok((history_id, name))
+}
+
+async fn record_item_location_event(
+    tx: &mut Transaction<'_, Sqlite>,
+    item_id: i64,
+    operation: &str,
+    before: &crate::modules::storico::LocationSnapshot,
+    after: &crate::modules::storico::LocationSnapshot,
+    parent_event_id: Option<i64>,
+) -> Result<(), sqlx::Error> {
+    if before == after {
+        return Ok(());
+    }
+
+    let (item_history_id, item_name) = history_item_identity(tx, item_id).await?;
+    let context = if after.abitazione_storico_id.is_some() {
+        after
+    } else {
+        before
+    };
+
+    let event_id = crate::modules::storico::record_event(
+        tx,
+        &crate::modules::storico::NewHistoryEvent {
+            entita_storico_id: item_history_id,
+            modulo: "oggetti",
+            componente: "luoghi",
+            operazione: operation,
+            nome_entita_snapshot: &item_name,
+            abitazione_storico_id: context.abitazione_storico_id,
+            abitazione_nome_snapshot: context.abitazione_nome.as_deref(),
+            stanza_storico_id: context.stanza_storico_id,
+            stanza_nome_snapshot: context.stanza_nome.as_deref(),
+            evento_padre_id: parent_event_id,
+        },
+    )
+    .await?;
+
+    crate::modules::storico::record_location_change(tx, event_id, before, after).await
+}
+
 async fn create_home(pool: &SqlitePool, name: &str) -> Result<i64, sqlx::Error> {
+    let mut tx = pool.begin().await?;
     let result = sqlx::query("INSERT INTO abitazioni (nome) VALUES (?)")
         .bind(name)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
-    Ok(result.last_insert_rowid())
+    let id = result.last_insert_rowid();
+
+    let history_id =
+        crate::modules::storico::ensure_entity(&mut tx, "abitazione", id, name).await?;
+    let event_id = crate::modules::storico::record_event(
+        &mut tx,
+        &crate::modules::storico::NewHistoryEvent {
+            entita_storico_id: history_id,
+            modulo: "luoghi",
+            componente: "abitazioni",
+            operazione: "creazione",
+            nome_entita_snapshot: name,
+            abitazione_storico_id: Some(history_id),
+            abitazione_nome_snapshot: Some(name),
+            stanza_storico_id: None,
+            stanza_nome_snapshot: None,
+            evento_padre_id: None,
+        },
+    )
+    .await?;
+    crate::modules::storico::record_field_changes(
+        &mut tx,
+        event_id,
+        &[crate::modules::storico::NewFieldChange {
+            campo: "nome",
+            tipo_valore: "testo",
+            valore_prima: None,
+            valore_dopo: Some(name.to_string()),
+        }],
+    )
+    .await?;
+
+    tx.commit().await?;
+    Ok(id)
 }
 
 async fn rename_home(pool: &SqlitePool, id: i64, name: &str) -> Result<bool, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let Some(old_name) =
+        sqlx::query_scalar::<_, String>("SELECT nome FROM abitazioni WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await?
+    else {
+        return Ok(false);
+    };
+
+    if old_name == name {
+        return Ok(true);
+    }
+
+    let history_id =
+        crate::modules::storico::ensure_entity(&mut tx, "abitazione", id, &old_name).await?;
     let result = sqlx::query(
         "UPDATE abitazioni SET nome = ?, aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
     )
     .bind(name)
     .bind(id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
-    Ok(result.rows_affected() == 1)
+
+    if result.rows_affected() != 1 {
+        return Ok(false);
+    }
+
+    let event_id = crate::modules::storico::record_event(
+        &mut tx,
+        &crate::modules::storico::NewHistoryEvent {
+            entita_storico_id: history_id,
+            modulo: "luoghi",
+            componente: "abitazioni",
+            operazione: "rinomina",
+            nome_entita_snapshot: name,
+            abitazione_storico_id: Some(history_id),
+            abitazione_nome_snapshot: Some(name),
+            stanza_storico_id: None,
+            stanza_nome_snapshot: None,
+            evento_padre_id: None,
+        },
+    )
+    .await?;
+    crate::modules::storico::record_field_changes(
+        &mut tx,
+        event_id,
+        &[crate::modules::storico::NewFieldChange {
+            campo: "nome",
+            tipo_valore: "testo",
+            valore_prima: Some(old_name),
+            valore_dopo: Some(name.to_string()),
+        }],
+    )
+    .await?;
+    crate::modules::storico::rename_entity(&mut tx, history_id, name).await?;
+
+    tx.commit().await?;
+    Ok(true)
 }
 
 async fn delete_home(pool: &SqlitePool, id: i64) -> Result<bool, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let Some(home_name) =
+        sqlx::query_scalar::<_, String>("SELECT nome FROM abitazioni WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await?
+    else {
+        return Ok(false);
+    };
+
+    let home_history_id =
+        crate::modules::storico::ensure_entity(&mut tx, "abitazione", id, &home_name).await?;
+    let home_event_id = crate::modules::storico::record_event(
+        &mut tx,
+        &crate::modules::storico::NewHistoryEvent {
+            entita_storico_id: home_history_id,
+            modulo: "luoghi",
+            componente: "abitazioni",
+            operazione: "eliminazione",
+            nome_entita_snapshot: &home_name,
+            abitazione_storico_id: Some(home_history_id),
+            abitazione_nome_snapshot: Some(&home_name),
+            stanza_storico_id: None,
+            stanza_nome_snapshot: None,
+            evento_padre_id: None,
+        },
+    )
+    .await?;
+    crate::modules::storico::record_field_changes(
+        &mut tx,
+        home_event_id,
+        &[crate::modules::storico::NewFieldChange {
+            campo: "nome",
+            tipo_valore: "testo",
+            valore_prima: Some(home_name.clone()),
+            valore_dopo: None,
+        }],
+    )
+    .await?;
+
+    let rooms: Vec<(i64, String)> =
+        sqlx::query_as("SELECT id, nome FROM stanze WHERE abitazione_id = ? ORDER BY id")
+            .bind(id)
+            .fetch_all(&mut *tx)
+            .await?;
+
+    let affected_items: Vec<(i64, Option<i64>)> =
+        sqlx::query_as("SELECT item_id, stanza_id FROM item_luogo WHERE abitazione_id = ?")
+            .bind(id)
+            .fetch_all(&mut *tx)
+            .await?;
+
+    for (item_id, room_id) in affected_items {
+        let before = history_location_snapshot(&mut tx, id, room_id).await?;
+        record_item_location_event(
+            &mut tx,
+            item_id,
+            "rimozione",
+            &before,
+            &crate::modules::storico::LocationSnapshot::default(),
+            Some(home_event_id),
+        )
+        .await?;
+    }
+
+    for (room_id, room_name) in rooms {
+        let room_history_id =
+            crate::modules::storico::ensure_entity(&mut tx, "stanza", room_id, &room_name).await?;
+        let room_event_id = crate::modules::storico::record_event(
+            &mut tx,
+            &crate::modules::storico::NewHistoryEvent {
+                entita_storico_id: room_history_id,
+                modulo: "luoghi",
+                componente: "stanze",
+                operazione: "eliminazione",
+                nome_entita_snapshot: &room_name,
+                abitazione_storico_id: Some(home_history_id),
+                abitazione_nome_snapshot: Some(&home_name),
+                stanza_storico_id: Some(room_history_id),
+                stanza_nome_snapshot: Some(&room_name),
+                evento_padre_id: Some(home_event_id),
+            },
+        )
+        .await?;
+        crate::modules::storico::record_field_changes(
+            &mut tx,
+            room_event_id,
+            &[crate::modules::storico::NewFieldChange {
+                campo: "nome",
+                tipo_valore: "testo",
+                valore_prima: Some(room_name),
+                valore_dopo: None,
+            }],
+        )
+        .await?;
+        crate::modules::storico::mark_entity_deleted(&mut tx, room_history_id).await?;
+    }
+
+    crate::modules::storico::mark_entity_deleted(&mut tx, home_history_id).await?;
+
     let result = sqlx::query("DELETE FROM abitazioni WHERE id = ?")
         .bind(id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
+
+    tx.commit().await?;
     Ok(result.rows_affected() == 1)
 }
 
@@ -1359,30 +1650,197 @@ async fn list_homes(pool: &SqlitePool) -> Result<Vec<HomeRecord>, sqlx::Error> {
 }
 
 async fn create_room(pool: &SqlitePool, home_id: i64, name: &str) -> Result<i64, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let home_name: String = sqlx::query_scalar("SELECT nome FROM abitazioni WHERE id = ?")
+        .bind(home_id)
+        .fetch_one(&mut *tx)
+        .await?;
+    let home_history_id =
+        crate::modules::storico::ensure_entity(&mut tx, "abitazione", home_id, &home_name).await?;
+
     let result = sqlx::query("INSERT INTO stanze (abitazione_id, nome) VALUES (?, ?)")
         .bind(home_id)
         .bind(name)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
-    Ok(result.last_insert_rowid())
+    let id = result.last_insert_rowid();
+    let room_history_id =
+        crate::modules::storico::ensure_entity(&mut tx, "stanza", id, name).await?;
+
+    let event_id = crate::modules::storico::record_event(
+        &mut tx,
+        &crate::modules::storico::NewHistoryEvent {
+            entita_storico_id: room_history_id,
+            modulo: "luoghi",
+            componente: "stanze",
+            operazione: "creazione",
+            nome_entita_snapshot: name,
+            abitazione_storico_id: Some(home_history_id),
+            abitazione_nome_snapshot: Some(&home_name),
+            stanza_storico_id: Some(room_history_id),
+            stanza_nome_snapshot: Some(name),
+            evento_padre_id: None,
+        },
+    )
+    .await?;
+    crate::modules::storico::record_field_changes(
+        &mut tx,
+        event_id,
+        &[crate::modules::storico::NewFieldChange {
+            campo: "nome",
+            tipo_valore: "testo",
+            valore_prima: None,
+            valore_dopo: Some(name.to_string()),
+        }],
+    )
+    .await?;
+
+    tx.commit().await?;
+    Ok(id)
 }
 
 async fn rename_room(pool: &SqlitePool, id: i64, name: &str) -> Result<bool, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let Some((home_id, old_name, home_name)) = sqlx::query_as::<_, (i64, String, String)>(
+        "SELECT s.abitazione_id, s.nome, a.nome \
+         FROM stanze s JOIN abitazioni a ON a.id = s.abitazione_id \
+         WHERE s.id = ?",
+    )
+    .bind(id)
+    .fetch_optional(&mut *tx)
+    .await?
+    else {
+        return Ok(false);
+    };
+
+    if old_name == name {
+        return Ok(true);
+    }
+
+    let home_history_id =
+        crate::modules::storico::ensure_entity(&mut tx, "abitazione", home_id, &home_name).await?;
+    let room_history_id =
+        crate::modules::storico::ensure_entity(&mut tx, "stanza", id, &old_name).await?;
+
     let result = sqlx::query(
         "UPDATE stanze SET nome = ?, aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
     )
     .bind(name)
     .bind(id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
-    Ok(result.rows_affected() == 1)
+    if result.rows_affected() != 1 {
+        return Ok(false);
+    }
+
+    let event_id = crate::modules::storico::record_event(
+        &mut tx,
+        &crate::modules::storico::NewHistoryEvent {
+            entita_storico_id: room_history_id,
+            modulo: "luoghi",
+            componente: "stanze",
+            operazione: "rinomina",
+            nome_entita_snapshot: name,
+            abitazione_storico_id: Some(home_history_id),
+            abitazione_nome_snapshot: Some(&home_name),
+            stanza_storico_id: Some(room_history_id),
+            stanza_nome_snapshot: Some(name),
+            evento_padre_id: None,
+        },
+    )
+    .await?;
+    crate::modules::storico::record_field_changes(
+        &mut tx,
+        event_id,
+        &[crate::modules::storico::NewFieldChange {
+            campo: "nome",
+            tipo_valore: "testo",
+            valore_prima: Some(old_name),
+            valore_dopo: Some(name.to_string()),
+        }],
+    )
+    .await?;
+    crate::modules::storico::rename_entity(&mut tx, room_history_id, name).await?;
+
+    tx.commit().await?;
+    Ok(true)
 }
 
 async fn delete_room(pool: &SqlitePool, id: i64) -> Result<bool, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let Some((home_id, room_name, home_name)) = sqlx::query_as::<_, (i64, String, String)>(
+        "SELECT s.abitazione_id, s.nome, a.nome \
+         FROM stanze s JOIN abitazioni a ON a.id = s.abitazione_id \
+         WHERE s.id = ?",
+    )
+    .bind(id)
+    .fetch_optional(&mut *tx)
+    .await?
+    else {
+        return Ok(false);
+    };
+
+    let before = history_location_snapshot(&mut tx, home_id, Some(id)).await?;
+    let after = history_location_snapshot(&mut tx, home_id, None).await?;
+    let home_history_id = after
+        .abitazione_storico_id
+        .expect("la casa esiste durante l'eliminazione della stanza");
+    let room_history_id = before
+        .stanza_storico_id
+        .expect("la stanza esiste durante la propria eliminazione");
+
+    let room_event_id = crate::modules::storico::record_event(
+        &mut tx,
+        &crate::modules::storico::NewHistoryEvent {
+            entita_storico_id: room_history_id,
+            modulo: "luoghi",
+            componente: "stanze",
+            operazione: "eliminazione",
+            nome_entita_snapshot: &room_name,
+            abitazione_storico_id: Some(home_history_id),
+            abitazione_nome_snapshot: Some(&home_name),
+            stanza_storico_id: Some(room_history_id),
+            stanza_nome_snapshot: Some(&room_name),
+            evento_padre_id: None,
+        },
+    )
+    .await?;
+    crate::modules::storico::record_field_changes(
+        &mut tx,
+        room_event_id,
+        &[crate::modules::storico::NewFieldChange {
+            campo: "nome",
+            tipo_valore: "testo",
+            valore_prima: Some(room_name),
+            valore_dopo: None,
+        }],
+    )
+    .await?;
+
+    let affected_items: Vec<i64> =
+        sqlx::query_scalar("SELECT item_id FROM item_luogo WHERE stanza_id = ?")
+            .bind(id)
+            .fetch_all(&mut *tx)
+            .await?;
+    for item_id in affected_items {
+        record_item_location_event(
+            &mut tx,
+            item_id,
+            "spostamento",
+            &before,
+            &after,
+            Some(room_event_id),
+        )
+        .await?;
+    }
+
+    crate::modules::storico::mark_entity_deleted(&mut tx, room_history_id).await?;
     let result = sqlx::query("DELETE FROM stanze WHERE id = ?")
         .bind(id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
+
+    tx.commit().await?;
     Ok(result.rows_affected() == 1)
 }
 
@@ -1445,7 +1903,8 @@ async fn get_item_location(
     item_id: i64,
 ) -> Result<Option<ItemLocation>, sqlx::Error> {
     sqlx::query_as::<_, ItemLocation>(
-        "SELECT a.nome AS home_name, s.nome AS room_name \
+        "SELECT il.abitazione_id AS home_id, il.stanza_id AS room_id, \
+                a.nome AS home_name, s.nome AS room_name \
          FROM item_luogo il \
          LEFT JOIN abitazioni a ON a.id = il.abitazione_id \
          LEFT JOIN stanze s ON s.id = il.stanza_id \
@@ -1456,23 +1915,83 @@ async fn get_item_location(
     .await
 }
 
+async fn get_item_location_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    item_id: i64,
+) -> Result<Option<ItemLocation>, sqlx::Error> {
+    sqlx::query_as::<_, ItemLocation>(
+        "SELECT il.abitazione_id AS home_id, il.stanza_id AS room_id, \
+                a.nome AS home_name, s.nome AS room_name \
+         FROM item_luogo il \
+         LEFT JOIN abitazioni a ON a.id = il.abitazione_id \
+         LEFT JOIN stanze s ON s.id = il.stanza_id \
+         WHERE il.item_id = ?",
+    )
+    .bind(item_id)
+    .fetch_optional(&mut **tx)
+    .await
+}
+
 async fn set_item_home(pool: &SqlitePool, item_id: i64, home_id: i64) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let previous = get_item_location_tx(&mut tx, item_id).await?;
+
+    if previous
+        .as_ref()
+        .is_some_and(|location| location.home_id == home_id && location.room_id.is_none())
+    {
+        return Ok(());
+    }
+
+    let before = if let Some(previous) = previous.as_ref() {
+        history_snapshot_from_item_location(&mut tx, previous).await?
+    } else {
+        crate::modules::storico::LocationSnapshot::default()
+    };
+    let after = history_location_snapshot(&mut tx, home_id, None).await?;
+
     sqlx::query(
         "INSERT INTO item_luogo (item_id, abitazione_id, stanza_id) VALUES (?, ?, NULL) \
          ON CONFLICT(item_id) DO UPDATE SET abitazione_id = excluded.abitazione_id, stanza_id = NULL",
     )
     .bind(item_id)
     .bind(home_id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+
+    let operation = if previous.is_some() {
+        "spostamento"
+    } else {
+        "assegnazione"
+    };
+    record_item_location_event(&mut tx, item_id, operation, &before, &after, None).await?;
+
+    tx.commit().await?;
     Ok(())
 }
 
 async fn set_item_room(pool: &SqlitePool, item_id: i64, room_id: i64) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
     let home_id: i64 = sqlx::query_scalar("SELECT abitazione_id FROM stanze WHERE id = ?")
         .bind(room_id)
-        .fetch_one(pool)
+        .fetch_one(&mut *tx)
         .await?;
+    let previous = get_item_location_tx(&mut tx, item_id).await?;
+
+    if previous
+        .as_ref()
+        .is_some_and(|location| location.home_id == home_id && location.room_id == Some(room_id))
+    {
+        return Ok(());
+    }
+
+    let before = if let Some(previous) = previous.as_ref() {
+        history_snapshot_from_item_location(&mut tx, previous).await?
+    } else {
+        crate::modules::storico::LocationSnapshot::default()
+    };
+    let after = history_location_snapshot(&mut tx, home_id, Some(room_id)).await?;
+
     sqlx::query(
         "INSERT INTO item_luogo (item_id, abitazione_id, stanza_id) VALUES (?, ?, ?) \
          ON CONFLICT(item_id) DO UPDATE SET abitazione_id = excluded.abitazione_id, stanza_id = excluded.stanza_id",
@@ -1480,16 +1999,36 @@ async fn set_item_room(pool: &SqlitePool, item_id: i64, room_id: i64) -> Result<
     .bind(item_id)
     .bind(home_id)
     .bind(room_id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+
+    let operation = if previous.is_some() {
+        "spostamento"
+    } else {
+        "assegnazione"
+    };
+    record_item_location_event(&mut tx, item_id, operation, &before, &after, None).await?;
+
+    tx.commit().await?;
     Ok(())
 }
 
 async fn clear_item_location(pool: &SqlitePool, item_id: i64) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let Some(previous) = get_item_location_tx(&mut tx, item_id).await? else {
+        return Ok(());
+    };
+    let before = history_snapshot_from_item_location(&mut tx, &previous).await?;
+    let after = crate::modules::storico::LocationSnapshot::default();
+
     sqlx::query("DELETE FROM item_luogo WHERE item_id = ?")
         .bind(item_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
+
+    record_item_location_event(&mut tx, item_id, "rimozione", &before, &after, None).await?;
+
+    tx.commit().await?;
     Ok(())
 }
 
@@ -2003,10 +2542,14 @@ mod tests {
     fn messaggio_luogo_distingue_assegnazione_spostamento_e_rimozione() {
         let nessun_luogo = None;
         let garage = ItemLocation {
+            home_id: 1,
+            room_id: Some(10),
             home_name: Some("Casa principale".to_string()),
             room_name: Some("Garage".to_string()),
         };
         let camera = ItemLocation {
+            home_id: 1,
+            room_id: Some(11),
             home_name: Some("Casa principale".to_string()),
             room_name: Some("Camera".to_string()),
         };

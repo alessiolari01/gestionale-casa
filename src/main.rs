@@ -67,6 +67,11 @@ async fn main() -> anyhow::Result<()> {
         .branch(Update::filter_message().endpoint(handle_message))
         .branch(Update::filter_callback_query().endpoint(handle_callback));
 
+    // Il dispatcher prende possesso di bot/config. Conserviamo solo cio' che
+    // serve per notificare uno shutdown controllato (Ctrl+C compreso).
+    let shutdown_bot = bot.clone();
+    let shutdown_chat_ids = config.allowed_chat_ids.clone();
+
     Dispatcher::builder(bot, handler)
         .dependencies(dptree::deps![
             config,
@@ -80,6 +85,20 @@ async fn main() -> anyhow::Result<()> {
         .dispatch()
         .await;
 
+    for chat_id in shutdown_chat_ids {
+        if let Err(error) = shutdown_bot
+            .send_message(ChatId(chat_id), "🔴 Gestionale Casa è offline.")
+            .await
+        {
+            tracing::warn!(
+                chat_id,
+                ?error,
+                "Impossibile inviare la notifica di spegnimento alla chat autorizzata"
+            );
+        }
+    }
+
+    tracing::info!("Gestionale Casa offline");
     Ok(())
 }
 
