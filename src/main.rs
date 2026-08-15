@@ -245,7 +245,7 @@ async fn handle_callback(
         "system:status" => {
             send_status(&bot, chat_id, &pool).await?;
         }
-        _ if data.starts_with("history:") => {
+        _ if data.starts_with("history:") || data.starts_with("h:") => {
             sessions.clear_chat(chat_id.0);
             location_sessions.clear_chat(chat_id.0);
             photo_sessions.clear_chat(chat_id.0);
