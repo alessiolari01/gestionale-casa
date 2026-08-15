@@ -1,19 +1,18 @@
 # Handoff — Gestionale Casa
 
-## Aggiornamento corrente — Step 5B in test
+## Aggiornamento corrente — Step 5C in test
 
-- `main` contiene Step 5A chiuso e verificato, più la correzione che rende
-  eseguibile `scripts/backup.sh`;
-- lo sviluppo corrente avviene sul branch `step-5b-test`;
+- `main` contiene Step 5A e Step 5B chiusi e verificati;
+- Step 5B salva le foto reali in `data/media/oggetti/<item_id>/`, invia la
+  notifica online all'avvio e permette il ritorno al menu da `/status`;
+- lo sviluppo corrente avviene sul branch `step-5c-test`;
 - per piccole iterazioni si preferisce SSH/SCP PC -> Termux, evitando commit
   usati solo come trasporto;
-- GitHub `main` resta comunque la fonte ufficiale e riceve solo modifiche
-  verificate;
-- Step 5B riusa la tabella core `foto` e salva i file reali in
-  `data/media/oggetti/<item_id>/`;
-- la notifica di avvio e il ritorno al menu da `/status` fanno parte dello stesso
-  step e vanno testati sul dispositivo reale;
-- Step 5C dovrà aggiungere modifica/eliminazione degli oggetti già persistiti;
+- GitHub `main` resta la fonte ufficiale e riceve solo modifiche verificate;
+- Step 5C aggiunge modifica degli oggetti persistiti, rimozione esplicita dei
+  campi opzionali ed eliminazione con doppia conferma;
+- la cancellazione usa il cascade SQLite e poi pulisce
+  `data/media/oggetti/<id>/`;
 - Step 6 dovrà progettare multi-abitazione e stanze, ma nessuna migration va
   creata prima della conferma dell'architettura dei luoghi.
 
@@ -128,15 +127,17 @@ Completati e verificati:
 - Step 3.1 — handoff, workflow Git, CI e Dependabot;
 - Step 4 — SQLite operativo, migration automatiche e `/status`.
 
-Step 5A:
+Step 5:
 
-- Oggetti generici: implementazione e test runtime S9 completati. Lo step è
-  considerato chiuso quando questa revisione è presente su `main` con CI verde.
+- Step 5A — oggetti generici: chiuso e verificato;
+- Step 5B — foto degli oggetti: chiuso e verificato;
+- Step 5C — modifica/eliminazione degli oggetti salvati: in test.
 
 Sviluppi successivi pianificati:
 
-- Step 5B — foto degli oggetti;
-- Step 5C — modifica/eliminazione degli oggetti salvati;
+- Step 5D — documenti e tag;
+- Step 5E — garanzie e promemoria;
+- Step 5F — prestiti e storico;
 - Step 6 — luoghi e multi-abitazione, da progettare e confermare.
 
 Verifiche reali dello Step 3 sul Galaxy S9:
@@ -255,8 +256,7 @@ Regole operative:
 
 ## 8.3 Requisiti futuri già registrati
 
-Il modulo Oggetti dovrà acquisire la modifica degli oggetti già persistiti;
-questa funzione non appartiene allo Step 5A.
+La modifica/eliminazione degli oggetti persistiti è sviluppata nello Step 5C.
 
 Il gestionale dovrà inoltre supportare più case/abitazioni e stanze come entità
 riconosciute. Devono essere possibili sia viste per singola casa/stanza sia una
@@ -430,37 +430,33 @@ supportato ufficialmente su Linux e macOS open-source, non su Android. Per
 l'S9 il progetto prevede quindi Tailscale come rete privata + OpenSSH di
 Termux come servizio SSH, non il server Tailscale SSH integrato.
 
-## 13. Step corrente — Step 5A Oggetti generici
+## 13. Step corrente — Step 5C Modifica/eliminazione
 
-**Step 4 è chiuso e verificato sul Galaxy S9.**
+Gli **Step 5A e 5B sono chiusi e verificati**. Lo Step 5C è la modifica
+corrente da validare sul branch `step-5c-test`.
 
-Lo **Step 5A è implementato ma non ancora chiuso**. La verifica deve ancora
-passare GitHub Actions e il test runtime sul Galaxy S9.
+File principali coinvolti:
 
-File principali dello Step 5A:
-
-- `migrations/20260814121600_oggetti.sql`;
 - `src/modules/oggetti.rs`;
-- `src/main.rs`;
-- `docs/moduli/oggetti.md`.
+- `src/modules/foto.rs` per la pulizia dei media dopo delete;
+- `docs/moduli/oggetti.md`;
+- `docs/moduli/modifica-eliminazione.md`;
+- `docs/moduli/foto.md`.
 
 Decisioni da preservare:
 
 - solo il nome è obbligatorio;
-- i dettagli opzionali si aggiungono da un pannello Telegram;
-- inline keyboard e `/comandi` convivono e richiamano la stessa logica;
-- il numero seriale resta disponibile ma secondario;
-- prezzi e valori sono memorizzati come centesimi interi;
-- `items` e `oggetti` vengono creati nella stessa transazione;
-- le bozze incomplete sono in memoria e non sopravvivono al riavvio;
-- la migration core dello Step 2 non va modificata.
-
-Sottostep successivi previsti solo dopo la chiusura del 5A:
-
-- 5B modifica/eliminazione;
-- 5C foto/documenti/tag;
-- 5D garanzie/promemoria;
-- 5E prestiti/storico.
+- modifica e creazione riusano lo stesso pannello dettagli;
+- la bozza di modifica conserva l'ID e non scrive sul DB finché non viene
+  premuto `💾 Salva modifiche`;
+- `/salta` mantiene il valore e `/rimuovi` cancella il campo opzionale aperto;
+- eliminazione solo dopo conferma esplicita;
+- `DELETE` parte da `items` per sfruttare `ON DELETE CASCADE`;
+- dopo il commit vengono rimossi i media locali dell'item;
+- nessuna nuova migration nello Step 5C;
+- la migration core dello Step 2 non va modificata;
+- il futuro sistema case/stanze resta separato e va approvato prima di cambiare
+  il modello della posizione.
 
 ## 14. Regola di chiusura di ogni step
 

@@ -1,7 +1,7 @@
 //! Modulo "oggetti generici".
 //!
-//! Step 5A: anagrafica base, menu Telegram con inline keyboard, comandi
-//! testuali equivalenti, inserimento guidato, elenco, ricerca e scheda singola.
+//! Step 5C: oltre all'anagrafica introdotta nello Step 5A, gli oggetti gia'
+//! salvati possono essere modificati o eliminati con conferma esplicita.
 
 use std::{
     collections::HashMap,
@@ -64,6 +64,7 @@ enum ConversationState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DraftField {
+    Name,
     Brand,
     Model,
     Position,
@@ -78,6 +79,7 @@ enum DraftField {
 
 #[derive(Debug, Clone, Default)]
 struct ObjectDraft {
+    object_id: Option<i64>,
     name: String,
     description: Option<String>,
     brand: Option<String>,
@@ -96,9 +98,35 @@ impl ObjectDraft {
     fn new(name: &str) -> Option<Self> {
         let name = clean_required(name, 120)?;
         Some(Self {
+            object_id: None,
             name,
             ..Self::default()
         })
+    }
+
+    fn from_record(record: &ObjectRecord) -> Self {
+        Self {
+            object_id: Some(record.id),
+            name: record.name.clone(),
+            description: record.description.clone(),
+            brand: record.brand.clone(),
+            model: record.model.clone(),
+            serial_number: record.serial_number.clone(),
+            position: record.position.clone(),
+            purchase_date: record.purchase_date.clone(),
+            purchase_price_cents: record.purchase_price_cents,
+            seller: record.seller.clone(),
+            estimated_value_cents: record.estimated_value_cents,
+            condition: record
+                .condition
+                .as_deref()
+                .and_then(ObjectCondition::from_db),
+            notes: record.notes.clone(),
+        }
+    }
+
+    fn is_update(&self) -> bool {
+        self.object_id.is_some()
     }
 }
 
@@ -227,7 +255,7 @@ pub async fn handle_message(
             }
             "/oggetto" => {
                 sessions.clear_chat(chat_id);
-                if let Ok(id) = args.parse::<i64>() {
+                if let Some(id) = parse_positive_id(args) {
                     send_object_detail(bot, msg.chat.id, pool, id).await?;
                 } else {
                     bot.send_message(msg.chat.id, "Uso: /oggetto <id>\nEsempio: /oggetto 12")
@@ -235,15 +263,42 @@ pub async fn handle_message(
                 }
                 return Ok(true);
             }
-            "/annulla" => {
+            "/oggetto_modifica" => {
                 sessions.clear_chat(chat_id);
-                bot.send_message(msg.chat.id, "Operazione annullata.")
-                    .reply_markup(objects_menu_keyboard())
+                if let Some(id) = parse_positive_id(args) {
+                    start_edit_object(bot, msg.chat.id, chat_id, pool, sessions, id).await?;
+                } else {
+                    bot.send_message(
+                        msg.chat.id,
+                        "Uso: /oggetto_modifica <id>\nEsempio: /oggetto_modifica 12",
+                    )
                     .await?;
+                }
+                return Ok(true);
+            }
+            "/oggetto_elimina" => {
+                sessions.clear_chat(chat_id);
+                if let Some(id) = parse_positive_id(args) {
+                    send_delete_confirmation(bot, msg.chat.id, pool, id).await?;
+                } else {
+                    bot.send_message(
+                        msg.chat.id,
+                        "Uso: /oggetto_elimina <id>\nEsempio: /oggetto_elimina 12",
+                    )
+                    .await?;
+                }
+                return Ok(true);
+            }
+            "/annulla" => {
+                cancel_current_operation(bot, msg.chat.id, chat_id, pool, sessions).await?;
                 return Ok(true);
             }
             "/salta" => {
                 skip_current_field(bot, msg.chat.id, chat_id, sessions).await?;
+                return Ok(true);
+            }
+            "/rimuovi" => {
+                remove_current_field(bot, msg.chat.id, chat_id, sessions).await?;
                 return Ok(true);
             }
             _ => return Ok(false),
@@ -329,6 +384,9 @@ pub async fn handle_callback(
             )
             .await?;
         }
+        "oggetti:draft:name" => {
+            set_draft_field(bot, chat_id, raw_chat_id, sessions, DraftField::Name).await?;
+        }
         "oggetti:draft:brand" => {
             set_draft_field(bot, chat_id, raw_chat_id, sessions, DraftField::Brand).await?;
         }
@@ -377,6 +435,9 @@ pub async fn handle_callback(
                 _ => ObjectCondition::NeedsRepair,
             };
             update_condition(bot, chat_id, raw_chat_id, sessions, condition).await?;
+        }
+        "oggetti:draft:condition:clear" => {
+            clear_condition(bot, chat_id, raw_chat_id, sessions).await?;
         }
         "oggetti:draft:other" => {
             if let Some(ConversationState::EditingObject { draft, .. }) = sessions.get(raw_chat_id)
@@ -430,10 +491,25 @@ pub async fn handle_callback(
             save_current_draft(bot, chat_id, raw_chat_id, pool, sessions).await?;
         }
         "oggetti:draft:cancel" => {
+            cancel_current_operation(bot, chat_id, raw_chat_id, pool, sessions).await?;
+        }
+        _ if data.starts_with("oggetti:edit:") => {
             sessions.clear_chat(raw_chat_id);
-            bot.send_message(chat_id, "Creazione oggetto annullata.")
-                .reply_markup(objects_menu_keyboard())
-                .await?;
+            if let Some(id) = parse_callback_i64(data, "oggetti:edit:") {
+                start_edit_object(bot, chat_id, raw_chat_id, pool, sessions, id).await?;
+            }
+        }
+        _ if data.starts_with("oggetti:delete:ask:") => {
+            sessions.clear_chat(raw_chat_id);
+            if let Some(id) = parse_callback_i64(data, "oggetti:delete:ask:") {
+                send_delete_confirmation(bot, chat_id, pool, id).await?;
+            }
+        }
+        _ if data.starts_with("oggetti:delete:do:") => {
+            sessions.clear_chat(raw_chat_id);
+            if let Some(id) = parse_callback_i64(data, "oggetti:delete:do:") {
+                delete_object_and_media(bot, chat_id, pool, id).await?;
+            }
         }
         _ if data.starts_with("oggetti:view:") => {
             sessions.clear_chat(raw_chat_id);
@@ -451,6 +527,68 @@ pub async fn handle_callback(
     }
 
     Ok(true)
+}
+
+fn object_id_to_return_after_cancel(state: Option<ConversationState>) -> Option<i64> {
+    match state {
+        Some(ConversationState::EditingObject { draft, .. }) => draft.object_id,
+        _ => None,
+    }
+}
+
+async fn cancel_current_operation(
+    bot: &Bot,
+    chat_id: ChatId,
+    raw_chat_id: i64,
+    pool: &SqlitePool,
+    sessions: &SessionStore,
+) -> ResponseResult<()> {
+    let return_object_id = object_id_to_return_after_cancel(sessions.get(raw_chat_id));
+    sessions.clear_chat(raw_chat_id);
+
+    let Some(id) = return_object_id else {
+        bot.send_message(chat_id, "Operazione annullata.")
+            .reply_markup(objects_menu_keyboard())
+            .await?;
+        return Ok(());
+    };
+
+    match get_object(pool, id).await {
+        Ok(Some(object)) => {
+            bot.send_message(
+                chat_id,
+                format!(
+                    "↩️ Modifica annullata. Nessuna modifica salvata.\n\n{}",
+                    format_object(&object)
+                ),
+            )
+            .reply_markup(object_detail_keyboard(id))
+            .await?;
+        }
+        Ok(None) => {
+            bot.send_message(
+                chat_id,
+                "Operazione annullata. L'oggetto non esiste più nel database.",
+            )
+            .reply_markup(objects_menu_keyboard())
+            .await?;
+        }
+        Err(error) => {
+            tracing::error!(
+                ?error,
+                object_id = id,
+                "Errore ritorno alla scheda dopo annullamento modifica"
+            );
+            bot.send_message(
+                chat_id,
+                "Operazione annullata, ma non riesco a riaprire la scheda dell'oggetto.",
+            )
+            .reply_markup(objects_menu_keyboard())
+            .await?;
+        }
+    }
+
+    Ok(())
 }
 
 async fn start_new_object(
@@ -488,6 +626,43 @@ async fn start_new_object(
         .await?;
     }
 
+    Ok(())
+}
+
+async fn start_edit_object(
+    bot: &Bot,
+    telegram_chat_id: ChatId,
+    raw_chat_id: i64,
+    pool: &SqlitePool,
+    sessions: &SessionStore,
+    id: i64,
+) -> ResponseResult<()> {
+    match get_object(pool, id).await {
+        Ok(Some(object)) => {
+            let draft = ObjectDraft::from_record(&object);
+            sessions.set(
+                raw_chat_id,
+                ConversationState::EditingObject {
+                    draft: Box::new(draft.clone()),
+                    field: None,
+                },
+            );
+            send_draft_panel(bot, telegram_chat_id, &draft).await?;
+        }
+        Ok(None) => {
+            bot.send_message(telegram_chat_id, format!("Oggetto #{id} non trovato."))
+                .reply_markup(objects_menu_keyboard())
+                .await?;
+        }
+        Err(error) => {
+            tracing::error!(?error, object_id = id, "Errore avvio modifica oggetto");
+            bot.send_message(
+                telegram_chat_id,
+                "⚠️ Non riesco ad aprire questo oggetto in modifica.",
+            )
+            .await?;
+        }
+    }
     Ok(())
 }
 
@@ -529,6 +704,18 @@ async fn apply_field_input(
     let cleaned = clean_optional(input, 500);
 
     match field {
+        DraftField::Name => {
+            if let Some(name) = clean_required(input, 120) {
+                draft.name = name;
+                finish_field(bot, chat_id, raw_chat_id, sessions, draft).await?;
+            } else {
+                bot.send_message(
+                    chat_id,
+                    "Il nome non può essere vuoto e deve restare entro 120 caratteri. Riprova oppure usa /salta per mantenere quello attuale.",
+                )
+                .await?;
+            }
+        }
         DraftField::Brand => {
             draft.brand = clean_optional(input, 120);
             let prompt = field_prompt(DraftField::Model, &draft);
@@ -660,12 +847,7 @@ async fn skip_current_field(
         return Ok(());
     };
 
-    let next = match field {
-        DraftField::Brand => Some(DraftField::Model),
-        DraftField::PurchaseDate => Some(DraftField::PurchasePrice),
-        DraftField::PurchasePrice => Some(DraftField::Seller),
-        _ => None,
-    };
+    let next = next_draft_field(field);
 
     if let Some(next_field) = next {
         let prompt = field_prompt(next_field, &draft);
@@ -684,6 +866,69 @@ async fn skip_current_field(
     Ok(())
 }
 
+async fn remove_current_field(
+    bot: &Bot,
+    chat_id: ChatId,
+    raw_chat_id: i64,
+    sessions: &SessionStore,
+) -> ResponseResult<()> {
+    let Some(ConversationState::EditingObject { mut draft, field }) = sessions.get(raw_chat_id)
+    else {
+        bot.send_message(chat_id, "Non c'è nessun campo da rimuovere.")
+            .await?;
+        return Ok(());
+    };
+
+    let Some(field) = field else {
+        bot.send_message(chat_id, "Apri prima un campo dal pannello dettagli.")
+            .await?;
+        return Ok(());
+    };
+
+    match field {
+        DraftField::Name => {
+            bot.send_message(chat_id, "Il nome è obbligatorio e non può essere rimosso. Usa /salta per mantenerlo oppure scrivi un nuovo nome.")
+                .await?;
+            return Ok(());
+        }
+        DraftField::Brand => draft.brand = None,
+        DraftField::Model => draft.model = None,
+        DraftField::Position => draft.position = None,
+        DraftField::PurchaseDate => draft.purchase_date = None,
+        DraftField::PurchasePrice => draft.purchase_price_cents = None,
+        DraftField::Seller => draft.seller = None,
+        DraftField::Notes => draft.notes = None,
+        DraftField::Description => draft.description = None,
+        DraftField::EstimatedValue => draft.estimated_value_cents = None,
+        DraftField::SerialNumber => draft.serial_number = None,
+    }
+
+    if let Some(next_field) = next_draft_field(field) {
+        let prompt = field_prompt(next_field, &draft);
+        sessions.set(
+            raw_chat_id,
+            ConversationState::EditingObject {
+                draft,
+                field: Some(next_field),
+            },
+        );
+        bot.send_message(chat_id, prompt).await?;
+    } else {
+        finish_field(bot, chat_id, raw_chat_id, sessions, *draft).await?;
+    }
+
+    Ok(())
+}
+
+fn next_draft_field(field: DraftField) -> Option<DraftField> {
+    match field {
+        DraftField::Brand => Some(DraftField::Model),
+        DraftField::PurchaseDate => Some(DraftField::PurchasePrice),
+        DraftField::PurchasePrice => Some(DraftField::Seller),
+        _ => None,
+    }
+}
+
 async fn update_condition(
     bot: &Bot,
     chat_id: ChatId,
@@ -700,6 +945,21 @@ async fn update_condition(
     finish_field(bot, chat_id, raw_chat_id, sessions, *draft).await
 }
 
+async fn clear_condition(
+    bot: &Bot,
+    chat_id: ChatId,
+    raw_chat_id: i64,
+    sessions: &SessionStore,
+) -> ResponseResult<()> {
+    let Some(ConversationState::EditingObject { mut draft, .. }) = sessions.get(raw_chat_id) else {
+        no_active_draft(bot, chat_id).await?;
+        return Ok(());
+    };
+
+    draft.condition = None;
+    finish_field(bot, chat_id, raw_chat_id, sessions, *draft).await
+}
+
 async fn save_current_draft(
     bot: &Bot,
     chat_id: ChatId,
@@ -712,18 +972,33 @@ async fn save_current_draft(
         return Ok(());
     };
 
-    match create_object(pool, &draft).await {
+    let result = if let Some(id) = draft.object_id {
+        update_object(pool, id, &draft).await.map(|()| id)
+    } else {
+        create_object(pool, &draft).await
+    };
+
+    match result {
         Ok(id) => {
+            let was_update = draft.object_id.is_some();
             sessions.clear_chat(raw_chat_id);
-            bot.send_message(chat_id, format!("✅ Oggetto salvato con ID #{id}."))
-                .await?;
+            let message = if was_update {
+                format!("✅ Modifiche salvate per l'oggetto #{id}.")
+            } else {
+                format!("✅ Oggetto salvato con ID #{id}.")
+            };
+            bot.send_message(chat_id, message).await?;
             send_object_detail(bot, chat_id, pool, id).await?;
         }
         Err(error) => {
-            tracing::error!(?error, "Errore durante il salvataggio dell'oggetto");
+            tracing::error!(
+                ?error,
+                object_id = draft.object_id,
+                "Errore durante il salvataggio dell'oggetto"
+            );
             bot.send_message(
                 chat_id,
-                "⚠️ Non sono riuscito a salvare l'oggetto. La bozza resta aperta: puoi riprovare con ✅ Salva o usare /annulla.",
+                "⚠️ Non sono riuscito a salvare. La bozza resta aperta: puoi riprovare oppure usare /annulla.",
             )
             .await?;
         }
@@ -840,6 +1115,97 @@ async fn send_object_detail(
     Ok(())
 }
 
+async fn send_delete_confirmation(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    id: i64,
+) -> ResponseResult<()> {
+    match get_object(pool, id).await {
+        Ok(Some(object)) => {
+            bot.send_message(
+                chat_id,
+                format!(
+                    "⚠️ Eliminare definitivamente?
+
+📦 {}
+#{}
+
+Verranno eliminati anche i dati collegati nel database e le foto locali dell'oggetto. Questa operazione non può essere annullata.",
+                    object.name, object.id
+                ),
+            )
+            .reply_markup(delete_confirmation_keyboard(id))
+            .await?;
+        }
+        Ok(None) => {
+            bot.send_message(chat_id, format!("Oggetto #{id} non trovato."))
+                .reply_markup(objects_menu_keyboard())
+                .await?;
+        }
+        Err(error) => {
+            tracing::error!(
+                ?error,
+                object_id = id,
+                "Errore conferma eliminazione oggetto"
+            );
+            bot.send_message(chat_id, "⚠️ Non riesco a preparare l'eliminazione.")
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+async fn delete_object_and_media(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    id: i64,
+) -> ResponseResult<()> {
+    match delete_object(pool, id).await {
+        Ok(true) => match crate::modules::foto::remove_object_media(id).await {
+            Ok(()) => {
+                bot.send_message(
+                    chat_id,
+                    format!("🗑 Oggetto #{id} eliminato definitivamente."),
+                )
+                .reply_markup(objects_menu_keyboard())
+                .await?;
+            }
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    object_id = id,
+                    "Oggetto eliminato ma pulizia media locale fallita"
+                );
+                bot.send_message(
+                    chat_id,
+                    format!(
+                        "🗑 Oggetto #{id} eliminato dal database.
+⚠️ Non sono riuscito a rimuovere tutti i file locali: controlla data/media/oggetti/{id}."
+                    ),
+                )
+                .reply_markup(objects_menu_keyboard())
+                .await?;
+            }
+        },
+        Ok(false) => {
+            bot.send_message(chat_id, format!("Oggetto #{id} non trovato."))
+                .reply_markup(objects_menu_keyboard())
+                .await?;
+        }
+        Err(error) => {
+            tracing::error!(?error, object_id = id, "Errore eliminazione oggetto");
+            bot.send_message(
+                chat_id,
+                "⚠️ Non sono riuscito a eliminare l'oggetto. Nessun file locale è stato rimosso.",
+            )
+            .await?;
+        }
+    }
+    Ok(())
+}
+
 async fn no_active_draft(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
@@ -862,6 +1228,61 @@ async fn create_object(pool: &SqlitePool, draft: &ObjectDraft) -> anyhow::Result
     insert_object_details(&mut tx, id, draft).await?;
     tx.commit().await?;
     Ok(id)
+}
+
+async fn update_object(pool: &SqlitePool, id: i64, draft: &ObjectDraft) -> anyhow::Result<()> {
+    let mut tx = pool.begin().await?;
+
+    let item = sqlx::query(
+        "UPDATE items SET nome = ?, aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND tipo = 'oggetto'",
+    )
+    .bind(&draft.name)
+    .bind(id)
+    .execute(&mut *tx)
+    .await?;
+
+    if item.rows_affected() != 1 {
+        anyhow::bail!("oggetto #{id} non trovato durante l'aggiornamento");
+    }
+
+    let details = sqlx::query(
+        "UPDATE oggetti SET \
+            descrizione = ?, marca = ?, modello = ?, numero_serie = ?, posizione = ?, \
+            data_acquisto = ?, prezzo_acquisto_centesimi = ?, venditore = ?, \
+            valore_stimato_centesimi = ?, condizione = ?, note = ? \
+         WHERE item_id = ?",
+    )
+    .bind(draft.description.as_deref())
+    .bind(draft.brand.as_deref())
+    .bind(draft.model.as_deref())
+    .bind(draft.serial_number.as_deref())
+    .bind(draft.position.as_deref())
+    .bind(draft.purchase_date.as_deref())
+    .bind(draft.purchase_price_cents)
+    .bind(draft.seller.as_deref())
+    .bind(draft.estimated_value_cents)
+    .bind(draft.condition.map(ObjectCondition::as_db))
+    .bind(draft.notes.as_deref())
+    .bind(id)
+    .execute(&mut *tx)
+    .await?;
+
+    if details.rows_affected() != 1 {
+        anyhow::bail!("dettagli oggetto #{id} non trovati durante l'aggiornamento");
+    }
+
+    tx.commit().await?;
+    Ok(())
+}
+
+async fn delete_object(pool: &SqlitePool, id: i64) -> anyhow::Result<bool> {
+    let mut tx = pool.begin().await?;
+    let result = sqlx::query("DELETE FROM items WHERE id = ? AND tipo = 'oggetto'")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(result.rows_affected() == 1)
 }
 
 async fn insert_object_details(
@@ -978,11 +1399,11 @@ async fn search_objects(
 }
 
 fn format_draft(draft: &ObjectDraft) -> String {
-    let mut lines = vec![
-        "📦 Nuovo oggetto".to_string(),
-        String::new(),
-        format!("Nome: {}", draft.name),
-    ];
+    let title = draft.object_id.map_or_else(
+        || "📦 Nuovo oggetto".to_string(),
+        |id| format!("✏️ Modifica oggetto #{id}"),
+    );
+    let mut lines = vec![title, String::new(), format!("Nome: {}", draft.name)];
 
     push_optional_line(&mut lines, "Marca", draft.brand.as_deref());
     push_optional_line(&mut lines, "Modello", draft.model.as_deref());
@@ -1005,7 +1426,14 @@ fn format_draft(draft: &ObjectDraft) -> String {
     push_optional_line(&mut lines, "Numero seriale", draft.serial_number.as_deref());
 
     lines.push(String::new());
-    lines.push("Aggiungi solo i dettagli che ti servono, poi premi ✅ Salva.".to_string());
+    if draft.is_update() {
+        lines.push(
+            "Modifica solo ciò che serve. /salta mantiene il valore attuale; /rimuovi cancella il campo aperto. Poi premi 💾 Salva modifiche."
+                .to_string(),
+        );
+    } else {
+        lines.push("Aggiungi solo i dettagli che ti servono, poi premi ✅ Salva.".to_string());
+    }
     lines.join("\n")
 }
 
@@ -1087,22 +1515,32 @@ fn draft_keyboard(draft: &ObjectDraft) -> InlineKeyboardMarkup {
             || draft.serial_number.is_some(),
     );
 
-    InlineKeyboardMarkup::new(vec![
-        vec![button(&brand_model, "oggetti:draft:brand")],
-        vec![
-            button(&position, "oggetti:draft:position"),
-            button(&purchase, "oggetti:draft:purchase"),
-        ],
-        vec![
-            button(&condition, "oggetti:draft:condition"),
-            button(&notes, "oggetti:draft:notes"),
-        ],
-        vec![button(&other, "oggetti:draft:other")],
-        vec![
-            button("✅ Salva", "oggetti:draft:save"),
-            button("❌ Annulla", "oggetti:draft:cancel"),
-        ],
-    ])
+    let mut rows = Vec::new();
+    if draft.is_update() {
+        rows.push(vec![button("✏️ Nome", "oggetti:draft:name")]);
+    }
+    rows.push(vec![button(&brand_model, "oggetti:draft:brand")]);
+    rows.push(vec![
+        button(&position, "oggetti:draft:position"),
+        button(&purchase, "oggetti:draft:purchase"),
+    ]);
+    rows.push(vec![
+        button(&condition, "oggetti:draft:condition"),
+        button(&notes, "oggetti:draft:notes"),
+    ]);
+    rows.push(vec![button(&other, "oggetti:draft:other")]);
+    rows.push(vec![
+        button(
+            if draft.is_update() {
+                "💾 Salva modifiche"
+            } else {
+                "✅ Salva"
+            },
+            "oggetti:draft:save",
+        ),
+        button("❌ Annulla", "oggetti:draft:cancel"),
+    ]);
+    InlineKeyboardMarkup::new(rows)
 }
 
 fn section_label(label: &str, filled: bool) -> String {
@@ -1123,6 +1561,10 @@ fn condition_keyboard() -> InlineKeyboardMarkup {
             button("🟡 Usurato", "oggetti:draft:condition:worn"),
             button("🔴 Da riparare", "oggetti:draft:condition:repair"),
         ],
+        vec![button(
+            "🗑 Rimuovi condizione",
+            "oggetti:draft:condition:clear",
+        )],
         vec![button("⬅️ Dettagli", "oggetti:draft:back")],
     ])
 }
@@ -1146,6 +1588,10 @@ fn cancel_keyboard() -> InlineKeyboardMarkup {
 
 fn object_detail_keyboard(id: i64) -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
+        vec![
+            button("✏️ Modifica", &format!("oggetti:edit:{id}")),
+            button("🗑 Elimina", &format!("oggetti:delete:ask:{id}")),
+        ],
         vec![button("📷 Foto", &format!("foto:menu:{id}"))],
         vec![button("📋 Elenco", "oggetti:list:0")],
         vec![
@@ -1154,6 +1600,16 @@ fn object_detail_keyboard(id: i64) -> InlineKeyboardMarkup {
         ],
         vec![button("📦 Menu oggetti", "oggetti:menu")],
         vec![button("🏠 Menu principale", "menu:main")],
+    ])
+}
+
+fn delete_confirmation_keyboard(id: i64) -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![
+        vec![button(
+            "🗑 Sì, elimina definitivamente",
+            &format!("oggetti:delete:do:{id}"),
+        )],
+        vec![button("↩️ Annulla", &format!("oggetti:view:{id}"))],
     ])
 }
 
@@ -1225,6 +1681,7 @@ fn button(label: &str, data: &str) -> InlineKeyboardButton {
 
 fn field_prompt(field: DraftField, draft: &ObjectDraft) -> String {
     let instruction = match field {
+        DraftField::Name => "✏️ Inserisci il nome dell'oggetto.",
         DraftField::Brand => "🏷 Inserisci la marca.",
         DraftField::Model => "🏷 Inserisci il modello.",
         DraftField::Position => "📍 Dove si trova l'oggetto?\nEsempio: Garage - scaffale 2",
@@ -1238,6 +1695,7 @@ fn field_prompt(field: DraftField, draft: &ObjectDraft) -> String {
     };
 
     let current = match field {
+        DraftField::Name => Some(draft.name.clone()),
         DraftField::Brand => draft.brand.clone(),
         DraftField::Model => draft.model.clone(),
         DraftField::Position => draft.position.clone(),
@@ -1251,9 +1709,17 @@ fn field_prompt(field: DraftField, draft: &ObjectDraft) -> String {
     };
 
     if let Some(current) = current {
-        format!(
-            "{instruction}\n\nValore attuale:\n{current}\n\nScrivi un nuovo valore per sostituirlo oppure usa /salta per mantenere quello attuale."
-        )
+        if field == DraftField::Name {
+            format!(
+                "{instruction}\n\nValore attuale:\n{current}\n\nScrivi un nuovo valore oppure usa /salta per mantenere quello attuale. Il nome è obbligatorio e non può essere rimosso."
+            )
+        } else {
+            format!(
+                "{instruction}\n\nValore attuale:\n{current}\n\nScrivi un nuovo valore, usa /salta per mantenerlo oppure /rimuovi per cancellarlo."
+            )
+        }
+    } else if field == DraftField::Name {
+        instruction.to_string()
     } else {
         format!("{instruction}\n\nUsa /salta per lasciare il campo vuoto.")
     }
@@ -1269,6 +1735,11 @@ fn parse_command(text: &str) -> Option<(&str, &str)> {
     let args = trimmed[split_at..].trim();
     let command = token.split('@').next().unwrap_or(token);
     Some((command, args))
+}
+
+fn parse_positive_id(value: &str) -> Option<i64> {
+    let id = value.trim().parse::<i64>().ok()?;
+    (id > 0).then_some(id)
 }
 
 fn parse_callback_i64(data: &str, prefix: &str) -> Option<i64> {
@@ -1465,7 +1936,59 @@ mod tests {
 
         assert!(prompt.contains("Valore attuale:"));
         assert!(prompt.contains("Bosch"));
-        assert!(prompt.contains("/salta per mantenere"));
+        assert!(prompt.contains("/salta per mantenerlo"));
+        assert!(prompt.contains("/rimuovi per cancellarlo"));
+    }
+
+    #[test]
+    fn annulla_modifica_torna_all_oggetto_originale() {
+        let mut update_draft = ObjectDraft::new("Trapano").expect("bozza");
+        update_draft.object_id = Some(42);
+        let update_state = ConversationState::EditingObject {
+            draft: Box::new(update_draft),
+            field: Some(DraftField::Brand),
+        };
+        assert_eq!(
+            object_id_to_return_after_cancel(Some(update_state)),
+            Some(42)
+        );
+
+        let create_draft = ObjectDraft::new("Valigia").expect("bozza");
+        let create_state = ConversationState::EditingObject {
+            draft: Box::new(create_draft),
+            field: None,
+        };
+        assert_eq!(object_id_to_return_after_cancel(Some(create_state)), None);
+        assert_eq!(
+            object_id_to_return_after_cancel(Some(ConversationState::AwaitingSearch)),
+            None
+        );
+    }
+
+    #[test]
+    fn bozza_di_modifica_conserva_id_e_valori_correnti() {
+        let record = ObjectRecord {
+            id: 42,
+            name: "MacBook".to_string(),
+            description: None,
+            brand: Some("Apple".to_string()),
+            model: Some("Pro".to_string()),
+            serial_number: None,
+            position: Some("Studio".to_string()),
+            purchase_date: None,
+            purchase_price_cents: None,
+            seller: None,
+            estimated_value_cents: None,
+            condition: Some("ottimo".to_string()),
+            notes: None,
+        };
+
+        let draft = ObjectDraft::from_record(&record);
+        assert_eq!(draft.object_id, Some(42));
+        assert_eq!(draft.name, "MacBook");
+        assert_eq!(draft.brand.as_deref(), Some("Apple"));
+        assert_eq!(draft.condition, Some(ObjectCondition::Excellent));
+        assert!(draft.is_update());
     }
 
     #[tokio::test]
@@ -1493,6 +2016,85 @@ mod tests {
         let search = search_objects(&pool, "garage", 10).await.expect("ricerca");
         assert_eq!(search.len(), 1);
         assert_eq!(search[0].id, id);
+    }
+
+    #[tokio::test]
+    async fn oggetto_salvato_puo_essere_modificato_senza_creare_duplicati() {
+        let pool = test_pool().await;
+        let mut original = ObjectDraft::new("Trapano Bosch").expect("bozza");
+        original.brand = Some("Bosch".to_string());
+        original.position = Some("Garage".to_string());
+        original.notes = Some("Prima nota".to_string());
+
+        let id = create_object(&pool, &original).await.expect("salvataggio");
+        let record = get_object(&pool, id)
+            .await
+            .expect("lettura")
+            .expect("oggetto presente");
+        let mut edited = ObjectDraft::from_record(&record);
+        edited.name = "Trapano officina".to_string();
+        edited.brand = None;
+        edited.position = Some("Cantina".to_string());
+        edited.notes = None;
+
+        update_object(&pool, id, &edited)
+            .await
+            .expect("aggiornamento");
+
+        let updated = get_object(&pool, id)
+            .await
+            .expect("rilettura")
+            .expect("oggetto presente");
+        assert_eq!(updated.name, "Trapano officina");
+        assert_eq!(updated.brand, None);
+        assert_eq!(updated.position.as_deref(), Some("Cantina"));
+        assert_eq!(updated.notes, None);
+
+        let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM items WHERE tipo = 'oggetto'")
+            .fetch_one(&pool)
+            .await
+            .expect("conteggio items");
+        assert_eq!(total, 1);
+    }
+
+    #[tokio::test]
+    async fn eliminazione_oggetto_rimuove_record_e_foto_collegate() {
+        let pool = test_pool().await;
+        let draft = ObjectDraft::new("Oggetto con foto").expect("bozza");
+        let id = create_object(&pool, &draft).await.expect("salvataggio");
+
+        sqlx::query(
+            "INSERT INTO foto (item_id, percorso_file, ruolo, descrizione) VALUES (?, ?, 'principale', ?)",
+        )
+        .bind(id)
+        .bind(format!("data/media/oggetti/{id}/test.jpg"))
+        .bind("foto test")
+        .execute(&pool)
+        .await
+        .expect("foto test");
+
+        assert!(delete_object(&pool, id).await.expect("eliminazione"));
+
+        let item_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM items WHERE id = ?")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .expect("conteggio item");
+        let object_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM oggetti WHERE item_id = ?")
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .expect("conteggio oggetto");
+        let photo_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM foto WHERE item_id = ?")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .expect("conteggio foto");
+
+        assert_eq!(item_count, 0);
+        assert_eq!(object_count, 0);
+        assert_eq!(photo_count, 0);
     }
 
     #[tokio::test]

@@ -1,7 +1,7 @@
 //! Punto di ingresso del Gestionale Casa.
 //!
-//! Step corrente: Step 5B, gestione foto per gli oggetti generici sopra
-//! l'infrastruttura Telegram + SQLx + SQLite verificata negli step precedenti.
+//! Step corrente: Step 5C, modifica ed eliminazione sicura degli oggetti
+//! generici sopra l'infrastruttura Telegram + SQLx + SQLite gia' verificata.
 
 mod auth;
 mod config;
