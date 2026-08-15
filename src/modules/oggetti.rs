@@ -223,6 +223,7 @@ struct ObjectSummary {
 
 pub fn main_menu_keyboard() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
+        vec![button("📜 Storico", "history:global:0")],
         vec![button("📦 Oggetti", "oggetti:menu")],
         vec![button("🏠 Case e stanze", "loc:menu")],
         vec![
@@ -2401,6 +2402,7 @@ fn object_detail_keyboard(id: i64, has_structured_location: bool) -> InlineKeybo
     };
 
     InlineKeyboardMarkup::new(vec![
+        vec![button("📜 Storico", &format!("history:item:{id}:0"))],
         vec![
             button("✏️ Modifica", &format!("oggetti:edit:{id}")),
             button("🗑 Elimina", &format!("oggetti:delete:ask:{id}")),
