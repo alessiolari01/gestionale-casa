@@ -1,5 +1,43 @@
 # Diario di sviluppo
 
+
+### Step 5A — verifica UX e preparazione chiusura
+
+- Verificato sul Galaxy S9 il comportamento dei campi già compilati: il pannello
+  mostra `✅`, riaprendo il campo viene mostrato il valore corrente, `/salta` lo
+  conserva e un nuovo valore lo sostituisce esplicitamente.
+- Verificato manualmente il caso Marca/Modello e un campo singolo (Posizione),
+  con salvataggio e successiva ricerca dell'oggetto.
+- `cargo fmt --all -- --check`, `git diff --check` e Clippy con `-D warnings`
+  risultano superati dopo la patch UX; la suite `check/test` va rieseguita come
+  controllo finale immediatamente prima del commit di chiusura.
+- Durante un `cargo run` il linker LLVM/Termux è terminato una volta con
+  segmentation fault; il comando ripetuto ha avviato correttamente il backend.
+  Non sono state necessarie modifiche al codice.
+- Configurato e provato l'accesso **OpenSSH locale PC -> S9** e il trasferimento
+  file via SCP. GitHub `main` resta la fonte ufficiale; SSH/SCP diventano il
+  canale operativo per testare patch senza commit di trasporto.
+- Registrati per il futuro due requisiti: modifica degli oggetti già salvati e
+  gestione trasversale di più case/stanze con ricerca sia filtrata sia globale.
+  La struttura dei luoghi dovrà essere proposta e confermata prima di creare la
+  migration.
+
+### Roadmap aggiornata proposta
+
+1. completare CI della Pull Request e merge su `main`; a quel punto Step 5A è
+   formalmente chiuso;
+2. Step 5B — foto degli oggetti;
+3. Step 5C — modifica/eliminazione degli oggetti già salvati;
+4. Step 6 — luoghi e multi-abitazione, prima dei successivi grandi moduli, dopo
+   conferma dell'architettura.
+
+### Step 5A — affinamento UX bozza oggetti
+
+- Le sezioni gia' compilate nel pannello dettagli sono marcate con `✅`.
+- Riaprendo un campo gia' valorizzato il bot mostra il valore attuale prima della sostituzione.
+- Durante la revisione di un campo, `/salta` conserva il valore esistente; su un campo vuoto continua a lasciarlo vuoto.
+- Aggiunto un test automatico dedicato al prompt dei campi gia' compilati.
+
 ## Step 5A — Oggetti generici: prima implementazione — 2026-08-14
 
 ### Stato precedente

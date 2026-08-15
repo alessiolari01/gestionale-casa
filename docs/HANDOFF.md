@@ -110,9 +110,16 @@ Completati e verificati:
 - Step 3.1 — handoff, workflow Git, CI e Dependabot;
 - Step 4 — SQLite operativo, migration automatiche e `/status`.
 
-Prossimo sviluppo funzionale:
+Step 5A:
 
-- Step 5 — modulo Oggetti generici.
+- Oggetti generici: implementazione e test runtime S9 completati. Lo step è
+  considerato chiuso quando questa revisione è presente su `main` con CI verde.
+
+Sviluppi successivi pianificati:
+
+- Step 5B — foto degli oggetti;
+- Step 5C — modifica/eliminazione degli oggetti salvati;
+- Step 6 — luoghi e multi-abitazione, da progettare e confermare.
 
 Verifiche reali dello Step 3 sul Galaxy S9:
 
@@ -206,6 +213,41 @@ Comandi Step 5A:
 
 Lo stato delle bozze è conservato in memoria per chat tramite `SessionStore`.
 Non contiene token o altri segreti.
+
+## 8.2 Accesso locale PC -> Galaxy S9 via SSH
+
+È stato configurato e provato OpenSSH in Termux sulla rete locale. Questo
+permette di usare il terminale S9 direttamente dal PC e di trasferire patch con
+SCP, evitando commit provvisori usati solo come trasporto.
+
+Forma generale dei comandi:
+
+```text
+ssh -p 8022 <utente-termux>@<ip-lan-s9>
+scp -P 8022 <file-locale> <utente-termux>@<ip-lan-s9>:~/
+```
+
+Regole operative:
+
+- non versionare IP LAN, password o chiavi private;
+- SSH/SCP non sostituiscono Git: una modifica verificata deve comunque finire
+  in un commit e poi su GitHub;
+- non aprire la porta 8022 sul router;
+- per accesso fuori dalla LAN si valuterà Tailscale + lo stesso OpenSSH.
+
+## 8.3 Requisiti futuri già registrati
+
+Il modulo Oggetti dovrà acquisire la modifica degli oggetti già persistiti;
+questa funzione non appartiene allo Step 5A.
+
+Il gestionale dovrà inoltre supportare più case/abitazioni e stanze come entità
+riconosciute. Devono essere possibili sia viste per singola casa/stanza sia una
+ricerca combinata su tutte le abitazioni. Lo spostamento di un oggetto dovrà
+permettere di scegliere una stanza registrata.
+
+La proposta preferita, ancora **da confermare**, è un modello gerarchico di
+`luoghi` riutilizzabile da tutti i moduli. Non creare migration per questa parte
+prima dell'approvazione esplicita dell'architettura.
 
 ## 9. Workflow Git ufficiale attuale
 

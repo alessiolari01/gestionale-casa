@@ -349,11 +349,17 @@ pub async fn handle_callback(
             set_draft_field(bot, chat_id, raw_chat_id, sessions, DraftField::Notes).await?;
         }
         "oggetti:draft:condition" => {
-            if matches!(
-                sessions.get(raw_chat_id),
-                Some(ConversationState::EditingObject { .. })
-            ) {
-                bot.send_message(chat_id, "🛠 Scegli la condizione dell'oggetto:")
+            if let Some(ConversationState::EditingObject { draft, .. }) = sessions.get(raw_chat_id)
+            {
+                let text = if let Some(condition) = draft.condition {
+                    format!(
+                        "🛠 Condizione attuale: {}\n\nScegli una nuova condizione oppure torna ai dettagli.",
+                        condition.label()
+                    )
+                } else {
+                    "🛠 Scegli la condizione dell'oggetto:".to_string()
+                };
+                bot.send_message(chat_id, text)
                     .reply_markup(condition_keyboard())
                     .await?;
             } else {
@@ -373,12 +379,10 @@ pub async fn handle_callback(
             update_condition(bot, chat_id, raw_chat_id, sessions, condition).await?;
         }
         "oggetti:draft:other" => {
-            if matches!(
-                sessions.get(raw_chat_id),
-                Some(ConversationState::EditingObject { .. })
-            ) {
+            if let Some(ConversationState::EditingObject { draft, .. }) = sessions.get(raw_chat_id)
+            {
                 bot.send_message(chat_id, "⋯ Altri dettagli")
-                    .reply_markup(other_details_keyboard())
+                    .reply_markup(other_details_keyboard(&draft))
                     .await?;
             } else {
                 no_active_draft(bot, chat_id).await?;
@@ -499,6 +503,8 @@ async fn set_draft_field(
         return Ok(());
     };
 
+    let prompt = field_prompt(field, &draft);
+
     sessions.set(
         raw_chat_id,
         ConversationState::EditingObject {
@@ -507,7 +513,7 @@ async fn set_draft_field(
         },
     );
 
-    bot.send_message(chat_id, field_prompt(field)).await?;
+    bot.send_message(chat_id, prompt).await?;
     Ok(())
 }
 
@@ -525,6 +531,7 @@ async fn apply_field_input(
     match field {
         DraftField::Brand => {
             draft.brand = clean_optional(input, 120);
+            let prompt = field_prompt(DraftField::Model, &draft);
             sessions.set(
                 raw_chat_id,
                 ConversationState::EditingObject {
@@ -532,8 +539,7 @@ async fn apply_field_input(
                     field: Some(DraftField::Model),
                 },
             );
-            bot.send_message(chat_id, field_prompt(DraftField::Model))
-                .await?;
+            bot.send_message(chat_id, prompt).await?;
         }
         DraftField::Model => {
             draft.model = clean_optional(input, 120);
@@ -546,6 +552,7 @@ async fn apply_field_input(
         DraftField::PurchaseDate => match parse_date_to_iso(input) {
             Some(date) => {
                 draft.purchase_date = Some(date);
+                let prompt = field_prompt(DraftField::PurchasePrice, &draft);
                 sessions.set(
                     raw_chat_id,
                     ConversationState::EditingObject {
@@ -553,13 +560,12 @@ async fn apply_field_input(
                         field: Some(DraftField::PurchasePrice),
                     },
                 );
-                bot.send_message(chat_id, field_prompt(DraftField::PurchasePrice))
-                    .await?;
+                bot.send_message(chat_id, prompt).await?;
             }
             None => {
                 bot.send_message(
                     chat_id,
-                    "Data non valida. Usa GG/MM/AAAA oppure AAAA-MM-GG. Esempio: 14/05/2025.\nUsa /salta per lasciare il campo vuoto.",
+                    "Data non valida. Usa GG/MM/AAAA oppure AAAA-MM-GG. Esempio: 14/05/2025.\nUsa /salta per non modificare il valore.",
                 )
                 .await?;
             }
@@ -567,6 +573,7 @@ async fn apply_field_input(
         DraftField::PurchasePrice => match parse_money_to_cents(input) {
             Some(cents) => {
                 draft.purchase_price_cents = Some(cents);
+                let prompt = field_prompt(DraftField::Seller, &draft);
                 sessions.set(
                     raw_chat_id,
                     ConversationState::EditingObject {
@@ -574,13 +581,12 @@ async fn apply_field_input(
                         field: Some(DraftField::Seller),
                     },
                 );
-                bot.send_message(chat_id, field_prompt(DraftField::Seller))
-                    .await?;
+                bot.send_message(chat_id, prompt).await?;
             }
             None => {
                 bot.send_message(
                     chat_id,
-                    "Prezzo non valido. Esempi validi: 89,90 oppure 89.90 oppure 89.\nUsa /salta per lasciare il campo vuoto.",
+                    "Prezzo non valido. Esempi validi: 89,90 oppure 89.90 oppure 89.\nUsa /salta per non modificare il valore.",
                 )
                 .await?;
             }
@@ -605,7 +611,7 @@ async fn apply_field_input(
             None => {
                 bot.send_message(
                     chat_id,
-                    "Valore non valido. Esempi validi: 250 oppure 250,00.\nUsa /salta per lasciare il campo vuoto.",
+                    "Valore non valido. Esempi validi: 250 oppure 250,00.\nUsa /salta per non modificare il valore.",
                 )
                 .await?;
             }
@@ -662,6 +668,7 @@ async fn skip_current_field(
     };
 
     if let Some(next_field) = next {
+        let prompt = field_prompt(next_field, &draft);
         sessions.set(
             raw_chat_id,
             ConversationState::EditingObject {
@@ -669,7 +676,7 @@ async fn skip_current_field(
                 field: Some(next_field),
             },
         );
-        bot.send_message(chat_id, field_prompt(next_field)).await?;
+        bot.send_message(chat_id, prompt).await?;
     } else {
         finish_field(bot, chat_id, raw_chat_id, sessions, *draft).await?;
     }
@@ -727,7 +734,7 @@ async fn save_current_draft(
 
 async fn send_draft_panel(bot: &Bot, chat_id: ChatId, draft: &ObjectDraft) -> ResponseResult<()> {
     bot.send_message(chat_id, format_draft(draft))
-        .reply_markup(draft_keyboard())
+        .reply_markup(draft_keyboard(draft))
         .await?;
     Ok(())
 }
@@ -1059,23 +1066,51 @@ fn objects_menu_keyboard() -> InlineKeyboardMarkup {
     ])
 }
 
-fn draft_keyboard() -> InlineKeyboardMarkup {
+fn draft_keyboard(draft: &ObjectDraft) -> InlineKeyboardMarkup {
+    let brand_model = section_label(
+        "🏷 Marca e modello",
+        draft.brand.is_some() || draft.model.is_some(),
+    );
+    let position = section_label("📍 Posizione", draft.position.is_some());
+    let purchase = section_label(
+        "💶 Acquisto",
+        draft.purchase_date.is_some()
+            || draft.purchase_price_cents.is_some()
+            || draft.seller.is_some(),
+    );
+    let condition = section_label("🛠 Condizione", draft.condition.is_some());
+    let notes = section_label("📝 Note", draft.notes.is_some());
+    let other = section_label(
+        "⋯ Altri dettagli",
+        draft.description.is_some()
+            || draft.estimated_value_cents.is_some()
+            || draft.serial_number.is_some(),
+    );
+
     InlineKeyboardMarkup::new(vec![
-        vec![button("🏷 Marca e modello", "oggetti:draft:brand")],
+        vec![button(&brand_model, "oggetti:draft:brand")],
         vec![
-            button("📍 Posizione", "oggetti:draft:position"),
-            button("💶 Acquisto", "oggetti:draft:purchase"),
+            button(&position, "oggetti:draft:position"),
+            button(&purchase, "oggetti:draft:purchase"),
         ],
         vec![
-            button("🛠 Condizione", "oggetti:draft:condition"),
-            button("📝 Note", "oggetti:draft:notes"),
+            button(&condition, "oggetti:draft:condition"),
+            button(&notes, "oggetti:draft:notes"),
         ],
-        vec![button("⋯ Altri dettagli", "oggetti:draft:other")],
+        vec![button(&other, "oggetti:draft:other")],
         vec![
             button("✅ Salva", "oggetti:draft:save"),
             button("❌ Annulla", "oggetti:draft:cancel"),
         ],
     ])
+}
+
+fn section_label(label: &str, filled: bool) -> String {
+    if filled {
+        format!("✅ {label}")
+    } else {
+        label.to_string()
+    }
 }
 
 fn condition_keyboard() -> InlineKeyboardMarkup {
@@ -1092,11 +1127,15 @@ fn condition_keyboard() -> InlineKeyboardMarkup {
     ])
 }
 
-fn other_details_keyboard() -> InlineKeyboardMarkup {
+fn other_details_keyboard(draft: &ObjectDraft) -> InlineKeyboardMarkup {
+    let description = section_label("📝 Descrizione", draft.description.is_some());
+    let value = section_label("💰 Valore stimato", draft.estimated_value_cents.is_some());
+    let serial = section_label("🔢 Numero seriale", draft.serial_number.is_some());
+
     InlineKeyboardMarkup::new(vec![
-        vec![button("📝 Descrizione", "oggetti:draft:description")],
-        vec![button("💰 Valore stimato", "oggetti:draft:value")],
-        vec![button("🔢 Numero seriale", "oggetti:draft:serial")],
+        vec![button(&description, "oggetti:draft:description")],
+        vec![button(&value, "oggetti:draft:value")],
+        vec![button(&serial, "oggetti:draft:serial")],
         vec![button("⬅️ Dettagli", "oggetti:draft:back")],
     ])
 }
@@ -1182,32 +1221,39 @@ fn button(label: &str, data: &str) -> InlineKeyboardButton {
     InlineKeyboardButton::callback(label.to_string(), data.to_string())
 }
 
-fn field_prompt(field: DraftField) -> &'static str {
-    match field {
-        DraftField::Brand => "🏷 Inserisci la marca.\nUsa /salta per lasciarla vuota.",
-        DraftField::Model => "🏷 Inserisci il modello.\nUsa /salta per lasciarlo vuoto.",
-        DraftField::Position => {
-            "📍 Dove si trova l'oggetto?\nEsempio: Garage - scaffale 2\nUsa /salta per lasciare vuoto."
-        }
-        DraftField::PurchaseDate => {
-            "📅 Inserisci la data di acquisto (GG/MM/AAAA o AAAA-MM-GG).\nUsa /salta per lasciare vuoto."
-        }
-        DraftField::PurchasePrice => {
-            "💶 Inserisci il prezzo pagato.\nEsempio: 89,90\nUsa /salta per lasciare vuoto."
-        }
-        DraftField::Seller => {
-            "🏪 Inserisci negozio o venditore.\nEsempio: Amazon\nUsa /salta per lasciare vuoto."
-        }
-        DraftField::Notes => "📝 Inserisci le note.\nUsa /salta per lasciare vuoto.",
-        DraftField::Description => {
-            "📝 Inserisci una descrizione.\nUsa /salta per lasciare vuoto."
-        }
-        DraftField::EstimatedValue => {
-            "💰 Inserisci il valore stimato attuale.\nEsempio: 250\nUsa /salta per lasciare vuoto."
-        }
-        DraftField::SerialNumber => {
-            "🔢 Inserisci il numero seriale.\nUsa /salta per lasciare vuoto."
-        }
+fn field_prompt(field: DraftField, draft: &ObjectDraft) -> String {
+    let instruction = match field {
+        DraftField::Brand => "🏷 Inserisci la marca.",
+        DraftField::Model => "🏷 Inserisci il modello.",
+        DraftField::Position => "📍 Dove si trova l'oggetto?\nEsempio: Garage - scaffale 2",
+        DraftField::PurchaseDate => "📅 Inserisci la data di acquisto (GG/MM/AAAA o AAAA-MM-GG).",
+        DraftField::PurchasePrice => "💶 Inserisci il prezzo pagato.\nEsempio: 89,90",
+        DraftField::Seller => "🏪 Inserisci negozio o venditore.\nEsempio: Amazon",
+        DraftField::Notes => "📝 Inserisci le note.",
+        DraftField::Description => "📝 Inserisci una descrizione.",
+        DraftField::EstimatedValue => "💰 Inserisci il valore stimato attuale.\nEsempio: 250",
+        DraftField::SerialNumber => "🔢 Inserisci il numero seriale.",
+    };
+
+    let current = match field {
+        DraftField::Brand => draft.brand.clone(),
+        DraftField::Model => draft.model.clone(),
+        DraftField::Position => draft.position.clone(),
+        DraftField::PurchaseDate => draft.purchase_date.as_deref().map(display_date),
+        DraftField::PurchasePrice => draft.purchase_price_cents.map(format_money),
+        DraftField::Seller => draft.seller.clone(),
+        DraftField::Notes => draft.notes.clone(),
+        DraftField::Description => draft.description.clone(),
+        DraftField::EstimatedValue => draft.estimated_value_cents.map(format_money),
+        DraftField::SerialNumber => draft.serial_number.clone(),
+    };
+
+    if let Some(current) = current {
+        format!(
+            "{instruction}\n\nValore attuale:\n{current}\n\nScrivi un nuovo valore per sostituirlo oppure usa /salta per mantenere quello attuale."
+        )
+    } else {
+        format!("{instruction}\n\nUsa /salta per lasciare il campo vuoto.")
     }
 }
 
@@ -1406,6 +1452,18 @@ mod tests {
             parse_command("/oggetto_nuovo@CasaBot Trapano Bosch"),
             Some(("/oggetto_nuovo", "Trapano Bosch"))
         );
+    }
+
+    #[test]
+    fn campo_gia_compilato_mostra_il_valore_attuale() {
+        let mut draft = ObjectDraft::new("Trapano").expect("bozza");
+        draft.brand = Some("Bosch".to_string());
+
+        let prompt = field_prompt(DraftField::Brand, &draft);
+
+        assert!(prompt.contains("Valore attuale:"));
+        assert!(prompt.contains("Bosch"));
+        assert!(prompt.contains("/salta per mantenere"));
     }
 
     #[tokio::test]
