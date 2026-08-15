@@ -115,5 +115,5 @@ segnala la directory residua invece di nascondere il problema.
 - cestino o recupero di un oggetto eliminato;
 - storico delle modifiche;
 - versionamento delle foto;
-- luoghi strutturati multi-casa/stanze, previsti nello Step 6 dopo conferma
-  dell'architettura.
+- luoghi strutturati multi-casa/stanze: implementati successivamente nello Step
+  6A e documentati in `docs/moduli/luoghi.md`.

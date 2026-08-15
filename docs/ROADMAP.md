@@ -1,63 +1,254 @@
 # Roadmap funzionale
 
-Questo documento raccoglie i requisiti futuri già emersi senza trasformarli
-automaticamente in decisioni implementative. Le scelte architetturali indicate
-come **da confermare** non devono produrre migration o codice persistente prima
-dell'approvazione.
+Questo documento raccoglie la sequenza approvata degli sviluppi futuri e le
+scelte che devono restare visibili anche quando il progetto passa a un'altra
+persona o a un'altra AI.
 
 ## Stato corrente
 
-- Step 1-4: chiusi.
-- Step 5A — Oggetti generici: **chiuso**, presente su `main`, CI verde e
-  verificato anche sul database reale del Galaxy S9.
-- Step 5B — Foto oggetti: **chiuso e verificato** sul Galaxy S9, con CI verde.
-- Step 5C — Modifica/eliminazione: implementazione corrente in test.
+- Step 1-4: **chiusi e verificati**.
+- Step 5A — Oggetti generici: **chiuso e verificato**.
+- Step 5B — Foto oggetti: **chiuso e verificato**.
+- Step 5C — Modifica/eliminazione oggetti: **chiuso e verificato**, mergiato su
+  `main` con CI verde.
+- Step 6A — Case, stanze e posizione strutturata: **step corrente in sviluppo**.
 
-## Sequenza proposta
+## Sequenza approvata
 
-1. **Step 5C — Modifica ed eliminazione oggetti**
-   - modifica di nome e dettagli di un oggetto già salvato;
-   - rimozione esplicita dei valori opzionali;
-   - conferma forte prima delle eliminazioni;
-   - cascade delle relazioni SQLite e pulizia dei file media locali;
-   - nessuna nuova migration.
-2. **Step 5D — Documenti e tag**.
-3. **Step 5E — Garanzie e promemoria**.
-4. **Step 5F — Prestiti e storico**.
-5. **Step 6 — Luoghi e multi-abitazione** — requisito trasversale da progettare
-   prima dei moduli successivi che dipendono dalla posizione.
+### Step 6A — Case, stanze e posizione strutturata
 
-## Requisito: più case e stanze
+Obiettivi:
 
-Il gestionale dovrà supportare:
-
-- più case/abitazioni separate;
+- più abitazioni nello stesso account;
 - stanze appartenenti a una casa;
-- assegnazione di un oggetto a una stanza riconosciuta dal sistema;
-- spostamento dell'oggetto scegliendo la nuova stanza;
-- elenco e filtri per singola casa e singola stanza;
-- ricerca globale su tutte le case oppure limitata a una casa/stanza.
+- oggetti assegnabili direttamente a una casa oppure a una stanza;
+- spostamento guidato dell'oggetto;
+- elenchi filtrati per casa e stanza;
+- ricerca oggetti anche per nome della casa/stanza;
+- mantenimento del vecchio campo `oggetti.posizione` come dettaglio libero;
+- base condivisa tramite `items`, riutilizzabile dai moduli futuri.
 
-### Proposta da confermare
+Architettura approvata: `abitazioni` + `stanze` + `item_luogo`. Dettagli in
+`docs/moduli/luoghi.md`.
 
-La soluzione preferita è un albero di **luoghi**:
+### Step 6B — Storico globale + storico individuale
+
+Lo storico deve essere una funzione trasversale del gestionale, non un log
+specifico del modulo Oggetti.
+
+Due viste:
+
+1. **storico individuale** dalla scheda di un'entità;
+2. **storico globale dell'account** con filtri.
+
+Ogni evento dovrà conservare almeno:
+
+- data e ora;
+- tipo di operazione;
+- modulo/sezione;
+- entità interessata e relativo ID quando ancora esiste;
+- casa e stanza rilevanti, se presenti;
+- valori precedenti e nuovi per le modifiche;
+- una descrizione leggibile per Telegram.
+
+Filtri desiderati:
+
+- periodo;
+- modulo (`oggetti`, `vestiti`, `veicoli`, `case`, `stanze`, ecc.);
+- casa;
+- stanza;
+- tipo di operazione;
+- elemento specifico.
+
+Esempi di eventi: creazione, modifica, spostamento, foto aggiunta/rimossa,
+archiviazione, eliminazione, tag e promemoria. Gli eventi importanti devono
+restare consultabili anche dopo la cancellazione dell'entità originale.
+
+Per i luoghi, lo storico dovrà distinguere almeno tre eventi diversi:
+
+- prima assegnazione (`nessun luogo -> casa/stanza`);
+- spostamento (`casa/stanza A -> casa/stanza B`), conservando esplicitamente
+  origine e destinazione;
+- rimozione del luogo (`casa/stanza -> nessun luogo`).
+
+La UI dello Step 6A usa già questa distinzione, così il significato delle azioni
+rimane coerente quando verrà introdotto lo storico.
+
+### Step 6C — Contenitori e sotto-posizioni
+
+Estensione futura della posizione fisica:
 
 ```text
-Casa A
-├── Cucina
-├── Camera
-└── Garage
-    └── Scaffale 2   (eventuale livello futuro)
-
-Casa B
-├── Soggiorno
-└── Cantina
+Casa principale
+→ Garage
+→ Scaffale 2
+→ Cassetta attrezzi
+→ Chiave dinamometrica
 ```
 
-A livello dati, una singola tabella gerarchica con `parent_id` e tipo di luogo
-permetterebbe di rappresentare case, stanze e in futuro sotto-posizioni senza
-duplicare logica. Gli oggetti potrebbero riferirsi a un `luogo_id`, lasciando
-un dettaglio libero solo quando serve.
+Lo Step 6A non forza già questa gerarchia. Nel 6C si valuterà se usare un terzo
+livello dedicato oppure una struttura gerarchica generica sotto la stanza.
 
-**Questa architettura non è ancora approvata:** va presentata e confermata prima
-dell'implementazione.
+### Step 7A — Documenti e garanzie
+
+Documenti collegabili alle entità, per esempio:
+
+- scontrini e fatture;
+- manuali;
+- garanzie;
+- libretti e certificati;
+- polizze e altri PDF/immagini.
+
+La funzione deve essere condivisa tra moduli quando possibile, evitando tabelle
+separate per Oggetti, Vestiti e Veicoli.
+
+### Step 7B — Promemoria e scadenze
+
+Sviluppare concretamente l'infrastruttura `promemoria` già prevista nel core:
+
+- scadenze collegate a un'entità;
+- notifiche Telegram anticipate;
+- ricorrenze;
+- completamento;
+- esempi: garanzia, revisione, assicurazione, manutenzione.
+
+### Step 7C — Tag + ricerca globale
+
+- tag condivisi tra moduli;
+- filtri combinabili per casa, stanza, modulo, stato e tag;
+- ricerca globale che non richieda di conoscere prima il modulo dell'elemento.
+
+Esempio futuro:
+
+```text
+/cerca casco
+→ oggetto
+→ vestito/accessorio
+→ documento
+→ manutenzione collegata
+```
+
+### Step 8 — Primo nuovo modulo applicativo
+
+Priorità da scegliere al momento tra:
+
+- **Veicoli**;
+- **Vestiti**.
+
+Entrambi dovranno riusare, dove sensato, luoghi, foto, documenti, tag,
+promemoria e storico invece di ricreare sistemi paralleli.
+
+## Funzioni future approvate da tenere in progettazione
+
+### Manutenzioni e interventi
+
+Registro di eventi reali, distinto dallo storico tecnico delle modifiche al
+gestionale. Particolarmente utile per veicoli, elettrodomestici e attrezzatura.
+
+Dati possibili: data, chilometraggio/ore, descrizione, costo, officina/persona,
+documenti e foto.
+
+### Costi e valore
+
+Per ogni entità potranno essere aggregati:
+
+- prezzo di acquisto;
+- manutenzioni;
+- accessori;
+- assicurazioni/spese ricorrenti;
+- valore stimato attuale.
+
+In futuro questi dati alimenteranno statistiche e dashboard.
+
+### Prestiti
+
+Stato temporaneo per oggetti prestati a una persona, con:
+
+- persona;
+- data prestito;
+- restituzione prevista;
+- restituzione effettiva;
+- promemoria opzionale;
+- eventi nello storico.
+
+### QR code e codici a barre
+
+Possibile generazione di QR per aprire direttamente la scheda di:
+
+- oggetto;
+- stanza;
+- contenitore.
+
+Particolarmente utile dopo lo Step 6C.
+
+### Archivio invece della sola eliminazione
+
+Oltre alla cancellazione definitiva introdotta nello Step 5C, il progetto dovrà
+valutare uno stato di archivio che conservi dati e storico per elementi non più
+attivi:
+
+- venduto;
+- regalato;
+- buttato;
+- perso;
+- dismesso.
+
+L'archivio sarà preferibile alla cancellazione quando si vuole conservare la
+storia dell'elemento.
+
+### Registro acquisti
+
+Flusso rapido che parte da un acquisto e crea/collega:
+
+- elemento;
+- prezzo;
+- venditore;
+- data;
+- scontrino/fattura;
+- garanzia.
+
+In futuro si potrà valutare l'estrazione assistita dei dati da foto/documenti,
+ma non è un requisito dei primi step.
+
+### Dashboard e statistiche
+
+Vista sintetica futura, per esempio:
+
+- numero di oggetti/veicoli/vestiti;
+- elementi per casa/stanza;
+- prossime scadenze;
+- elementi da riparare;
+- valore stimato e spese aggregate.
+
+## Principio architetturale trasversale
+
+Il progetto deve evitare di creare una versione diversa della stessa funzione
+per ogni modulo.
+
+Il pattern attuale `items` va evoluto mantenendo questa idea:
+
+```text
+                    ITEM / ENTITÀ
+                         |
+          +--------------+--------------+
+          |              |              |
+       Oggetto         Veicolo        Vestito
+          |              |              |
+          +---- Foto / Documenti / Tag / Promemoria / Storico ----+
+          +-------------------- Luogo condiviso --------------------+
+```
+
+Non significa che ogni futura entità debba per forza essere una riga `items`:
+case, stanze e altri concetti di sistema possono avere tabelle proprie. Significa
+che le funzionalità trasversali vanno progettate una volta e riusate quando il
+dominio lo consente.
+
+## Regola per le future decisioni
+
+Prima di introdurre una migration strutturale importante:
+
+1. descrivere il requisito;
+2. confrontare le alternative;
+3. scegliere e documentare il modello;
+4. solo dopo creare migration e codice;
+5. mantenere compatibilità con i dati reali già presenti quando possibile.

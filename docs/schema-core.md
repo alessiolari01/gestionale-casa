@@ -1,8 +1,13 @@
 # Schema dati core
 
-Le tabelle descritte qui sono condivise da tutti i moduli (oggetti,
+Le tabelle descritte qui sono condivise dai moduli basati su `items` (oggetti,
 vestiti, veicoli, ricette). Definite una sola volta, evitano di
 reimplementare quattro volte la stessa logica per foto, tag e promemoria.
+
+Dallo Step 6A esiste anche una **estensione condivisa** per la posizione fisica:
+`abitazioni`, `stanze` e `item_luogo`, definita in una migration successiva e
+documentata in `docs/moduli/luoghi.md`. Non viene retroattivamente aggiunta alla
+migration core, che resta immutabile.
 
 Migrazione corrispondente: `migrations/20260812120000_schema_core.sql`.
 
@@ -68,11 +73,10 @@ erDiagram
     }
 ```
 
-Le tabelle specifiche di ciascun modulo (`oggetti`, `vestiti`, `veicoli`,
-`ricette`) non esistono ancora: verranno create quando si progetta ciascun
-modulo, con `id` che sarà allo stesso tempo chiave primaria e chiave
-esterna verso `items(id)` (stesso pattern usato qui per `foto` e
-`promemoria`).
+La tabella specifica `oggetti` esiste dallo Step 5A e usa lo stesso ID della
+riga `items`. Vestiti, Veicoli e Ricette seguiranno lo stesso principio quando
+verranno implementati, salvo una decisione architetturale esplicitamente
+documentata.
 
 ## Tabelle
 
@@ -116,6 +120,19 @@ veicolo, "controlla garanzia" per un oggetto).
 Il meccanismo che controlla periodicamente `promemoria` e invia i messaggi
 via bot (lo *scheduler*) verrà progettato insieme al primo modulo che lo
 usa concretamente (i veicoli, con le scadenze di manutenzione).
+
+## Estensione condivisa Step 6A: `item_luogo`
+
+La posizione strutturata non viene duplicata nelle tabelle specifiche dei
+moduli. `item_luogo.item_id` punta a `items(id)` e collega l'elemento a una
+`abitazione` e, opzionalmente, a una `stanza`.
+
+Questo mantiene lo stesso principio dello schema core: la funzione trasversale
+si implementa una volta sola. Il vecchio campo `oggetti.posizione` resta invece
+un dettaglio libero specifico del modulo.
+
+Vedi `docs/moduli/luoghi.md` e
+`migrations/20260815183000_luoghi.sql`.
 
 ## Cosa NON è in questo schema
 

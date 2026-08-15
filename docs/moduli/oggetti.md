@@ -1,4 +1,4 @@
-# Modulo Oggetti generici — Step 5A + Step 5C
+# Modulo Oggetti generici — Step 5A → Step 6A
 
 ## Scopo
 
@@ -11,8 +11,10 @@ Lo Step 5A copre il ciclo minimo completo:
 
 La revisione dei **campi della bozza** prima di `✅ Salva` fa parte dello Step
 5A. Lo **Step 5C** estende lo stesso pannello agli oggetti già persistiti e
-aggiunge l'eliminazione con conferma. Le foto sono state aggiunte nello Step 5B;
-documenti/tag, garanzie/promemoria e prestiti restano sottostep successivi.
+aggiunge l'eliminazione con conferma. Le foto sono state aggiunte nello Step 5B.
+Lo **Step 6A** aggiunge casa/stanza strutturate senza perdere il vecchio campo
+libero di posizione. Documenti, garanzie, promemoria, tag, storico e prestiti
+restano sviluppi successivi.
 
 ## Modello dati
 
@@ -31,7 +33,7 @@ La migration `20260814121600_oggetti.sql` aggiunge:
 | `marca` | testo | no | es. Bosch |
 | `modello` | testo | no | es. UniversalImpact 800 |
 | `numero_serie` | testo | no | tenuto per gli oggetti dove ha senso |
-| `posizione` | testo | no | es. Garage - scaffale 2 |
+| `posizione` | testo | no | dallo Step 6A: dettaglio libero, es. scaffale 2 |
 | `data_acquisto` | data ISO | no | salvata come `AAAA-MM-GG` |
 | `prezzo_acquisto_centesimi` | intero | no | denaro in centesimi, mai `REAL` |
 | `venditore` | testo | no | es. Amazon, MediaWorld, privato |
@@ -39,10 +41,12 @@ La migration `20260814121600_oggetti.sql` aggiunge:
 | `condizione` | enum testo | no | ottimo/buono/usurato/da_riparare |
 | `note` | testo | no | note libere |
 
-> `posizione` è testuale nello Step 5A. In futuro verrà migrata verso il sistema
-> condiviso di luoghi/case/stanze, dopo approvazione della relativa architettura.
+> Dallo Step 6A `posizione` **non rappresenta più da sola il luogo completo**.
+> Casa e stanza sono salvate tramite `item_luogo`; `oggetti.posizione` resta un
+> dettaglio libero (es. `scaffale 2`). I valori storici non vengono convertiti
+> automaticamente.
 
-Foto, scontrini, garanzie, tag e promemoria non vengono duplicati in questa
+Foto, luoghi, futuri documenti/garanzie, tag e promemoria non vengono duplicati in questa
 tabella: usano le tabelle core predisposte. Dallo Step 5B la voce `📷 Foto` della
 scheda oggetto usa concretamente la tabella core `foto`.
 
@@ -61,12 +65,13 @@ logica applicativa.
 | scheda per ID | pulsante risultato | `/oggetto <id>` |
 | modifica oggetto | `✏️ Modifica` | `/oggetto_modifica <id>` |
 | elimina oggetto | `🗑 Elimina` | `/oggetto_elimina <id>` |
+| casa/stanza | `🏠 Casa / stanza` | `/oggetto_luogo <id>` o `/oggetto_sposta <id>` |
 | foto oggetto | `📷 Foto` | `/foto <id>` |
 | annulla operazione | `❌ Annulla` | `/annulla` |
 | mantieni valore corrente | — | `/salta` |
 | rimuovi campo opzionale aperto | — | `/rimuovi` |
 
-`/start` apre il menu principale con Oggetti e Stato sistema; Vestiti, Veicoli
+`/start` apre il menu principale con Oggetti, Case e stanze e Stato sistema; Vestiti, Veicoli
 e Ricette sono gia' rappresentati esteticamente ma marcati come prossimamente.
 
 ## Creazione con pannello dettagli
@@ -74,12 +79,34 @@ e Ricette sono gia' rappresentati esteticamente ma marcati come prossimamente.
 1. il bot chiede solo il nome;
 2. dopo il nome mostra il pannello dettagli;
 3. l'utente puo' salvare subito oppure aggiungere dati opzionali;
-4. `Marca e modello` e `Acquisto` sono piccoli flussi guidati;
-5. `Condizione` usa quattro pulsanti;
-6. `Altri dettagli` contiene descrizione, valore stimato e numero seriale;
-7. le sezioni gia' compilate vengono marcate con `✅` nel pannello;
-8. riaprendo un campo gia' valorizzato, il bot mostra il valore attuale prima di chiedere quello nuovo; `/salta` mantiene il valore esistente invece di sovrascriverlo;
-9. `✅ Salva` inserisce `items` e `oggetti` nella stessa transazione SQL.
+4. durante una **nuova creazione**, `🏠 Posizione` apre un unico flusso guidato `Casa -> Stanza -> Dettaglio posizione`;
+5. se l'utente salta la casa, il passaggio stanza viene saltato automaticamente e il bot chiede direttamente il dettaglio libero;
+6. dopo aver scelto una casa si puo' scegliere una sua stanza oppure lasciare l'oggetto associato alla sola casa; non viene mai proposta una stanza senza aver prima scelto la casa;
+7. il dettaglio posizione resta opzionale e puo' essere saltato con `/salta`;
+8. `Marca e modello` e `Acquisto` sono piccoli flussi guidati;
+9. `Condizione` usa quattro pulsanti;
+10. `Altri dettagli` contiene descrizione, valore stimato e numero seriale;
+11. le sezioni gia' compilate vengono marcate con `✅` nel pannello;
+12. riaprendo un campo gia' valorizzato, il bot mostra il valore attuale prima di chiedere quello nuovo; `/salta` mantiene il valore esistente invece di sovrascriverlo;
+13. `✅ Salva` inserisce `items`, `oggetti` e, quando scelto, `item_luogo` nella **stessa transazione SQL**.
+
+Esempio di creazione completa:
+
+```text
+Nome: Trapano Bosch
+→ 🏠 Posizione
+→ Casa principale
+→ Garage
+→ Scaffale 2
+→ ✅ Salva
+
+Risultato:
+🏠 Casa principale / 🚪 Garage
+📌 Scaffale 2
+```
+
+Se invece viene premuto `⏭ Salta casa -> dettaglio`, non viene chiesta alcuna
+stanza e si passa direttamente a `📌 Dettaglio posizione`.
 
 Una bozza incompleta vive solo in memoria: se il backend viene riavviato prima
 del salvataggio, la bozza viene persa ma il database resta invariato.
@@ -94,6 +121,7 @@ stessa transazione, senza creare un nuovo item.
 Regole UX:
 
 - il nome è modificabile ma non può essere rimosso;
+- nella modifica il campo `📌 Dettaglio posizione` resta separato dal luogo strutturato: casa/stanza si cambiano dalla scheda con `🚚 Sposta oggetto`, così uno spostamento resta un'azione esplicita e potrà essere registrato correttamente nello storico;
 - riaprendo un campo viene mostrato il valore corrente;
 - `/salta` mantiene il valore;
 - `/rimuovi` imposta a `NULL` il campo opzionale attualmente aperto;
@@ -116,12 +144,34 @@ La cancellazione parte dalla riga `items`. Le foreign key con
 resta eliminato dal database ma il bot segnala chiaramente la directory da
 controllare manualmente.
 
+## Luogo strutturato — Step 6A
+
+La scheda dell'oggetto espone `🏠 Casa / stanza`. L'utente può:
+
+- scegliere una casa;
+- scegliere una stanza di quella casa;
+- lasciare l'oggetto associato alla sola casa;
+- spostare l'oggetto in un'altra casa/stanza;
+- rimuovere del tutto il luogo strutturato.
+
+La relazione è salvata in `item_luogo`, quindi non è specifica del modulo
+Oggetti. La scheda mostra, per esempio:
+
+```text
+🏠 Casa principale / 🚪 Garage
+📌 Scaffale 2
+```
+
+Eliminare una stanza non elimina l'oggetto: rimane nella casa senza stanza.
+Eliminare una casa non elimina l'oggetto: perde solo la relazione di luogo.
+Dettagli completi in `docs/moduli/luoghi.md`.
+
 ## Elenco e ricerca
 
 - elenco alfabetico, 8 oggetti per pagina;
 - ogni riga ha un pulsante che apre la scheda;
-- la ricerca controlla nome, marca, modello, numero seriale, posizione, venditore,
-  descrizione e note;
+- la ricerca controlla nome, marca, modello, numero seriale, dettaglio posizione,
+  venditore, descrizione, note, nome casa e nome stanza;
 - massimo 12 risultati per ricerca nello Step 5A.
 
 ## Validazione
@@ -150,8 +200,9 @@ separatamente nello Step 5B.
 
 ## Fuori perimetro
 
-- Step 5D: documenti e tag;
-- Step 5E: garanzie e promemoria;
-- Step 5F: prestiti e storico;
-- Step 6: luoghi e multi-abitazione (più case, stanze, filtri e ricerca globale),
-  con architettura da confermare prima dell'implementazione.
+- Step 6B: storico globale + individuale;
+- Step 6C: contenitori e sotto-posizioni;
+- Step 7A: documenti e garanzie;
+- Step 7B: promemoria e scadenze;
+- Step 7C: tag e ricerca globale;
+- moduli Veicoli, Vestiti e Ricette.
