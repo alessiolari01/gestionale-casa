@@ -823,7 +823,7 @@ async fn send_object_detail(
     match get_object(pool, id).await {
         Ok(Some(object)) => {
             bot.send_message(chat_id, format_object(&object))
-                .reply_markup(object_detail_keyboard())
+                .reply_markup(object_detail_keyboard(id))
                 .await?;
         }
         Ok(None) => {
@@ -1144,14 +1144,16 @@ fn cancel_keyboard() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![vec![button("❌ Annulla", "oggetti:draft:cancel")]])
 }
 
-fn object_detail_keyboard() -> InlineKeyboardMarkup {
+fn object_detail_keyboard(id: i64) -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
+        vec![button("📷 Foto", &format!("foto:menu:{id}"))],
         vec![button("📋 Elenco", "oggetti:list:0")],
         vec![
             button("🔎 Cerca", "oggetti:search"),
             button("➕ Nuovo", "oggetti:new"),
         ],
         vec![button("📦 Menu oggetti", "oggetti:menu")],
+        vec![button("🏠 Menu principale", "menu:main")],
     ])
 }
 

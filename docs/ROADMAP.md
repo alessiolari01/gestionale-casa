@@ -8,15 +8,19 @@ dell'approvazione.
 ## Stato corrente
 
 - Step 1-4: chiusi.
-- Step 5A — Oggetti generici: verifiche runtime completate sul Galaxy S9; lo
-  step è chiuso quando questa revisione è presente su `main` con CI verde.
+- Step 5A — Oggetti generici: **chiuso**, presente su `main`, CI verde e
+  verificato anche sul database reale del Galaxy S9.
+- Step 5B — Foto oggetti: implementazione corrente in test.
 
 ## Sequenza proposta
 
 1. **Step 5B — Foto oggetti**
    - aggiunta, visualizzazione e gestione foto collegate a `items`;
    - uso della tabella core `foto`;
-   - salvataggio locale dei file da definire nello step.
+   - salvataggio locale in `data/media/oggetti/<item_id>/`;
+   - prima foto principale, successive galleria;
+   - notifica automatica di avvio e navigazione al menu da `/status`;
+   - nessuna nuova migration: riuso della tabella core `foto`.
 2. **Step 5C — Modifica ed eliminazione oggetti**
    - modifica di un oggetto già salvato;
    - conferme esplicite per eliminazioni;

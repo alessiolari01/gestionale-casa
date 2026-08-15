@@ -1,7 +1,7 @@
 //! Punto di ingresso del Gestionale Casa.
 //!
-//! Step corrente: Step 5A, primo modulo applicativo "Oggetti generici" sopra
-//! l'infrastruttura Telegram + SQLx + SQLite verificata nello Step 4.
+//! Step corrente: Step 5B, gestione foto per gli oggetti generici sopra
+//! l'infrastruttura Telegram + SQLx + SQLite verificata negli step precedenti.
 
 mod auth;
 mod config;
@@ -12,9 +12,13 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use config::Config;
-use modules::oggetti::SessionStore;
+use modules::{foto::PhotoSessionStore, oggetti::SessionStore};
 use sqlx::SqlitePool;
-use teloxide::{dptree, prelude::*};
+use teloxide::{
+    dptree,
+    prelude::*,
+    types::{InlineKeyboardButton, InlineKeyboardMarkup},
+};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -44,13 +48,26 @@ async fn main() -> anyhow::Result<()> {
         .context("Impossibile collegarsi al bot Telegram")?;
     tracing::info!(bot_username = ?me.username(), "Gestionale Casa online");
 
+    // Il messaggio di avvio rende subito evidente che il backend e' tornato
+    // online e offre direttamente il menu principale senza richiedere /start.
+    for chat_id in config.allowed_chat_ids.iter().copied() {
+        if let Err(error) = send_online_menu(&bot, ChatId(chat_id)).await {
+            tracing::warn!(
+                chat_id,
+                ?error,
+                "Impossibile inviare la notifica di avvio alla chat autorizzata"
+            );
+        }
+    }
+
     let sessions = SessionStore::new();
+    let photo_sessions = PhotoSessionStore::new();
     let handler = dptree::entry()
         .branch(Update::filter_message().endpoint(handle_message))
         .branch(Update::filter_callback_query().endpoint(handle_callback));
 
     Dispatcher::builder(bot, handler)
-        .dependencies(dptree::deps![config, pool, sessions])
+        .dependencies(dptree::deps![config, pool, sessions, photo_sessions])
         .enable_ctrlc_handler()
         .build()
         .dispatch()
@@ -65,6 +82,7 @@ async fn handle_message(
     config: Arc<Config>,
     pool: SqlitePool,
     sessions: SessionStore,
+    photo_sessions: PhotoSessionStore,
 ) -> ResponseResult<()> {
     let chat_id = msg.chat.id.0;
     if !auth::is_authorized(chat_id, &config.allowed_chat_ids) {
@@ -72,18 +90,48 @@ async fn handle_message(
         return respond(());
     }
 
+    // Se si entra esplicitamente nel flusso foto da comando, chiudiamo una
+    // eventuale bozza oggetto rimasta aperta per evitare stati concorrenti.
+    if matches!(
+        msg.text().and_then(first_command),
+        Some("/foto") | Some("/foto_aggiungi")
+    ) {
+        sessions.clear_chat(chat_id);
+    }
+
+    // I comandi foto e, soprattutto, le foto vere e proprie devono essere
+    // gestiti prima del controllo msg.text(), perche' una foto non e' testo.
+    if modules::foto::handle_message(&bot, &msg, &pool, &photo_sessions).await? {
+        return respond(());
+    }
+
     let Some(text) = msg.text() else {
+        if msg.photo().is_some() {
+            bot.send_message(
+                msg.chat.id,
+                "📷 Non sto aspettando una foto. Apri la scheda di un oggetto e usa 📷 Foto → ➕ Aggiungi foto.",
+            )
+            .await?;
+        }
         return respond(());
     };
+
+    let command = first_command(text);
+
+    // Qualunque altro comando esplicito interrompe un'eventuale attesa foto:
+    // evita che una foto inviata piu' tardi venga associata per errore.
+    if command.is_some() {
+        photo_sessions.clear_chat(chat_id);
+    }
 
     if modules::oggetti::handle_message(&bot, &msg, &pool, &sessions, text).await? {
         return respond(());
     }
 
-    let command = first_command(text);
     match command {
         Some("/start") => {
             sessions.clear_chat(chat_id);
+            photo_sessions.clear_chat(chat_id);
             send_main_menu(&bot, msg.chat.id).await?;
         }
         Some("/ping") => {
@@ -118,6 +166,7 @@ async fn handle_callback(
     config: Arc<Config>,
     pool: SqlitePool,
     sessions: SessionStore,
+    photo_sessions: PhotoSessionStore,
 ) -> ResponseResult<()> {
     bot.answer_callback_query(q.id.clone()).await?;
 
@@ -140,6 +189,7 @@ async fn handle_callback(
     match data {
         "menu:main" => {
             sessions.clear_chat(chat_id.0);
+            photo_sessions.clear_chat(chat_id.0);
             send_main_menu(&bot, chat_id).await?;
         }
         "menu:soon" => {
@@ -153,6 +203,14 @@ async fn handle_callback(
             send_status(&bot, chat_id, &pool).await?;
         }
         _ => {
+            if data.starts_with("oggetti:") {
+                photo_sessions.clear_chat(chat_id.0);
+            }
+
+            if modules::foto::handle_callback(&bot, chat_id, &pool, &photo_sessions, data).await? {
+                return respond(());
+            }
+
             if !modules::oggetti::handle_callback(&bot, chat_id, &pool, &sessions, data).await? {
                 bot.send_message(chat_id, "Pulsante non riconosciuto o non più valido.")
                     .await?;
@@ -161,6 +219,16 @@ async fn handle_callback(
     }
 
     respond(())
+}
+
+async fn send_online_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
+    bot.send_message(
+        chat_id,
+        "🟢 Gestionale Casa è online.\n\n🏠 Menu principale\nScegli una sezione.\n\nComandi rapidi: /oggetti · /status · /ping",
+    )
+    .reply_markup(modules::oggetti::main_menu_keyboard())
+    .await?;
+    Ok(())
 }
 
 async fn send_main_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
@@ -195,7 +263,9 @@ async fn send_status(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> ResponseR
                  Schema core: {schema}",
                 status.applied_migrations
             );
-            bot.send_message(chat_id, message).await?;
+            bot.send_message(chat_id, message)
+                .reply_markup(status_keyboard())
+                .await?;
         }
         Err(error) => {
             tracing::error!(?error, "Errore durante la lettura dello stato");
@@ -203,10 +273,18 @@ async fn send_status(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> ResponseR
                 chat_id,
                 "⚠️ Il bot è online, ma non riesco a leggere lo stato del database.",
             )
+            .reply_markup(status_keyboard())
             .await?;
         }
     }
     Ok(())
+}
+
+fn status_keyboard() -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
+        "🏠 Menu principale".to_string(),
+        "menu:main".to_string(),
+    )]])
 }
 
 fn first_command(text: &str) -> Option<&str> {

@@ -15,7 +15,8 @@ Prima di modificare il progetto, leggere nell'ordine:
    continuare il progetto;
 5. **[docs/schema-core.md](./docs/schema-core.md)** — schema dati condiviso;
 6. **[docs/moduli/oggetti.md](./docs/moduli/oggetti.md)** — specifica Step 5A;
-7. **[docs/ROADMAP.md](./docs/ROADMAP.md)** — requisiti futuri e decisioni ancora da confermare.
+7. **[docs/moduli/foto.md](./docs/moduli/foto.md)** — specifica Step 5B;
+8. **[docs/ROADMAP.md](./docs/ROADMAP.md)** — requisiti futuri e decisioni ancora da confermare.
 
 ## Stato del progetto
 
@@ -27,7 +28,7 @@ Prima di modificare il progetto, leggere nell'ordine:
 - [x] Step 4 — SQLite operativo + migration automatiche + `/status`, verificato sul Galaxy S9
 - [ ] Step 5 — Modulo oggetti
   - [x] Step 5A — anagrafica, pulsanti + comandi, creazione, elenco, ricerca e scheda
-  - [ ] Step 5B — foto degli oggetti
+  - [ ] Step 5B — foto degli oggetti (implementazione in test)
   - [ ] Step 5C — modifica ed eliminazione degli oggetti gia' salvati
 - [ ] Modulo vestiti
 - [ ] Modulo veicoli
@@ -35,42 +36,22 @@ Prima di modificare il progetto, leggere nell'ordine:
 
 ### Ultimo step funzionale verificato
 
-Lo **Step 4 è stato verificato realmente sul Galaxy S9**. La catena
-`Telegram -> Rust -> SQLx -> SQLite` è ora operativa.
+Lo **Step 5A — Oggetti generici è chiuso e verificato**. È stato integrato in
+`main`, la CI GitHub Actions è verde e sul Galaxy S9 sono stati verificati:
 
-Verifiche effettuate:
-
-1. `cargo check` con SQLx 0.8.6 completato correttamente;
-2. `cargo test --locked` completato con 2 test superati e 0 falliti;
-3. `openssl-sys` assente dalla dependency graph;
-4. `cargo run --locked` avvia il backend e crea `data/db/gestionale.db`;
-5. `/start`, `/ping` e `/status` funzionano;
-6. `/status` conferma foreign key attive, migration applicata e tutte le tabelle
-   dello schema core presenti;
-7. un secondo avvio sullo stesso database avviene senza errori e senza
-   riapplicare in modo distruttivo la migration.
+1. `cargo fmt --all -- --check`, `cargo check --locked`, `cargo test --locked`
+   e Clippy con `-D warnings`;
+2. 9 test automatici superati;
+3. menu e comandi Telegram, creazione semplice e dettagliata, elenco, ricerca e
+   scheda oggetto;
+4. revisione sicura dei campi già compilati nella bozza;
+5. applicazione della seconda migration anche sul database reale;
+6. `/status` con `Migrazioni applicate: 2`;
+7. persistenza corretta dopo riavvio del backend;
+8. backup del database reale verificato prima dell'upgrade.
 
 Il warning di compatibilità futura relativo a `proc-macro-error2 v2.0.1` non ha
-bloccato build o test ed è mantenuto come nota da rivalutare durante futuri
-aggiornamenti delle dipendenze.
-
-Per completezza, lo **Step 3** aveva già verificato realmente sul Galaxy S9:
-
-1. `cargo test` è completato correttamente;
-2. il backend si collega alle API Telegram;
-3. `/ping` risponde `Pong! Gestionale Casa è online.`;
-4. `/start` risponde con i comandi disponibili;
-5. un secondo account Telegram, non presente in `ALLOWED_CHAT_IDS`, non riceve
-   alcuna risposta dal bot.
-
-Durante il primo test era comparso un errore `openssl-sys`: il Galaxy S9 era
-ancora sul `Cargo.toml` dello Step 2, che attivava le feature predefinite di
-Teloxide e quindi `native-tls`. Riallineando il repository allo Step 3,
-Teloxide usa `rustls` come previsto e la compilazione riesce senza OpenSSL
-nativo. Il dettaglio resta documentato in `CHANGELOG.md`.
-
-`Cargo.lock` è già versionato ed è quello generato durante la build verificata
-sul Galaxy S9.
+bloccato build o test e resta una nota da rivalutare durante futuri aggiornamenti.
 
 ### Step 3.1 verificato
 
@@ -90,25 +71,26 @@ Rust stable, una nuova esecuzione GitHub Actions ha completato con esito positiv
 
 ### Passo corrente
 
-Lo **Step 4 — SQLite operativo** è chiuso e verificato sul Galaxy S9.
+Lo **Step 5A — Oggetti generici è chiuso**.
 
-Lo **Step 5A — Oggetti generici** ha completato le verifiche runtime sul Galaxy
-S9. È considerato chiuso quando questa revisione è presente su `main` con CI
-GitHub Actions verde. Lo Step 5A aggiunge:
+È in sviluppo lo **Step 5B — Foto degli oggetti**. La prima implementazione da
+verificare aggiunge:
 
-- nuova migration `oggetti`, senza modificare la migration core già applicata;
-- menu Telegram con inline keyboard;
-- comandi testuali equivalenti ai pulsanti;
-- creazione rapida con solo nome oppure pannello dettagli opzionale;
-- salvataggio atomico `items + oggetti`;
-- elenco paginato, ricerca e scheda singola;
-- test automatici del parsing e della persistenza;
-- revisione sicura dei campi della bozza: le sezioni compilate sono marcate, il
-  valore corrente viene mostrato prima di sostituirlo e `/salta` lo mantiene.
+- messaggio automatico quando il bot torna online, già corredato dal menu
+  principale;
+- pulsante `🏠 Menu principale` dopo `/status` e dopo Stato sistema;
+- pulsante `📷 Foto` nella scheda di un oggetto;
+- aggiunta e visualizzazione foto tramite pulsanti e comandi `/foto <id>` e
+  `/foto_aggiungi <id>`;
+- download reale delle immagini Telegram in `data/media/oggetti/<id>/`;
+- registrazione nella tabella core `foto`, senza nuova migration;
+- prima foto marcata `principale`, successive come `galleria`;
+- didascalia Telegram salvata come descrizione;
+- file locali inclusi nei backup perché `scripts/backup.sh` copia `data/media`.
 
-La specifica del modulo è in `docs/moduli/oggetti.md`. La modifica di un oggetto
-gia' salvato **non fa parte dello Step 5A**: è pianificata subito dopo la gestione
-delle foto.
+Finché i test runtime e la CI dello Step 5B non sono completati, queste funzioni
+non vanno considerate stabili. La modifica/eliminazione di oggetti già salvati
+resta pianificata nello Step 5C.
 
 ## Fonte ufficiale e workflow corrente
 
@@ -291,6 +273,7 @@ gestionale-casa/
 │   ├── db.rs                # pool SQLite, migration e stato runtime
 │   ├── auth.rs              # whitelist chat autorizzate
 │   └── modules/
+│       ├── foto.rs             # foto locali collegate agli items
 │       ├── oggetti.rs
 │       ├── vestiti.rs
 │       ├── veicoli.rs

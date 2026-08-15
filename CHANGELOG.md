@@ -1,5 +1,57 @@
 # Diario di sviluppo
 
+## Step 5B — Foto oggetti e navigazione di avvio — 2026-08-15
+
+### Stato precedente
+
+Lo Step 5A è stato mergiato su `main`, la CI del merge è verde e la seconda
+migration è stata applicata e verificata anche sul database reale del Galaxy S9.
+Un backup consistente del database reale è stato creato prima dell'upgrade e il
+secondo avvio ha confermato `Migrazioni applicate: 2`.
+
+### Implementazione predisposta per test
+
+- notifica automatica `🟢 Gestionale Casa è online` all'avvio del backend;
+- la notifica di avvio contiene direttamente l'inline keyboard del menu principale;
+- `/status` e il pulsante Stato sistema mostrano `🏠 Menu principale`;
+- nuovo modulo `src/modules/foto.rs`;
+- pulsante `📷 Foto` nella scheda degli oggetti;
+- menu foto con aggiunta, visualizzazione e ritorno all'oggetto;
+- comandi equivalenti `/foto <id>` e `/foto_aggiungi <id>`;
+- ricezione delle immagini Telegram anche quando il messaggio non contiene testo;
+- download della versione più grande della foto in `data/media/oggetti/<item_id>/`;
+- registrazione del percorso, ruolo e descrizione nella tabella core `foto`;
+- prima foto di un oggetto marcata `principale`, successive `galleria`;
+- didascalia Telegram usata come descrizione della foto;
+- visualizzazione delle foto dal file locale tramite Telegram;
+- rimozione del file locale se la registrazione SQLite fallisce, per evitare
+  file orfani;
+- due test automatici dedicati a estensione file e ruoli principale/galleria;
+- nessuna nuova migration: viene riusata la tabella `foto` dello schema core;
+- `tokio` abilita la feature `fs` necessaria al salvataggio asincrono dei file.
+
+### Da verificare prima della chiusura
+
+1. `cargo fmt --all -- --check`;
+2. `cargo check --locked`;
+3. `cargo test --locked`;
+4. `cargo clippy --all-targets --locked -- -D warnings`;
+5. notifica automatica di avvio e menu principale sul Galaxy S9;
+6. pulsante di ritorno al menu da `/status`;
+7. aggiunta di almeno due foto allo stesso oggetto, verificando principale e
+   galleria;
+8. presenza reale dei file sotto `data/media/oggetti/<id>/`;
+9. visualizzazione dopo riavvio;
+10. backup contenente anche `data/media`;
+11. CI GitHub Actions verde prima del merge.
+
+### Prossimo passo previsto
+
+Dopo la chiusura dello Step 5B: **Step 5C — modifica ed eliminazione sicura
+degli oggetti già salvati**. Il requisito multi-casa/stanze resta registrato per
+lo Step 6 e la relativa architettura deve essere confermata prima della migration.
+
+
 
 ### Step 5A — verifica UX e preparazione chiusura
 

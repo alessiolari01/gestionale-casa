@@ -43,7 +43,8 @@ La migration `20260814121600_oggetti.sql` aggiunge:
 > condiviso di luoghi/case/stanze, dopo approvazione della relativa architettura.
 
 Foto, scontrini, garanzie, tag e promemoria non vengono duplicati in questa
-tabella: useranno le tabelle core gia' predisposte negli step successivi.
+tabella: usano le tabelle core predisposte. Dallo Step 5B la voce `📷 Foto` della
+scheda oggetto usa concretamente la tabella core `foto`.
 
 ## Interfaccia Telegram
 
@@ -58,6 +59,7 @@ logica applicativa.
 | elenco | `📋 Elenco oggetti` | `/oggetti_lista` |
 | ricerca | `🔎 Cerca` | `/oggetto_cerca [testo]` |
 | scheda per ID | pulsante risultato | `/oggetto <id>` |
+| foto oggetto | `📷 Foto` | `/foto <id>` |
 | annulla operazione | `❌ Annulla` | `/annulla` |
 | salta campo opzionale | — | `/salta` |
 
@@ -107,12 +109,13 @@ Sono inclusi test per:
 - `ON DELETE CASCADE` tra `items` e `oggetti`;
 - rifiuto di valori monetari negativi a livello SQLite.
 
-La verifica definitiva resta da eseguire sul Galaxy S9 e in GitHub Actions prima
-di chiudere lo Step 5A.
+Lo Step 5A è stato verificato sul Galaxy S9, integrato in `main` con CI verde e
+applicato anche al database reale. La gestione delle foto è sviluppata
+separatamente nello Step 5B.
 
 ## Fuori perimetro
 
-- Step 5B: foto degli oggetti;
+- Step 5B: foto degli oggetti — ora in implementazione/test;
 - Step 5C: modifica ed eliminazione sicura degli oggetti già salvati;
 - Step 5D: documenti e tag;
 - Step 5E: garanzie e promemoria;
