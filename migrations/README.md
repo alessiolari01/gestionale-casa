@@ -38,3 +38,9 @@ cronologia riproducibile.
 
 Per questo lo Step 6A non modifica né la migration core né quella Oggetti:
 aggiunge una terza migration separata.
+
+## Step 6B — storico trasversale
+
+Migration: `20260815215400_storico.sql`. Introduce `storico_entita`, `storico_eventi`, `storico_cambiamenti` e `storico_cambi_luogo`, oltre agli indici necessari.
+
+La migration esegue il backfill delle identità per elementi, abitazioni e stanze già esistenti ma **non crea eventi retroattivi**. Le migration precedenti restano immutabili.

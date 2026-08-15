@@ -139,6 +139,22 @@ impl ObjectDraft {
     }
 }
 
+#[derive(Debug, Clone, FromRow)]
+struct ObjectHistorySnapshot {
+    name: String,
+    description: Option<String>,
+    brand: Option<String>,
+    model: Option<String>,
+    serial_number: Option<String>,
+    position: Option<String>,
+    purchase_date: Option<String>,
+    purchase_price_cents: Option<i64>,
+    seller: Option<String>,
+    estimated_value_cents: Option<i64>,
+    condition: Option<String>,
+    notes: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ObjectCondition {
     Excellent,
@@ -207,6 +223,7 @@ struct ObjectSummary {
 
 pub fn main_menu_keyboard() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
+        vec![button("📜 Storico", "history:global:0")],
         vec![button("📦 Oggetti", "oggetti:menu")],
         vec![button("🏠 Case e stanze", "loc:menu")],
         vec![
@@ -1514,6 +1531,280 @@ async fn no_active_draft(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     Ok(())
 }
 
+fn push_history_change(
+    changes: &mut Vec<crate::modules::storico::NewFieldChange>,
+    campo: &'static str,
+    tipo_valore: &'static str,
+    valore_prima: Option<String>,
+    valore_dopo: Option<String>,
+) {
+    if valore_prima != valore_dopo {
+        changes.push(crate::modules::storico::NewFieldChange {
+            campo,
+            tipo_valore,
+            valore_prima,
+            valore_dopo,
+        });
+    }
+}
+
+fn object_creation_changes(draft: &ObjectDraft) -> Vec<crate::modules::storico::NewFieldChange> {
+    let mut changes = Vec::new();
+    push_history_change(
+        &mut changes,
+        "nome",
+        "testo",
+        None,
+        Some(draft.name.clone()),
+    );
+    push_history_change(
+        &mut changes,
+        "descrizione",
+        "testo",
+        None,
+        draft.description.clone(),
+    );
+    push_history_change(&mut changes, "marca", "testo", None, draft.brand.clone());
+    push_history_change(&mut changes, "modello", "testo", None, draft.model.clone());
+    push_history_change(
+        &mut changes,
+        "numero_serie",
+        "testo",
+        None,
+        draft.serial_number.clone(),
+    );
+    push_history_change(
+        &mut changes,
+        "posizione",
+        "testo",
+        None,
+        draft.position.clone(),
+    );
+    push_history_change(
+        &mut changes,
+        "data_acquisto",
+        "data",
+        None,
+        draft.purchase_date.clone(),
+    );
+    push_history_change(
+        &mut changes,
+        "prezzo_acquisto_centesimi",
+        "denaro_centesimi",
+        None,
+        draft.purchase_price_cents.map(|value| value.to_string()),
+    );
+    push_history_change(
+        &mut changes,
+        "venditore",
+        "testo",
+        None,
+        draft.seller.clone(),
+    );
+    push_history_change(
+        &mut changes,
+        "valore_stimato_centesimi",
+        "denaro_centesimi",
+        None,
+        draft.estimated_value_cents.map(|value| value.to_string()),
+    );
+    push_history_change(
+        &mut changes,
+        "condizione",
+        "testo",
+        None,
+        draft.condition.map(|value| value.as_db().to_string()),
+    );
+    push_history_change(&mut changes, "note", "testo", None, draft.notes.clone());
+    changes
+}
+
+fn object_update_changes(
+    before: &ObjectHistorySnapshot,
+    draft: &ObjectDraft,
+) -> Vec<crate::modules::storico::NewFieldChange> {
+    let mut changes = Vec::new();
+    push_history_change(
+        &mut changes,
+        "nome",
+        "testo",
+        Some(before.name.clone()),
+        Some(draft.name.clone()),
+    );
+    push_history_change(
+        &mut changes,
+        "descrizione",
+        "testo",
+        before.description.clone(),
+        draft.description.clone(),
+    );
+    push_history_change(
+        &mut changes,
+        "marca",
+        "testo",
+        before.brand.clone(),
+        draft.brand.clone(),
+    );
+    push_history_change(
+        &mut changes,
+        "modello",
+        "testo",
+        before.model.clone(),
+        draft.model.clone(),
+    );
+    push_history_change(
+        &mut changes,
+        "numero_serie",
+        "testo",
+        before.serial_number.clone(),
+        draft.serial_number.clone(),
+    );
+    push_history_change(
+        &mut changes,
+        "posizione",
+        "testo",
+        before.position.clone(),
+        draft.position.clone(),
+    );
+    push_history_change(
+        &mut changes,
+        "data_acquisto",
+        "data",
+        before.purchase_date.clone(),
+        draft.purchase_date.clone(),
+    );
+    push_history_change(
+        &mut changes,
+        "prezzo_acquisto_centesimi",
+        "denaro_centesimi",
+        before.purchase_price_cents.map(|value| value.to_string()),
+        draft.purchase_price_cents.map(|value| value.to_string()),
+    );
+    push_history_change(
+        &mut changes,
+        "venditore",
+        "testo",
+        before.seller.clone(),
+        draft.seller.clone(),
+    );
+    push_history_change(
+        &mut changes,
+        "valore_stimato_centesimi",
+        "denaro_centesimi",
+        before.estimated_value_cents.map(|value| value.to_string()),
+        draft.estimated_value_cents.map(|value| value.to_string()),
+    );
+    push_history_change(
+        &mut changes,
+        "condizione",
+        "testo",
+        before.condition.clone(),
+        draft.condition.map(|value| value.as_db().to_string()),
+    );
+    push_history_change(
+        &mut changes,
+        "note",
+        "testo",
+        before.notes.clone(),
+        draft.notes.clone(),
+    );
+    changes
+}
+
+fn object_deletion_changes(
+    before: &ObjectHistorySnapshot,
+) -> Vec<crate::modules::storico::NewFieldChange> {
+    let mut changes = Vec::new();
+    push_history_change(
+        &mut changes,
+        "nome",
+        "testo",
+        Some(before.name.clone()),
+        None,
+    );
+    push_history_change(
+        &mut changes,
+        "descrizione",
+        "testo",
+        before.description.clone(),
+        None,
+    );
+    push_history_change(&mut changes, "marca", "testo", before.brand.clone(), None);
+    push_history_change(&mut changes, "modello", "testo", before.model.clone(), None);
+    push_history_change(
+        &mut changes,
+        "numero_serie",
+        "testo",
+        before.serial_number.clone(),
+        None,
+    );
+    push_history_change(
+        &mut changes,
+        "posizione",
+        "testo",
+        before.position.clone(),
+        None,
+    );
+    push_history_change(
+        &mut changes,
+        "data_acquisto",
+        "data",
+        before.purchase_date.clone(),
+        None,
+    );
+    push_history_change(
+        &mut changes,
+        "prezzo_acquisto_centesimi",
+        "denaro_centesimi",
+        before.purchase_price_cents.map(|value| value.to_string()),
+        None,
+    );
+    push_history_change(
+        &mut changes,
+        "venditore",
+        "testo",
+        before.seller.clone(),
+        None,
+    );
+    push_history_change(
+        &mut changes,
+        "valore_stimato_centesimi",
+        "denaro_centesimi",
+        before.estimated_value_cents.map(|value| value.to_string()),
+        None,
+    );
+    push_history_change(
+        &mut changes,
+        "condizione",
+        "testo",
+        before.condition.clone(),
+        None,
+    );
+    push_history_change(&mut changes, "note", "testo", before.notes.clone(), None);
+    changes
+}
+
+async fn get_object_history_snapshot(
+    tx: &mut Transaction<'_, Sqlite>,
+    id: i64,
+) -> Result<Option<ObjectHistorySnapshot>, sqlx::Error> {
+    sqlx::query_as::<_, ObjectHistorySnapshot>(
+        "SELECT i.nome AS name, \
+                o.descrizione AS description, o.marca AS brand, o.modello AS model, \
+                o.numero_serie AS serial_number, o.posizione AS position, \
+                o.data_acquisto AS purchase_date, \
+                o.prezzo_acquisto_centesimi AS purchase_price_cents, \
+                o.venditore AS seller, \
+                o.valore_stimato_centesimi AS estimated_value_cents, \
+                o.condizione AS condition, o.note AS notes \
+         FROM items i JOIN oggetti o ON o.item_id = i.id \
+         WHERE i.id = ? AND i.tipo = 'oggetto'",
+    )
+    .bind(id)
+    .fetch_optional(&mut **tx)
+    .await
+}
+
 async fn create_object(pool: &SqlitePool, draft: &ObjectDraft) -> anyhow::Result<i64> {
     let mut tx = pool.begin().await?;
     let item_result: SqliteQueryResult =
@@ -1532,12 +1823,78 @@ async fn create_object(pool: &SqlitePool, draft: &ObjectDraft) -> anyhow::Result
         crate::modules::luoghi::insert_item_location(&mut tx, id, home_id, draft.room_id).await?;
     }
 
+    let storico_id =
+        crate::modules::storico::ensure_entity(&mut tx, "oggetto", id, &draft.name).await?;
+    let event_location =
+        crate::modules::luoghi::history_item_location_snapshot(&mut tx, id).await?;
+    let creation_event = crate::modules::storico::record_event(
+        &mut tx,
+        &crate::modules::storico::NewHistoryEvent {
+            entita_storico_id: storico_id,
+            modulo: "oggetti",
+            componente: "anagrafica",
+            operazione: "creazione",
+            nome_entita_snapshot: &draft.name,
+            abitazione_storico_id: event_location.abitazione_storico_id,
+            abitazione_nome_snapshot: event_location.abitazione_nome.as_deref(),
+            stanza_storico_id: event_location.stanza_storico_id,
+            stanza_nome_snapshot: event_location.stanza_nome.as_deref(),
+            evento_padre_id: None,
+        },
+    )
+    .await?;
+    let creation_changes = object_creation_changes(draft);
+    crate::modules::storico::record_field_changes(&mut tx, creation_event, &creation_changes)
+        .await?;
+
+    if let Some(home_id) = draft.home_id {
+        let location_after =
+            crate::modules::luoghi::history_location_snapshot(&mut tx, home_id, draft.room_id)
+                .await?;
+        let location_event = crate::modules::storico::record_event(
+            &mut tx,
+            &crate::modules::storico::NewHistoryEvent {
+                entita_storico_id: storico_id,
+                modulo: "oggetti",
+                componente: "luoghi",
+                operazione: "assegnazione",
+                nome_entita_snapshot: &draft.name,
+                abitazione_storico_id: location_after.abitazione_storico_id,
+                abitazione_nome_snapshot: location_after.abitazione_nome.as_deref(),
+                stanza_storico_id: location_after.stanza_storico_id,
+                stanza_nome_snapshot: location_after.stanza_nome.as_deref(),
+                evento_padre_id: Some(creation_event),
+            },
+        )
+        .await?;
+        crate::modules::storico::record_location_change(
+            &mut tx,
+            location_event,
+            &crate::modules::storico::LocationSnapshot::default(),
+            &location_after,
+        )
+        .await?;
+    }
+
     tx.commit().await?;
     Ok(id)
 }
 
 async fn update_object(pool: &SqlitePool, id: i64, draft: &ObjectDraft) -> anyhow::Result<()> {
     let mut tx = pool.begin().await?;
+
+    let Some(before) = get_object_history_snapshot(&mut tx, id).await? else {
+        anyhow::bail!("oggetto #{id} non trovato durante l'aggiornamento");
+    };
+    let changes = object_update_changes(&before, draft);
+
+    // Salvare una modifica senza cambiare nulla non genera UPDATE né storico.
+    if changes.is_empty() {
+        return Ok(());
+    }
+
+    let storico_id =
+        crate::modules::storico::ensure_entity(&mut tx, "oggetto", id, &before.name).await?;
 
     let item = sqlx::query(
         "UPDATE items SET nome = ?, aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND tipo = 'oggetto'",
@@ -1577,12 +1934,65 @@ async fn update_object(pool: &SqlitePool, id: i64, draft: &ObjectDraft) -> anyho
         anyhow::bail!("dettagli oggetto #{id} non trovati durante l'aggiornamento");
     }
 
+    let event_location =
+        crate::modules::luoghi::history_item_location_snapshot(&mut tx, id).await?;
+    let event_id = crate::modules::storico::record_event(
+        &mut tx,
+        &crate::modules::storico::NewHistoryEvent {
+            entita_storico_id: storico_id,
+            modulo: "oggetti",
+            componente: "anagrafica",
+            operazione: "modifica",
+            nome_entita_snapshot: &draft.name,
+            abitazione_storico_id: event_location.abitazione_storico_id,
+            abitazione_nome_snapshot: event_location.abitazione_nome.as_deref(),
+            stanza_storico_id: event_location.stanza_storico_id,
+            stanza_nome_snapshot: event_location.stanza_nome.as_deref(),
+            evento_padre_id: None,
+        },
+    )
+    .await?;
+    crate::modules::storico::record_field_changes(&mut tx, event_id, &changes).await?;
+
+    if before.name != draft.name {
+        crate::modules::storico::rename_entity(&mut tx, storico_id, &draft.name).await?;
+    }
+
     tx.commit().await?;
     Ok(())
 }
 
 async fn delete_object(pool: &SqlitePool, id: i64) -> anyhow::Result<bool> {
     let mut tx = pool.begin().await?;
+
+    let Some(before) = get_object_history_snapshot(&mut tx, id).await? else {
+        return Ok(false);
+    };
+    let storico_id =
+        crate::modules::storico::ensure_entity(&mut tx, "oggetto", id, &before.name).await?;
+
+    let event_location =
+        crate::modules::luoghi::history_item_location_snapshot(&mut tx, id).await?;
+    let event_id = crate::modules::storico::record_event(
+        &mut tx,
+        &crate::modules::storico::NewHistoryEvent {
+            entita_storico_id: storico_id,
+            modulo: "oggetti",
+            componente: "anagrafica",
+            operazione: "eliminazione",
+            nome_entita_snapshot: &before.name,
+            abitazione_storico_id: event_location.abitazione_storico_id,
+            abitazione_nome_snapshot: event_location.abitazione_nome.as_deref(),
+            stanza_storico_id: event_location.stanza_storico_id,
+            stanza_nome_snapshot: event_location.stanza_nome.as_deref(),
+            evento_padre_id: None,
+        },
+    )
+    .await?;
+    let deletion_changes = object_deletion_changes(&before);
+    crate::modules::storico::record_field_changes(&mut tx, event_id, &deletion_changes).await?;
+    crate::modules::storico::mark_entity_deleted(&mut tx, storico_id).await?;
+
     let result = sqlx::query("DELETE FROM items WHERE id = ? AND tipo = 'oggetto'")
         .bind(id)
         .execute(&mut *tx)
@@ -1992,6 +2402,7 @@ fn object_detail_keyboard(id: i64, has_structured_location: bool) -> InlineKeybo
     };
 
     InlineKeyboardMarkup::new(vec![
+        vec![button("📜 Storico", &format!("history:item:{id}:0"))],
         vec![
             button("✏️ Modifica", &format!("oggetti:edit:{id}")),
             button("🗑 Elimina", &format!("oggetti:delete:ask:{id}")),
@@ -2639,5 +3050,119 @@ mod tests {
                 .execute(&pool)
                 .await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn storico_oggetto_conserva_contesto_luogo_e_non_registra_noop() {
+        let pool = test_pool().await;
+
+        let home = sqlx::query("INSERT INTO abitazioni (nome) VALUES ('Casa storico')")
+            .execute(&pool)
+            .await
+            .expect("casa");
+        let home_id = home.last_insert_rowid();
+
+        let room =
+            sqlx::query("INSERT INTO stanze (abitazione_id, nome) VALUES (?, 'Garage storico')")
+                .bind(home_id)
+                .execute(&pool)
+                .await
+                .expect("stanza");
+        let room_id = room.last_insert_rowid();
+
+        let mut draft = ObjectDraft::new("Trapano storico").expect("bozza");
+        draft.brand = Some("Bosch".to_string());
+        draft.home_id = Some(home_id);
+        draft.home_name = Some("Casa storico".to_string());
+        draft.room_id = Some(room_id);
+        draft.room_name = Some("Garage storico".to_string());
+
+        let id = create_object(&pool, &draft).await.expect("creazione");
+
+        let creation_context: (Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT abitazione_nome_snapshot, stanza_nome_snapshot \
+             FROM storico_eventi \
+             WHERE operazione = 'creazione' AND nome_entita_snapshot = 'Trapano storico' \
+             ORDER BY id DESC LIMIT 1",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("contesto creazione");
+        assert_eq!(
+            creation_context,
+            (
+                Some("Casa storico".to_string()),
+                Some("Garage storico".to_string())
+            )
+        );
+
+        let record = get_object(&pool, id)
+            .await
+            .expect("lettura")
+            .expect("oggetto");
+        let mut edited = ObjectDraft::from_record(&record);
+        edited.brand = Some("Makita".to_string());
+
+        update_object(&pool, id, &edited)
+            .await
+            .expect("prima modifica");
+
+        let modification_count_before: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM storico_eventi \
+             WHERE operazione = 'modifica' AND nome_entita_snapshot = 'Trapano storico'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("conteggio modifica");
+        assert_eq!(modification_count_before, 1);
+
+        update_object(&pool, id, &edited)
+            .await
+            .expect("salvataggio invariato");
+
+        let modification_count_after: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM storico_eventi \
+             WHERE operazione = 'modifica' AND nome_entita_snapshot = 'Trapano storico'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("conteggio dopo noop");
+        assert_eq!(modification_count_after, 1);
+
+        let modification_context: (Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT abitazione_nome_snapshot, stanza_nome_snapshot \
+             FROM storico_eventi \
+             WHERE operazione = 'modifica' AND nome_entita_snapshot = 'Trapano storico' \
+             ORDER BY id DESC LIMIT 1",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("contesto modifica");
+        assert_eq!(
+            modification_context,
+            (
+                Some("Casa storico".to_string()),
+                Some("Garage storico".to_string())
+            )
+        );
+
+        assert!(delete_object(&pool, id).await.expect("eliminazione"));
+
+        let deletion_context: (Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT abitazione_nome_snapshot, stanza_nome_snapshot \
+             FROM storico_eventi \
+             WHERE operazione = 'eliminazione' AND nome_entita_snapshot = 'Trapano storico' \
+             ORDER BY id DESC LIMIT 1",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("contesto eliminazione");
+        assert_eq!(
+            deletion_context,
+            (
+                Some("Casa storico".to_string()),
+                Some("Garage storico".to_string())
+            )
+        );
     }
 }

@@ -67,6 +67,11 @@ async fn main() -> anyhow::Result<()> {
         .branch(Update::filter_message().endpoint(handle_message))
         .branch(Update::filter_callback_query().endpoint(handle_callback));
 
+    // Il dispatcher prende possesso di bot/config. Conserviamo solo cio' che
+    // serve per notificare uno shutdown controllato (Ctrl+C compreso).
+    let shutdown_bot = bot.clone();
+    let shutdown_chat_ids = config.allowed_chat_ids.clone();
+
     Dispatcher::builder(bot, handler)
         .dependencies(dptree::deps![
             config,
@@ -80,6 +85,20 @@ async fn main() -> anyhow::Result<()> {
         .dispatch()
         .await;
 
+    for chat_id in shutdown_chat_ids {
+        if let Err(error) = shutdown_bot
+            .send_message(ChatId(chat_id), "🔴 Gestionale Casa è offline.")
+            .await
+        {
+            tracing::warn!(
+                chat_id,
+                ?error,
+                "Impossibile inviare la notifica di spegnimento alla chat autorizzata"
+            );
+        }
+    }
+
+    tracing::info!("Gestionale Casa offline");
     Ok(())
 }
 
@@ -154,6 +173,12 @@ async fn handle_message(
             bot.send_message(msg.chat.id, "Pong! Gestionale Casa è online.")
                 .await?;
         }
+        Some("/storico") => {
+            sessions.clear_chat(chat_id);
+            location_sessions.clear_chat(chat_id);
+            photo_sessions.clear_chat(chat_id);
+            modules::storico::show_global_history(&bot, msg.chat.id, &pool, 0).await?;
+        }
         Some("/status") => {
             send_status(&bot, msg.chat.id, &pool).await?;
         }
@@ -220,6 +245,18 @@ async fn handle_callback(
         "system:status" => {
             send_status(&bot, chat_id, &pool).await?;
         }
+        _ if data.starts_with("history:") || data.starts_with("h:") => {
+            sessions.clear_chat(chat_id.0);
+            location_sessions.clear_chat(chat_id.0);
+            photo_sessions.clear_chat(chat_id.0);
+            if !modules::storico::handle_callback(&bot, chat_id, &pool, data).await? {
+                bot.send_message(
+                    chat_id,
+                    "Pulsante storico non riconosciuto o non più valido.",
+                )
+                .await?;
+            }
+        }
         _ => {
             if data.starts_with("oggetti:") {
                 photo_sessions.clear_chat(chat_id.0);
@@ -253,7 +290,7 @@ async fn handle_callback(
 async fn send_online_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
-        "🟢 Gestionale Casa è online.\n\n🏠 Menu principale\nScegli una sezione.\n\nComandi rapidi: /oggetti · /luoghi · /status · /ping",
+        "🟢 Gestionale Casa è online.\n\n🏠 Menu principale\nScegli una sezione.\n\nComandi rapidi: /oggetti · /luoghi · /storico · /status · /ping",
     )
     .reply_markup(modules::oggetti::main_menu_keyboard())
     .await?;
@@ -263,7 +300,7 @@ async fn send_online_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
 async fn send_main_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
-        "🏠 Gestionale Casa\n\nScegli una sezione. I moduli non ancora disponibili sono indicati come prossimamente.\n\nComandi rapidi: /oggetti · /luoghi · /status · /ping",
+        "🏠 Gestionale Casa\n\nScegli una sezione. I moduli non ancora disponibili sono indicati come prossimamente.\n\nComandi rapidi: /oggetti · /luoghi · /storico · /status · /ping",
     )
     .reply_markup(modules::oggetti::main_menu_keyboard())
     .await?;

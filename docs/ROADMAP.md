@@ -1,5 +1,28 @@
 # Roadmap funzionale
 
+
+## Stato aggiornato dopo l'implementazione Step 6B
+
+- Step 1 ✅ Scheletro progetto
+- Step 2 ✅ Schema dati core
+- Step 3 ✅ Backend Telegram + whitelist
+- Step 3.1 ✅ Handoff, GitHub Actions, Dependabot e workflow Git
+- Step 4 ✅ SQLite runtime + migration automatiche + `/status`
+- Step 5A ✅ Oggetti generici
+- Step 5B ✅ Foto degli oggetti
+- Step 5C ✅ Modifica ed eliminazione oggetti
+- Step 6A ✅ Case, stanze e posizione strutturata
+- Step 6B ✅ Implementato e verificato su S9; PR/CI/merge ancora necessari
+- Step 6C ⏭️ Contenitori e sotto-posizioni
+- Step 7A ⏳ Documenti e garanzie
+- Step 7B ⏳ Promemoria e scadenze
+- Step 7C ⏳ Tag + ricerca globale
+- Step 8 ⏳ Primo nuovo modulo applicativo: Veicoli o Vestiti
+
+Il 6C parte solo dopo l'ingresso del 6B nella baseline ufficiale `main`.
+
+---
+
 Questo documento raccoglie la sequenza approvata degli sviluppi futuri e le
 scelte che devono restare visibili anche quando il progetto passa a un'altra
 persona o a un'altra AI.

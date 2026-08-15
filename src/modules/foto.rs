@@ -436,23 +436,87 @@ async fn register_photo(
     path: &str,
     description: Option<&str>,
 ) -> Result<&'static str, sqlx::Error> {
-    let existing = count_photos(pool, item_id).await?;
+    let mut tx = pool.begin().await?;
+
+    let existing: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM foto WHERE item_id = ?")
+        .bind(item_id)
+        .fetch_one(&mut *tx)
+        .await?;
     let role = if existing == 0 {
         "principale"
     } else {
         "galleria"
     };
 
-    sqlx::query(
+    let object_name: String =
+        sqlx::query_scalar("SELECT nome FROM items WHERE id = ? AND tipo = 'oggetto'")
+            .bind(item_id)
+            .fetch_one(&mut *tx)
+            .await?;
+    let storico_id =
+        crate::modules::storico::ensure_entity(&mut tx, "oggetto", item_id, &object_name).await?;
+
+    let result = sqlx::query(
         "INSERT INTO foto (item_id, percorso_file, ruolo, descrizione) VALUES (?, ?, ?, ?)",
     )
     .bind(item_id)
     .bind(path)
     .bind(role)
     .bind(description)
-    .execute(pool)
+    .execute(&mut *tx)
+    .await?;
+    let photo_id = result.last_insert_rowid();
+
+    let event_location =
+        crate::modules::luoghi::history_item_location_snapshot(&mut tx, item_id).await?;
+    let event_id = crate::modules::storico::record_event(
+        &mut tx,
+        &crate::modules::storico::NewHistoryEvent {
+            entita_storico_id: storico_id,
+            modulo: "oggetti",
+            componente: "foto",
+            operazione: "foto_aggiunta",
+            nome_entita_snapshot: &object_name,
+            abitazione_storico_id: event_location.abitazione_storico_id,
+            abitazione_nome_snapshot: event_location.abitazione_nome.as_deref(),
+            stanza_storico_id: event_location.stanza_storico_id,
+            stanza_nome_snapshot: event_location.stanza_nome.as_deref(),
+            evento_padre_id: None,
+        },
+    )
     .await?;
 
+    let mut changes = vec![
+        crate::modules::storico::NewFieldChange {
+            campo: "foto_id",
+            tipo_valore: "numero",
+            valore_prima: None,
+            valore_dopo: Some(photo_id.to_string()),
+        },
+        crate::modules::storico::NewFieldChange {
+            campo: "ruolo",
+            tipo_valore: "testo",
+            valore_prima: None,
+            valore_dopo: Some(role.to_string()),
+        },
+        crate::modules::storico::NewFieldChange {
+            campo: "percorso_file",
+            tipo_valore: "testo",
+            valore_prima: None,
+            valore_dopo: Some(path.to_string()),
+        },
+    ];
+    if let Some(description) = description {
+        changes.push(crate::modules::storico::NewFieldChange {
+            campo: "descrizione",
+            tipo_valore: "testo",
+            valore_prima: None,
+            valore_dopo: Some(description.to_string()),
+        });
+    }
+    crate::modules::storico::record_field_changes(&mut tx, event_id, &changes).await?;
+
+    tx.commit().await?;
     Ok(role)
 }
 
@@ -599,5 +663,63 @@ mod tests {
         assert_eq!(photos[0].ruolo.as_deref(), Some("principale"));
         assert_eq!(photos[0].descrizione.as_deref(), Some("prima"));
         assert_eq!(photos[1].ruolo.as_deref(), Some("galleria"));
+    }
+
+    #[tokio::test]
+    async fn storico_foto_conserva_il_luogo_dell_oggetto() {
+        let pool = test_pool().await;
+
+        let item =
+            sqlx::query("INSERT INTO items (tipo, nome) VALUES ('oggetto', 'Foto con luogo')")
+                .execute(&pool)
+                .await
+                .expect("item");
+        let item_id = item.last_insert_rowid();
+
+        sqlx::query("INSERT INTO oggetti (item_id) VALUES (?)")
+            .bind(item_id)
+            .execute(&pool)
+            .await
+            .expect("oggetto");
+
+        let home = sqlx::query("INSERT INTO abitazioni (nome) VALUES ('Casa foto')")
+            .execute(&pool)
+            .await
+            .expect("casa");
+        let home_id = home.last_insert_rowid();
+
+        let room = sqlx::query("INSERT INTO stanze (abitazione_id, nome) VALUES (?, 'Studio')")
+            .bind(home_id)
+            .execute(&pool)
+            .await
+            .expect("stanza");
+        let room_id = room.last_insert_rowid();
+
+        sqlx::query("INSERT INTO item_luogo (item_id, abitazione_id, stanza_id) VALUES (?, ?, ?)")
+            .bind(item_id)
+            .bind(home_id)
+            .bind(room_id)
+            .execute(&pool)
+            .await
+            .expect("luogo");
+
+        register_photo(&pool, item_id, "data/media/foto_contesto.jpg", None)
+            .await
+            .expect("foto");
+
+        let context: (Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT abitazione_nome_snapshot, stanza_nome_snapshot \
+             FROM storico_eventi \
+             WHERE operazione = 'foto_aggiunta' AND nome_entita_snapshot = 'Foto con luogo' \
+             ORDER BY id DESC LIMIT 1",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("contesto foto");
+
+        assert_eq!(
+            context,
+            (Some("Casa foto".to_string()), Some("Studio".to_string()))
+        );
     }
 }
