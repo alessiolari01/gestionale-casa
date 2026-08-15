@@ -1,5 +1,117 @@
 # Diario di sviluppo
 
+
+### Step 5A — verifica UX e preparazione chiusura
+
+- Verificato sul Galaxy S9 il comportamento dei campi già compilati: il pannello
+  mostra `✅`, riaprendo il campo viene mostrato il valore corrente, `/salta` lo
+  conserva e un nuovo valore lo sostituisce esplicitamente.
+- Verificato manualmente il caso Marca/Modello e un campo singolo (Posizione),
+  con salvataggio e successiva ricerca dell'oggetto.
+- `cargo fmt --all -- --check`, `git diff --check` e Clippy con `-D warnings`
+  risultano superati dopo la patch UX; la suite `check/test` va rieseguita come
+  controllo finale immediatamente prima del commit di chiusura.
+- Durante un `cargo run` il linker LLVM/Termux è terminato una volta con
+  segmentation fault; il comando ripetuto ha avviato correttamente il backend.
+  Non sono state necessarie modifiche al codice.
+- Configurato e provato l'accesso **OpenSSH locale PC -> S9** e il trasferimento
+  file via SCP. GitHub `main` resta la fonte ufficiale; SSH/SCP diventano il
+  canale operativo per testare patch senza commit di trasporto.
+- Registrati per il futuro due requisiti: modifica degli oggetti già salvati e
+  gestione trasversale di più case/stanze con ricerca sia filtrata sia globale.
+  La struttura dei luoghi dovrà essere proposta e confermata prima di creare la
+  migration.
+
+### Roadmap aggiornata proposta
+
+1. completare CI della Pull Request e merge su `main`; a quel punto Step 5A è
+   formalmente chiuso;
+2. Step 5B — foto degli oggetti;
+3. Step 5C — modifica/eliminazione degli oggetti già salvati;
+4. Step 6 — luoghi e multi-abitazione, prima dei successivi grandi moduli, dopo
+   conferma dell'architettura.
+
+### Step 5A — affinamento UX bozza oggetti
+
+- Le sezioni gia' compilate nel pannello dettagli sono marcate con `✅`.
+- Riaprendo un campo gia' valorizzato il bot mostra il valore attuale prima della sostituzione.
+- Durante la revisione di un campo, `/salta` conserva il valore esistente; su un campo vuoto continua a lasciarlo vuoto.
+- Aggiunto un test automatico dedicato al prompt dei campi gia' compilati.
+
+## Step 5A — Oggetti generici: prima implementazione — 2026-08-14
+
+### Stato precedente
+
+Lo Step 4 era chiuso e verificato: Telegram, SQLx, SQLite, migration automatiche
+e `/status` erano operativi sul Galaxy S9. Il modulo `oggetti` era ancora uno
+scheletro e non esisteva una tabella specifica.
+
+### Decisioni concordate
+
+- il modulo riguarda solo **oggetti generici**;
+- il nome è l'unico campo obbligatorio;
+- i dettagli opzionali vengono scelti da un **pannello dettagli**;
+- il numero seriale resta disponibile ma non è in primo piano;
+- l'interfaccia principale usa pulsanti inline, mantenendo `/comandi`
+  equivalenti in parallelo;
+- pulsanti e comandi convergono sulla stessa logica applicativa.
+
+### Implementato
+
+- nuova migration `20260814121600_oggetti.sql`, senza modificare quella core;
+- tabella `oggetti` collegata 1:1 a `items` con `ON DELETE CASCADE`;
+- prezzi e valore stimato salvati in centesimi interi con `CHECK >= 0`;
+- condizione limitata a `ottimo`, `buono`, `usurato`, `da_riparare`;
+- menu principale Telegram con inline keyboard;
+- menu Oggetti con Nuovo / Elenco / Cerca;
+- comandi `/oggetti`, `/oggetto_nuovo`, `/oggetti_lista`,
+  `/oggetto_cerca`, `/oggetto`, `/annulla`, `/salta`;
+- creazione rapida con solo nome oppure pannello dettagli;
+- flussi guidati per marca/modello e dati di acquisto;
+- selezione condizione tramite pulsanti;
+- altri dettagli: descrizione, valore stimato e seriale;
+- salvataggio atomico di `items` + `oggetti` in transazione SQL;
+- elenco alfabetico paginato;
+- ricerca su nome, marca, modello, seriale, posizione, venditore, descrizione e note;
+- scheda singola richiamabile da pulsante o `/oggetto <id>`;
+- sessione bozza in memoria per chat;
+- callback Telegram sottoposte alla stessa whitelist delle chat autorizzate;
+- documentazione `docs/moduli/oggetti.md`.
+
+### Test predisposti
+
+- parsing importi italiani/decimali;
+- validazione e normalizzazione date;
+- parser dei comandi con suffisso `@nome_bot`;
+- salvataggio, lettura, elenco e ricerca su SQLite;
+- verifica `ON DELETE CASCADE`;
+- verifica del `CHECK` contro importi negativi.
+
+La sintassi delle due migration è stata verificata anche applicandole in ordine
+su SQLite in memoria, inserendo un oggetto reale di prova e confermando il
+rifiuto di un prezzo negativo.
+
+### Stato dello step
+
+**Implementato, non ancora chiuso.**
+
+Prima della chiusura servono:
+
+1. `cargo fmt --all -- --check`;
+2. `cargo check --locked`;
+3. `cargo test --locked`;
+4. `cargo clippy --all-targets --locked -- -D warnings`;
+5. GitHub Actions verde;
+6. test runtime sul Galaxy S9 di pulsanti, comandi, creazione, elenco, ricerca,
+   scheda e persistenza dopo riavvio.
+
+### Prossimo passo standard
+
+Chiudere e verificare lo Step 5A. Solo dopo passare allo **Step 5B —
+modifica ed eliminazione sicura**.
+
+---
+
 Questo file registra gli step del progetto in ordine cronologico. Ogni step
 spiega da quale stato si partiva, cosa è stato modificato, cosa è stato
 verificato e quale sarà il passo successivo.

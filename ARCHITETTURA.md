@@ -217,15 +217,56 @@ cambia.
   amministratore.
 - **Aggiornamenti di sicurezza**: sistema operativo dell'host aggiornato
   regolarmente.
-- **Accesso remoto per manutenzione**: non è ancora implementato. In futuro si
-  valuterà Tailscale come rete privata tra PC e S9 e un normale server OpenSSH
-  in Termux, con autenticazione a chiave. Non verrà esposta una porta SSH
-  direttamente a Internet. Il server integrato di Tailscale SSH non è la
-  soluzione prevista sull'S9: su Android si userà Tailscale per la
-  connettività e OpenSSH/Termux per il servizio.
+- **Accesso per manutenzione**: sulla LAN è operativo un normale server
+  OpenSSH in Termux (porta 8022), usato dal PC per terminale e trasferimento
+  patch via SCP. GitHub `main` resta la fonte ufficiale. L'accesso fuori LAN
+  resta futuro e dovrà usare Tailscale + OpenSSH/Termux, senza esporre SSH
+  tramite port forwarding pubblico.
 - **Backup**: copia periodica di database e foto su storage esterno,
   verificata periodicamente (un backup mai testato non è un backup
   affidabile).
+
+## 5.1 Interfaccia applicativa dei moduli
+
+Dallo Step 5A l'interfaccia Telegram usa due ingressi paralleli:
+
+1. **inline keyboard**, pensata per l'uso quotidiano e come interfaccia
+   principale;
+2. **comandi testuali equivalenti**, utili come scorciatoie e per test/debug.
+
+Le due strade non duplicano la logica: convergono sulle stesse funzioni Rust e
+sulle stesse operazioni SQL. Per esempio `➕ Nuovo oggetto` e
+`/oggetto_nuovo` aprono lo stesso flusso.
+
+Le bozze non ancora salvate sono mantenute solo in memoria per chat. I dati
+persistenti vengono scritti esclusivamente quando l'utente conferma `✅ Salva`.
+Il salvataggio dell'oggetto avviene in una singola transazione che crea prima
+`items` e poi la riga specifica `oggetti`.
+
+Per importi monetari il progetto usa **centesimi interi**, non valori `REAL`,
+evitando errori di rappresentazione floating point.
+
+## 5.2 Luoghi e multi-abitazione — requisito futuro
+
+La posizione testuale di Step 5A è volutamente semplice e temporanea. Il sistema
+dovrà in futuro trattare i luoghi come entità riconosciute, non come semplici
+stringhe. I requisiti confermati sono:
+
+- più abitazioni nello stesso gestionale;
+- stanze appartenenti a una specifica abitazione;
+- oggetti assegnabili e spostabili scegliendo un luogo registrato;
+- elenchi filtrabili per abitazione e stanza;
+- ricerca globale su tutte le abitazioni oppure limitata a un singolo ramo.
+
+**Proposta architetturale da confermare prima di implementare:** una tabella
+gerarchica `luoghi`, con `parent_id` e un tipo (almeno `casa` e `stanza`). La
+struttura permetterebbe in seguito anche sotto-posizioni opzionali come armadio,
+scaffale o box senza dover ridisegnare lo schema. Gli oggetti referenzierebbero
+un `luogo_id`, mantenendo eventualmente un piccolo dettaglio libero per casi
+come "scaffale 2".
+
+Questa è una proposta, non una decisione definitiva: va approvata prima della
+migration relativa.
 
 ## 6. Roadmap di sviluppo
 
@@ -244,8 +285,20 @@ minima comune. Ogni modulo verrà poi documentato in dettaglio in
 - ~~**Step 4 — Connessione SQLite + migrazioni automatiche + `/status`**~~ —
   chiuso e verificato sul Galaxy S9: database creato realmente, migration
   applicata, `/status` operativo e secondo avvio sullo stesso DB superato.
-- **Step 5 — Oggetti generici** — prossimo step funzionale;
-  catalogo libero e base concettuale anche per gli altri moduli.
+- **Step 5 — Oggetti generici** — in sviluppo.
+  - ~~**Step 5A**~~ — verifiche runtime completate sul Galaxy S9; si considera
+    chiuso quando questa revisione è su `main` con CI verde. Include tabella
+    `oggetti`, menu con inline keyboard e comandi equivalenti, creazione guidata,
+    revisione sicura della bozza, elenco, ricerca e scheda singola.
+  - **Step 5B** — foto degli oggetti usando la tabella core `foto`.
+  - **Step 5C** — modifica ed eliminazione sicura degli oggetti già salvati.
+  - **Step 5D** — documenti e tag.
+  - **Step 5E** — garanzie e promemoria.
+  - **Step 5F** — prestiti e storico.
+- **Step 6 — Luoghi e multi-abitazione** — requisito futuro trasversale da
+  progettare e confermare prima dell'implementazione: più case, stanze
+  riconosciute, spostamento degli oggetti tra stanze, viste per casa/stanza e
+  ricerca combinata su tutte le abitazioni.
 - **Vestiti** — capi, materiali, taglie, stagionalità, outfit.
 - **Veicoli** — anagrafica veicoli, scadenze manutenzione, storico interventi.
 - **Ricette** — ricette con dosi scalabili, pianificazione pasti e aggregazione

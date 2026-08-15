@@ -110,9 +110,16 @@ Completati e verificati:
 - Step 3.1 — handoff, workflow Git, CI e Dependabot;
 - Step 4 — SQLite operativo, migration automatiche e `/status`.
 
-Prossimo sviluppo funzionale:
+Step 5A:
 
-- Step 5 — modulo Oggetti generici.
+- Oggetti generici: implementazione e test runtime S9 completati. Lo step è
+  considerato chiuso quando questa revisione è presente su `main` con CI verde.
+
+Sviluppi successivi pianificati:
+
+- Step 5B — foto degli oggetti;
+- Step 5C — modifica/eliminazione degli oggetti salvati;
+- Step 6 — luoghi e multi-abitazione, da progettare e confermare.
 
 Verifiche reali dello Step 3 sul Galaxy S9:
 
@@ -183,6 +190,64 @@ un errore attuale, e va rivalutato durante futuri upgrade delle dipendenze.
 
 Dopo la chiusura dello Step 4, il prossimo sviluppo previsto e' **Step 5 —
 modulo Oggetti generici**.
+
+## 8.1 Step 5A — Oggetti generici
+
+Il primo modulo applicativo usa la tabella core `items` e la nuova tabella
+specifica `oggetti`. La documentazione completa è in
+`docs/moduli/oggetti.md`.
+
+Il menu principale Telegram mostra pulsanti cliccabili; i comandi testuali
+restano disponibili in parallelo. Il dispatcher gestisce sia `Message` sia
+`CallbackQuery`. La whitelist viene applicata a entrambi gli ingressi.
+
+Comandi Step 5A:
+
+- `/oggetti`;
+- `/oggetto_nuovo [nome]`;
+- `/oggetti_lista`;
+- `/oggetto_cerca [testo]`;
+- `/oggetto <id>`;
+- `/annulla`;
+- `/salta`.
+
+Lo stato delle bozze è conservato in memoria per chat tramite `SessionStore`.
+Non contiene token o altri segreti.
+
+## 8.2 Accesso locale PC -> Galaxy S9 via SSH
+
+È stato configurato e provato OpenSSH in Termux sulla rete locale. Questo
+permette di usare il terminale S9 direttamente dal PC e di trasferire patch con
+SCP, evitando commit provvisori usati solo come trasporto.
+
+Forma generale dei comandi:
+
+```text
+ssh -p 8022 <utente-termux>@<ip-lan-s9>
+scp -P 8022 <file-locale> <utente-termux>@<ip-lan-s9>:~/
+```
+
+Regole operative:
+
+- non versionare IP LAN, password o chiavi private;
+- SSH/SCP non sostituiscono Git: una modifica verificata deve comunque finire
+  in un commit e poi su GitHub;
+- non aprire la porta 8022 sul router;
+- per accesso fuori dalla LAN si valuterà Tailscale + lo stesso OpenSSH.
+
+## 8.3 Requisiti futuri già registrati
+
+Il modulo Oggetti dovrà acquisire la modifica degli oggetti già persistiti;
+questa funzione non appartiene allo Step 5A.
+
+Il gestionale dovrà inoltre supportare più case/abitazioni e stanze come entità
+riconosciute. Devono essere possibili sia viste per singola casa/stanza sia una
+ricerca combinata su tutte le abitazioni. Lo spostamento di un oggetto dovrà
+permettere di scegliere una stanza registrata.
+
+La proposta preferita, ancora **da confermare**, è un modello gerarchico di
+`luoghi` riutilizzabile da tutti i moduli. Non creare migration per questa parte
+prima dell'approvazione esplicita dell'architettura.
 
 ## 9. Workflow Git ufficiale attuale
 
@@ -347,13 +412,37 @@ supportato ufficialmente su Linux e macOS open-source, non su Android. Per
 l'S9 il progetto prevede quindi Tailscale come rete privata + OpenSSH di
 Termux come servizio SSH, non il server Tailscale SSH integrato.
 
-## 13. Prossimo step funzionale
+## 13. Step corrente — Step 5A Oggetti generici
 
 **Step 4 è chiuso e verificato sul Galaxy S9.**
 
-Il prossimo sviluppo funzionale è **Step 5 — modulo Oggetti generici**. Prima
-dell'implementazione va aggiornata/creata la documentazione del modulo in
-`docs/moduli/`, definendo schema dati specifico, comandi Telegram e casi d'uso.
+Lo **Step 5A è implementato ma non ancora chiuso**. La verifica deve ancora
+passare GitHub Actions e il test runtime sul Galaxy S9.
+
+File principali dello Step 5A:
+
+- `migrations/20260814121600_oggetti.sql`;
+- `src/modules/oggetti.rs`;
+- `src/main.rs`;
+- `docs/moduli/oggetti.md`.
+
+Decisioni da preservare:
+
+- solo il nome è obbligatorio;
+- i dettagli opzionali si aggiungono da un pannello Telegram;
+- inline keyboard e `/comandi` convivono e richiamano la stessa logica;
+- il numero seriale resta disponibile ma secondario;
+- prezzi e valori sono memorizzati come centesimi interi;
+- `items` e `oggetti` vengono creati nella stessa transazione;
+- le bozze incomplete sono in memoria e non sopravvivono al riavvio;
+- la migration core dello Step 2 non va modificata.
+
+Sottostep successivi previsti solo dopo la chiusura del 5A:
+
+- 5B modifica/eliminazione;
+- 5C foto/documenti/tag;
+- 5D garanzie/promemoria;
+- 5E prestiti/storico.
 
 ## 14. Regola di chiusura di ogni step
 

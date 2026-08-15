@@ -13,7 +13,9 @@ Prima di modificare il progetto, leggere nell'ordine:
 3. **[CHANGELOG.md](./CHANGELOG.md)** — cronologia degli step e verifiche;
 4. **[docs/HANDOFF.md](./docs/HANDOFF.md)** — consegna completa per chi deve
    continuare il progetto;
-5. **[docs/schema-core.md](./docs/schema-core.md)** — schema dati condiviso.
+5. **[docs/schema-core.md](./docs/schema-core.md)** — schema dati condiviso;
+6. **[docs/moduli/oggetti.md](./docs/moduli/oggetti.md)** — specifica Step 5A;
+7. **[docs/ROADMAP.md](./docs/ROADMAP.md)** — requisiti futuri e decisioni ancora da confermare.
 
 ## Stato del progetto
 
@@ -23,7 +25,10 @@ Prima di modificare il progetto, leggere nell'ordine:
 - [x] Step 3.1 — Handoff, workflow Git, CI e Dependabot, verificato con
   GitHub Actions
 - [x] Step 4 — SQLite operativo + migration automatiche + `/status`, verificato sul Galaxy S9
-- [ ] Modulo oggetti
+- [ ] Step 5 — Modulo oggetti
+  - [x] Step 5A — anagrafica, pulsanti + comandi, creazione, elenco, ricerca e scheda
+  - [ ] Step 5B — foto degli oggetti
+  - [ ] Step 5C — modifica ed eliminazione degli oggetti gia' salvati
 - [ ] Modulo vestiti
 - [ ] Modulo veicoli
 - [ ] Modulo ricette
@@ -87,11 +92,23 @@ Rust stable, una nuova esecuzione GitHub Actions ha completato con esito positiv
 
 Lo **Step 4 — SQLite operativo** è chiuso e verificato sul Galaxy S9.
 
-Il prossimo sviluppo funzionale è lo **Step 5 — modulo Oggetti generici**.
-Prima di implementarlo va definita/aggiornata la documentazione dedicata in
-`docs/moduli/`, chiarendo dati, comandi Telegram e casi d'uso. Lo Step 5 sarà
-il primo modulo applicativo costruito sopra l'infrastruttura Telegram + SQLite
-ora verificata.
+Lo **Step 5A — Oggetti generici** ha completato le verifiche runtime sul Galaxy
+S9. È considerato chiuso quando questa revisione è presente su `main` con CI
+GitHub Actions verde. Lo Step 5A aggiunge:
+
+- nuova migration `oggetti`, senza modificare la migration core già applicata;
+- menu Telegram con inline keyboard;
+- comandi testuali equivalenti ai pulsanti;
+- creazione rapida con solo nome oppure pannello dettagli opzionale;
+- salvataggio atomico `items + oggetti`;
+- elenco paginato, ricerca e scheda singola;
+- test automatici del parsing e della persistenza;
+- revisione sicura dei campi della bozza: le sezioni compilate sono marcate, il
+  valore corrente viene mostrato prima di sostituirlo e `/salta` lo mantiene.
+
+La specifica del modulo è in `docs/moduli/oggetti.md`. La modifica di un oggetto
+gia' salvato **non fa parte dello Step 5A**: è pianificata subito dopo la gestione
+delle foto.
 
 ## Fonte ufficiale e workflow corrente
 
@@ -152,15 +169,39 @@ S9.
 Il workflow completo, incluse gestione dei conflitti, segreti e consegna a
 terzi, è descritto in `docs/HANDOFF.md`.
 
-## Amministrazione remota futura
+## Accesso operativo al Galaxy S9
 
-L'accesso remoto diretto all'S9 **non fa parte dello Step 3.1**. In futuro è
-prevista una soluzione basata su **Tailscale + server OpenSSH in Termux**, in
-modo da amministrare il telefono dal PC anche fuori dalla stessa rete senza
-esporre una porta SSH direttamente a Internet.
+Sulla rete locale è ora disponibile un **server OpenSSH in Termux**. Dal PC si
+può quindi aprire direttamente il terminale dell'S9 e trasferire patch senza
+usare GitHub come semplice mezzo di trasporto:
 
-Questa estensione verrà progettata e testata in uno step dedicato; per ora il
-workflow GitHub resta il metodo ufficiale di gestione tra PC e S9.
+```text
+ssh -p 8022 <utente-termux>@<ip-lan-s9>
+scp -P 8022 <file> <utente-termux>@<ip-lan-s9>:~/
+```
+
+GitHub `main` resta comunque la **fonte ufficiale**: SSH/SCP servono per sviluppo
+e test, poi le modifiche verificate devono essere committate e pubblicate. Non
+vanno salvati nel repository IP locali, password o altri segreti.
+
+L'accesso da reti esterne resta futuro: la soluzione prevista è
+**Tailscale + OpenSSH Termux**, senza port forwarding pubblico della porta SSH.
+
+## Requisito futuro: più case e stanze
+
+Il gestionale dovrà supportare più abitazioni separate e permettere sia viste
+filtrate sia ricerche combinate. In particolare sono requisiti già registrati:
+
+- più case/abitazioni nello stesso gestionale;
+- stanze appartenenti a una casa e riconosciute dal sistema;
+- assegnazione e spostamento di un oggetto scegliendo una stanza registrata;
+- elenco per casa e per stanza;
+- ricerca limitata a una casa/stanza oppure estesa a tutte le case.
+
+La struttura dati definitiva non è ancora approvata. L'ipotesi preferita è un
+sistema gerarchico di **luoghi** (casa -> stanza -> eventuale sotto-posizione),
+riutilizzabile anche dagli altri moduli. Verrà proposta e confermata prima
+dell'implementazione.
 
 ## Requisiti
 

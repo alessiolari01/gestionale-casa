@@ -9,6 +9,10 @@ ogni modifica, con nome nel formato `<timestamp>_<descrizione>.sql`
 - `20260812120000_schema_core.sql`: schema dati condiviso da tutti i moduli
   (`items`, `foto`, `tag`, `item_tag`, `promemoria`). La descrizione e' in
   `docs/schema-core.md`.
+- `20260814121600_oggetti.sql`: tabella specifica `oggetti` per lo Step 5A;
+  dettagli in `docs/moduli/oggetti.md`.
+- `20260814121600_oggetti.sql`: tabella specifica `oggetti` per lo Step 5A;
+  dettagli in `docs/moduli/oggetti.md`.
 
 ## Esecuzione runtime
 
