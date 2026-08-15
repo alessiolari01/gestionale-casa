@@ -9,6 +9,7 @@
 //! della struttura del progetto.
 
 pub mod foto;
+pub mod luoghi;
 pub mod oggetti;
 pub mod ricette;
 pub mod veicoli;

@@ -1,7 +1,7 @@
 //! Punto di ingresso del Gestionale Casa.
 //!
-//! Step corrente: Step 5C, modifica ed eliminazione sicura degli oggetti
-//! generici sopra l'infrastruttura Telegram + SQLx + SQLite gia' verificata.
+//! Step corrente: Step 6A, case, stanze e posizione strutturata condivisa
+//! sopra l'infrastruttura Telegram + SQLx + SQLite gia' verificata.
 
 mod auth;
 mod config;
@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use config::Config;
-use modules::{foto::PhotoSessionStore, oggetti::SessionStore};
+use modules::{foto::PhotoSessionStore, luoghi::LocationSessionStore, oggetti::SessionStore};
 use sqlx::SqlitePool;
 use teloxide::{
     dptree,
@@ -61,13 +61,20 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let sessions = SessionStore::new();
+    let location_sessions = LocationSessionStore::new();
     let photo_sessions = PhotoSessionStore::new();
     let handler = dptree::entry()
         .branch(Update::filter_message().endpoint(handle_message))
         .branch(Update::filter_callback_query().endpoint(handle_callback));
 
     Dispatcher::builder(bot, handler)
-        .dependencies(dptree::deps![config, pool, sessions, photo_sessions])
+        .dependencies(dptree::deps![
+            config,
+            pool,
+            sessions,
+            location_sessions,
+            photo_sessions
+        ])
         .enable_ctrlc_handler()
         .build()
         .dispatch()
@@ -82,6 +89,7 @@ async fn handle_message(
     config: Arc<Config>,
     pool: SqlitePool,
     sessions: SessionStore,
+    location_sessions: LocationSessionStore,
     photo_sessions: PhotoSessionStore,
 ) -> ResponseResult<()> {
     let chat_id = msg.chat.id.0;
@@ -97,6 +105,7 @@ async fn handle_message(
         Some("/foto") | Some("/foto_aggiungi")
     ) {
         sessions.clear_chat(chat_id);
+        location_sessions.clear_chat(chat_id);
     }
 
     // I comandi foto e, soprattutto, le foto vere e proprie devono essere
@@ -124,13 +133,20 @@ async fn handle_message(
         photo_sessions.clear_chat(chat_id);
     }
 
+    if modules::luoghi::handle_message(&bot, &msg, &pool, &location_sessions, text).await? {
+        sessions.clear_chat(chat_id);
+        return respond(());
+    }
+
     if modules::oggetti::handle_message(&bot, &msg, &pool, &sessions, text).await? {
+        location_sessions.clear_chat(chat_id);
         return respond(());
     }
 
     match command {
         Some("/start") => {
             sessions.clear_chat(chat_id);
+            location_sessions.clear_chat(chat_id);
             photo_sessions.clear_chat(chat_id);
             send_main_menu(&bot, msg.chat.id).await?;
         }
@@ -166,6 +182,7 @@ async fn handle_callback(
     config: Arc<Config>,
     pool: SqlitePool,
     sessions: SessionStore,
+    location_sessions: LocationSessionStore,
     photo_sessions: PhotoSessionStore,
 ) -> ResponseResult<()> {
     bot.answer_callback_query(q.id.clone()).await?;
@@ -189,13 +206,14 @@ async fn handle_callback(
     match data {
         "menu:main" => {
             sessions.clear_chat(chat_id.0);
+            location_sessions.clear_chat(chat_id.0);
             photo_sessions.clear_chat(chat_id.0);
             send_main_menu(&bot, chat_id).await?;
         }
         "menu:soon" => {
             bot.send_message(
                 chat_id,
-                "Questo modulo non è ancora implementato. Per ora è disponibile 📦 Oggetti.",
+                "Questo modulo non è ancora implementato. Per ora sono disponibili 📦 Oggetti e 🏠 Case e stanze.",
             )
             .await?;
         }
@@ -208,12 +226,23 @@ async fn handle_callback(
             }
 
             if modules::foto::handle_callback(&bot, chat_id, &pool, &photo_sessions, data).await? {
+                location_sessions.clear_chat(chat_id.0);
+                return respond(());
+            }
+
+            if modules::luoghi::handle_callback(&bot, chat_id, &pool, &location_sessions, data)
+                .await?
+            {
+                sessions.clear_chat(chat_id.0);
+                photo_sessions.clear_chat(chat_id.0);
                 return respond(());
             }
 
             if !modules::oggetti::handle_callback(&bot, chat_id, &pool, &sessions, data).await? {
                 bot.send_message(chat_id, "Pulsante non riconosciuto o non più valido.")
                     .await?;
+            } else {
+                location_sessions.clear_chat(chat_id.0);
             }
         }
     }
@@ -224,7 +253,7 @@ async fn handle_callback(
 async fn send_online_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
-        "🟢 Gestionale Casa è online.\n\n🏠 Menu principale\nScegli una sezione.\n\nComandi rapidi: /oggetti · /status · /ping",
+        "🟢 Gestionale Casa è online.\n\n🏠 Menu principale\nScegli una sezione.\n\nComandi rapidi: /oggetti · /luoghi · /status · /ping",
     )
     .reply_markup(modules::oggetti::main_menu_keyboard())
     .await?;
@@ -234,7 +263,7 @@ async fn send_online_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
 async fn send_main_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
-        "🏠 Gestionale Casa\n\nScegli una sezione. I moduli non ancora disponibili sono indicati come prossimamente.\n\nComandi rapidi: /oggetti · /status · /ping",
+        "🏠 Gestionale Casa\n\nScegli una sezione. I moduli non ancora disponibili sono indicati come prossimamente.\n\nComandi rapidi: /oggetti · /luoghi · /status · /ping",
     )
     .reply_markup(modules::oggetti::main_menu_keyboard())
     .await?;

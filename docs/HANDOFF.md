@@ -1,20 +1,22 @@
 # Handoff — Gestionale Casa
 
-## Aggiornamento corrente — Step 5C in test
+## Aggiornamento corrente — Step 6A in sviluppo
 
-- `main` contiene Step 5A e Step 5B chiusi e verificati;
-- Step 5B salva le foto reali in `data/media/oggetti/<item_id>/`, invia la
-  notifica online all'avvio e permette il ritorno al menu da `/status`;
-- lo sviluppo corrente avviene sul branch `step-5c-test`;
-- per piccole iterazioni si preferisce SSH/SCP PC -> Termux, evitando commit
-  usati solo come trasporto;
-- GitHub `main` resta la fonte ufficiale e riceve solo modifiche verificate;
-- Step 5C aggiunge modifica degli oggetti persistiti, rimozione esplicita dei
-  campi opzionali ed eliminazione con doppia conferma;
-- la cancellazione usa il cascade SQLite e poi pulisce
-  `data/media/oggetti/<id>/`;
-- Step 6 dovrà progettare multi-abitazione e stanze, ma nessuna migration va
-  creata prima della conferma dell'architettura dei luoghi.
+- `main` contiene gli Step 5A, 5B e 5C chiusi e verificati;
+- il merge dello Step 5C è su `main` con CI verde;
+- lo sviluppo corrente usa il branch `step-6a-test`;
+- Step 6A introduce case, stanze e posizione strutturata condivisa;
+- nuova migration: `migrations/20260815183000_luoghi.sql`;
+- nuovo modulo: `src/modules/luoghi.rs`;
+- il modello approvato è `abitazioni` + `stanze` + `item_luogo`;
+- `item_luogo` punta a `items`, così la posizione è riutilizzabile da altri
+  moduli futuri;
+- `oggetti.posizione` non viene eliminata: diventa dettaglio libero della
+  posizione e i valori esistenti non vengono reinterpretati automaticamente;
+- eliminare una stanza/casa non deve eliminare gli oggetti;
+- dopo 6A sono pianificati 6B storico globale/individuale e 6C
+  contenitori/sotto-posizioni;
+- tutte le future funzioni approvate sono raccolte in `docs/ROADMAP.md`.
 
 
 Questo documento serve a consegnare il progetto a una nuova persona o a
@@ -125,33 +127,37 @@ Completati e verificati:
 - Step 2 — schema dati core;
 - Step 3 — backend Telegram + whitelist;
 - Step 3.1 — handoff, workflow Git, CI e Dependabot;
-- Step 4 — SQLite operativo, migration automatiche e `/status`.
+- Step 4 — SQLite operativo, migration automatiche e `/status`;
+- Step 5A — oggetti generici;
+- Step 5B — foto degli oggetti;
+- Step 5C — modifica/eliminazione sicura, mergiato su `main` con CI verde.
 
-Step 5:
+Step corrente:
 
-- Step 5A — oggetti generici: chiuso e verificato;
-- Step 5B — foto degli oggetti: chiuso e verificato;
-- Step 5C — modifica/eliminazione degli oggetti salvati: in test.
+- **Step 6A — case, stanze e posizione strutturata**, branch `step-6a-test`.
 
-Sviluppi successivi pianificati:
+Sequenza successiva approvata:
 
-- Step 5D — documenti e tag;
-- Step 5E — garanzie e promemoria;
-- Step 5F — prestiti e storico;
-- Step 6 — luoghi e multi-abitazione, da progettare e confermare.
+- Step 6B — storico globale + individuale;
+- Step 6C — contenitori e sotto-posizioni;
+- Step 7A — documenti e garanzie;
+- Step 7B — promemoria e scadenze;
+- Step 7C — tag e ricerca globale;
+- Step 8 — primo nuovo modulo applicativo (Veicoli o Vestiti).
 
-Verifiche reali dello Step 3 sul Galaxy S9:
+Ulteriori direzioni approvate: manutenzioni, costi/valore, prestiti, QR code,
+archivio degli elementi non più attivi, registro acquisti e dashboard.
+Dettagli in `docs/ROADMAP.md`.
 
-- `cargo test` superato;
-- `/ping` funzionante;
-- `/start` funzionante;
-- secondo account Telegram non autorizzato ignorato correttamente;
-- `Cargo.lock` generato durante la build verificata e versionato.
+Verifiche storiche importanti sul Galaxy S9:
 
-Problema già incontrato: un checkout S9 rimasto sul vecchio `Cargo.toml`
-attivava `native-tls -> OpenSSL`. Riallineando il telefono al `main` corretto,
-Teloxide usa `rustls` e il problema è scomparso. Non reintrodurre
-`native-tls` senza una ragione esplicita e documentata.
+- `/start`, `/ping`, `/status` e whitelist end-to-end;
+- SQLx/SQLite senza `openssl-sys`;
+- foto salvate localmente e persistenti;
+- modifica/eliminazione oggetti con cascade e pulizia media;
+- CI GitHub Actions verde sugli step chiusi.
+
+Non reintrodurre `native-tls` senza una ragione esplicita e documentata.
 
 ## 7. Step 3.1 — repository e qualità
 
@@ -254,18 +260,29 @@ Regole operative:
 - non aprire la porta 8022 sul router;
 - per accesso fuori dalla LAN si valuterà Tailscale + lo stesso OpenSSH.
 
-## 8.3 Requisiti futuri già registrati
+## 8.3 Requisiti trasversali già approvati
 
-La modifica/eliminazione degli oggetti persistiti è sviluppata nello Step 5C.
+La multi-abitazione non è più una proposta: è lo Step 6A corrente. Le decisioni
+sono:
 
-Il gestionale dovrà inoltre supportare più case/abitazioni e stanze come entità
-riconosciute. Devono essere possibili sia viste per singola casa/stanza sia una
-ricerca combinata su tutte le abitazioni. Lo spostamento di un oggetto dovrà
-permettere di scegliere una stanza registrata.
+- più case nello stesso gestionale;
+- stanze appartenenti a una casa;
+- item assegnabile alla casa o a una stanza;
+- spostamento guidato;
+- filtri per casa/stanza;
+- ricerca anche per nome casa/stanza;
+- `oggetti.posizione` mantenuta come dettaglio libero;
+- niente cancellazione degli oggetti quando si elimina un luogo.
 
-La proposta preferita, ancora **da confermare**, è un modello gerarchico di
-`luoghi` riutilizzabile da tutti i moduli. Non creare migration per questa parte
-prima dell'approvazione esplicita dell'architettura.
+Le funzioni future devono seguire il principio di riuso: foto, documenti, tag,
+promemoria, luogo e storico non vanno duplicati per ogni modulo se possono
+essere collegati in modo condiviso alle entità.
+
+Lo storico dello Step 6B dovrà conservare eventi strutturati con data/ora,
+modulo, entità, casa/stanza e valori prima/dopo; dovrà essere consultabile sia
+dalla singola entità sia globalmente con filtri.
+
+Per la roadmap completa usare `docs/ROADMAP.md` come fonte aggiornata.
 
 ## 9. Workflow Git ufficiale attuale
 
@@ -430,33 +447,49 @@ supportato ufficialmente su Linux e macOS open-source, non su Android. Per
 l'S9 il progetto prevede quindi Tailscale come rete privata + OpenSSH di
 Termux come servizio SSH, non il server Tailscale SSH integrato.
 
-## 13. Step corrente — Step 5C Modifica/eliminazione
+## 13. Step corrente — Step 6A Case e stanze
 
-Gli **Step 5A e 5B sono chiusi e verificati**. Lo Step 5C è la modifica
-corrente da validare sul branch `step-5c-test`.
+Base di partenza: commit `main` successivo al merge dello Step 5C. Lo sviluppo
+va eseguito su `step-6a-test` e non mergiato finché non sono verdi test, runtime
+S9 e CI della Pull Request.
 
 File principali coinvolti:
 
+- `migrations/20260815183000_luoghi.sql`;
+- `src/modules/luoghi.rs`;
 - `src/modules/oggetti.rs`;
-- `src/modules/foto.rs` per la pulizia dei media dopo delete;
-- `docs/moduli/oggetti.md`;
-- `docs/moduli/modifica-eliminazione.md`;
-- `docs/moduli/foto.md`.
+- `src/modules/mod.rs`;
+- `src/main.rs`;
+- `docs/moduli/luoghi.md`;
+- documentazione generale e roadmap.
 
 Decisioni da preservare:
 
-- solo il nome è obbligatorio;
-- modifica e creazione riusano lo stesso pannello dettagli;
-- la bozza di modifica conserva l'ID e non scrive sul DB finché non viene
-  premuto `💾 Salva modifiche`;
-- `/salta` mantiene il valore e `/rimuovi` cancella il campo opzionale aperto;
-- eliminazione solo dopo conferma esplicita;
-- `DELETE` parte da `items` per sfruttare `ON DELETE CASCADE`;
-- dopo il commit vengono rimossi i media locali dell'item;
-- nessuna nuova migration nello Step 5C;
-- la migration core dello Step 2 non va modificata;
-- il futuro sistema case/stanze resta separato e va approvato prima di cambiare
-  il modello della posizione.
+- `abitazioni` e `stanze` sono entità proprie;
+- `item_luogo` collega `items` alla casa/stanza e rende il modello riusabile;
+- una stanza deve appartenere alla casa indicata anche a livello DB;
+- cancellare una stanza mantiene gli item nella casa senza stanza;
+- cancellare una casa rimuove solo la relazione di luogo, non gli item;
+- il campo storico `oggetti.posizione` resta disponibile come dettaglio libero;
+- nessuna conversione automatica delle vecchie stringhe posizione;
+- dalla scheda oggetto si deve poter assegnare/spostare/rimuovere il luogo;
+- elenco e ricerca devono mostrare e usare casa/stanza;
+- case e stanze richiedono conferma prima della cancellazione;
+- le migration già applicate non vanno modificate.
+
+Test runtime minimi prima della chiusura:
+
+1. due case;
+2. stanze in entrambe;
+3. rinomina casa/stanza;
+4. assegnazione oggetto alla sola casa;
+5. spostamento in stanza e poi in altra casa;
+6. filtro casa/stanza e ricerca per nome luogo;
+7. rimozione luogo;
+8. delete stanza con oggetto: item resta nella casa;
+9. delete casa con oggetto: item resta senza luogo;
+10. persistenza dopo riavvio;
+11. `fmt`, `check`, `test`, Clippy, PR CI verde.
 
 ## 14. Regola di chiusura di ogni step
 

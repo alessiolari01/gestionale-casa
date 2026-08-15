@@ -1,7 +1,8 @@
 //! Modulo "oggetti generici".
 //!
-//! Step 5C: oltre all'anagrafica introdotta nello Step 5A, gli oggetti gia'
-//! salvati possono essere modificati o eliminati con conferma esplicita.
+//! Step 6A: agli oggetti gia' completi di CRUD e foto si aggiunge una
+//! posizione strutturata casa/stanza condivisa tramite `item_luogo`. Il campo
+//! `posizione` resta un dettaglio libero (es. scaffale, cassetto, contenitore).
 
 use std::{
     collections::HashMap,
@@ -86,6 +87,10 @@ struct ObjectDraft {
     model: Option<String>,
     serial_number: Option<String>,
     position: Option<String>,
+    home_id: Option<i64>,
+    home_name: Option<String>,
+    room_id: Option<i64>,
+    room_name: Option<String>,
     purchase_date: Option<String>,
     purchase_price_cents: Option<i64>,
     seller: Option<String>,
@@ -113,6 +118,10 @@ impl ObjectDraft {
             model: record.model.clone(),
             serial_number: record.serial_number.clone(),
             position: record.position.clone(),
+            home_id: None,
+            home_name: None,
+            room_id: None,
+            room_name: None,
             purchase_date: record.purchase_date.clone(),
             purchase_price_cents: record.purchase_price_cents,
             seller: record.seller.clone(),
@@ -183,6 +192,8 @@ struct ObjectRecord {
     estimated_value_cents: Option<i64>,
     condition: Option<String>,
     notes: Option<String>,
+    home_name: Option<String>,
+    room_name: Option<String>,
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -190,11 +201,14 @@ struct ObjectSummary {
     id: i64,
     name: String,
     position: Option<String>,
+    home_name: Option<String>,
+    room_name: Option<String>,
 }
 
 pub fn main_menu_keyboard() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
         vec![button("📦 Oggetti", "oggetti:menu")],
+        vec![button("🏠 Case e stanze", "loc:menu")],
         vec![
             button("👕 Vestiti · prossimamente", "menu:soon"),
             button("🚗 Veicoli · prossimamente", "menu:soon"),
@@ -244,7 +258,7 @@ pub async fn handle_message(
                     sessions.set(chat_id, ConversationState::AwaitingSearch);
                     bot.send_message(
                         msg.chat.id,
-                        "🔎 Cerca oggetto\n\nScrivi nome, marca, modello, posizione, seriale o una parola presente nelle note.\n\n/annulla per uscire.",
+                        "🔎 Cerca oggetto\n\nScrivi nome, marca, modello, casa, stanza, dettaglio posizione, seriale o una parola presente nelle note.\n\n/annulla per uscire.",
                     )
                     .await?;
                 } else {
@@ -389,6 +403,45 @@ pub async fn handle_callback(
         }
         "oggetti:draft:brand" => {
             set_draft_field(bot, chat_id, raw_chat_id, sessions, DraftField::Brand).await?;
+        }
+        "oggetti:draft:location" => {
+            show_new_object_home_picker(bot, chat_id, raw_chat_id, pool, sessions).await?;
+        }
+        "oggetti:draft:location:skip-home" => {
+            clear_draft_structured_location_and_ask_detail(bot, chat_id, raw_chat_id, sessions)
+                .await?;
+        }
+        _ if data.starts_with("oggetti:draft:location:home-only:") => {
+            if let Some(home_id) = parse_callback_i64(data, "oggetti:draft:location:home-only:") {
+                select_draft_home_only_and_ask_detail(
+                    bot,
+                    chat_id,
+                    raw_chat_id,
+                    pool,
+                    sessions,
+                    home_id,
+                )
+                .await?;
+            }
+        }
+        _ if data.starts_with("oggetti:draft:location:room:") => {
+            if let Some(room_id) = parse_callback_i64(data, "oggetti:draft:location:room:") {
+                select_draft_room_and_ask_detail(
+                    bot,
+                    chat_id,
+                    raw_chat_id,
+                    pool,
+                    sessions,
+                    room_id,
+                )
+                .await?;
+            }
+        }
+        _ if data.starts_with("oggetti:draft:location:home:") => {
+            if let Some(home_id) = parse_callback_i64(data, "oggetti:draft:location:home:") {
+                show_new_object_room_picker(bot, chat_id, raw_chat_id, pool, sessions, home_id)
+                    .await?;
+            }
         }
         "oggetti:draft:position" => {
             set_draft_field(bot, chat_id, raw_chat_id, sessions, DraftField::Position).await?;
@@ -562,7 +615,7 @@ async fn cancel_current_operation(
                     format_object(&object)
                 ),
             )
-            .reply_markup(object_detail_keyboard(id))
+            .reply_markup(object_detail_keyboard(id, object.home_name.is_some()))
             .await?;
         }
         Ok(None) => {
@@ -663,6 +716,255 @@ async fn start_edit_object(
             .await?;
         }
     }
+    Ok(())
+}
+
+async fn show_new_object_home_picker(
+    bot: &Bot,
+    chat_id: ChatId,
+    raw_chat_id: i64,
+    pool: &SqlitePool,
+    sessions: &SessionStore,
+) -> ResponseResult<()> {
+    let Some(ConversationState::EditingObject { draft, .. }) = sessions.get(raw_chat_id) else {
+        no_active_draft(bot, chat_id).await?;
+        return Ok(());
+    };
+
+    if draft.is_update() {
+        set_draft_field(bot, chat_id, raw_chat_id, sessions, DraftField::Position).await?;
+        return Ok(());
+    }
+
+    match crate::modules::luoghi::home_choices(pool).await {
+        Ok(homes) => {
+            let current = draft_structured_location_label(&draft)
+                .unwrap_or_else(|| "Nessuna casa/stanza selezionata".to_string());
+            let text = if homes.is_empty() {
+                format!(
+                    "🏠 Posizione del nuovo oggetto\n\n1/3 · Casa\n\nSelezione attuale: {current}\n\nNon ci sono ancora case registrate. Puoi saltare la casa e inserire direttamente il dettaglio libero della posizione."
+                )
+            } else {
+                format!(
+                    "🏠 Posizione del nuovo oggetto\n\n1/3 · Casa\n\nSelezione attuale: {current}\n\nScegli una casa. Se non vuoi assegnare un luogo strutturato, premi ⏭ Salta casa: passerai direttamente al dettaglio posizione."
+                )
+            };
+            bot.send_message(chat_id, text)
+                .reply_markup(new_object_home_picker_keyboard(&homes))
+                .await?;
+        }
+        Err(error) => {
+            tracing::error!(?error, "Errore elenco case durante creazione oggetto");
+            bot.send_message(chat_id, "⚠️ Non riesco a leggere le case disponibili.")
+                .await?;
+        }
+    }
+
+    Ok(())
+}
+
+async fn show_new_object_room_picker(
+    bot: &Bot,
+    chat_id: ChatId,
+    raw_chat_id: i64,
+    pool: &SqlitePool,
+    sessions: &SessionStore,
+    home_id: i64,
+) -> ResponseResult<()> {
+    let Some(ConversationState::EditingObject { draft, .. }) = sessions.get(raw_chat_id) else {
+        no_active_draft(bot, chat_id).await?;
+        return Ok(());
+    };
+
+    if draft.is_update() {
+        no_active_draft(bot, chat_id).await?;
+        return Ok(());
+    }
+
+    let home = match crate::modules::luoghi::home_choice(pool, home_id).await {
+        Ok(Some(home)) => home,
+        Ok(None) => {
+            bot.send_message(chat_id, "La casa scelta non esiste più. Scegline un'altra.")
+                .await?;
+            show_new_object_home_picker(bot, chat_id, raw_chat_id, pool, sessions).await?;
+            return Ok(());
+        }
+        Err(error) => {
+            tracing::error!(
+                ?error,
+                home_id,
+                "Errore lettura casa durante creazione oggetto"
+            );
+            bot.send_message(chat_id, "⚠️ Non riesco a leggere la casa scelta.")
+                .await?;
+            return Ok(());
+        }
+    };
+
+    let rooms = match crate::modules::luoghi::room_choices(pool, home_id).await {
+        Ok(rooms) => rooms,
+        Err(error) => {
+            tracing::error!(
+                ?error,
+                home_id,
+                "Errore elenco stanze durante creazione oggetto"
+            );
+            bot.send_message(chat_id, "⚠️ Non riesco a leggere le stanze disponibili.")
+                .await?;
+            return Ok(());
+        }
+    };
+
+    let text = if rooms.is_empty() {
+        format!(
+            "🏠 Posizione del nuovo oggetto\n\n2/3 · Stanza\n\nCasa scelta: 🏠 {}\n\nQuesta casa non ha ancora stanze. Puoi assegnare l'oggetto direttamente alla casa e passare al dettaglio posizione.",
+            home.name
+        )
+    } else {
+        format!(
+            "🏠 Posizione del nuovo oggetto\n\n2/3 · Stanza\n\nCasa scelta: 🏠 {}\n\nScegli una stanza oppure usa la sola casa. Una stanza può essere scelta solo dopo la sua casa.",
+            home.name
+        )
+    };
+
+    bot.send_message(chat_id, text)
+        .reply_markup(new_object_room_picker_keyboard(home_id, &home.name, &rooms))
+        .await?;
+    Ok(())
+}
+
+async fn clear_draft_structured_location_and_ask_detail(
+    bot: &Bot,
+    chat_id: ChatId,
+    raw_chat_id: i64,
+    sessions: &SessionStore,
+) -> ResponseResult<()> {
+    let Some(ConversationState::EditingObject { mut draft, .. }) = sessions.get(raw_chat_id) else {
+        no_active_draft(bot, chat_id).await?;
+        return Ok(());
+    };
+
+    if draft.is_update() {
+        no_active_draft(bot, chat_id).await?;
+        return Ok(());
+    }
+
+    draft.home_id = None;
+    draft.home_name = None;
+    draft.room_id = None;
+    draft.room_name = None;
+    ask_position_detail_after_location(bot, chat_id, raw_chat_id, sessions, *draft).await
+}
+
+async fn select_draft_home_only_and_ask_detail(
+    bot: &Bot,
+    chat_id: ChatId,
+    raw_chat_id: i64,
+    pool: &SqlitePool,
+    sessions: &SessionStore,
+    home_id: i64,
+) -> ResponseResult<()> {
+    let Some(ConversationState::EditingObject { mut draft, .. }) = sessions.get(raw_chat_id) else {
+        no_active_draft(bot, chat_id).await?;
+        return Ok(());
+    };
+
+    if draft.is_update() {
+        no_active_draft(bot, chat_id).await?;
+        return Ok(());
+    }
+
+    match crate::modules::luoghi::home_choice(pool, home_id).await {
+        Ok(Some(home)) => {
+            draft.home_id = Some(home.id);
+            draft.home_name = Some(home.name);
+            draft.room_id = None;
+            draft.room_name = None;
+            ask_position_detail_after_location(bot, chat_id, raw_chat_id, sessions, *draft).await?;
+        }
+        Ok(None) => {
+            bot.send_message(chat_id, "La casa scelta non esiste più. Scegline un'altra.")
+                .await?;
+            show_new_object_home_picker(bot, chat_id, raw_chat_id, pool, sessions).await?;
+        }
+        Err(error) => {
+            tracing::error!(
+                ?error,
+                home_id,
+                "Errore selezione casa durante creazione oggetto"
+            );
+            bot.send_message(chat_id, "⚠️ Non riesco a selezionare questa casa.")
+                .await?;
+        }
+    }
+
+    Ok(())
+}
+
+async fn select_draft_room_and_ask_detail(
+    bot: &Bot,
+    chat_id: ChatId,
+    raw_chat_id: i64,
+    pool: &SqlitePool,
+    sessions: &SessionStore,
+    room_id: i64,
+) -> ResponseResult<()> {
+    let Some(ConversationState::EditingObject { mut draft, .. }) = sessions.get(raw_chat_id) else {
+        no_active_draft(bot, chat_id).await?;
+        return Ok(());
+    };
+
+    if draft.is_update() {
+        no_active_draft(bot, chat_id).await?;
+        return Ok(());
+    }
+
+    match crate::modules::luoghi::room_choice(pool, room_id).await {
+        Ok(Some(room)) => {
+            draft.home_id = Some(room.home_id);
+            draft.home_name = Some(room.home_name);
+            draft.room_id = Some(room.id);
+            draft.room_name = Some(room.name);
+            ask_position_detail_after_location(bot, chat_id, raw_chat_id, sessions, *draft).await?;
+        }
+        Ok(None) => {
+            bot.send_message(
+                chat_id,
+                "La stanza scelta non esiste più. Riapri la posizione e riprova.",
+            )
+            .await?;
+            finish_field(bot, chat_id, raw_chat_id, sessions, *draft).await?;
+        }
+        Err(error) => {
+            tracing::error!(
+                ?error,
+                room_id,
+                "Errore selezione stanza durante creazione oggetto"
+            );
+            bot.send_message(chat_id, "⚠️ Non riesco a selezionare questa stanza.")
+                .await?;
+        }
+    }
+
+    Ok(())
+}
+
+async fn ask_position_detail_after_location(
+    bot: &Bot,
+    chat_id: ChatId,
+    raw_chat_id: i64,
+    sessions: &SessionStore,
+    draft: ObjectDraft,
+) -> ResponseResult<()> {
+    let prompt = field_prompt(DraftField::Position, &draft);
+    sessions.set(
+        raw_chat_id,
+        ConversationState::EditingObject {
+            draft: Box::new(draft),
+            field: Some(DraftField::Position),
+        },
+    );
+    bot.send_message(chat_id, prompt).await?;
     Ok(())
 }
 
@@ -1036,9 +1338,7 @@ async fn send_object_list(
             let mut text = format!("📋 Oggetti · pagina {}/{}\n\n", page + 1, total_pages);
             for object in &objects {
                 text.push_str(&format!("#{} · {}", object.id, object.name));
-                if let Some(position) = &object.position {
-                    text.push_str(&format!("\n📍 {position}"));
-                }
+                push_summary_location(&mut text, object);
                 text.push_str("\n\n");
             }
 
@@ -1071,9 +1371,7 @@ async fn send_search_results(
             let mut text = format!("🔎 Risultati per: {query}\n\n");
             for object in &objects {
                 text.push_str(&format!("#{} · {}", object.id, object.name));
-                if let Some(position) = &object.position {
-                    text.push_str(&format!("\n📍 {position}"));
-                }
+                push_summary_location(&mut text, object);
                 text.push_str("\n\n");
             }
             bot.send_message(chat_id, text)
@@ -1089,7 +1387,7 @@ async fn send_search_results(
     Ok(())
 }
 
-async fn send_object_detail(
+pub async fn send_object_detail(
     bot: &Bot,
     chat_id: ChatId,
     pool: &SqlitePool,
@@ -1098,7 +1396,7 @@ async fn send_object_detail(
     match get_object(pool, id).await {
         Ok(Some(object)) => {
             bot.send_message(chat_id, format_object(&object))
-                .reply_markup(object_detail_keyboard(id))
+                .reply_markup(object_detail_keyboard(id, object.home_name.is_some()))
                 .await?;
         }
         Ok(None) => {
@@ -1226,6 +1524,14 @@ async fn create_object(pool: &SqlitePool, draft: &ObjectDraft) -> anyhow::Result
     let id = item_result.last_insert_rowid();
 
     insert_object_details(&mut tx, id, draft).await?;
+
+    if draft.room_id.is_some() && draft.home_id.is_none() {
+        anyhow::bail!("una stanza non può essere salvata senza la relativa casa");
+    }
+    if let Some(home_id) = draft.home_id {
+        crate::modules::luoghi::insert_item_location(&mut tx, id, home_id, draft.room_id).await?;
+    }
+
     tx.commit().await?;
     Ok(id)
 }
@@ -1323,9 +1629,13 @@ async fn get_object(pool: &SqlitePool, id: i64) -> Result<Option<ObjectRecord>, 
             o.data_acquisto AS purchase_date, \
             o.prezzo_acquisto_centesimi AS purchase_price_cents, \
             o.venditore AS seller, o.valore_stimato_centesimi AS estimated_value_cents, \
-            o.condizione AS condition, o.note AS notes \
+            o.condizione AS condition, o.note AS notes, \
+            a.nome AS home_name, s.nome AS room_name \
          FROM items i \
          JOIN oggetti o ON o.item_id = i.id \
+         LEFT JOIN item_luogo il ON il.item_id = i.id \
+         LEFT JOIN abitazioni a ON a.id = il.abitazione_id \
+         LEFT JOIN stanze s ON s.id = il.stanza_id \
          WHERE i.id = ? AND i.tipo = 'oggetto'",
     )
     .bind(id)
@@ -1348,9 +1658,13 @@ async fn list_objects(
     .fetch_one(pool)
     .await?;
     let objects = sqlx::query_as::<_, ObjectSummary>(
-        "SELECT i.id AS id, i.nome AS name, o.posizione AS position \
+        "SELECT i.id AS id, i.nome AS name, o.posizione AS position, \
+                a.nome AS home_name, s.nome AS room_name \
          FROM items i \
          JOIN oggetti o ON o.item_id = i.id \
+         LEFT JOIN item_luogo il ON il.item_id = i.id \
+         LEFT JOIN abitazioni a ON a.id = il.abitazione_id \
+         LEFT JOIN stanze s ON s.id = il.stanza_id \
          WHERE i.tipo = 'oggetto' \
          ORDER BY i.nome COLLATE NOCASE, i.id \
          LIMIT ? OFFSET ?",
@@ -1369,9 +1683,13 @@ async fn search_objects(
 ) -> Result<Vec<ObjectSummary>, sqlx::Error> {
     let pattern = format!("%{}%", query.trim());
     sqlx::query_as::<_, ObjectSummary>(
-        "SELECT i.id AS id, i.nome AS name, o.posizione AS position \
+        "SELECT i.id AS id, i.nome AS name, o.posizione AS position, \
+                a.nome AS home_name, s.nome AS room_name \
          FROM items i \
          JOIN oggetti o ON o.item_id = i.id \
+         LEFT JOIN item_luogo il ON il.item_id = i.id \
+         LEFT JOIN abitazioni a ON a.id = il.abitazione_id \
+         LEFT JOIN stanze s ON s.id = il.stanza_id \
          WHERE i.tipo = 'oggetto' AND (\
             i.nome LIKE ? COLLATE NOCASE OR \
             o.marca LIKE ? COLLATE NOCASE OR \
@@ -1380,11 +1698,15 @@ async fn search_objects(
             o.posizione LIKE ? COLLATE NOCASE OR \
             o.venditore LIKE ? COLLATE NOCASE OR \
             o.descrizione LIKE ? COLLATE NOCASE OR \
-            o.note LIKE ? COLLATE NOCASE\
+            o.note LIKE ? COLLATE NOCASE OR \
+            a.nome LIKE ? COLLATE NOCASE OR \
+            s.nome LIKE ? COLLATE NOCASE\
          ) \
          ORDER BY i.nome COLLATE NOCASE, i.id \
          LIMIT ?",
     )
+    .bind(&pattern)
+    .bind(&pattern)
     .bind(&pattern)
     .bind(&pattern)
     .bind(&pattern)
@@ -1407,7 +1729,10 @@ fn format_draft(draft: &ObjectDraft) -> String {
 
     push_optional_line(&mut lines, "Marca", draft.brand.as_deref());
     push_optional_line(&mut lines, "Modello", draft.model.as_deref());
-    push_optional_line(&mut lines, "Posizione", draft.position.as_deref());
+    if let Some(location) = draft_structured_location_label(draft) {
+        lines.push(format!("Luogo: {location}"));
+    }
+    push_optional_line(&mut lines, "Dettaglio posizione", draft.position.as_deref());
     if let Some(date) = &draft.purchase_date {
         lines.push(format!("Data acquisto: {}", display_date(date)));
     }
@@ -1448,8 +1773,15 @@ fn format_object(object: &ObjectRecord) -> String {
             .join(" — ");
         lines.push(format!("🏷 {brand_model}"));
     }
+    if let Some(home) = &object.home_name {
+        if let Some(room) = &object.room_name {
+            lines.push(format!("🏠 {home} / 🚪 {room}"));
+        } else {
+            lines.push(format!("🏠 {home}"));
+        }
+    }
     if let Some(position) = &object.position {
-        lines.push(format!("📍 {position}"));
+        lines.push(format!("📌 {position}"));
     }
     if let Some(condition) = object
         .condition
@@ -1490,6 +1822,7 @@ fn objects_menu_keyboard() -> InlineKeyboardMarkup {
             button("📋 Elenco oggetti", "oggetti:list:0"),
             button("🔎 Cerca", "oggetti:search"),
         ],
+        vec![button("🏠 Filtra per casa / stanza", "loc:home:list")],
         vec![button("🏠 Menu principale", "menu:main")],
     ])
 }
@@ -1499,7 +1832,14 @@ fn draft_keyboard(draft: &ObjectDraft) -> InlineKeyboardMarkup {
         "🏷 Marca e modello",
         draft.brand.is_some() || draft.model.is_some(),
     );
-    let position = section_label("📍 Posizione", draft.position.is_some());
+    let position = if draft.is_update() {
+        section_label("📌 Dettaglio posizione", draft.position.is_some())
+    } else {
+        section_label(
+            "🏠 Posizione",
+            draft.home_id.is_some() || draft.position.is_some(),
+        )
+    };
     let purchase = section_label(
         "💶 Acquisto",
         draft.purchase_date.is_some()
@@ -1521,7 +1861,14 @@ fn draft_keyboard(draft: &ObjectDraft) -> InlineKeyboardMarkup {
     }
     rows.push(vec![button(&brand_model, "oggetti:draft:brand")]);
     rows.push(vec![
-        button(&position, "oggetti:draft:position"),
+        button(
+            &position,
+            if draft.is_update() {
+                "oggetti:draft:position"
+            } else {
+                "oggetti:draft:location"
+            },
+        ),
         button(&purchase, "oggetti:draft:purchase"),
     ]);
     rows.push(vec![
@@ -1541,6 +1888,57 @@ fn draft_keyboard(draft: &ObjectDraft) -> InlineKeyboardMarkup {
         button("❌ Annulla", "oggetti:draft:cancel"),
     ]);
     InlineKeyboardMarkup::new(rows)
+}
+
+fn new_object_home_picker_keyboard(
+    homes: &[crate::modules::luoghi::HomeChoice],
+) -> InlineKeyboardMarkup {
+    let mut rows = homes
+        .iter()
+        .map(|home| {
+            vec![button(
+                &format!("🏠 {}", home.name),
+                &format!("oggetti:draft:location:home:{}", home.id),
+            )]
+        })
+        .collect::<Vec<_>>();
+    rows.push(vec![button(
+        "⏭ Salta casa → dettaglio",
+        "oggetti:draft:location:skip-home",
+    )]);
+    rows.push(vec![button("↩️ Torna ai dettagli", "oggetti:draft:back")]);
+    InlineKeyboardMarkup::new(rows)
+}
+
+fn new_object_room_picker_keyboard(
+    home_id: i64,
+    home_name: &str,
+    rooms: &[crate::modules::luoghi::RoomChoice],
+) -> InlineKeyboardMarkup {
+    let mut rows = rooms
+        .iter()
+        .map(|room| {
+            vec![button(
+                &format!("🚪 {}", room.name),
+                &format!("oggetti:draft:location:room:{}", room.id),
+            )]
+        })
+        .collect::<Vec<_>>();
+    rows.push(vec![button(
+        &format!("🏠 Solo {} → dettaglio", truncate_chars(home_name, 28)),
+        &format!("oggetti:draft:location:home-only:{home_id}"),
+    )]);
+    rows.push(vec![button("↩️ Cambia casa", "oggetti:draft:location")]);
+    rows.push(vec![button("↩️ Torna ai dettagli", "oggetti:draft:back")]);
+    InlineKeyboardMarkup::new(rows)
+}
+
+fn draft_structured_location_label(draft: &ObjectDraft) -> Option<String> {
+    let home = draft.home_name.as_deref()?;
+    Some(match draft.room_name.as_deref() {
+        Some(room) => format!("🏠 {home} / 🚪 {room}"),
+        None => format!("🏠 {home}"),
+    })
 }
 
 fn section_label(label: &str, filled: bool) -> String {
@@ -1586,12 +1984,19 @@ fn cancel_keyboard() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![vec![button("❌ Annulla", "oggetti:draft:cancel")]])
 }
 
-fn object_detail_keyboard(id: i64) -> InlineKeyboardMarkup {
+fn object_detail_keyboard(id: i64, has_structured_location: bool) -> InlineKeyboardMarkup {
+    let location_label = if has_structured_location {
+        "🚚 Sposta oggetto"
+    } else {
+        "🏠 Assegna casa / stanza"
+    };
+
     InlineKeyboardMarkup::new(vec![
         vec![
             button("✏️ Modifica", &format!("oggetti:edit:{id}")),
             button("🗑 Elimina", &format!("oggetti:delete:ask:{id}")),
         ],
+        vec![button(location_label, &format!("loc:item:{id}"))],
         vec![button("📷 Foto", &format!("foto:menu:{id}"))],
         vec![button("📋 Elenco", "oggetti:list:0")],
         vec![
@@ -1658,6 +2063,19 @@ fn search_results_keyboard(objects: &[ObjectSummary]) -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(rows)
 }
 
+fn push_summary_location(text: &mut String, object: &ObjectSummary) {
+    if let Some(home) = &object.home_name {
+        if let Some(room) = &object.room_name {
+            text.push_str(&format!("\n🏠 {home} / {room}"));
+        } else {
+            text.push_str(&format!("\n🏠 {home}"));
+        }
+    }
+    if let Some(position) = &object.position {
+        text.push_str(&format!("\n📌 {position}"));
+    }
+}
+
 fn object_button_label(object: &ObjectSummary) -> String {
     let short_name = truncate_chars(&object.name, 42);
     format!("📦 #{} · {short_name}", object.id)
@@ -1681,17 +2099,24 @@ fn button(label: &str, data: &str) -> InlineKeyboardButton {
 
 fn field_prompt(field: DraftField, draft: &ObjectDraft) -> String {
     let instruction = match field {
-        DraftField::Name => "✏️ Inserisci il nome dell'oggetto.",
-        DraftField::Brand => "🏷 Inserisci la marca.",
-        DraftField::Model => "🏷 Inserisci il modello.",
-        DraftField::Position => "📍 Dove si trova l'oggetto?\nEsempio: Garage - scaffale 2",
-        DraftField::PurchaseDate => "📅 Inserisci la data di acquisto (GG/MM/AAAA o AAAA-MM-GG).",
-        DraftField::PurchasePrice => "💶 Inserisci il prezzo pagato.\nEsempio: 89,90",
-        DraftField::Seller => "🏪 Inserisci negozio o venditore.\nEsempio: Amazon",
-        DraftField::Notes => "📝 Inserisci le note.",
-        DraftField::Description => "📝 Inserisci una descrizione.",
-        DraftField::EstimatedValue => "💰 Inserisci il valore stimato attuale.\nEsempio: 250",
-        DraftField::SerialNumber => "🔢 Inserisci il numero seriale.",
+        DraftField::Name => "✏️ Inserisci il nome dell'oggetto.".to_string(),
+        DraftField::Brand => "🏷 Inserisci la marca.".to_string(),
+        DraftField::Model => "🏷 Inserisci il modello.".to_string(),
+        DraftField::Position if draft.is_update() => "📌 Inserisci un dettaglio libero della posizione.\nEsempio: scaffale 2, cassetto alto.\nCasa e stanza si cambiano dalla scheda dell'oggetto con 🚚 Sposta oggetto.".to_string(),
+        DraftField::Position => {
+            let structured = draft_structured_location_label(draft)
+                .unwrap_or_else(|| "Nessuna casa/stanza".to_string());
+            format!(
+                "📌 3/3 · Dettaglio posizione\n\nLuogo scelto: {structured}\n\nInserisci un dettaglio libero opzionale.\nEsempio: scaffale 2, cassetto alto."
+            )
+        }
+        DraftField::PurchaseDate => "📅 Inserisci la data di acquisto (GG/MM/AAAA o AAAA-MM-GG).".to_string(),
+        DraftField::PurchasePrice => "💶 Inserisci il prezzo pagato.\nEsempio: 89,90".to_string(),
+        DraftField::Seller => "🏪 Inserisci negozio o venditore.\nEsempio: Amazon".to_string(),
+        DraftField::Notes => "📝 Inserisci le note.".to_string(),
+        DraftField::Description => "📝 Inserisci una descrizione.".to_string(),
+        DraftField::EstimatedValue => "💰 Inserisci il valore stimato attuale.\nEsempio: 250".to_string(),
+        DraftField::SerialNumber => "🔢 Inserisci il numero seriale.".to_string(),
     };
 
     let current = match field {
@@ -1719,7 +2144,7 @@ fn field_prompt(field: DraftField, draft: &ObjectDraft) -> String {
             )
         }
     } else if field == DraftField::Name {
-        instruction.to_string()
+        instruction
     } else {
         format!("{instruction}\n\nUsa /salta per lasciare il campo vuoto.")
     }
@@ -1981,6 +2406,8 @@ mod tests {
             estimated_value_cents: None,
             condition: Some("ottimo".to_string()),
             notes: None,
+            home_name: Some("Casa principale".to_string()),
+            room_name: Some("Studio".to_string()),
         };
 
         let draft = ObjectDraft::from_record(&record);
@@ -2016,6 +2443,37 @@ mod tests {
         let search = search_objects(&pool, "garage", 10).await.expect("ricerca");
         assert_eq!(search.len(), 1);
         assert_eq!(search[0].id, id);
+
+        let home = sqlx::query("INSERT INTO abitazioni (nome) VALUES ('Casa principale')")
+            .execute(&pool)
+            .await
+            .expect("casa");
+        let home_id = home.last_insert_rowid();
+        let room = sqlx::query("INSERT INTO stanze (abitazione_id, nome) VALUES (?, 'Officina')")
+            .bind(home_id)
+            .execute(&pool)
+            .await
+            .expect("stanza");
+        let room_id = room.last_insert_rowid();
+        sqlx::query("INSERT INTO item_luogo (item_id, abitazione_id, stanza_id) VALUES (?, ?, ?)")
+            .bind(id)
+            .bind(home_id)
+            .bind(room_id)
+            .execute(&pool)
+            .await
+            .expect("luogo");
+
+        let by_home = search_objects(&pool, "principale", 10)
+            .await
+            .expect("ricerca casa");
+        assert_eq!(by_home.len(), 1);
+        assert_eq!(by_home[0].home_name.as_deref(), Some("Casa principale"));
+
+        let by_room = search_objects(&pool, "officina", 10)
+            .await
+            .expect("ricerca stanza");
+        assert_eq!(by_room.len(), 1);
+        assert_eq!(by_room[0].room_name.as_deref(), Some("Officina"));
     }
 
     #[tokio::test]
@@ -2111,6 +2569,56 @@ mod tests {
 
         let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM oggetti WHERE item_id = ?")
             .bind(id)
+            .fetch_one(&pool)
+            .await
+            .expect("conteggio");
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn nuovo_oggetto_salva_casa_stanza_e_dettaglio_nella_stessa_creazione() {
+        let pool = test_pool().await;
+        let home = sqlx::query("INSERT INTO abitazioni (nome) VALUES ('Casa principale')")
+            .execute(&pool)
+            .await
+            .expect("casa");
+        let home_id = home.last_insert_rowid();
+        let room = sqlx::query("INSERT INTO stanze (abitazione_id, nome) VALUES (?, 'Garage')")
+            .bind(home_id)
+            .execute(&pool)
+            .await
+            .expect("stanza");
+        let room_id = room.last_insert_rowid();
+
+        let mut draft = ObjectDraft::new("Trapano guidato").expect("bozza");
+        draft.home_id = Some(home_id);
+        draft.home_name = Some("Casa principale".to_string());
+        draft.room_id = Some(room_id);
+        draft.room_name = Some("Garage".to_string());
+        draft.position = Some("Scaffale 2".to_string());
+
+        let id = create_object(&pool, &draft).await.expect("salvataggio");
+        let object = get_object(&pool, id)
+            .await
+            .expect("lettura")
+            .expect("oggetto presente");
+
+        assert_eq!(object.home_name.as_deref(), Some("Casa principale"));
+        assert_eq!(object.room_name.as_deref(), Some("Garage"));
+        assert_eq!(object.position.as_deref(), Some("Scaffale 2"));
+    }
+
+    #[tokio::test]
+    async fn nuova_creazione_non_salva_stanza_senza_casa() {
+        let pool = test_pool().await;
+        let mut draft = ObjectDraft::new("Bozza incoerente").expect("bozza");
+        draft.room_id = Some(999);
+        draft.room_name = Some("Garage".to_string());
+
+        let result = create_object(&pool, &draft).await;
+        assert!(result.is_err());
+
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM items WHERE tipo = 'oggetto'")
             .fetch_one(&pool)
             .await
             .expect("conteggio");

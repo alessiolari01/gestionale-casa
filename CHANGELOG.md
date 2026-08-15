@@ -1,5 +1,85 @@
 # Diario di sviluppo
 
+## Step 6A — Case, stanze e posizione strutturata — 2026-08-15
+
+- UX luoghi: distingue prima assegnazione, spostamento e rimozione; gli spostamenti mostrano origine e destinazione in preparazione allo storico dello Step 6B.
+- UX spostamento: la stanza (o la sola casa) già occupata dall'oggetto è marcata come `Attualmente qui` direttamente nel selettore di destinazione.
+- UX creazione oggetto: la posizione diventa un flusso guidato unico `Casa -> Stanza -> Dettaglio`; saltando la casa si salta automaticamente anche la stanza. Casa/stanza vengono salvate nella stessa transazione della nuova scheda.
+
+### Stato precedente
+
+Gli Step 5A, 5B e 5C sono chiusi e verificati. Lo Step 5C è stato mergiato su
+`main` con CI verde dopo i test runtime sul Galaxy S9. Il modello precedente
+aveva solo `oggetti.posizione` come stringa libera e non riconosceva case o
+stanze come entità.
+
+### Decisione architetturale approvata
+
+Lo Step 6A usa:
+
+```text
+abitazioni
+└── stanze
+
+items ── item_luogo ──> abitazione + stanza opzionale
+```
+
+La relazione viene collegata a `items` e non direttamente a `oggetti`, così il
+sistema di luoghi potrà essere riusato da Vestiti, Veicoli e altri moduli.
+
+Il vecchio `oggetti.posizione` resta disponibile e assume il significato di
+dettaglio libero, per esempio `scaffale 2`. Nessun dato esistente viene
+interpretato automaticamente come casa o stanza.
+
+### Implementazione predisposta per test
+
+- nuova migration `20260815183000_luoghi.sql`;
+- nuove tabelle `abitazioni`, `stanze` e `item_luogo`;
+- vincolo DB che impedisce di associare una stanza a una casa diversa;
+- eliminazione stanza: item conservato nella casa con `stanza_id = NULL`;
+- eliminazione casa: relazione di luogo rimossa, item conservato;
+- nuovo modulo `src/modules/luoghi.rs`;
+- menu Telegram `🏠 Case e stanze`;
+- creazione, elenco, dettaglio, rinomina ed eliminazione con conferma per case e
+  stanze;
+- comandi testuali equivalenti `/luoghi`, `/case`, `/casa_*`, `/stanza_*`;
+- scheda oggetto con `🏠 Casa / stanza`;
+- assegnazione alla sola casa, a una stanza, spostamento e rimozione luogo;
+- comandi `/oggetto_luogo <id>` e `/oggetto_sposta <id>`;
+- filtro degli oggetti dalla scheda casa/stanza;
+- ricerca oggetti estesa a nome casa e nome stanza;
+- elenco/scheda oggetto mostrano separatamente luogo strutturato e dettaglio
+  libero;
+- durante la creazione di un nuovo oggetto il pannello `🏠 Posizione` guida in sequenza casa, stanza e dettaglio; la modifica di un oggetto esistente continua invece a usare `🚚 Sposta oggetto` per casa/stanza, mantenendo espliciti gli spostamenti;
+- documentazione del punto attuale e della roadmap futura aggiornata, incluse le
+  decisioni su storico globale/individuale, contenitori, documenti, garanzie,
+  promemoria, tag, ricerca globale, manutenzioni, costi, prestiti, QR, archivio,
+  registro acquisti e dashboard.
+
+### Verifiche da eseguire prima della chiusura
+
+1. `cargo fmt --all -- --check`;
+2. `cargo check --locked`;
+3. `cargo test --locked`;
+4. `cargo clippy --all-targets --locked -- -D warnings`;
+5. test runtime su due case e più stanze;
+6. rinomina casa/stanza;
+7. assegnazione oggetto a casa, stanza e spostamento fra case;
+8. filtro e ricerca per casa/stanza;
+9. rimozione del luogo;
+10. eliminazione stanza con oggetto collegato, verificando che l'oggetto resti
+    nella casa;
+11. eliminazione casa con oggetto collegato, verificando che l'oggetto resti
+    senza luogo;
+12. persistenza dopo riavvio;
+13. Pull Request e CI GitHub Actions verdi.
+
+### Prossimo passo previsto
+
+Dopo la chiusura del 6A: **Step 6B — storico globale + storico individuale**.
+Lo storico dovrà registrare eventi strutturati con data/ora, valori prima/dopo e
+filtri per modulo, casa, stanza, periodo e operazione.
+
 ## Step 5C — Modifica ed eliminazione oggetti — 2026-08-15
 
 ### Stato precedente
@@ -37,26 +117,22 @@ notifica automatica di avvio e il ritorno al menu da `/status`.
 - documentata separatamente la specifica in
   `docs/moduli/modifica-eliminazione.md`.
 
-### Da verificare prima della chiusura
+### Verifiche di chiusura
 
-1. `cargo fmt --all -- --check`;
-2. `cargo check --locked`;
-3. `cargo test --locked`;
-4. `cargo clippy --all-targets --locked -- -D warnings`;
-5. modifica reale di nome e almeno un dettaglio sul database di test;
-6. `/salta` su un valore esistente e `/rimuovi` su un campo opzionale;
-7. annullamento di una modifica senza persistenza;
-8. eliminazione annullata dalla schermata di conferma;
-9. eliminazione confermata di un oggetto di test con almeno una foto, verificando
-   scomparsa da SQLite e rimozione della directory media;
-10. persistenza delle modifiche dopo riavvio;
-11. Pull Request e CI GitHub Actions verdi prima del merge su `main`.
+- controlli Rust e Clippy superati;
+- modifica reale verificata sul Galaxy S9 senza duplicare l'oggetto;
+- `/salta` e `/rimuovi` verificati;
+- annullamento contestuale verificato: dalla modifica si torna alla scheda dello
+  stesso oggetto, dalla nuova creazione al menu Oggetti;
+- eliminazione con conferma, cascade SQLite e rimozione dei media locali
+  verificate;
+- Pull Request mergiata su `main`;
+- CI GitHub Actions del merge verde.
 
-### Prossimo passo previsto
+### Stato finale
 
-Dopo la chiusura del 5C si rivaluta la sequenza fra documenti/tag,
-garanzie/promemoria e il futuro Step 6 luoghi/multi-abitazione. L'architettura
-case/stanze resta **da confermare** prima di introdurre una migration.
+**Step 5C chiuso e verificato.** Il passo successivo approvato è Step 6A — case,
+stanze e posizione strutturata.
 
 ## Step 5B — Foto oggetti e navigazione di avvio — 2026-08-15
 

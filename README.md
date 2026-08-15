@@ -17,77 +17,66 @@ Prima di modificare il progetto, leggere nell'ordine:
 6. **[docs/moduli/oggetti.md](./docs/moduli/oggetti.md)** — specifica del modulo Oggetti;
 7. **[docs/moduli/foto.md](./docs/moduli/foto.md)** — specifica Step 5B;
 8. **[docs/moduli/modifica-eliminazione.md](./docs/moduli/modifica-eliminazione.md)** — specifica Step 5C;
-9. **[docs/ROADMAP.md](./docs/ROADMAP.md)** — requisiti futuri e decisioni ancora da confermare.
+9. **[docs/moduli/luoghi.md](./docs/moduli/luoghi.md)** — specifica Step 6A;
+10. **[docs/ROADMAP.md](./docs/ROADMAP.md)** — sequenza approvata e future implementazioni.
 
 ## Stato del progetto
 
 - [x] Step 1 — Scheletro del progetto
 - [x] Step 2 — Schema dati core
 - [x] Step 3 — Backend Telegram + whitelist, verificato sul Galaxy S9
-- [x] Step 3.1 — Handoff, workflow Git, CI e Dependabot, verificato con
-  GitHub Actions
-- [x] Step 4 — SQLite operativo + migration automatiche + `/status`, verificato sul Galaxy S9
-- [ ] Step 5 — Modulo oggetti
-  - [x] Step 5A — anagrafica, pulsanti + comandi, creazione, elenco, ricerca e scheda
-  - [x] Step 5B — foto locali degli oggetti + navigazione di avvio/status
-  - [ ] Step 5C — modifica ed eliminazione degli oggetti gia' salvati (implementazione in test)
+- [x] Step 3.1 — Handoff, workflow Git, CI e Dependabot
+- [x] Step 4 — SQLite operativo + migration automatiche + `/status`
+- [x] Step 5 — Modulo Oggetti
+  - [x] Step 5A — anagrafica, creazione, elenco, ricerca e scheda
+  - [x] Step 5B — foto locali + navigazione di avvio/status
+  - [x] Step 5C — modifica ed eliminazione sicura
+- [ ] Step 6 — Luoghi e funzioni trasversali
+  - [ ] **Step 6A — case, stanze e posizione strutturata (corrente)**
+  - [ ] Step 6B — storico globale + individuale
+  - [ ] Step 6C — contenitori e sotto-posizioni
+- [ ] Step 7 — documenti/garanzie, promemoria/scadenze, tag/ricerca globale
 - [ ] Modulo vestiti
 - [ ] Modulo veicoli
 - [ ] Modulo ricette
 
 ### Ultimo step funzionale verificato
 
-Lo **Step 5B — Foto degli oggetti è chiuso e verificato**. È stato integrato in
-`main` con CI GitHub Actions verde. Sul Galaxy S9 sono stati verificati:
-
-1. `cargo fmt --all -- --check`, `cargo check --locked`, 11 test automatici e
-   Clippy con `-D warnings`;
-2. messaggio automatico `🟢 Gestionale Casa è online` con menu principale;
-3. ritorno al menu principale da `/status` e da Stato sistema;
-4. caricamento di due foto sullo stesso oggetto, con ruoli `principale` e
-   `galleria`;
-5. presenza reale dei file in `data/media/oggetti/<id>/`;
-6. visualizzazione delle foto dal file locale e persistenza dopo riavvio;
-7. pulizia dei file di test prima dell'uso sul database reale;
-8. `scripts/backup.sh` eseguibile e predisposto a includere `data/media`.
+Lo **Step 5C — Modifica ed eliminazione oggetti è chiuso e verificato**. È
+stato mergiato su `main` con CI GitHub Actions verde. Sul Galaxy S9 sono stati
+verificati modifica senza duplicati, `/salta`, `/rimuovi`, annullamento
+contestuale, eliminazione con conferma, cascade SQLite e rimozione dei media
+locali.
 
 Il warning di compatibilità futura relativo a `proc-macro-error2 v2.0.1` non ha
 bloccato build o test e resta una nota da rivalutare durante futuri aggiornamenti.
 
-### Step 3.1 verificato
-
-Lo **Step 3.1** non aggiunge funzioni al gestionale. Rende il repository più
-facile da mantenere e consegnare ad altri attraverso:
-
-- `docs/HANDOFF.md`;
-- workflow Git esplicito PC ↔ GitHub ↔ Galaxy S9;
-- CI GitHub Actions su Rust stable per formattazione, check, test e Clippy;
-- Dependabot settimanale per Cargo e GitHub Actions, senza auto-merge.
-
-La prima esecuzione della CI ha evidenziato due problemi di qualità/configurazione:
-formattazione Rust non ancora applicata e un controllo MSRV 1.88 troppo rigido per
-questo progetto. Dopo `cargo fmt` sul Galaxy S9 e la semplificazione della CI su
-Rust stable, una nuova esecuzione GitHub Actions ha completato con esito positivo
-`fmt`, `check`, `test` e `clippy`. Lo **Step 3.1 è quindi chiuso e verificato**.
-
 ### Passo corrente
 
-Gli **Step 5A e 5B sono chiusi**. È in sviluppo lo **Step 5C — Modifica ed
-eliminazione degli oggetti già salvati**. L'implementazione di test aggiunge:
+È in sviluppo lo **Step 6A — Case, stanze e posizione strutturata**. La scelta
+architetturale è stata approvata e usa tre elementi:
 
-- pulsanti `✏️ Modifica` e `🗑 Elimina` nella scheda oggetto;
-- comandi equivalenti `/oggetto_modifica <id>` e `/oggetto_elimina <id>`;
-- modifica del nome e di tutti i dettagli già supportati;
-- `/salta` per mantenere il valore corrente e `/rimuovi` per cancellare il campo
-  aperto;
-- salvataggio atomico delle modifiche senza creare duplicati;
-- eliminazione solo dopo una conferma esplicita e irreversibile;
-- cascade SQLite dei dati collegati e rimozione della directory locale
-  `data/media/oggetti/<id>/`;
-- nessuna nuova migration: lo schema esistente è sufficiente.
+```text
+abitazioni
+   └── stanze
 
-Lo Step 5C non va considerato stabile finché non supera test automatici, test
-runtime sul Galaxy S9 e CI della Pull Request.
+items ── item_luogo ──> abitazione + stanza opzionale
+```
+
+Obiettivi dello step:
+
+- più case nello stesso gestionale;
+- stanze riconosciute e legate alla propria casa;
+- oggetti assegnabili direttamente a una casa o a una stanza;
+- spostamento guidato;
+- filtri per casa/stanza;
+- ricerca anche per nome casa e stanza;
+- mantenimento di `oggetti.posizione` come dettaglio libero, senza perdere dati
+  già presenti.
+
+La specifica è in `docs/moduli/luoghi.md`. Lo Step 6A non va considerato chiuso
+finché migration, test automatici, test runtime sul Galaxy S9 e CI della Pull
+Request non sono tutti verdi.
 
 ## Fonte ufficiale e workflow corrente
 
@@ -166,21 +155,23 @@ vanno salvati nel repository IP locali, password o altri segreti.
 L'accesso da reti esterne resta futuro: la soluzione prevista è
 **Tailscale + OpenSSH Termux**, senza port forwarding pubblico della porta SSH.
 
-## Requisito futuro: più case e stanze
+## Evoluzione funzionale già approvata
 
-Il gestionale dovrà supportare più abitazioni separate e permettere sia viste
-filtrate sia ricerche combinate. In particolare sono requisiti già registrati:
+Dopo lo Step 6A la roadmap prevede funzioni trasversali che dovranno essere
+riusate dai moduli futuri invece di essere duplicate:
 
-- più case/abitazioni nello stesso gestionale;
-- stanze appartenenti a una casa e riconosciute dal sistema;
-- assegnazione e spostamento di un oggetto scegliendo una stanza registrata;
-- elenco per casa e per stanza;
-- ricerca limitata a una casa/stanza oppure estesa a tutte le case.
+- **Step 6B** — storico globale dell'account + storico individuale di ogni
+  entità, con data/ora, prima/dopo e filtri per modulo, casa, stanza, periodo e
+  tipo di operazione;
+- **Step 6C** — contenitori e sotto-posizioni strutturate;
+- **Step 7A** — documenti e garanzie;
+- **Step 7B** — promemoria e scadenze;
+- **Step 7C** — tag e ricerca globale.
 
-La struttura dati definitiva non è ancora approvata. L'ipotesi preferita è un
-sistema gerarchico di **luoghi** (casa -> stanza -> eventuale sotto-posizione),
-riutilizzabile anche dagli altri moduli. Verrà proposta e confermata prima
-dell'implementazione.
+Sono inoltre approvate come direzioni future: manutenzioni, costi e valore,
+prestiti, QR code, archivio per elementi venduti/regalati/buttati/persi,
+registro acquisti e dashboard/statistiche. La descrizione completa e l'ordine
+di sviluppo sono mantenuti in `docs/ROADMAP.md`.
 
 ## Requisiti
 
@@ -272,6 +263,7 @@ gestionale-casa/
 │   └── modules/
 │       ├── foto.rs             # foto locali collegate agli items
 │       ├── oggetti.rs
+│       ├── luoghi.rs
 │       ├── vestiti.rs
 │       ├── veicoli.rs
 │       └── ricette.rs
@@ -280,6 +272,7 @@ gestionale-casa/
 ├── docs/
 │   ├── HANDOFF.md           # istruzioni complete per continuare
 │   ├── schema-core.md
+│   ├── ROADMAP.md
 │   └── moduli/
 └── data/                    # database e file locali, NON versionati
 ```

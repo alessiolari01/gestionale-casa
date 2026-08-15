@@ -110,4 +110,4 @@ directory locale `data/media/oggetti/<id>/`.
 - cambio manuale della foto principale;
 - cancellazione o riordinamento foto;
 - documenti PDF/scontrini trattati come file generici;
-- luoghi multi-casa/stanze (Step 6, architettura ancora da confermare).
+- luoghi multi-casa/stanze: implementati nello Step 6A e documentati in `docs/moduli/luoghi.md`.

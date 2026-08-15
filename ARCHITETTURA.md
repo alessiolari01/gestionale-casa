@@ -92,17 +92,22 @@ noto per una gestione aggressiva dei processi in background):
 - L'ottimizzazione batteria per Termux va disattivata nelle impostazioni
   Android.
 
-### 2.6 Tabella `items` centrale per foto, tag e promemoria
+### 2.6 Tabella `items` centrale per funzioni condivise
 
-**Scelta**: ogni riga di ogni modulo (un vestito, un veicolo, una ricetta,
-un oggetto) è anche una riga in una tabella `items` comune. Foto, tag e
-promemoria fanno riferimento sempre a `items`, mai direttamente alle
-tabelle dei singoli moduli.
+**Scelta**: ogni riga dei moduli che rappresentano beni/elementi gestiti
+(un vestito, un veicolo, una ricetta, un oggetto) è anche una riga in una
+tabella `items` comune. Foto, tag e promemoria fanno riferimento a `items`.
+Dallo Step 6A anche la posizione strutturata usa una relazione condivisa
+`item_luogo`.
 
-**Perché**: senza questa tabella, foto/tag/promemoria andrebbero
-implementati e interrogati separatamente per ciascuno dei quattro moduli.
-Con `items` come punto comune, quella logica si scrive una volta sola.
-Dettagli completi in `docs/schema-core.md`.
+**Perché**: senza questo punto comune, foto, tag, promemoria, luoghi e futuro
+storico dovrebbero essere implementati separatamente per ciascun modulo. Il
+principio architetturale è invece progettare una volta le funzioni trasversali
+e riusarle quando il dominio lo consente. Case e stanze restano entità di
+sistema con tabelle proprie e non sono forzate dentro `items`.
+
+Dettagli dello schema core in `docs/schema-core.md`; luoghi in
+`docs/moduli/luoghi.md`.
 
 
 ### 2.7 GitHub `main` come fonte ufficiale e ruoli dei dispositivi
@@ -183,6 +188,7 @@ gestionale-casa/
 │   ├── auth.rs                # whitelist chat_id autorizzati
 │   └── modules/
 │       ├── oggetti.rs
+│       ├── luoghi.rs
 │       ├── vestiti.rs
 │       ├── veicoli.rs
 │       └── ricette.rs
@@ -246,68 +252,69 @@ Il salvataggio dell'oggetto avviene in una singola transazione che crea prima
 Per importi monetari il progetto usa **centesimi interi**, non valori `REAL`,
 evitando errori di rappresentazione floating point.
 
-## 5.2 Luoghi e multi-abitazione — requisito futuro
+## 5.2 Luoghi e multi-abitazione — Step 6A
 
-La posizione testuale di Step 5A è volutamente semplice e temporanea. Il sistema
-dovrà in futuro trattare i luoghi come entità riconosciute, non come semplici
-stringhe. I requisiti confermati sono:
+La posizione non è più modellata soltanto come testo libero. Lo Step 6A adotta
+una struttura esplicita e condivisa:
 
-- più abitazioni nello stesso gestionale;
-- stanze appartenenti a una specifica abitazione;
-- oggetti assegnabili e spostabili scegliendo un luogo registrato;
-- elenchi filtrabili per abitazione e stanza;
-- ricerca globale su tutte le abitazioni oppure limitata a un singolo ramo.
+```text
+abitazioni
+└── stanze
 
-**Proposta architetturale da confermare prima di implementare:** una tabella
-gerarchica `luoghi`, con `parent_id` e un tipo (almeno `casa` e `stanza`). La
-struttura permetterebbe in seguito anche sotto-posizioni opzionali come armadio,
-scaffale o box senza dover ridisegnare lo schema. Gli oggetti referenzierebbero
-un `luogo_id`, mantenendo eventualmente un piccolo dettaglio libero per casi
-come "scaffale 2".
+items ── item_luogo ──> abitazione + stanza opzionale
+```
 
-Questa è una proposta, non una decisione definitiva: va approvata prima della
-migration relativa.
+Decisioni:
+
+- più abitazioni nello stesso account;
+- ogni stanza appartiene a una sola abitazione;
+- un item può essere senza luogo, nella sola casa oppure in una stanza;
+- `item_luogo` è condiviso tra i moduli basati su `items`;
+- una stanza selezionata deve appartenere alla casa selezionata: il vincolo è
+  protetto anche a livello SQLite;
+- eliminare una stanza non elimina gli item: restano nella casa senza stanza;
+- eliminare una casa non elimina gli item: scompare solo la loro relazione di
+  luogo;
+- il campo `oggetti.posizione` resta come dettaglio libero, per esempio
+  `scaffale 2` o `cassetto alto`;
+- le vecchie stringhe di posizione non vengono interpretate o migrate
+  automaticamente, per non trasformare dati reali sulla base di supposizioni.
+
+La scelta `abitazioni` + `stanze` è intenzionalmente più esplicita di una tabella
+gerarchica generica: oggi sono certi due livelli e i vincoli risultano più
+semplici e leggibili. Lo Step 6C valuterà contenitori e sotto-posizioni senza
+obbligare il 6A a decidere già una gerarchia arbitraria.
+
+Dettagli in `docs/moduli/luoghi.md`.
 
 ## 6. Roadmap di sviluppo
 
-Prima dei moduli funzionali viene completata e verificata l'infrastruttura
-minima comune. Ogni modulo verrà poi documentato in dettaglio in
-`docs/moduli/<nome>.md` prima di essere implementato.
+- ~~**Step 1 — Scheletro iniziale**~~ — chiuso.
+- ~~**Step 2 — Schema dati core**~~ — chiuso.
+- ~~**Step 3 — Backend Telegram + whitelist**~~ — chiuso e verificato.
+- ~~**Step 3.1 — Handoff, Git e CI**~~ — chiuso e verificato.
+- ~~**Step 4 — SQLite runtime + migration + `/status`**~~ — chiuso e verificato.
+- ~~**Step 5A — Oggetti generici**~~ — chiuso e verificato.
+- ~~**Step 5B — Foto oggetti**~~ — chiuso e verificato.
+- ~~**Step 5C — Modifica/eliminazione**~~ — chiuso, mergiato su `main` con CI verde.
+- **Step 6A — Case, stanze e posizione strutturata** — corrente.
+- **Step 6B — Storico globale + individuale** — eventi strutturati con data/ora,
+  prima/dopo e filtri per modulo, casa, stanza, periodo e operazione.
+- **Step 6C — Contenitori e sotto-posizioni**.
+- **Step 7A — Documenti e garanzie**.
+- **Step 7B — Promemoria e scadenze**.
+- **Step 7C — Tag e ricerca globale**.
+- **Step 8 — Primo nuovo modulo applicativo**, da scegliere fra Veicoli e
+  Vestiti; Ricette resta pianificato successivamente.
 
-- ~~**Step 1 — Scheletro iniziale**~~ — fatto.
-- ~~**Step 2 — Schema dati core**~~ — fatto, vedi `docs/schema-core.md` e
-  `migrations/20260812120000_schema_core.sql`.
-- ~~**Step 3 — Base backend Telegram + whitelist**~~ — implementato e
-  verificato sul Galaxy S9: test automatici, `/start`, `/ping` e whitelist
-  end-to-end superati.
-- ~~**Step 3.1 — Handoff, workflow Git e automazioni GitHub**~~ — chiuso e
-  verificato con CI GitHub Actions verde (`fmt`, `check`, `test`, `clippy`).
-- ~~**Step 4 — Connessione SQLite + migrazioni automatiche + `/status`**~~ —
-  chiuso e verificato sul Galaxy S9: database creato realmente, migration
-  applicata, `/status` operativo e secondo avvio sullo stesso DB superato.
-- **Step 5 — Oggetti generici** — in sviluppo.
-  - ~~**Step 5A**~~ — chiuso e verificato sul Galaxy S9 con CI verde. Include
-    tabella `oggetti`, menu con inline keyboard e comandi equivalenti, creazione
-    guidata, revisione sicura della bozza, elenco, ricerca e scheda singola.
-  - ~~**Step 5B**~~ — foto degli oggetti usando la tabella core `foto`, chiuso e
-    verificato sul Galaxy S9 con CI verde.
-  - **Step 5C** — modifica ed eliminazione sicura degli oggetti già salvati, in
-    implementazione/test.
-  - **Step 5D** — documenti e tag.
-  - **Step 5E** — garanzie e promemoria.
-  - **Step 5F** — prestiti e storico.
-- **Step 6 — Luoghi e multi-abitazione** — requisito futuro trasversale da
-  progettare e confermare prima dell'implementazione: più case, stanze
-  riconosciute, spostamento degli oggetti tra stanze, viste per casa/stanza e
-  ricerca combinata su tutte le abitazioni.
-- **Vestiti** — capi, materiali, taglie, stagionalità, outfit.
-- **Veicoli** — anagrafica veicoli, scadenze manutenzione, storico interventi.
-- **Ricette** — ricette con dosi scalabili, pianificazione pasti e aggregazione
-  della lista della spesa.
+Funzioni già approvate come direzioni future: manutenzioni, costi/valore,
+prestiti, QR code, archivio degli elementi non più attivi, registro acquisti e
+dashboard/statistiche. La specifica e l'ordine aggiornato sono mantenuti in
+`docs/ROADMAP.md`.
 
-La cronologia dettagliata di ogni step, incluse verifiche e differenze rispetto
-allo stato precedente, è mantenuta in `CHANGELOG.md`. Il workflow operativo e
-le istruzioni per la consegna sono in `docs/HANDOFF.md`.
+Principio da preservare: foto, documenti, tag, promemoria, luoghi e storico
+vanno progettati come servizi trasversali quando possibile, senza creare una
+versione separata della stessa funzione per ogni modulo.
 
 ## 7. Estensioni future (non nel perimetro attuale)
 
@@ -321,6 +328,22 @@ le istruzioni per la consegna sono in `docs/HANDOFF.md`.
   e senza port forwarding pubblico. Deve includere test da reti differenti,
   gestione del riavvio e comportamento Android in background.
 
+
+## Case, stanze e posizione strutturata — Step 6A
+
+Lo Step 6A aggiunge la migration `20260815183000_luoghi.sql` e il modulo
+`src/modules/luoghi.rs`. La relazione fisica non viene messa direttamente nella
+tabella `oggetti`: `item_luogo` punta a `items`, così lo stesso meccanismo potrà
+essere riutilizzato in futuro per Vestiti e Veicoli.
+
+Le cancellazioni dei luoghi sono progettate per non cancellare i beni. La
+semantica è volutamente diversa dalla cancellazione di un oggetto:
+
+- stanza eliminata → item ancora nella casa, stanza azzerata;
+- casa eliminata → item ancora esistente, relazione di luogo rimossa.
+
+La scheda oggetto permette di scegliere e cambiare casa/stanza. Elenchi e
+ricerca espongono il luogo strutturato insieme al dettaglio libero.
 
 ## Modifica ed eliminazione degli oggetti — Step 5C
 
