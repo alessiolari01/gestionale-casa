@@ -88,21 +88,26 @@ Per ridurre l'uso manuale di `/start`:
 - sanitizzazione/normalizzazione dell'estensione del file;
 - prima foto `principale` e seconda `galleria` su SQLite in memoria.
 
-## Test runtime richiesti prima della chiusura
+## Verifiche completate
+
+Lo Step 5B è stato verificato sul Galaxy S9 e integrato in `main` con CI verde:
 
 - ricezione della notifica online all'avvio;
 - ritorno al menu da `/status`;
-- caricamento di almeno due foto sullo stesso oggetto;
+- caricamento di due foto sullo stesso oggetto;
 - verifica dei file reali in `data/media/oggetti/<id>/`;
+- ruoli `principale` e `galleria`;
 - visualizzazione delle foto dal bot;
 - persistenza dopo riavvio;
-- backup che contenga anche la directory media;
-- `fmt`, `check`, `test`, `clippy` e CI GitHub Actions verdi.
+- 11 test automatici complessivi e Clippy con `-D warnings`.
+
+Dallo Step 5C, quando un oggetto viene eliminato definitivamente, le righe
+`foto` vengono eliminate dal cascade SQLite e il backend rimuove anche la
+directory locale `data/media/oggetti/<id>/`.
 
 ## Fuori perimetro Step 5B
 
 - cambio manuale della foto principale;
 - cancellazione o riordinamento foto;
 - documenti PDF/scontrini trattati come file generici;
-- modifica ed eliminazione degli oggetti già salvati (Step 5C);
 - luoghi multi-casa/stanze (Step 6, architettura ancora da confermare).

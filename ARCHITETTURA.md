@@ -286,12 +286,13 @@ minima comune. Ogni modulo verrà poi documentato in dettaglio in
   chiuso e verificato sul Galaxy S9: database creato realmente, migration
   applicata, `/status` operativo e secondo avvio sullo stesso DB superato.
 - **Step 5 — Oggetti generici** — in sviluppo.
-  - ~~**Step 5A**~~ — verifiche runtime completate sul Galaxy S9; si considera
-    chiuso quando questa revisione è su `main` con CI verde. Include tabella
-    `oggetti`, menu con inline keyboard e comandi equivalenti, creazione guidata,
-    revisione sicura della bozza, elenco, ricerca e scheda singola.
-  - **Step 5B** — foto degli oggetti usando la tabella core `foto`.
-  - **Step 5C** — modifica ed eliminazione sicura degli oggetti già salvati.
+  - ~~**Step 5A**~~ — chiuso e verificato sul Galaxy S9 con CI verde. Include
+    tabella `oggetti`, menu con inline keyboard e comandi equivalenti, creazione
+    guidata, revisione sicura della bozza, elenco, ricerca e scheda singola.
+  - ~~**Step 5B**~~ — foto degli oggetti usando la tabella core `foto`, chiuso e
+    verificato sul Galaxy S9 con CI verde.
+  - **Step 5C** — modifica ed eliminazione sicura degli oggetti già salvati, in
+    implementazione/test.
   - **Step 5D** — documenti e tag.
   - **Step 5E** — garanzie e promemoria.
   - **Step 5F** — prestiti e storico.
@@ -320,6 +321,26 @@ le istruzioni per la consegna sono in `docs/HANDOFF.md`.
   e senza port forwarding pubblico. Deve includere test da reti differenti,
   gestione del riavvio e comportamento Android in background.
 
+
+## Modifica ed eliminazione degli oggetti — Step 5C
+
+La modifica riusa lo stesso `ObjectDraft` della creazione ma conserva l'ID
+dell'oggetto esistente. Il database viene aggiornato solo alla conferma finale:
+`items` e `oggetti` sono modificati nella stessa transazione, evitando stati
+parziali e duplicati. I campi opzionali possono essere riportati a `NULL`; il
+nome resta obbligatorio.
+
+L'eliminazione segue invece una strategia a due livelli:
+
+1. conferma esplicita nell'interfaccia Telegram;
+2. `DELETE` della riga `items`, delegando alle foreign key `ON DELETE CASCADE`
+   la pulizia delle relazioni;
+3. dopo il commit SQLite, rimozione della directory media locale dell'item.
+
+Il database viene eliminato prima dei file: se la pulizia del filesystem fallisce
+non si rischia di perdere le immagini lasciando però un item ancora attivo. Il
+backend segnala l'eventuale directory residua per una pulizia manuale. Nessuna
+nuova migration è necessaria nello Step 5C.
 
 ## Gestione file multimediali — Step 5B
 

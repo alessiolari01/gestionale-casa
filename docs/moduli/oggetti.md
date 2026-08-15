@@ -1,4 +1,4 @@
-# Modulo Oggetti generici — Step 5A
+# Modulo Oggetti generici — Step 5A + Step 5C
 
 ## Scopo
 
@@ -10,9 +10,9 @@ Lo Step 5A copre il ciclo minimo completo:
 `Telegram -> Rust -> SQLx -> items + oggetti -> Telegram`
 
 La revisione dei **campi della bozza** prima di `✅ Salva` fa parte dello Step
-5A. La modifica di un **oggetto già salvato**, invece, resta volutamente fuori
-da questo sottostep e sarà aggiunta successivamente. Foto, documenti/tag,
-garanzie/promemoria e prestiti restano anch'essi fuori dal 5A.
+5A. Lo **Step 5C** estende lo stesso pannello agli oggetti già persistiti e
+aggiunge l'eliminazione con conferma. Le foto sono state aggiunte nello Step 5B;
+documenti/tag, garanzie/promemoria e prestiti restano sottostep successivi.
 
 ## Modello dati
 
@@ -59,9 +59,12 @@ logica applicativa.
 | elenco | `📋 Elenco oggetti` | `/oggetti_lista` |
 | ricerca | `🔎 Cerca` | `/oggetto_cerca [testo]` |
 | scheda per ID | pulsante risultato | `/oggetto <id>` |
+| modifica oggetto | `✏️ Modifica` | `/oggetto_modifica <id>` |
+| elimina oggetto | `🗑 Elimina` | `/oggetto_elimina <id>` |
 | foto oggetto | `📷 Foto` | `/foto <id>` |
 | annulla operazione | `❌ Annulla` | `/annulla` |
-| salta campo opzionale | — | `/salta` |
+| mantieni valore corrente | — | `/salta` |
+| rimuovi campo opzionale aperto | — | `/rimuovi` |
 
 `/start` apre il menu principale con Oggetti e Stato sistema; Vestiti, Veicoli
 e Ricette sono gia' rappresentati esteticamente ma marcati come prossimamente.
@@ -80,6 +83,38 @@ e Ricette sono gia' rappresentati esteticamente ma marcati come prossimamente.
 
 Una bozza incompleta vive solo in memoria: se il backend viene riavviato prima
 del salvataggio, la bozza viene persa ma il database resta invariato.
+
+## Modifica di un oggetto salvato — Step 5C
+
+Dalla scheda di un oggetto, `✏️ Modifica` oppure `/oggetto_modifica <id>` carica
+dal database tutti i valori correnti in una bozza di modifica. La bozza conserva
+l'ID originale: `💾 Salva modifiche` esegue `UPDATE` su `items` e `oggetti` nella
+stessa transazione, senza creare un nuovo item.
+
+Regole UX:
+
+- il nome è modificabile ma non può essere rimosso;
+- riaprendo un campo viene mostrato il valore corrente;
+- `/salta` mantiene il valore;
+- `/rimuovi` imposta a `NULL` il campo opzionale attualmente aperto;
+- la condizione ha un pulsante dedicato `🗑 Rimuovi condizione`;
+- `❌ Annulla` e `/annulla` scartano l'intera bozza: il database non viene
+  toccato fino al salvataggio finale; se si stava modificando un oggetto già
+  salvato, il bot torna alla scheda di quell'oggetto, mentre durante una nuova
+  creazione torna al menu Oggetti.
+
+## Eliminazione sicura — Step 5C
+
+`🗑 Elimina` oppure `/oggetto_elimina <id>` non cancella immediatamente. Il bot
+mostra nome e ID e richiede una seconda conferma esplicita. Solo il pulsante
+`🗑 Sì, elimina definitivamente` esegue la cancellazione.
+
+La cancellazione parte dalla riga `items`. Le foreign key con
+`ON DELETE CASCADE` rimuovono i dati collegati, comprese le righe `oggetti` e
+`foto`. Dopo il commit SQLite il backend prova anche a eliminare
+`data/media/oggetti/<id>/`. Se la pulizia del filesystem fallisce, l'oggetto
+resta eliminato dal database ma il bot segnala chiaramente la directory da
+controllare manualmente.
 
 ## Elenco e ricerca
 
@@ -115,8 +150,6 @@ separatamente nello Step 5B.
 
 ## Fuori perimetro
 
-- Step 5B: foto degli oggetti — ora in implementazione/test;
-- Step 5C: modifica ed eliminazione sicura degli oggetti già salvati;
 - Step 5D: documenti e tag;
 - Step 5E: garanzie e promemoria;
 - Step 5F: prestiti e storico;

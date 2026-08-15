@@ -1,5 +1,63 @@
 # Diario di sviluppo
 
+## Step 5C — Modifica ed eliminazione oggetti — 2026-08-15
+
+### Stato precedente
+
+Gli Step 5A e 5B sono chiusi. Lo Step 5B è stato verificato sul Galaxy S9 con
+11 test automatici, Clippy, CI GitHub Actions verde, salvataggio reale delle
+foto sul filesystem e persistenza dopo riavvio. `main` contiene anche la
+notifica automatica di avvio e il ritorno al menu da `/status`.
+
+### Implementato e verificato
+
+- aggiunti `✏️ Modifica` e `🗑 Elimina` alla scheda di ogni oggetto;
+- aggiunti i comandi equivalenti `/oggetto_modifica <id>` e
+  `/oggetto_elimina <id>`;
+- la modifica carica dal database una bozza completa con l'ID dell'oggetto,
+  evitando di creare una nuova riga durante il salvataggio;
+- il nome diventa modificabile dall'apposito pulsante ed è sempre obbligatorio;
+- tutti i dettagli già presenti possono essere sostituiti;
+- `/salta` mantiene il valore corrente e il nuovo `/rimuovi` cancella il campo
+  aperto;
+- reso contestuale `❌ Annulla`/`/annulla`: durante la modifica di un oggetto
+  salvato si torna direttamente alla sua scheda, mentre durante una nuova
+  creazione si torna al menu Oggetti;
+- la condizione può essere rimossa con un pulsante dedicato;
+- `💾 Salva modifiche` aggiorna `items` e `oggetti` nella stessa transazione;
+- l'eliminazione richiede una seconda conferma esplicita prima del `DELETE`;
+- la cancellazione parte da `items`, sfruttando `ON DELETE CASCADE` per
+  `oggetti`, `foto` e le altre relazioni core;
+- dopo il commit della cancellazione viene rimossa anche la directory
+  `data/media/oggetti/<id>/`; un eventuale errore di pulizia filesystem viene
+  segnalato senza nascondere l'avvenuta eliminazione dal database;
+- nessuna nuova migration: lo schema corrente supporta già modifica e delete;
+- aggiunti test per caricamento della bozza di modifica, update senza duplicati
+  e cascade delle foto durante l'eliminazione;
+- documentata separatamente la specifica in
+  `docs/moduli/modifica-eliminazione.md`.
+
+### Da verificare prima della chiusura
+
+1. `cargo fmt --all -- --check`;
+2. `cargo check --locked`;
+3. `cargo test --locked`;
+4. `cargo clippy --all-targets --locked -- -D warnings`;
+5. modifica reale di nome e almeno un dettaglio sul database di test;
+6. `/salta` su un valore esistente e `/rimuovi` su un campo opzionale;
+7. annullamento di una modifica senza persistenza;
+8. eliminazione annullata dalla schermata di conferma;
+9. eliminazione confermata di un oggetto di test con almeno una foto, verificando
+   scomparsa da SQLite e rimozione della directory media;
+10. persistenza delle modifiche dopo riavvio;
+11. Pull Request e CI GitHub Actions verdi prima del merge su `main`.
+
+### Prossimo passo previsto
+
+Dopo la chiusura del 5C si rivaluta la sequenza fra documenti/tag,
+garanzie/promemoria e il futuro Step 6 luoghi/multi-abitazione. L'architettura
+case/stanze resta **da confermare** prima di introdurre una migration.
+
 ## Step 5B — Foto oggetti e navigazione di avvio — 2026-08-15
 
 ### Stato precedente
@@ -30,20 +88,17 @@ secondo avvio ha confermato `Migrazioni applicate: 2`.
 - nessuna nuova migration: viene riusata la tabella `foto` dello schema core;
 - `tokio` abilita la feature `fs` necessaria al salvataggio asincrono dei file.
 
-### Da verificare prima della chiusura
+### Verifiche completate
 
-1. `cargo fmt --all -- --check`;
-2. `cargo check --locked`;
-3. `cargo test --locked`;
-4. `cargo clippy --all-targets --locked -- -D warnings`;
-5. notifica automatica di avvio e menu principale sul Galaxy S9;
-6. pulsante di ritorno al menu da `/status`;
-7. aggiunta di almeno due foto allo stesso oggetto, verificando principale e
-   galleria;
-8. presenza reale dei file sotto `data/media/oggetti/<id>/`;
-9. visualizzazione dopo riavvio;
-10. backup contenente anche `data/media`;
-11. CI GitHub Actions verde prima del merge.
+- `cargo fmt --all -- --check`, `cargo check --locked` e Clippy superati;
+- `cargo test --locked`: 11 test superati, 0 falliti;
+- notifica online e menu automatico verificati sul Galaxy S9;
+- ritorno al menu da `/status` verificato;
+- due foto caricate sullo stesso oggetto con ruoli principale/galleria corretti;
+- file locali verificati sotto `data/media/oggetti/<id>/`;
+- visualizzazione e persistenza dopo riavvio verificate;
+- file di test rimossi prima dell'uso reale;
+- CI della Pull Request e CI su `main` verdi.
 
 ### Prossimo passo previsto
 

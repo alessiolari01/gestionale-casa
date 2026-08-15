@@ -2,7 +2,8 @@
 //!
 //! Step 5B: il file ricevuto da Telegram viene scaricato realmente sul filesystem
 //! locale e registrato nella tabella core `foto`. La prima foto di un oggetto
-//! viene marcata `principale`, le successive `galleria`.
+//! viene marcata `principale`, le successive `galleria`. Lo Step 5C riusa questo
+//! modulo per eliminare anche la directory media quando un oggetto viene rimosso.
 
 use std::{
     collections::HashMap,
@@ -19,6 +20,15 @@ use teloxide::{
 use tokio::fs::File;
 
 const MEDIA_ROOT: &str = "data/media/oggetti";
+
+pub async fn remove_object_media(item_id: i64) -> std::io::Result<()> {
+    let directory = PathBuf::from(MEDIA_ROOT).join(item_id.to_string());
+    match tokio::fs::remove_dir_all(directory).await {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
 
 #[derive(Clone, Default)]
 pub struct PhotoSessionStore {

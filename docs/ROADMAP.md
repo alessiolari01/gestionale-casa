@@ -10,25 +10,21 @@ dell'approvazione.
 - Step 1-4: chiusi.
 - Step 5A — Oggetti generici: **chiuso**, presente su `main`, CI verde e
   verificato anche sul database reale del Galaxy S9.
-- Step 5B — Foto oggetti: implementazione corrente in test.
+- Step 5B — Foto oggetti: **chiuso e verificato** sul Galaxy S9, con CI verde.
+- Step 5C — Modifica/eliminazione: implementazione corrente in test.
 
 ## Sequenza proposta
 
-1. **Step 5B — Foto oggetti**
-   - aggiunta, visualizzazione e gestione foto collegate a `items`;
-   - uso della tabella core `foto`;
-   - salvataggio locale in `data/media/oggetti/<item_id>/`;
-   - prima foto principale, successive galleria;
-   - notifica automatica di avvio e navigazione al menu da `/status`;
-   - nessuna nuova migration: riuso della tabella core `foto`.
-2. **Step 5C — Modifica ed eliminazione oggetti**
-   - modifica di un oggetto già salvato;
-   - conferme esplicite per eliminazioni;
-   - conservazione dell'integrità delle relazioni.
-3. **Step 5D — Documenti e tag**.
-4. **Step 5E — Garanzie e promemoria**.
-5. **Step 5F — Prestiti e storico**.
-6. **Step 6 — Luoghi e multi-abitazione** — requisito trasversale da progettare
+1. **Step 5C — Modifica ed eliminazione oggetti**
+   - modifica di nome e dettagli di un oggetto già salvato;
+   - rimozione esplicita dei valori opzionali;
+   - conferma forte prima delle eliminazioni;
+   - cascade delle relazioni SQLite e pulizia dei file media locali;
+   - nessuna nuova migration.
+2. **Step 5D — Documenti e tag**.
+3. **Step 5E — Garanzie e promemoria**.
+4. **Step 5F — Prestiti e storico**.
+5. **Step 6 — Luoghi e multi-abitazione** — requisito trasversale da progettare
    prima dei moduli successivi che dipendono dalla posizione.
 
 ## Requisito: più case e stanze

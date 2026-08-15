@@ -14,9 +14,10 @@ Prima di modificare il progetto, leggere nell'ordine:
 4. **[docs/HANDOFF.md](./docs/HANDOFF.md)** — consegna completa per chi deve
    continuare il progetto;
 5. **[docs/schema-core.md](./docs/schema-core.md)** — schema dati condiviso;
-6. **[docs/moduli/oggetti.md](./docs/moduli/oggetti.md)** — specifica Step 5A;
+6. **[docs/moduli/oggetti.md](./docs/moduli/oggetti.md)** — specifica del modulo Oggetti;
 7. **[docs/moduli/foto.md](./docs/moduli/foto.md)** — specifica Step 5B;
-8. **[docs/ROADMAP.md](./docs/ROADMAP.md)** — requisiti futuri e decisioni ancora da confermare.
+8. **[docs/moduli/modifica-eliminazione.md](./docs/moduli/modifica-eliminazione.md)** — specifica Step 5C;
+9. **[docs/ROADMAP.md](./docs/ROADMAP.md)** — requisiti futuri e decisioni ancora da confermare.
 
 ## Stato del progetto
 
@@ -28,27 +29,27 @@ Prima di modificare il progetto, leggere nell'ordine:
 - [x] Step 4 — SQLite operativo + migration automatiche + `/status`, verificato sul Galaxy S9
 - [ ] Step 5 — Modulo oggetti
   - [x] Step 5A — anagrafica, pulsanti + comandi, creazione, elenco, ricerca e scheda
-  - [ ] Step 5B — foto degli oggetti (implementazione in test)
-  - [ ] Step 5C — modifica ed eliminazione degli oggetti gia' salvati
+  - [x] Step 5B — foto locali degli oggetti + navigazione di avvio/status
+  - [ ] Step 5C — modifica ed eliminazione degli oggetti gia' salvati (implementazione in test)
 - [ ] Modulo vestiti
 - [ ] Modulo veicoli
 - [ ] Modulo ricette
 
 ### Ultimo step funzionale verificato
 
-Lo **Step 5A — Oggetti generici è chiuso e verificato**. È stato integrato in
-`main`, la CI GitHub Actions è verde e sul Galaxy S9 sono stati verificati:
+Lo **Step 5B — Foto degli oggetti è chiuso e verificato**. È stato integrato in
+`main` con CI GitHub Actions verde. Sul Galaxy S9 sono stati verificati:
 
-1. `cargo fmt --all -- --check`, `cargo check --locked`, `cargo test --locked`
-   e Clippy con `-D warnings`;
-2. 9 test automatici superati;
-3. menu e comandi Telegram, creazione semplice e dettagliata, elenco, ricerca e
-   scheda oggetto;
-4. revisione sicura dei campi già compilati nella bozza;
-5. applicazione della seconda migration anche sul database reale;
-6. `/status` con `Migrazioni applicate: 2`;
-7. persistenza corretta dopo riavvio del backend;
-8. backup del database reale verificato prima dell'upgrade.
+1. `cargo fmt --all -- --check`, `cargo check --locked`, 11 test automatici e
+   Clippy con `-D warnings`;
+2. messaggio automatico `🟢 Gestionale Casa è online` con menu principale;
+3. ritorno al menu principale da `/status` e da Stato sistema;
+4. caricamento di due foto sullo stesso oggetto, con ruoli `principale` e
+   `galleria`;
+5. presenza reale dei file in `data/media/oggetti/<id>/`;
+6. visualizzazione delle foto dal file locale e persistenza dopo riavvio;
+7. pulizia dei file di test prima dell'uso sul database reale;
+8. `scripts/backup.sh` eseguibile e predisposto a includere `data/media`.
 
 Il warning di compatibilità futura relativo a `proc-macro-error2 v2.0.1` non ha
 bloccato build o test e resta una nota da rivalutare durante futuri aggiornamenti.
@@ -71,26 +72,22 @@ Rust stable, una nuova esecuzione GitHub Actions ha completato con esito positiv
 
 ### Passo corrente
 
-Lo **Step 5A — Oggetti generici è chiuso**.
+Gli **Step 5A e 5B sono chiusi**. È in sviluppo lo **Step 5C — Modifica ed
+eliminazione degli oggetti già salvati**. L'implementazione di test aggiunge:
 
-È in sviluppo lo **Step 5B — Foto degli oggetti**. La prima implementazione da
-verificare aggiunge:
+- pulsanti `✏️ Modifica` e `🗑 Elimina` nella scheda oggetto;
+- comandi equivalenti `/oggetto_modifica <id>` e `/oggetto_elimina <id>`;
+- modifica del nome e di tutti i dettagli già supportati;
+- `/salta` per mantenere il valore corrente e `/rimuovi` per cancellare il campo
+  aperto;
+- salvataggio atomico delle modifiche senza creare duplicati;
+- eliminazione solo dopo una conferma esplicita e irreversibile;
+- cascade SQLite dei dati collegati e rimozione della directory locale
+  `data/media/oggetti/<id>/`;
+- nessuna nuova migration: lo schema esistente è sufficiente.
 
-- messaggio automatico quando il bot torna online, già corredato dal menu
-  principale;
-- pulsante `🏠 Menu principale` dopo `/status` e dopo Stato sistema;
-- pulsante `📷 Foto` nella scheda di un oggetto;
-- aggiunta e visualizzazione foto tramite pulsanti e comandi `/foto <id>` e
-  `/foto_aggiungi <id>`;
-- download reale delle immagini Telegram in `data/media/oggetti/<id>/`;
-- registrazione nella tabella core `foto`, senza nuova migration;
-- prima foto marcata `principale`, successive come `galleria`;
-- didascalia Telegram salvata come descrizione;
-- file locali inclusi nei backup perché `scripts/backup.sh` copia `data/media`.
-
-Finché i test runtime e la CI dello Step 5B non sono completati, queste funzioni
-non vanno considerate stabili. La modifica/eliminazione di oggetti già salvati
-resta pianificata nello Step 5C.
+Lo Step 5C non va considerato stabile finché non supera test automatici, test
+runtime sul Galaxy S9 e CI della Pull Request.
 
 ## Fonte ufficiale e workflow corrente
 
