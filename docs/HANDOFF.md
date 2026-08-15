@@ -1,5 +1,23 @@
 # Handoff — Gestionale Casa
 
+## Aggiornamento corrente — Step 5B in test
+
+- `main` contiene Step 5A chiuso e verificato, più la correzione che rende
+  eseguibile `scripts/backup.sh`;
+- lo sviluppo corrente avviene sul branch `step-5b-test`;
+- per piccole iterazioni si preferisce SSH/SCP PC -> Termux, evitando commit
+  usati solo come trasporto;
+- GitHub `main` resta comunque la fonte ufficiale e riceve solo modifiche
+  verificate;
+- Step 5B riusa la tabella core `foto` e salva i file reali in
+  `data/media/oggetti/<item_id>/`;
+- la notifica di avvio e il ritorno al menu da `/status` fanno parte dello stesso
+  step e vanno testati sul dispositivo reale;
+- Step 5C dovrà aggiungere modifica/eliminazione degli oggetti già persistiti;
+- Step 6 dovrà progettare multi-abitazione e stanze, ma nessuna migration va
+  creata prima della conferma dell'architettura dei luoghi.
+
+
 Questo documento serve a consegnare il progetto a una nuova persona o a
 un'altra AI senza richiedere l'accesso alle conversazioni usate durante lo
 sviluppo.

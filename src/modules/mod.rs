@@ -8,6 +8,7 @@
 //! in una sotto-cartella (es. `modules/ricette/`) senza cambiare il resto
 //! della struttura del progetto.
 
+pub mod foto;
 pub mod oggetti;
 pub mod ricette;
 pub mod veicoli;

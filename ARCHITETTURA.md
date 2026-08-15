@@ -319,3 +319,29 @@ le istruzioni per la consegna sono in `docs/HANDOFF.md`.
   test lo confermeranno, su Tailscale + server OpenSSH di Termux con chiavi SSH
   e senza port forwarding pubblico. Deve includere test da reti differenti,
   gestione del riavvio e comportamento Android in background.
+
+
+## Gestione file multimediali — Step 5B
+
+Le foto non vengono affidate esclusivamente alla disponibilità futura dei file
+Telegram. Il backend scarica una copia locale e il database conserva un percorso
+relativo al progetto. Per gli oggetti la struttura scelta è:
+
+```text
+data/media/oggetti/<item_id>/telegram_<message_id>.<estensione>
+```
+
+La tabella core `foto` resta la fonte relazionale (`item_id`, `percorso_file`,
+`ruolo`, `descrizione`). Non viene aggiunta una migration nello Step 5B perché lo
+schema necessario era già stato predisposto nello Step 2. La prima immagine di un
+item assume il ruolo `principale`; le successive `galleria`.
+
+`data/` resta esclusa da Git. I file multimediali sono invece parte del backup
+operativo: `scripts/backup.sh` copia `data/media` insieme al backup consistente
+del database SQLite. Questa scelta rende il gestionale trasferibile in futuro su
+un altro host senza dipendere dai file Telegram.
+
+L'interfaccia Telegram mantiene la regola già adottata nello Step 5A: pulsanti
+inline come percorso principale e comandi testuali equivalenti quando utili.
+Inoltre il backend invia una notifica di avvio alle chat autorizzate e `/status`
+fornisce sempre un pulsante per tornare al menu principale.
