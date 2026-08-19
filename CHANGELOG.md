@@ -1,6 +1,17 @@
 # Diario di sviluppo
 
 
+## Step 6C.1–6C.3A — Contenitori e navigazione dei luoghi — 2026-08-17 → 2026-08-19
+
+- 6C.1 (`cc3ba4c`): backend contenitori gerarchici.
+- 6C.2 (`4c64798`): UI Telegram contenitori; 47/47 test e runtime S9 verificati.
+- 6C.3A: sezione unificata `Case, stanze e contenitori`, elenchi globali, albero, `/luogo_*`, azioni contestuali e `Nuovo oggetto qui` con posizione strutturata precompilata.
+- Spostamento: destinazioni esplicite (`Sposta in Camera`, `Sposta in Casa principale`) al posto di `Livello principale`.
+- Contratto UI: `Indietro` semantico + accesso diretto al menu principale.
+
+6C.3A non introduce migration e deve essere verificato su S9 prima del commit.
+
+
 ## Step 6B — Storico trasversale globale + individuale — 2026-08-15 → 2026-08-16
 
 **Implementazione completata e verificata sul Galaxy S9; PR/CI/merge ancora necessari per la chiusura ufficiale.**

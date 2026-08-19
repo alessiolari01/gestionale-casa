@@ -1,6 +1,15 @@
 # Gestionale Casa
 
 
+## Step 6C — Luoghi gerarchici e navigazione contestuale
+
+Il gestionale tratta **case, stanze e contenitori** come un unico sistema di luoghi. `4c64798` è il checkpoint 6C.2 verificato su Galaxy S9; 6C.3A aggiunge navigazione contestuale, vista ad albero e creazione di un oggetto direttamente dal luogo corrente.
+
+Regola UI: le azioni dipendono dal luogo visualizzato e ogni schermata interna rilevante offre ritorno al livello logico precedente e `🏠 Menu principale`.
+
+Specifiche: `docs/moduli/navigazione-luoghi.md` e `docs/moduli/contenitori.md`.
+
+
 ## Stato Step 6B
 
 Lo **Step 6B — Storico trasversale globale + individuale** è implementato e verificato sul Galaxy S9. Sono disponibili storico globale e individuale, dettaglio prima/dopo, paginazione e filtri combinabili per periodo, modulo, operazione, casa, stanza ed elemento.

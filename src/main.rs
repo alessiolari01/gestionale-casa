@@ -1,7 +1,7 @@
 //! Punto di ingresso del Gestionale Casa.
 //!
-//! Step corrente: Step 6C.2, interfaccia Telegram per contenitori gerarchici
-//! sopra case, stanze e posizione strutturata condivisa.
+//! Step corrente: Step 6C.3A, navigazione contestuale di case, stanze e contenitori
+//! con creazione oggetti direttamente dal luogo corrente.
 
 mod auth;
 mod config;
@@ -259,7 +259,7 @@ async fn handle_callback(
         "menu:soon" => {
             bot.send_message(
                 chat_id,
-                "Questo modulo non è ancora implementato. Per ora sono disponibili 📦 Oggetti, 🏠 Case e stanze e 📦 Contenitori.",
+                "Questo modulo non è ancora implementato. Per ora sono disponibili 📦 Oggetti e 🏠 Case, stanze e contenitori.",
             )
             .await?;
         }
@@ -330,7 +330,7 @@ async fn handle_callback(
 async fn send_online_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
-        "🟢 Gestionale Casa è online.\n\n🏠 Menu principale\nScegli una sezione.\n\nComandi rapidi: /oggetti · /luoghi · /contenitori · /storico · /status · /ping",
+        "🟢 Gestionale Casa è online.\n\n🏠 Menu principale\nScegli una sezione.\n\nComandi rapidi: /oggetti · /luoghi · /struttura · /contenitori · /storico · /status · /ping",
     )
     .reply_markup(modules::oggetti::main_menu_keyboard())
     .await?;
@@ -340,7 +340,7 @@ async fn send_online_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
 async fn send_main_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
-        "🏠 Gestionale Casa\n\nScegli una sezione. I moduli non ancora disponibili sono indicati come prossimamente.\n\nComandi rapidi: /oggetti · /luoghi · /contenitori · /storico · /status · /ping",
+        "🏠 Gestionale Casa\n\nScegli una sezione. I moduli non ancora disponibili sono indicati come prossimamente.\n\nComandi rapidi: /oggetti · /luoghi · /struttura · /contenitori · /storico · /status · /ping",
     )
     .reply_markup(modules::oggetti::main_menu_keyboard())
     .await?;

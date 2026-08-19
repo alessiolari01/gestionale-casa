@@ -1,5 +1,5 @@
-//! Step 6C.1 - backend contenitori e sotto-posizioni.
-//! Nessuna UI Telegram in questo step.
+//! Step 6C.3A - contenitori gerarchici integrati nella navigazione dei luoghi.
+//! La UI consente anche di creare un oggetto direttamente dal contenitore corrente.
 
 use std::{
     collections::HashMap,
@@ -7,7 +7,7 @@ use std::{
 };
 
 use anyhow::{bail, ensure, Result};
-use sqlx::{FromRow, SqliteConnection, SqlitePool};
+use sqlx::{FromRow, Sqlite, SqliteConnection, SqlitePool, Transaction};
 use teloxide::{
     prelude::*,
     types::{InlineKeyboardButton, InlineKeyboardMarkup},
@@ -281,6 +281,37 @@ pub async fn assign_item_to_container(
     Ok(())
 }
 
+pub(crate) async fn insert_item_location_in_container(
+    tx: &mut Transaction<'_, Sqlite>,
+    item_id: i64,
+    container_id: i64,
+) -> Result<()> {
+    let scope = sqlx::query_as::<_, (i64, Option<i64>)>(
+        "SELECT abitazione_id, stanza_id FROM contenitori WHERE id = ?",
+    )
+    .bind(container_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or_else(|| anyhow::anyhow!("contenitore #{container_id} inesistente"))?;
+
+    sqlx::query(
+        "INSERT INTO item_luogo (item_id, abitazione_id, stanza_id, contenitore_id) \
+         VALUES (?, ?, ?, ?) \
+         ON CONFLICT(item_id) DO UPDATE SET \
+             abitazione_id = excluded.abitazione_id, \
+             stanza_id = excluded.stanza_id, \
+             contenitore_id = excluded.contenitore_id",
+    )
+    .bind(item_id)
+    .bind(scope.0)
+    .bind(scope.1)
+    .bind(container_id)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
+
 pub async fn move_container(
     pool: &SqlitePool,
     id: i64,
@@ -496,7 +527,7 @@ fn clean_optional_text(value: Option<&str>) -> Option<String> {
 pub async fn show_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
-        "📦 Contenitori\n\nGestisci armadi, scatole, ripiani e altre sotto-posizioni annidabili.\n\nIn questo step gli oggetti non vengono ancora assegnati ai contenitori: arriverà nel 6C.3.",
+        "📦 Contenitori\n\nGestisci armadi, scatole, ripiani e altre sotto-posizioni annidabili.\n\nPuoi creare un oggetto direttamente dal luogo corrente; la gestione completa degli spostamenti oggetto ↔ contenitore continua nel 6C.3.",
     )
     .reply_markup(containers_menu_keyboard())
     .await?;
@@ -608,6 +639,11 @@ pub async fn handle_callback(
         "c:l" => {
             sessions.clear_chat(raw_chat_id);
             show_home_picker(bot, chat_id, pool, HomePickerMode::List).await?;
+            return Ok(true);
+        }
+        "c:a" => {
+            sessions.clear_chat(raw_chat_id);
+            show_all_containers(bot, chat_id, pool).await?;
             return Ok(true);
         }
         _ => {}
@@ -799,7 +835,10 @@ async fn show_home_picker(
         )
         .reply_markup(InlineKeyboardMarkup::new(vec![
             vec![button("➕ Crea una casa", "loc:home:new")],
-            vec![button("↩️ Case e stanze", "loc:menu")],
+            vec![
+                button("↩️ Case, stanze e contenitori", "loc:menu"),
+                button("🏠 Menu principale", "menu:main"),
+            ],
         ]))
         .await?;
         return Ok(());
@@ -823,7 +862,10 @@ async fn show_home_picker(
             )]
         })
         .collect::<Vec<_>>();
-    rows.push(vec![button("↩️ Contenitori", "c:menu")]);
+    rows.push(vec![
+        button("↩️ Contenitori", "c:menu"),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
 
     bot.send_message(chat_id, title)
         .reply_markup(InlineKeyboardMarkup::new(rows))
@@ -858,6 +900,7 @@ async fn show_scope_picker_for_new(
         )]);
     }
     rows.push(vec![button("↩️ Cambia casa", "c:n")]);
+    rows.push(vec![button("🏠 Menu principale", "menu:main")]);
 
     bot.send_message(
         chat_id,
@@ -883,7 +926,12 @@ async fn ask_container_name(
     } else {
         "➕ Nuovo contenitore\n\nScrivi il nome del contenitore oppure /annulla.".to_string()
     };
-    bot.send_message(chat_id, text).await?;
+    bot.send_message(chat_id, text)
+        .reply_markup(InlineKeyboardMarkup::new(vec![vec![
+            button("↩️ Contenitori", "c:menu"),
+            button("🏠 Menu principale", "menu:main"),
+        ]]))
+        .await?;
     Ok(())
 }
 
@@ -997,6 +1045,62 @@ async fn rename_container_from_input(
     Ok(())
 }
 
+async fn show_all_containers(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> ResponseResult<()> {
+    let containers = sqlx::query_as::<_, ContainerRecord>(
+        "SELECT id, abitazione_id AS home_id, stanza_id AS room_id, \
+                contenitore_padre_id AS parent_id, nome AS name, descrizione AS description \
+         FROM contenitori ORDER BY nome COLLATE NOCASE, id LIMIT 100",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+
+    if containers.is_empty() {
+        bot.send_message(chat_id, "📦 Non ci sono ancora contenitori registrati.")
+            .reply_markup(containers_menu_keyboard())
+            .await?;
+        return Ok(());
+    }
+
+    let mut text = "📦 Elenco contenitori\n\n".to_string();
+    let mut rows = Vec::new();
+    for container in containers.iter().take(40) {
+        let path = container_path(pool, container.id)
+            .await
+            .ok()
+            .flatten()
+            .map(|path| format_container_path(&path))
+            .unwrap_or_else(|| "Percorso non disponibile".to_string());
+        text.push_str(&format!(
+            "#{} · {}\n📍 {}\n/luogo_c{}\n\n",
+            container.id, container.name, path, container.id
+        ));
+        rows.push(vec![button(
+            &format!(
+                "📦 #{} · {}",
+                container.id,
+                truncate_chars(&container.name, 32)
+            ),
+            &format!("c:v:{}", encode_id(container.id)),
+        )]);
+        if text.chars().count() > 3200 {
+            text.push_str(
+                "… elenco testuale abbreviato. Usa i pulsanti o la struttura completa.\n",
+            );
+            break;
+        }
+    }
+    rows.push(vec![
+        button("↩️ Contenitori", "c:menu"),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
+
+    bot.send_message(chat_id, text)
+        .reply_markup(InlineKeyboardMarkup::new(rows))
+        .await?;
+    Ok(())
+}
+
 async fn show_home_scope(
     bot: &Bot,
     chat_id: ChatId,
@@ -1038,10 +1142,21 @@ async fn show_home_scope(
         )]);
     }
     rows.push(vec![button(
-        "➕ Nuovo direttamente nella casa",
+        "➕ Nuovo contenitore nella casa",
         &format!("c:nn:{}:0", encode_id(home_id)),
     )]);
-    rows.push(vec![button("↩️ Cambia casa", "c:l")]);
+    rows.push(vec![button(
+        "🚪 Nuova stanza",
+        &format!("loc:room:new:{home_id}"),
+    )]);
+    rows.push(vec![button(
+        "➕ Nuovo oggetto qui",
+        &format!("oggetti:newat:h:{home_id}"),
+    )]);
+    rows.push(vec![
+        button("↩️ Elenco contenitori", "c:a"),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
 
     bot.send_message(
         chat_id,
@@ -1088,13 +1203,20 @@ async fn show_room_scope(
         })
         .collect::<Vec<_>>();
     rows.push(vec![button(
-        "➕ Nuovo in questa stanza",
+        "➕ Nuovo contenitore nella stanza",
         &format!("c:nn:{}:{}", encode_id(room.home_id), encode_id(room.id)),
     )]);
     rows.push(vec![button(
-        "↩️ Torna alla casa",
-        &format!("c:lh:{}", encode_id(room.home_id)),
+        "➕ Nuovo oggetto qui",
+        &format!("oggetti:newat:r:{}", room.id),
     )]);
+    rows.push(vec![
+        button(
+            "↩️ Torna alla casa",
+            &format!("c:lh:{}", encode_id(room.home_id)),
+        ),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
 
     let empty_note = if roots.is_empty() {
         "\n\nNon ci sono ancora contenitori direttamente in questa stanza."
@@ -1117,7 +1239,7 @@ async fn show_room_scope(
     Ok(())
 }
 
-async fn show_container_detail(
+pub(crate) async fn show_container_detail(
     bot: &Bot,
     chat_id: ChatId,
     pool: &SqlitePool,
@@ -1177,6 +1299,10 @@ async fn show_container_detail(
         "➕ Nuovo contenitore interno",
         &format!("c:nc:{}", encode_id(id)),
     )]);
+    rows.push(vec![button(
+        "➕ Nuovo oggetto qui",
+        &format!("oggetti:newat:c:{id}"),
+    )]);
     rows.push(vec![
         button("✏️ Rinomina", &format!("c:r:{}", encode_id(id))),
         button("🚚 Sposta", &format!("c:m:{}", encode_id(id))),
@@ -1187,20 +1313,29 @@ async fn show_container_detail(
     )]);
 
     if let Some(parent_id) = container.parent_id {
-        rows.push(vec![button(
-            "↩️ Contenitore superiore",
-            &format!("c:v:{}", encode_id(parent_id)),
-        )]);
+        rows.push(vec![
+            button(
+                "↩️ Contenitore superiore",
+                &format!("c:v:{}", encode_id(parent_id)),
+            ),
+            button("🏠 Menu principale", "menu:main"),
+        ]);
     } else if let Some(room_id) = container.room_id {
-        rows.push(vec![button(
-            "↩️ Contenitori della stanza",
-            &format!("c:lr:{}", encode_id(room_id)),
-        )]);
+        rows.push(vec![
+            button(
+                "↩️ Contenitori della stanza",
+                &format!("c:lr:{}", encode_id(room_id)),
+            ),
+            button("🏠 Menu principale", "menu:main"),
+        ]);
     } else {
-        rows.push(vec![button(
-            "↩️ Contenitori della casa",
-            &format!("c:lh:{}", encode_id(container.home_id)),
-        )]);
+        rows.push(vec![
+            button(
+                "↩️ Contenitori della casa",
+                &format!("c:lh:{}", encode_id(container.home_id)),
+            ),
+            button("🏠 Menu principale", "menu:main"),
+        ]);
     }
 
     bot.send_message(
@@ -1238,7 +1373,7 @@ async fn show_delete_confirmation(
     let promotion = if container.parent_id.is_some() {
         "I sottocontenitori e gli oggetti diretti verranno spostati nel contenitore superiore."
     } else {
-        "I sottocontenitori e gli oggetti diretti resteranno nella stessa casa/stanza, al livello principale."
+        "I sottocontenitori e gli oggetti diretti resteranno direttamente nella stessa casa o stanza."
     };
 
     bot.send_message(
@@ -1256,10 +1391,10 @@ async fn show_delete_confirmation(
             "🗑 Sì, elimina contenitore",
             &format!("c:dd:{}", encode_id(id)),
         )],
-        vec![button(
-            "↩️ Annulla",
-            &format!("c:v:{}", encode_id(id)),
-        )],
+        vec![
+            button("↩️ Annulla", &format!("c:v:{}", encode_id(id))),
+            button("🏠 Menu principale", "menu:main"),
+        ],
     ]))
     .await?;
     Ok(())
@@ -1307,10 +1442,13 @@ async fn delete_container_and_report(
                 chat_id,
                 "⚠️ Non riesco a eliminare il contenitore. Se la promozione creasse due contenitori con lo stesso nome allo stesso livello, rinomina prima uno dei due.",
             )
-            .reply_markup(InlineKeyboardMarkup::new(vec![vec![button(
-                "↩️ Torna al contenitore",
-                &format!("c:v:{}", encode_id(id)),
-            )]]))
+            .reply_markup(InlineKeyboardMarkup::new(vec![
+                vec![button(
+                    "↩️ Torna al contenitore",
+                    &format!("c:v:{}", encode_id(id)),
+                )],
+                vec![button("🏠 Menu principale", "menu:main")],
+            ]))
             .await?;
         }
     }
@@ -1340,10 +1478,10 @@ async fn show_move_home_picker(
             )]
         })
         .collect::<Vec<_>>();
-    rows.push(vec![button(
-        "↩️ Annulla",
-        &format!("c:v:{}", encode_id(id)),
-    )]);
+    rows.push(vec![
+        button("↩️ Annulla", &format!("c:v:{}", encode_id(id))),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
 
     bot.send_message(
         chat_id,
@@ -1394,10 +1532,10 @@ async fn show_move_scope_picker(
             ),
         )]);
     }
-    rows.push(vec![button(
-        "↩️ Cambia casa",
-        &format!("c:m:{}", encode_id(id)),
-    )]);
+    rows.push(vec![
+        button("↩️ Cambia casa", &format!("c:m:{}", encode_id(id))),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
 
     bot.send_message(
         chat_id,
@@ -1436,9 +1574,10 @@ async fn show_move_parent_picker(
         .await
         .unwrap_or_default();
     let scope_label = scope_label(pool, home_id, room_id).await;
+    let direct_target_label = direct_scope_move_label(pool, home_id, room_id).await;
 
     let mut rows = vec![vec![button(
-        "📍 Livello principale",
+        &direct_target_label,
         &move_target_callback(id, home_id, room_id, None),
     )]];
     for candidate in candidates.iter().take(30) {
@@ -1451,15 +1590,18 @@ async fn show_move_parent_picker(
             &move_target_callback(id, home_id, room_id, Some(candidate.id)),
         )]);
     }
-    rows.push(vec![button(
-        "↩️ Cambia stanza",
-        &format!("c:mh:{}:{}", encode_id(id), encode_id(home_id)),
-    )]);
+    rows.push(vec![
+        button(
+            "↩️ Cambia stanza",
+            &format!("c:mh:{}:{}", encode_id(id), encode_id(home_id)),
+        ),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
 
     let note = if candidates.is_empty() {
-        "\n\nNon ci sono altri contenitori validi in questa posizione: puoi scegliere solo il livello principale."
+        "\n\nNon ci sono altri contenitori validi qui: puoi spostarlo direttamente nella casa o stanza scelta."
     } else {
-        "\n\nPuoi metterlo al livello principale oppure dentro un altro contenitore."
+        "\n\nPuoi spostarlo direttamente nella casa/stanza scelta oppure dentro un altro contenitore."
     };
 
     bot.send_message(
@@ -1510,10 +1652,13 @@ async fn move_container_and_report(
                 chat_id,
                 "⚠️ Spostamento non riuscito. La destinazione potrebbe creare un ciclo oppure un conflitto di nomi.",
             )
-            .reply_markup(InlineKeyboardMarkup::new(vec![vec![button(
-                "↩️ Torna al contenitore",
-                &format!("c:v:{}", encode_id(id)),
-            )]]))
+            .reply_markup(InlineKeyboardMarkup::new(vec![
+                vec![button(
+                    "↩️ Torna al contenitore",
+                    &format!("c:v:{}", encode_id(id)),
+                )],
+                vec![button("🏠 Menu principale", "menu:main")],
+            ]))
             .await?;
         }
     }
@@ -1651,11 +1796,32 @@ fn format_container_path(path: &ContainerPath) -> String {
     parts.join(" / ")
 }
 
+pub(crate) fn format_path_for_ui(path: &ContainerPath) -> String {
+    format_container_path(path)
+}
+
+pub(crate) fn encode_callback_id(id: i64) -> String {
+    encode_id(id)
+}
+
+async fn direct_scope_move_label(pool: &SqlitePool, home_id: i64, room_id: Option<i64>) -> String {
+    if let Some(room_id) = room_id {
+        if let Ok(Some(room)) = read_ui_room(pool, room_id).await {
+            return format!("📍 Sposta in {}", truncate_chars(&room.name, 36));
+        }
+    }
+    if let Ok(Some(home)) = read_ui_home(pool, home_id).await {
+        return format!("📍 Sposta in {}", truncate_chars(&home.name, 36));
+    }
+    "📍 Sposta qui".to_string()
+}
+
 fn containers_menu_keyboard() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
         vec![button("➕ Nuovo contenitore", "c:n")],
-        vec![button("📋 Elenco contenitori", "c:l")],
-        vec![button("↩️ Case e stanze", "loc:menu")],
+        vec![button("📋 Tutti i contenitori", "c:a")],
+        vec![button("🔎 Sfoglia per casa", "c:l")],
+        vec![button("↩️ Case, stanze e contenitori", "loc:menu")],
         vec![button("🏠 Menu principale", "menu:main")],
     ])
 }

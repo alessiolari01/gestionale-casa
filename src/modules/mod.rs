@@ -8,7 +8,8 @@
 //! in una sotto-cartella (es. `modules/ricette/`) senza cambiare il resto
 //! della struttura del progetto.
 
-// Step 6C.2: UI contenitori attiva; alcune API sono riservate al 6C.3.
+// Step 6C.3A: contenitori integrati nella navigazione dei luoghi e nella creazione oggetti.
+// Alcune API backend restano riservate ai successivi sotto-step 6C.3/6C.4.
 #[allow(dead_code)]
 pub mod contenitori;
 pub mod foto;

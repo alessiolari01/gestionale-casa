@@ -17,3 +17,5 @@ Un file per ciascun modulo, mantenuto insieme all'implementazione, con:
 - `veicoli.md` — futuro;
 - `ricette.md` — futuro.
 - [Storico](storico.md) — storico trasversale, prima/dopo, luoghi e filtri.
+- [Navigazione dei luoghi](navigazione-luoghi.md) — gerarchia, albero, azioni contestuali e regole UI.
+- [Contenitori](contenitori.md) — modello, annidamento, spostamenti e promozione sicura.

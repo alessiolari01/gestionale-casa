@@ -1,8 +1,7 @@
 //! Modulo "oggetti generici".
 //!
-//! Step 6A: agli oggetti gia' completi di CRUD e foto si aggiunge una
-//! posizione strutturata casa/stanza condivisa tramite `item_luogo`. Il campo
-//! `posizione` resta un dettaglio libero (es. scaffale, cassetto, contenitore).
+//! Step 6C.3A: la posizione strutturata puo' includere casa, stanza e contenitore.
+//! Il campo `posizione` resta un dettaglio libero aggiuntivo (es. lato sinistro).
 
 use std::{
     collections::HashMap,
@@ -55,7 +54,10 @@ impl SessionStore {
 
 #[derive(Clone)]
 enum ConversationState {
-    AwaitingObjectName,
+    AwaitingObjectName {
+        preset: Option<DraftLocationPreset>,
+        choose_location_after_name: bool,
+    },
     EditingObject {
         draft: Box<ObjectDraft>,
         field: Option<DraftField>,
@@ -78,6 +80,16 @@ enum DraftField {
     SerialNumber,
 }
 
+#[derive(Debug, Clone)]
+struct DraftLocationPreset {
+    home_id: i64,
+    home_name: String,
+    room_id: Option<i64>,
+    room_name: Option<String>,
+    container_id: Option<i64>,
+    container_path: Option<String>,
+}
+
 #[derive(Debug, Clone, Default)]
 struct ObjectDraft {
     object_id: Option<i64>,
@@ -91,6 +103,8 @@ struct ObjectDraft {
     home_name: Option<String>,
     room_id: Option<i64>,
     room_name: Option<String>,
+    container_id: Option<i64>,
+    container_path: Option<String>,
     purchase_date: Option<String>,
     purchase_price_cents: Option<i64>,
     seller: Option<String>,
@@ -122,6 +136,8 @@ impl ObjectDraft {
             home_name: None,
             room_id: None,
             room_name: None,
+            container_id: None,
+            container_path: None,
             purchase_date: record.purchase_date.clone(),
             purchase_price_cents: record.purchase_price_cents,
             seller: record.seller.clone(),
@@ -210,6 +226,7 @@ struct ObjectRecord {
     notes: Option<String>,
     home_name: Option<String>,
     room_name: Option<String>,
+    container_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -225,7 +242,7 @@ pub fn main_menu_keyboard() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
         vec![button("📜 Storico", "history:global:0")],
         vec![button("📦 Oggetti", "oggetti:menu")],
-        vec![button("🏠 Case e stanze", "loc:menu")],
+        vec![button("🏠 Case, stanze e contenitori", "loc:menu")],
         vec![
             button("👕 Vestiti · prossimamente", "menu:soon"),
             button("🚗 Veicoli · prossimamente", "menu:soon"),
@@ -341,8 +358,14 @@ pub async fn handle_message(
     };
 
     match state {
-        ConversationState::AwaitingObjectName => {
-            if let Some(draft) = ObjectDraft::new(text) {
+        ConversationState::AwaitingObjectName {
+            preset,
+            choose_location_after_name,
+        } => {
+            if let Some(mut draft) = ObjectDraft::new(text) {
+                if let Some(preset) = preset {
+                    apply_location_preset(&mut draft, &preset);
+                }
                 sessions.set(
                     chat_id,
                     ConversationState::EditingObject {
@@ -350,7 +373,11 @@ pub async fn handle_message(
                         field: None,
                     },
                 );
-                send_draft_panel(bot, msg.chat.id, &draft).await?;
+                if choose_location_after_name {
+                    show_new_object_home_picker(bot, msg.chat.id, chat_id, pool, sessions).await?;
+                } else {
+                    send_draft_panel(bot, msg.chat.id, &draft).await?;
+                }
             } else {
                 bot.send_message(
                     msg.chat.id,
@@ -402,6 +429,9 @@ pub async fn handle_callback(
         }
         "oggetti:new" => {
             start_new_object(bot, chat_id, raw_chat_id, sessions, "").await?;
+        }
+        _ if data.starts_with("oggetti:newat:") => {
+            handle_new_object_here_callback(bot, chat_id, pool, sessions, data).await?;
         }
         "oggetti:list:0" => {
             sessions.clear_chat(raw_chat_id);
@@ -629,7 +659,7 @@ async fn cancel_current_operation(
                 chat_id,
                 format!(
                     "↩️ Modifica annullata. Nessuna modifica salvata.\n\n{}",
-                    format_object(&object)
+                    format_object(&object, None)
                 ),
             )
             .reply_markup(object_detail_keyboard(id, object.home_name.is_some()))
@@ -669,7 +699,13 @@ async fn start_new_object(
     name: &str,
 ) -> ResponseResult<()> {
     if name.trim().is_empty() {
-        sessions.set(raw_chat_id, ConversationState::AwaitingObjectName);
+        sessions.set(
+            raw_chat_id,
+            ConversationState::AwaitingObjectName {
+                preset: None,
+                choose_location_after_name: false,
+            },
+        );
         bot.send_message(
             telegram_chat_id,
             "📦 Nuovo oggetto\n\nCome vuoi chiamarlo?\n\nEsempio: Trapano Bosch\n/annulla per uscire.",
@@ -697,6 +733,177 @@ async fn start_new_object(
     }
 
     Ok(())
+}
+
+fn apply_location_preset(draft: &mut ObjectDraft, preset: &DraftLocationPreset) {
+    draft.home_id = Some(preset.home_id);
+    draft.home_name = Some(preset.home_name.clone());
+    draft.room_id = preset.room_id;
+    draft.room_name = preset.room_name.clone();
+    draft.container_id = preset.container_id;
+    draft.container_path = preset.container_path.clone();
+}
+
+async fn handle_new_object_here_callback(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    sessions: &SessionStore,
+    data: &str,
+) -> ResponseResult<()> {
+    const PREFIX: &str = "oggetti:newat:";
+    let Some(rest) = data.strip_prefix(PREFIX) else {
+        return Ok(());
+    };
+
+    if let Some(target) = rest.strip_prefix("confirm:") {
+        if let Some(preset) = load_location_preset(pool, target).await {
+            sessions.set(
+                chat_id.0,
+                ConversationState::AwaitingObjectName {
+                    preset: Some(preset.clone()),
+                    choose_location_after_name: false,
+                },
+            );
+            bot.send_message(
+                chat_id,
+                format!(
+                    "📦 Nuovo oggetto qui\n\n📍 {} ✅\n\nCome vuoi chiamarlo?\n\n/annulla per uscire.",
+                    preset_display_label(&preset)
+                ),
+            )
+            .reply_markup(cancel_keyboard())
+            .await?;
+        } else {
+            bot.send_message(chat_id, "⚠️ La posizione scelta non esiste più.")
+                .reply_markup(crate::modules::luoghi::location_navigation_keyboard())
+                .await?;
+        }
+        return Ok(());
+    }
+
+    if rest.starts_with("change:") {
+        sessions.set(
+            chat_id.0,
+            ConversationState::AwaitingObjectName {
+                preset: None,
+                choose_location_after_name: true,
+            },
+        );
+        bot.send_message(
+            chat_id,
+            "📦 Nuovo oggetto\n\nCome vuoi chiamarlo? Dopo il nome sceglierai un'altra posizione.\n\n/annulla per uscire.",
+        )
+        .reply_markup(cancel_keyboard())
+        .await?;
+        return Ok(());
+    }
+
+    let Some(preset) = load_location_preset(pool, rest).await else {
+        bot.send_message(chat_id, "⚠️ La posizione scelta non esiste più.")
+            .reply_markup(crate::modules::luoghi::location_navigation_keyboard())
+            .await?;
+        return Ok(());
+    };
+
+    let back_callback = match parse_location_target(rest) {
+        Some(('h', id)) => format!("loc:home:{id}"),
+        Some(('r', id)) => format!("loc:room:{id}"),
+        Some(('c', id)) => format!(
+            "c:v:{}",
+            crate::modules::contenitori::encode_callback_id(id)
+        ),
+        _ => "loc:menu".to_string(),
+    };
+
+    bot.send_message(
+        chat_id,
+        format!(
+            "📍 Posizione rilevata\n\n{}\n\nÈ il posto giusto per il nuovo oggetto?",
+            preset_display_label(&preset)
+        ),
+    )
+    .reply_markup(InlineKeyboardMarkup::new(vec![
+        vec![button(
+            "✅ Sì, crea qui",
+            &format!("oggetti:newat:confirm:{rest}"),
+        )],
+        vec![button(
+            "🔄 Scegli un'altra posizione",
+            &format!("oggetti:newat:change:{rest}"),
+        )],
+        vec![
+            button("↩️ Indietro", &back_callback),
+            button("🏠 Menu principale", "menu:main"),
+        ],
+    ]))
+    .await?;
+    Ok(())
+}
+
+fn parse_location_target(value: &str) -> Option<(char, i64)> {
+    let (kind, raw_id) = value.split_once(':')?;
+    let kind = kind.chars().next()?;
+    if !matches!(kind, 'h' | 'r' | 'c') {
+        return None;
+    }
+    let id = raw_id.parse::<i64>().ok().filter(|id| *id > 0)?;
+    Some((kind, id))
+}
+
+async fn load_location_preset(pool: &SqlitePool, target: &str) -> Option<DraftLocationPreset> {
+    let (kind, id) = parse_location_target(target)?;
+    match kind {
+        'h' => {
+            let home = crate::modules::luoghi::home_choice(pool, id).await.ok()??;
+            Some(DraftLocationPreset {
+                home_id: home.id,
+                home_name: home.name,
+                room_id: None,
+                room_name: None,
+                container_id: None,
+                container_path: None,
+            })
+        }
+        'r' => {
+            let room = crate::modules::luoghi::room_choice(pool, id).await.ok()??;
+            Some(DraftLocationPreset {
+                home_id: room.home_id,
+                home_name: room.home_name,
+                room_id: Some(room.id),
+                room_name: Some(room.name),
+                container_id: None,
+                container_path: None,
+            })
+        }
+        'c' => {
+            let container = crate::modules::contenitori::get_container(pool, id)
+                .await
+                .ok()??;
+            let path = crate::modules::contenitori::container_path(pool, id)
+                .await
+                .ok()??;
+            Some(DraftLocationPreset {
+                home_id: container.home_id,
+                home_name: path.home_name.clone(),
+                room_id: container.room_id,
+                room_name: path.room_name.clone(),
+                container_id: Some(container.id),
+                container_path: Some(crate::modules::contenitori::format_path_for_ui(&path)),
+            })
+        }
+        _ => None,
+    }
+}
+
+fn preset_display_label(preset: &DraftLocationPreset) -> String {
+    if let Some(path) = preset.container_path.as_deref() {
+        path.to_string()
+    } else if let Some(room) = preset.room_name.as_deref() {
+        format!("{} / {}", preset.home_name, room)
+    } else {
+        preset.home_name.clone()
+    }
 }
 
 async fn start_edit_object(
@@ -870,6 +1077,8 @@ async fn clear_draft_structured_location_and_ask_detail(
     draft.home_name = None;
     draft.room_id = None;
     draft.room_name = None;
+    draft.container_id = None;
+    draft.container_path = None;
     ask_position_detail_after_location(bot, chat_id, raw_chat_id, sessions, *draft).await
 }
 
@@ -897,6 +1106,8 @@ async fn select_draft_home_only_and_ask_detail(
             draft.home_name = Some(home.name);
             draft.room_id = None;
             draft.room_name = None;
+            draft.container_id = None;
+            draft.container_path = None;
             ask_position_detail_after_location(bot, chat_id, raw_chat_id, sessions, *draft).await?;
         }
         Ok(None) => {
@@ -942,6 +1153,8 @@ async fn select_draft_room_and_ask_detail(
             draft.home_name = Some(room.home_name);
             draft.room_id = Some(room.id);
             draft.room_name = Some(room.name);
+            draft.container_id = None;
+            draft.container_path = None;
             ask_position_detail_after_location(bot, chat_id, raw_chat_id, sessions, *draft).await?;
         }
         Ok(None) => {
@@ -1412,7 +1625,17 @@ pub async fn send_object_detail(
 ) -> ResponseResult<()> {
     match get_object(pool, id).await {
         Ok(Some(object)) => {
-            bot.send_message(chat_id, format_object(&object))
+            let container_path = match object.container_id {
+                Some(container_id) => {
+                    crate::modules::contenitori::container_path(pool, container_id)
+                        .await
+                        .ok()
+                        .flatten()
+                        .map(|path| crate::modules::contenitori::format_path_for_ui(&path))
+                }
+                None => None,
+            };
+            bot.send_message(chat_id, format_object(&object, container_path.as_deref()))
                 .reply_markup(object_detail_keyboard(id, object.home_name.is_some()))
                 .await?;
         }
@@ -1819,7 +2042,10 @@ async fn create_object(pool: &SqlitePool, draft: &ObjectDraft) -> anyhow::Result
     if draft.room_id.is_some() && draft.home_id.is_none() {
         anyhow::bail!("una stanza non può essere salvata senza la relativa casa");
     }
-    if let Some(home_id) = draft.home_id {
+    if let Some(container_id) = draft.container_id {
+        crate::modules::contenitori::insert_item_location_in_container(&mut tx, id, container_id)
+            .await?;
+    } else if let Some(home_id) = draft.home_id {
         crate::modules::luoghi::insert_item_location(&mut tx, id, home_id, draft.room_id).await?;
     }
 
@@ -1847,10 +2073,8 @@ async fn create_object(pool: &SqlitePool, draft: &ObjectDraft) -> anyhow::Result
     crate::modules::storico::record_field_changes(&mut tx, creation_event, &creation_changes)
         .await?;
 
-    if let Some(home_id) = draft.home_id {
-        let location_after =
-            crate::modules::luoghi::history_location_snapshot(&mut tx, home_id, draft.room_id)
-                .await?;
+    if event_location.abitazione_storico_id.is_some() {
+        let location_after = event_location.clone();
         let location_event = crate::modules::storico::record_event(
             &mut tx,
             &crate::modules::storico::NewHistoryEvent {
@@ -2040,7 +2264,7 @@ async fn get_object(pool: &SqlitePool, id: i64) -> Result<Option<ObjectRecord>, 
             o.prezzo_acquisto_centesimi AS purchase_price_cents, \
             o.venditore AS seller, o.valore_stimato_centesimi AS estimated_value_cents, \
             o.condizione AS condition, o.note AS notes, \
-            a.nome AS home_name, s.nome AS room_name \
+            a.nome AS home_name, s.nome AS room_name, il.contenitore_id AS container_id \
          FROM items i \
          JOIN oggetti o ON o.item_id = i.id \
          LEFT JOIN item_luogo il ON il.item_id = i.id \
@@ -2172,7 +2396,7 @@ fn format_draft(draft: &ObjectDraft) -> String {
     lines.join("\n")
 }
 
-fn format_object(object: &ObjectRecord) -> String {
+fn format_object(object: &ObjectRecord, container_path: Option<&str>) -> String {
     let mut lines = vec![format!("📦 {}", object.name), format!("#{}", object.id)];
 
     if object.brand.is_some() || object.model.is_some() {
@@ -2183,7 +2407,9 @@ fn format_object(object: &ObjectRecord) -> String {
             .join(" — ");
         lines.push(format!("🏷 {brand_model}"));
     }
-    if let Some(home) = &object.home_name {
+    if let Some(path) = container_path {
+        lines.push(format!("📍 {path}"));
+    } else if let Some(home) = &object.home_name {
         if let Some(room) = &object.room_name {
             lines.push(format!("🏠 {home} / 🚪 {room}"));
         } else {
@@ -2297,6 +2523,7 @@ fn draft_keyboard(draft: &ObjectDraft) -> InlineKeyboardMarkup {
         ),
         button("❌ Annulla", "oggetti:draft:cancel"),
     ]);
+    rows.push(vec![button("🏠 Menu principale", "menu:main")]);
     InlineKeyboardMarkup::new(rows)
 }
 
@@ -2317,6 +2544,7 @@ fn new_object_home_picker_keyboard(
         "oggetti:draft:location:skip-home",
     )]);
     rows.push(vec![button("↩️ Torna ai dettagli", "oggetti:draft:back")]);
+    rows.push(vec![button("🏠 Menu principale", "menu:main")]);
     InlineKeyboardMarkup::new(rows)
 }
 
@@ -2340,10 +2568,14 @@ fn new_object_room_picker_keyboard(
     )]);
     rows.push(vec![button("↩️ Cambia casa", "oggetti:draft:location")]);
     rows.push(vec![button("↩️ Torna ai dettagli", "oggetti:draft:back")]);
+    rows.push(vec![button("🏠 Menu principale", "menu:main")]);
     InlineKeyboardMarkup::new(rows)
 }
 
 fn draft_structured_location_label(draft: &ObjectDraft) -> Option<String> {
+    if let Some(path) = draft.container_path.as_deref() {
+        return Some(format!("📍 {path}"));
+    }
     let home = draft.home_name.as_deref()?;
     Some(match draft.room_name.as_deref() {
         Some(room) => format!("🏠 {home} / 🚪 {room}"),
@@ -2374,6 +2606,7 @@ fn condition_keyboard() -> InlineKeyboardMarkup {
             "oggetti:draft:condition:clear",
         )],
         vec![button("⬅️ Dettagli", "oggetti:draft:back")],
+        vec![button("🏠 Menu principale", "menu:main")],
     ])
 }
 
@@ -2387,11 +2620,15 @@ fn other_details_keyboard(draft: &ObjectDraft) -> InlineKeyboardMarkup {
         vec![button(&value, "oggetti:draft:value")],
         vec![button(&serial, "oggetti:draft:serial")],
         vec![button("⬅️ Dettagli", "oggetti:draft:back")],
+        vec![button("🏠 Menu principale", "menu:main")],
     ])
 }
 
 fn cancel_keyboard() -> InlineKeyboardMarkup {
-    InlineKeyboardMarkup::new(vec![vec![button("❌ Annulla", "oggetti:draft:cancel")]])
+    InlineKeyboardMarkup::new(vec![
+        vec![button("❌ Annulla", "oggetti:draft:cancel")],
+        vec![button("🏠 Menu principale", "menu:main")],
+    ])
 }
 
 fn object_detail_keyboard(id: i64, has_structured_location: bool) -> InlineKeyboardMarkup {
@@ -2426,6 +2663,7 @@ fn delete_confirmation_keyboard(id: i64) -> InlineKeyboardMarkup {
             &format!("oggetti:delete:do:{id}"),
         )],
         vec![button("↩️ Annulla", &format!("oggetti:view:{id}"))],
+        vec![button("🏠 Menu principale", "menu:main")],
     ])
 }
 
@@ -2457,6 +2695,7 @@ fn list_keyboard(objects: &[ObjectSummary], page: i64, total_pages: i64) -> Inli
         button("➕ Nuovo", "oggetti:new"),
     ]);
     rows.push(vec![button("📦 Menu oggetti", "oggetti:menu")]);
+    rows.push(vec![button("🏠 Menu principale", "menu:main")]);
     InlineKeyboardMarkup::new(rows)
 }
 
@@ -2471,6 +2710,7 @@ fn search_results_keyboard(objects: &[ObjectSummary]) -> InlineKeyboardMarkup {
         .collect::<Vec<_>>();
     rows.push(vec![button("🔎 Nuova ricerca", "oggetti:search")]);
     rows.push(vec![button("📦 Menu oggetti", "oggetti:menu")]);
+    rows.push(vec![button("🏠 Menu principale", "menu:main")]);
     InlineKeyboardMarkup::new(rows)
 }
 
@@ -2819,6 +3059,7 @@ mod tests {
             notes: None,
             home_name: Some("Casa principale".to_string()),
             room_name: Some("Studio".to_string()),
+            container_id: None,
         };
 
         let draft = ObjectDraft::from_record(&record);
@@ -3163,6 +3404,78 @@ mod tests {
                 Some("Casa storico".to_string()),
                 Some("Garage storico".to_string())
             )
+        );
+    }
+    #[tokio::test]
+    async fn nuovo_oggetto_puo_nascere_direttamente_in_un_contenitore() {
+        let pool = test_pool().await;
+        let home_id = sqlx::query("INSERT INTO abitazioni (nome) VALUES ('Casa principale')")
+            .execute(&pool)
+            .await
+            .expect("casa")
+            .last_insert_rowid();
+        let room_id = sqlx::query("INSERT INTO stanze (abitazione_id, nome) VALUES (?, 'Garage')")
+            .bind(home_id)
+            .execute(&pool)
+            .await
+            .expect("stanza")
+            .last_insert_rowid();
+        let container_id = crate::modules::contenitori::create_container(
+            &pool,
+            home_id,
+            Some(room_id),
+            None,
+            "Armadio",
+            None,
+        )
+        .await
+        .expect("contenitore");
+
+        let mut draft = ObjectDraft::new("Trapano").expect("bozza");
+        draft.home_id = Some(home_id);
+        draft.home_name = Some("Casa principale".to_string());
+        draft.room_id = Some(room_id);
+        draft.room_name = Some("Garage".to_string());
+        draft.container_id = Some(container_id);
+        draft.container_path = Some("Casa principale / Garage / Armadio".to_string());
+
+        let item_id = create_object(&pool, &draft).await.expect("creazione");
+        let location: (i64, Option<i64>, Option<i64>) = sqlx::query_as(
+            "SELECT abitazione_id, stanza_id, contenitore_id FROM item_luogo WHERE item_id = ?",
+        )
+        .bind(item_id)
+        .fetch_one(&pool)
+        .await
+        .expect("luogo");
+        assert_eq!(location, (home_id, Some(room_id), Some(container_id)));
+
+        let object = get_object(&pool, item_id)
+            .await
+            .expect("lettura")
+            .expect("oggetto");
+        assert_eq!(object.container_id, Some(container_id));
+    }
+
+    #[test]
+    fn posizione_contenitore_risulta_completata_nella_bozza() {
+        let mut draft = ObjectDraft::new("Trapano").expect("bozza");
+        draft.home_id = Some(1);
+        draft.home_name = Some("Casa principale".to_string());
+        draft.room_id = Some(2);
+        draft.room_name = Some("Garage".to_string());
+        draft.container_id = Some(3);
+        draft.container_path = Some("Casa principale / Garage / Armadio".to_string());
+
+        assert_eq!(
+            draft_structured_location_label(&draft).as_deref(),
+            Some("📍 Casa principale / Garage / Armadio")
+        );
+        assert_eq!(
+            section_label(
+                "🏠 Posizione",
+                draft.home_id.is_some() || draft.position.is_some()
+            ),
+            "✅ 🏠 Posizione"
         );
     }
 }

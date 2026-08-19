@@ -1,6 +1,23 @@
 # Handoff — Gestionale Casa
 
 
+## Handoff Step 6C — checkpoint 4c64798 e 6C.3A
+
+Branch: `step-6c-test`.
+
+Checkpoint già pushati:
+- `cc3ba4c` — 6C.1 backend contenitori;
+- `4c64798` — 6C.2 UI contenitori, 47/47 test e runtime verificati.
+
+Lavoro corrente: 6C.3A sopra `4c64798`, senza nuove migration.
+
+Requisiti: navigazione unificata case/stanze/contenitori, elenco globale e albero, `/luogo_h/r/c<ID>`, azioni contestuali, `Nuovo oggetto qui`, destinazioni di spostamento esplicite, `Indietro + Menu principale`.
+
+Prima di commit/push: fmt, check, test low-memory S9, Clippy `-D warnings`, diff check e runtime Telegram.
+
+Passi successivi: completare assegnazione/spostamento oggetti tra contenitori (6C.3), poi storico contenitori/percorso (6C.4). Non introdurre reset/cancellazione globale DB.
+
+
 ## Stato corrente — Step 6B pronto per PR
 
 Lo Step 6B è implementato e verificato sul Galaxy S9 sul branch `step-6b-test`. Checkpoint noti: `a28bdf8` (storico trasversale) e `d106678` (UI Telegram), seguiti dal commit 6B.3B dei filtri globali.

@@ -1,9 +1,9 @@
 //! Case, stanze e posizione strutturata degli item.
 //!
-//! Step 6A introduce una gerarchia riutilizzabile da tutti i moduli:
-//! abitazione -> stanza -> dettaglio libero specifico del modulo.
-//! Gli oggetti generici usano `item_luogo` per casa/stanza e mantengono
-//! `oggetti.posizione` come dettaglio libero (es. scaffale o cassetto).
+//! Step 6C.3A unifica la navigazione dei luoghi:
+//! abitazione -> stanza -> contenitori annidabili -> oggetto.
+//! Le azioni Telegram dipendono dal luogo visualizzato e mantengono sempre
+//! una scorciatoia verso il livello precedente e il menu principale.
 
 use std::{
     collections::HashMap,
@@ -81,6 +81,22 @@ struct RoomRecord {
     home_name: String,
 }
 
+#[derive(Debug, Clone, FromRow)]
+struct TreeContainerRecord {
+    id: i64,
+    home_id: i64,
+    room_id: Option<i64>,
+    parent_id: Option<i64>,
+    name: String,
+}
+
+#[derive(Debug, Clone)]
+struct LocationTreeNode {
+    label: String,
+    command: String,
+    children: Vec<LocationTreeNode>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct HomeChoice {
     pub(crate) id: i64,
@@ -115,7 +131,7 @@ struct LocatedObjectSummary {
 pub async fn show_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
-        "🏠 Case, stanze e contenitori\n\nGestisci le abitazioni, le stanze, i contenitori e consulta gli oggetti per luogo.",
+        "🏠 Case, stanze e contenitori\n\nVisualizza, crea e naviga tutti i luoghi del gestionale da un'unica sezione.",
     )
     .reply_markup(locations_menu_keyboard())
     .await?;
@@ -132,6 +148,20 @@ pub async fn handle_message(
     let chat_id = msg.chat.id.0;
 
     if let Some((command, args)) = parse_command(text) {
+        if let Some((kind, id)) = parse_location_command(command) {
+            sessions.clear_chat(chat_id);
+            match kind {
+                'h' => send_home_detail(bot, msg.chat.id, pool, id).await?,
+                'r' => send_room_detail(bot, msg.chat.id, pool, id).await?,
+                'c' => {
+                    crate::modules::contenitori::show_container_detail(bot, msg.chat.id, pool, id)
+                        .await?
+                }
+                _ => {}
+            }
+            return Ok(true);
+        }
+
         match command {
             "/luoghi" | "/case" => {
                 sessions.clear_chat(chat_id);
@@ -153,6 +183,16 @@ pub async fn handle_message(
             "/case_lista" => {
                 sessions.clear_chat(chat_id);
                 send_home_list(bot, msg.chat.id, pool).await?;
+                return Ok(true);
+            }
+            "/stanze_lista" => {
+                sessions.clear_chat(chat_id);
+                send_room_list(bot, msg.chat.id, pool).await?;
+                return Ok(true);
+            }
+            "/struttura" => {
+                sessions.clear_chat(chat_id);
+                send_location_tree(bot, msg.chat.id, pool).await?;
                 return Ok(true);
             }
             "/casa" => {
@@ -391,6 +431,22 @@ pub async fn handle_callback(
             sessions.clear_chat(raw_chat_id);
             show_menu(bot, chat_id).await?;
         }
+        "loc:create" => {
+            sessions.clear_chat(raw_chat_id);
+            show_create_menu(bot, chat_id).await?;
+        }
+        "loc:tree" => {
+            sessions.clear_chat(raw_chat_id);
+            send_location_tree(bot, chat_id, pool).await?;
+        }
+        "loc:room:list" => {
+            sessions.clear_chat(raw_chat_id);
+            send_room_list(bot, chat_id, pool).await?;
+        }
+        "loc:room:new:pick" => {
+            sessions.clear_chat(raw_chat_id);
+            show_home_picker_for_new_room(bot, chat_id, pool).await?;
+        }
         "loc:home:new" => {
             sessions.set(
                 raw_chat_id,
@@ -585,13 +641,139 @@ pub async fn handle_callback(
     Ok(true)
 }
 
+async fn send_location_tree(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> ResponseResult<()> {
+    let homes = list_homes(pool).await.unwrap_or_default();
+    if homes.is_empty() {
+        bot.send_message(chat_id, "🌳 La struttura è vuota: non ci sono ancora case.")
+            .reply_markup(location_navigation_keyboard())
+            .await?;
+        return Ok(());
+    }
+
+    let rooms = sqlx::query_as::<_, RoomRecord>(
+        "SELECT s.id AS id, s.abitazione_id AS home_id, s.nome AS name, a.nome AS home_name \
+         FROM stanze s JOIN abitazioni a ON a.id = s.abitazione_id \
+         ORDER BY s.nome COLLATE NOCASE, s.id",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+    let containers = sqlx::query_as::<_, TreeContainerRecord>(
+        "SELECT id, abitazione_id AS home_id, stanza_id AS room_id, \
+                contenitore_padre_id AS parent_id, nome AS name \
+         FROM contenitori ORDER BY nome COLLATE NOCASE, id",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+
+    let mut text = "🌳 Struttura completa dei luoghi\n\n".to_string();
+    for home in &homes {
+        text.push_str(&format!("🏠 {}  /luogo_h{}\n", home.name, home.id));
+        let nodes = build_home_nodes(home.id, &rooms, &containers);
+        render_tree_nodes(&nodes, "", &mut text, 0);
+        text.push('\n');
+        if text.chars().count() > 3500 {
+            text.push_str("… struttura abbreviata per il limite dei messaggi Telegram.\n");
+            break;
+        }
+    }
+    text.push_str("Tocca un comando /luogo_… per aprire direttamente quel luogo.");
+
+    bot.send_message(chat_id, text)
+        .reply_markup(location_navigation_keyboard())
+        .await?;
+    Ok(())
+}
+
+fn build_home_nodes(
+    home_id: i64,
+    rooms: &[RoomRecord],
+    containers: &[TreeContainerRecord],
+) -> Vec<LocationTreeNode> {
+    let mut nodes = Vec::new();
+    for room in rooms.iter().filter(|room| room.home_id == home_id) {
+        let children = build_container_nodes(containers, home_id, Some(room.id), None, 0);
+        nodes.push(LocationTreeNode {
+            label: format!("🚪 {}", room.name),
+            command: format!("/luogo_r{}", room.id),
+            children,
+        });
+    }
+    nodes.extend(build_container_nodes(containers, home_id, None, None, 0));
+    nodes
+}
+
+fn build_container_nodes(
+    containers: &[TreeContainerRecord],
+    home_id: i64,
+    room_id: Option<i64>,
+    parent_id: Option<i64>,
+    depth: usize,
+) -> Vec<LocationTreeNode> {
+    if depth >= 20 {
+        return Vec::new();
+    }
+    containers
+        .iter()
+        .filter(|container| {
+            container.home_id == home_id
+                && container.room_id == room_id
+                && container.parent_id == parent_id
+        })
+        .map(|container| LocationTreeNode {
+            label: format!("📦 {}", container.name),
+            command: format!("/luogo_c{}", container.id),
+            children: build_container_nodes(
+                containers,
+                home_id,
+                room_id,
+                Some(container.id),
+                depth + 1,
+            ),
+        })
+        .collect()
+}
+
+fn render_tree_nodes(nodes: &[LocationTreeNode], prefix: &str, text: &mut String, depth: usize) {
+    if depth >= 20 || text.chars().count() > 3500 {
+        return;
+    }
+    for (index, node) in nodes.iter().enumerate() {
+        let last = index + 1 == nodes.len();
+        let branch = if last { "└── " } else { "├── " };
+        text.push_str(&format!(
+            "{prefix}{branch}{}  {}\n",
+            node.label, node.command
+        ));
+        let child_prefix = format!("{prefix}{}", if last { "    " } else { "│   " });
+        render_tree_nodes(&node.children, &child_prefix, text, depth + 1);
+        if text.chars().count() > 3500 {
+            break;
+        }
+    }
+}
+
+fn parse_location_command(command: &str) -> Option<(char, i64)> {
+    let value = command.strip_prefix("/luogo_")?;
+    let mut chars = value.chars();
+    let kind = chars.next()?;
+    if !matches!(kind, 'h' | 'r' | 'c') {
+        return None;
+    }
+    let id = chars.as_str().parse::<i64>().ok().filter(|id| *id > 0)?;
+    Some((kind, id))
+}
+
 async fn ask_home_name(bot: &Bot, chat_id: ChatId, rename: bool) -> ResponseResult<()> {
     let text = if rename {
         "✏️ Scrivi il nuovo nome della casa.\n\n/annulla per uscire."
     } else {
         "➕ Nuova casa\n\nScrivi il nome dell'abitazione.\nEsempio: Casa principale\n\n/annulla per uscire."
     };
-    bot.send_message(chat_id, text).await?;
+    bot.send_message(chat_id, text)
+        .reply_markup(location_navigation_keyboard())
+        .await?;
     Ok(())
 }
 
@@ -601,7 +783,9 @@ async fn ask_room_name(bot: &Bot, chat_id: ChatId, rename: bool) -> ResponseResu
     } else {
         "➕ Nuova stanza\n\nScrivi il nome della stanza.\nEsempio: Garage\n\n/annulla per uscire."
     };
-    bot.send_message(chat_id, text).await?;
+    bot.send_message(chat_id, text)
+        .reply_markup(location_navigation_keyboard())
+        .await?;
     Ok(())
 }
 
@@ -773,7 +957,10 @@ async fn send_home_list(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> Respon
         Ok(homes) => {
             let mut text = "🏠 Case registrate\n\n".to_string();
             for home in &homes {
-                text.push_str(&format!("#{} · {}\n", home.id, home.name));
+                text.push_str(&format!(
+                    "#{} · {}\n/luogo_h{}\n\n",
+                    home.id, home.name, home.id
+                ));
             }
             bot.send_message(chat_id, text)
                 .reply_markup(home_list_keyboard(&homes))
@@ -785,6 +972,112 @@ async fn send_home_list(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> Respon
                 .await?;
         }
     }
+    Ok(())
+}
+
+async fn send_room_list(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> ResponseResult<()> {
+    let rooms = sqlx::query_as::<_, RoomRecord>(
+        "SELECT s.id AS id, s.abitazione_id AS home_id, s.nome AS name, a.nome AS home_name \
+         FROM stanze s JOIN abitazioni a ON a.id = s.abitazione_id \
+         ORDER BY a.nome COLLATE NOCASE, s.nome COLLATE NOCASE, s.id",
+    )
+    .fetch_all(pool)
+    .await;
+
+    match rooms {
+        Ok(rooms) if rooms.is_empty() => {
+            bot.send_message(chat_id, "🚪 Non ci sono ancora stanze registrate.")
+                .reply_markup(location_navigation_keyboard())
+                .await?;
+        }
+        Ok(rooms) => {
+            let mut text = "🚪 Elenco stanze\n\n".to_string();
+            let mut rows = Vec::new();
+            for room in rooms.iter().take(50) {
+                text.push_str(&format!(
+                    "#{} · {}\n📍 {}\n/luogo_r{}\n\n",
+                    room.id, room.name, room.home_name, room.id
+                ));
+                rows.push(vec![button(
+                    &format!("🚪 #{} · {}", room.id, truncate_chars(&room.name, 32)),
+                    &format!("loc:room:{}", room.id),
+                )]);
+                if text.chars().count() > 3200 {
+                    text.push_str(
+                        "… elenco testuale abbreviato. Usa i pulsanti o la struttura completa.\n",
+                    );
+                    break;
+                }
+            }
+            rows.push(vec![
+                button("↩️ Case, stanze e contenitori", "loc:menu"),
+                button("🏠 Menu principale", "menu:main"),
+            ]);
+            bot.send_message(chat_id, text)
+                .reply_markup(InlineKeyboardMarkup::new(rows))
+                .await?;
+        }
+        Err(error) => {
+            tracing::error!(?error, "Errore elenco stanze");
+            bot.send_message(chat_id, "⚠️ Non riesco a leggere l'elenco delle stanze.")
+                .reply_markup(location_navigation_keyboard())
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+async fn show_create_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
+    bot.send_message(chat_id, "➕ Crea un nuovo luogo\n\nCosa vuoi aggiungere?")
+        .reply_markup(InlineKeyboardMarkup::new(vec![
+            vec![button("🏠 Nuova casa", "loc:home:new")],
+            vec![button("🚪 Nuova stanza", "loc:room:new:pick")],
+            vec![button("📦 Nuovo contenitore", "c:n")],
+            vec![
+                button("↩️ Case, stanze e contenitori", "loc:menu"),
+                button("🏠 Menu principale", "menu:main"),
+            ],
+        ]))
+        .await?;
+    Ok(())
+}
+
+async fn show_home_picker_for_new_room(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+) -> ResponseResult<()> {
+    let homes = list_homes(pool).await.unwrap_or_default();
+    if homes.is_empty() {
+        bot.send_message(chat_id, "🚪 Per creare una stanza serve prima una casa.")
+            .reply_markup(InlineKeyboardMarkup::new(vec![
+                vec![button("➕ Crea una casa", "loc:home:new")],
+                vec![
+                    button("↩️ Crea…", "loc:create"),
+                    button("🏠 Menu principale", "menu:main"),
+                ],
+            ]))
+            .await?;
+        return Ok(());
+    }
+
+    let mut rows = homes
+        .iter()
+        .take(30)
+        .map(|home| {
+            vec![button(
+                &format!("🏠 {}", truncate_chars(&home.name, 38)),
+                &format!("loc:room:new:{}", home.id),
+            )]
+        })
+        .collect::<Vec<_>>();
+    rows.push(vec![
+        button("↩️ Crea…", "loc:create"),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
+    bot.send_message(chat_id, "🚪 Nuova stanza\n\nScegli la casa.")
+        .reply_markup(InlineKeyboardMarkup::new(rows))
+        .await?;
     Ok(())
 }
 
@@ -2119,11 +2412,22 @@ async fn list_objects_for_room(
 
 fn locations_menu_keyboard() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
-        vec![button("➕ Nuova casa", "loc:home:new")],
-        vec![button("📋 Elenco case", "loc:home:list")],
-        vec![button("📦 Contenitori", "c:menu")],
+        vec![
+            button("🏠 Elenco case", "loc:home:list"),
+            button("🚪 Elenco stanze", "loc:room:list"),
+        ],
+        vec![button("📦 Elenco contenitori", "c:a")],
+        vec![button("🌳 Struttura completa", "loc:tree")],
+        vec![button("➕ Crea…", "loc:create")],
         vec![button("🏠 Menu principale", "menu:main")],
     ])
+}
+
+pub(crate) fn location_navigation_keyboard() -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![vec![
+        button("↩️ Case, stanze e contenitori", "loc:menu"),
+        button("🏠 Menu principale", "menu:main"),
+    ]])
 }
 
 fn home_list_keyboard(homes: &[HomeRecord]) -> InlineKeyboardMarkup {
@@ -2137,21 +2441,44 @@ fn home_list_keyboard(homes: &[HomeRecord]) -> InlineKeyboardMarkup {
         })
         .collect::<Vec<_>>();
     rows.push(vec![button("➕ Nuova casa", "loc:home:new")]);
-    rows.push(vec![button("🏠 Menu principale", "menu:main")]);
+    rows.push(vec![
+        button("↩️ Case, stanze e contenitori", "loc:menu"),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
     InlineKeyboardMarkup::new(rows)
 }
 
 fn home_detail_keyboard(home_id: i64, rooms: &[RoomRecord]) -> InlineKeyboardMarkup {
-    let mut rows = vec![vec![button(
-        "➕ Nuova stanza",
-        &format!("loc:room:new:{home_id}"),
-    )]];
+    let mut rows = vec![
+        vec![button(
+            "➕ Nuova stanza",
+            &format!("loc:room:new:{home_id}"),
+        )],
+        vec![button(
+            "➕ Nuovo contenitore nella casa",
+            &format!(
+                "c:nn:{}:0",
+                crate::modules::contenitori::encode_callback_id(home_id)
+            ),
+        )],
+        vec![button(
+            "➕ Nuovo oggetto qui",
+            &format!("oggetti:newat:h:{home_id}"),
+        )],
+    ];
     for room in rooms.iter().take(20) {
         rows.push(vec![button(
             &format!("🚪 {}", truncate_chars(&room.name, 42)),
             &format!("loc:room:{}", room.id),
         )]);
     }
+    rows.push(vec![button(
+        "📦 Contenitori nella casa",
+        &format!(
+            "c:lh:{}",
+            crate::modules::contenitori::encode_callback_id(home_id)
+        ),
+    )]);
     rows.push(vec![button(
         "📦 Oggetti in questa casa",
         &format!("loc:filter:home:{home_id}"),
@@ -2160,12 +2487,34 @@ fn home_detail_keyboard(home_id: i64, rooms: &[RoomRecord]) -> InlineKeyboardMar
         button("✏️ Rinomina", &format!("loc:home:rename:{home_id}")),
         button("🗑 Elimina", &format!("loc:home:delete:ask:{home_id}")),
     ]);
-    rows.push(vec![button("↩️ Elenco case", "loc:home:list")]);
+    rows.push(vec![
+        button("↩️ Elenco case", "loc:home:list"),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
     InlineKeyboardMarkup::new(rows)
 }
 
 fn room_detail_keyboard(room: &RoomRecord) -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
+        vec![button(
+            "➕ Nuovo contenitore nella stanza",
+            &format!(
+                "c:nn:{}:{}",
+                crate::modules::contenitori::encode_callback_id(room.home_id),
+                crate::modules::contenitori::encode_callback_id(room.id)
+            ),
+        )],
+        vec![button(
+            "➕ Nuovo oggetto qui",
+            &format!("oggetti:newat:r:{}", room.id),
+        )],
+        vec![button(
+            "📦 Contenitori nella stanza",
+            &format!(
+                "c:lr:{}",
+                crate::modules::contenitori::encode_callback_id(room.id)
+            ),
+        )],
         vec![button(
             "📦 Oggetti nella stanza",
             &format!("loc:filter:room:{}", room.id),
@@ -2174,10 +2523,10 @@ fn room_detail_keyboard(room: &RoomRecord) -> InlineKeyboardMarkup {
             button("✏️ Rinomina", &format!("loc:room:rename:{}", room.id)),
             button("🗑 Elimina", &format!("loc:room:delete:ask:{}", room.id)),
         ],
-        vec![button(
-            "↩️ Torna alla casa",
-            &format!("loc:home:{}", room.home_id),
-        )],
+        vec![
+            button("↩️ Torna alla casa", &format!("loc:home:{}", room.home_id)),
+            button("🏠 Menu principale", "menu:main"),
+        ],
     ])
 }
 
@@ -2187,7 +2536,10 @@ fn home_delete_keyboard(id: i64) -> InlineKeyboardMarkup {
             "🗑 Sì, elimina casa",
             &format!("loc:home:delete:do:{id}"),
         )],
-        vec![button("↩️ Annulla", &format!("loc:home:{id}"))],
+        vec![
+            button("↩️ Annulla", &format!("loc:home:{id}")),
+            button("🏠 Menu principale", "menu:main"),
+        ],
     ])
 }
 
@@ -2197,7 +2549,10 @@ fn room_delete_keyboard(room: &RoomRecord) -> InlineKeyboardMarkup {
             "🗑 Sì, elimina stanza",
             &format!("loc:room:delete:do:{}", room.id),
         )],
-        vec![button("↩️ Annulla", &format!("loc:room:{}", room.id))],
+        vec![
+            button("↩️ Annulla", &format!("loc:room:{}", room.id)),
+            button("🏠 Menu principale", "menu:main"),
+        ],
     ])
 }
 
@@ -2216,10 +2571,10 @@ fn item_home_picker_keyboard(item_id: i64, homes: &[HomeRecord]) -> InlineKeyboa
         "🧹 Nessun luogo",
         &format!("loc:item:clear:{item_id}"),
     )]);
-    rows.push(vec![button(
-        "↩️ Scheda oggetto",
-        &format!("oggetti:view:{item_id}"),
-    )]);
+    rows.push(vec![
+        button("↩️ Scheda oggetto", &format!("oggetti:view:{item_id}")),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
     InlineKeyboardMarkup::new(rows)
 }
 
@@ -2610,5 +2965,45 @@ mod tests {
         let rimozione = location_change_message(Some(&camera), nessun_luogo.as_ref());
         assert!(rimozione.contains("Luogo rimosso"));
         assert!(rimozione.contains("Prima:"));
+    }
+    #[test]
+    fn comando_luogo_tipizzato_apre_case_stanze_e_contenitori() {
+        assert_eq!(parse_location_command("/luogo_h12"), Some(('h', 12)));
+        assert_eq!(parse_location_command("/luogo_r7"), Some(('r', 7)));
+        assert_eq!(parse_location_command("/luogo_c33"), Some(('c', 33)));
+        assert_eq!(parse_location_command("/luogo_x1"), None);
+        assert_eq!(parse_location_command("/luogo_h0"), None);
+    }
+
+    #[test]
+    fn albero_luoghi_mantiene_gerarchia_stanza_e_contenitori() {
+        let rooms = vec![RoomRecord {
+            id: 2,
+            home_id: 1,
+            name: "Garage".to_string(),
+            home_name: "Casa".to_string(),
+        }];
+        let containers = vec![
+            TreeContainerRecord {
+                id: 10,
+                home_id: 1,
+                room_id: Some(2),
+                parent_id: None,
+                name: "Armadio".to_string(),
+            },
+            TreeContainerRecord {
+                id: 11,
+                home_id: 1,
+                room_id: Some(2),
+                parent_id: Some(10),
+                name: "Ripiano".to_string(),
+            },
+        ];
+
+        let nodes = build_home_nodes(1, &rooms, &containers);
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].command, "/luogo_r2");
+        assert_eq!(nodes[0].children[0].command, "/luogo_c10");
+        assert_eq!(nodes[0].children[0].children[0].command, "/luogo_c11");
     }
 }

@@ -1,5 +1,18 @@
 # Architettura
 
+
+## Navigazione contestuale dei luoghi — Step 6C
+
+Gerarchia canonica: `casa -> stanza opzionale -> contenitori annidabili -> item`. Il percorso visualizzato è derivato dalle relazioni, non è una stringa duplicata usata come sorgente dati.
+
+La UI è place-contextual: le azioni dipendono dal luogo corrente, indipendentemente dal menu di provenienza.
+
+Riferimenti Telegram canonici: `/luogo_h<ID>` (casa), `/luogo_r<ID>` (stanza), `/luogo_c<ID>` (contenitore). Gli ID tipizzati evitano ambiguità con nomi duplicati.
+
+Contratto UI: ogni schermata interna rilevante deve offrire ritorno semantico al livello precedente e accesso diretto a `🏠 Menu principale`.
+
+`Nuovo oggetto qui` mantiene casa/stanza/contenitore come relazione strutturata nella creazione dell'oggetto. Dettagli in `docs/moduli/navigazione-luoghi.md`.
+
 Questo documento descrive come è fatto il progetto e perché è stato fatto
 così. L'obiettivo è che chiunque lo legga — anche senza aver seguito le
 discussioni originali — capisca la struttura abbastanza da poterci mettere

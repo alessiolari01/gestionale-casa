@@ -1,6 +1,18 @@
 # Roadmap funzionale
 
 
+## Stato Step 6C — contenitori e luoghi
+
+- 6C.1 ✅ backend gerarchia contenitori — `cc3ba4c`.
+- 6C.2 ✅ UI Telegram contenitori, verificata su S9 — `4c64798`.
+- 6C.3A 🔧 navigazione unificata + creazione contestuale oggetti — in verifica.
+- 6C.3 ⏭️ completare assegnazione/spostamento oggetti tra contenitori.
+- 6C.4 ⏭️ storico contenitori e cambi percorso.
+- 6C.5 ⏭️ verifica finale, documentazione, PR/CI/merge.
+
+Principio approvato: navigare per **luogo corrente**, non per silos separati casa/stanza/contenitore.
+
+
 ## Stato aggiornato dopo l'implementazione Step 6B
 
 - Step 1 ✅ Scheletro progetto
