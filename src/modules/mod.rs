@@ -8,7 +8,7 @@
 //! in una sotto-cartella (es. `modules/ricette/`) senza cambiare il resto
 //! della struttura del progetto.
 
-// Step 6C.1: backend contenitori non ancora collegato alla UI Telegram.
+// Step 6C.2: UI contenitori attiva; alcune API sono riservate al 6C.3.
 #[allow(dead_code)]
 pub mod contenitori;
 pub mod foto;

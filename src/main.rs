@@ -1,7 +1,7 @@
 //! Punto di ingresso del Gestionale Casa.
 //!
-//! Step corrente: Step 6A, case, stanze e posizione strutturata condivisa
-//! sopra l'infrastruttura Telegram + SQLx + SQLite gia' verificata.
+//! Step corrente: Step 6C.2, interfaccia Telegram per contenitori gerarchici
+//! sopra case, stanze e posizione strutturata condivisa.
 
 mod auth;
 mod config;
@@ -12,7 +12,10 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use config::Config;
-use modules::{foto::PhotoSessionStore, luoghi::LocationSessionStore, oggetti::SessionStore};
+use modules::{
+    contenitori::ContainerSessionStore, foto::PhotoSessionStore, luoghi::LocationSessionStore,
+    oggetti::SessionStore,
+};
 use sqlx::SqlitePool;
 use teloxide::{
     dptree,
@@ -62,6 +65,7 @@ async fn main() -> anyhow::Result<()> {
 
     let sessions = SessionStore::new();
     let location_sessions = LocationSessionStore::new();
+    let container_sessions = ContainerSessionStore::new();
     let photo_sessions = PhotoSessionStore::new();
     let handler = dptree::entry()
         .branch(Update::filter_message().endpoint(handle_message))
@@ -78,6 +82,7 @@ async fn main() -> anyhow::Result<()> {
             pool,
             sessions,
             location_sessions,
+            container_sessions,
             photo_sessions
         ])
         .enable_ctrlc_handler()
@@ -102,6 +107,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_message(
     bot: Bot,
     msg: Message,
@@ -109,6 +115,7 @@ async fn handle_message(
     pool: SqlitePool,
     sessions: SessionStore,
     location_sessions: LocationSessionStore,
+    container_sessions: ContainerSessionStore,
     photo_sessions: PhotoSessionStore,
 ) -> ResponseResult<()> {
     let chat_id = msg.chat.id.0;
@@ -125,6 +132,7 @@ async fn handle_message(
     ) {
         sessions.clear_chat(chat_id);
         location_sessions.clear_chat(chat_id);
+        container_sessions.clear_chat(chat_id);
     }
 
     // I comandi foto e, soprattutto, le foto vere e proprie devono essere
@@ -152,13 +160,21 @@ async fn handle_message(
         photo_sessions.clear_chat(chat_id);
     }
 
+    if modules::contenitori::handle_message(&bot, &msg, &pool, &container_sessions, text).await? {
+        sessions.clear_chat(chat_id);
+        location_sessions.clear_chat(chat_id);
+        return respond(());
+    }
+
     if modules::luoghi::handle_message(&bot, &msg, &pool, &location_sessions, text).await? {
         sessions.clear_chat(chat_id);
+        container_sessions.clear_chat(chat_id);
         return respond(());
     }
 
     if modules::oggetti::handle_message(&bot, &msg, &pool, &sessions, text).await? {
         location_sessions.clear_chat(chat_id);
+        container_sessions.clear_chat(chat_id);
         return respond(());
     }
 
@@ -166,6 +182,7 @@ async fn handle_message(
         Some("/start") => {
             sessions.clear_chat(chat_id);
             location_sessions.clear_chat(chat_id);
+            container_sessions.clear_chat(chat_id);
             photo_sessions.clear_chat(chat_id);
             send_main_menu(&bot, msg.chat.id).await?;
         }
@@ -176,6 +193,7 @@ async fn handle_message(
         Some("/storico") => {
             sessions.clear_chat(chat_id);
             location_sessions.clear_chat(chat_id);
+            container_sessions.clear_chat(chat_id);
             photo_sessions.clear_chat(chat_id);
             modules::storico::show_global_history(&bot, msg.chat.id, &pool, 0).await?;
         }
@@ -201,6 +219,7 @@ async fn handle_message(
     respond(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_callback(
     bot: Bot,
     q: CallbackQuery,
@@ -208,6 +227,7 @@ async fn handle_callback(
     pool: SqlitePool,
     sessions: SessionStore,
     location_sessions: LocationSessionStore,
+    container_sessions: ContainerSessionStore,
     photo_sessions: PhotoSessionStore,
 ) -> ResponseResult<()> {
     bot.answer_callback_query(q.id.clone()).await?;
@@ -232,13 +252,14 @@ async fn handle_callback(
         "menu:main" => {
             sessions.clear_chat(chat_id.0);
             location_sessions.clear_chat(chat_id.0);
+            container_sessions.clear_chat(chat_id.0);
             photo_sessions.clear_chat(chat_id.0);
             send_main_menu(&bot, chat_id).await?;
         }
         "menu:soon" => {
             bot.send_message(
                 chat_id,
-                "Questo modulo non è ancora implementato. Per ora sono disponibili 📦 Oggetti e 🏠 Case e stanze.",
+                "Questo modulo non è ancora implementato. Per ora sono disponibili 📦 Oggetti, 🏠 Case e stanze e 📦 Contenitori.",
             )
             .await?;
         }
@@ -248,6 +269,7 @@ async fn handle_callback(
         _ if data.starts_with("history:") || data.starts_with("h:") => {
             sessions.clear_chat(chat_id.0);
             location_sessions.clear_chat(chat_id.0);
+            container_sessions.clear_chat(chat_id.0);
             photo_sessions.clear_chat(chat_id.0);
             if !modules::storico::handle_callback(&bot, chat_id, &pool, data).await? {
                 bot.send_message(
@@ -264,6 +286,22 @@ async fn handle_callback(
 
             if modules::foto::handle_callback(&bot, chat_id, &pool, &photo_sessions, data).await? {
                 location_sessions.clear_chat(chat_id.0);
+                container_sessions.clear_chat(chat_id.0);
+                return respond(());
+            }
+
+            if modules::contenitori::handle_callback(
+                &bot,
+                chat_id,
+                &pool,
+                &container_sessions,
+                data,
+            )
+            .await?
+            {
+                sessions.clear_chat(chat_id.0);
+                location_sessions.clear_chat(chat_id.0);
+                photo_sessions.clear_chat(chat_id.0);
                 return respond(());
             }
 
@@ -271,6 +309,7 @@ async fn handle_callback(
                 .await?
             {
                 sessions.clear_chat(chat_id.0);
+                container_sessions.clear_chat(chat_id.0);
                 photo_sessions.clear_chat(chat_id.0);
                 return respond(());
             }
@@ -280,6 +319,7 @@ async fn handle_callback(
                     .await?;
             } else {
                 location_sessions.clear_chat(chat_id.0);
+                container_sessions.clear_chat(chat_id.0);
             }
         }
     }
@@ -290,7 +330,7 @@ async fn handle_callback(
 async fn send_online_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
-        "🟢 Gestionale Casa è online.\n\n🏠 Menu principale\nScegli una sezione.\n\nComandi rapidi: /oggetti · /luoghi · /storico · /status · /ping",
+        "🟢 Gestionale Casa è online.\n\n🏠 Menu principale\nScegli una sezione.\n\nComandi rapidi: /oggetti · /luoghi · /contenitori · /storico · /status · /ping",
     )
     .reply_markup(modules::oggetti::main_menu_keyboard())
     .await?;
@@ -300,7 +340,7 @@ async fn send_online_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
 async fn send_main_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
-        "🏠 Gestionale Casa\n\nScegli una sezione. I moduli non ancora disponibili sono indicati come prossimamente.\n\nComandi rapidi: /oggetti · /luoghi · /storico · /status · /ping",
+        "🏠 Gestionale Casa\n\nScegli una sezione. I moduli non ancora disponibili sono indicati come prossimamente.\n\nComandi rapidi: /oggetti · /luoghi · /contenitori · /storico · /status · /ping",
     )
     .reply_markup(modules::oggetti::main_menu_keyboard())
     .await?;

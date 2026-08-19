@@ -1,8 +1,79 @@
 //! Step 6C.1 - backend contenitori e sotto-posizioni.
 //! Nessuna UI Telegram in questo step.
 
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
+
 use anyhow::{bail, ensure, Result};
 use sqlx::{FromRow, SqliteConnection, SqlitePool};
+use teloxide::{
+    prelude::*,
+    types::{InlineKeyboardButton, InlineKeyboardMarkup},
+};
+
+#[derive(Clone, Default)]
+pub struct ContainerSessionStore {
+    inner: Arc<Mutex<HashMap<i64, ContainerConversationState>>>,
+}
+
+impl ContainerSessionStore {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn clear_chat(&self, chat_id: i64) {
+        self.with_sessions(|sessions| {
+            sessions.remove(&chat_id);
+        });
+    }
+
+    fn get(&self, chat_id: i64) -> Option<ContainerConversationState> {
+        self.with_sessions(|sessions| sessions.get(&chat_id).cloned())
+    }
+
+    fn set(&self, chat_id: i64, state: ContainerConversationState) {
+        self.with_sessions(|sessions| {
+            sessions.insert(chat_id, state);
+        });
+    }
+
+    fn with_sessions<T>(
+        &self,
+        f: impl FnOnce(&mut HashMap<i64, ContainerConversationState>) -> T,
+    ) -> T {
+        let mut guard = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        f(&mut guard)
+    }
+}
+
+#[derive(Debug, Clone)]
+enum ContainerConversationState {
+    AwaitingName {
+        home_id: i64,
+        room_id: Option<i64>,
+        parent_id: Option<i64>,
+        rename_id: Option<i64>,
+    },
+}
+
+#[derive(Debug, Clone, FromRow)]
+struct UiHome {
+    id: i64,
+    name: String,
+}
+
+#[derive(Debug, Clone, FromRow)]
+struct UiRoom {
+    id: i64,
+    home_id: i64,
+    name: String,
+    home_name: String,
+}
 
 #[derive(Debug, Clone, FromRow, PartialEq, Eq)]
 pub struct ContainerRecord {
@@ -102,6 +173,13 @@ pub async fn list_container_children(
 
 pub async fn rename_container(pool: &SqlitePool, id: i64, name: &str) -> Result<bool> {
     let name = clean_required_name(name)?;
+    let Some(current) = get_container(pool, id).await? else {
+        return Ok(false);
+    };
+    if current.name == name {
+        return Ok(false);
+    }
+
     let result = sqlx::query(
         "UPDATE contenitori SET nome = ?, \
          aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
@@ -397,6 +475,10 @@ async fn validate_parent_target(
 fn clean_required_name(value: &str) -> Result<String> {
     let value = value.trim();
     ensure!(!value.is_empty(), "nome contenitore vuoto");
+    ensure!(
+        value.chars().count() <= 120,
+        "nome contenitore troppo lungo (massimo 120 caratteri)"
+    );
     Ok(value.to_string())
 }
 
@@ -405,6 +487,1303 @@ fn clean_optional_text(value: Option<&str>) -> Option<String> {
         .map(str::trim)
         .filter(|v| !v.is_empty())
         .map(str::to_string)
+}
+
+// -----------------------------------------------------------------------------
+// Step 6C.2 - Interfaccia Telegram dei contenitori.
+// -----------------------------------------------------------------------------
+
+pub async fn show_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
+    bot.send_message(
+        chat_id,
+        "📦 Contenitori\n\nGestisci armadi, scatole, ripiani e altre sotto-posizioni annidabili.\n\nIn questo step gli oggetti non vengono ancora assegnati ai contenitori: arriverà nel 6C.3.",
+    )
+    .reply_markup(containers_menu_keyboard())
+    .await?;
+    Ok(())
+}
+
+pub async fn handle_message(
+    bot: &Bot,
+    msg: &Message,
+    pool: &SqlitePool,
+    sessions: &ContainerSessionStore,
+    text: &str,
+) -> ResponseResult<bool> {
+    let chat_id = msg.chat.id.0;
+
+    if let Some((command, args)) = parse_command(text) {
+        match command {
+            "/contenitori" => {
+                sessions.clear_chat(chat_id);
+                show_menu(bot, msg.chat.id).await?;
+                return Ok(true);
+            }
+            "/contenitore" => {
+                sessions.clear_chat(chat_id);
+                if let Some(id) = parse_positive_decimal_id(args) {
+                    show_container_detail(bot, msg.chat.id, pool, id).await?;
+                } else {
+                    bot.send_message(
+                        msg.chat.id,
+                        "Uso: /contenitore <id>\nEsempio: /contenitore 3",
+                    )
+                    .reply_markup(containers_menu_keyboard())
+                    .await?;
+                }
+                return Ok(true);
+            }
+            "/annulla" => {
+                if sessions.get(chat_id).is_some() {
+                    sessions.clear_chat(chat_id);
+                    bot.send_message(msg.chat.id, "Operazione sui contenitori annullata.")
+                        .reply_markup(containers_menu_keyboard())
+                        .await?;
+                    return Ok(true);
+                }
+                return Ok(false);
+            }
+            _ => return Ok(false),
+        }
+    }
+
+    let Some(state) = sessions.get(chat_id) else {
+        return Ok(false);
+    };
+
+    match state {
+        ContainerConversationState::AwaitingName {
+            home_id,
+            room_id,
+            parent_id,
+            rename_id: None,
+        } => {
+            create_container_from_input(
+                bot,
+                msg.chat.id,
+                pool,
+                sessions,
+                home_id,
+                room_id,
+                parent_id,
+                text,
+            )
+            .await?;
+        }
+        ContainerConversationState::AwaitingName {
+            rename_id: Some(id),
+            ..
+        } => {
+            rename_container_from_input(bot, msg.chat.id, pool, sessions, id, text).await?;
+        }
+    }
+
+    Ok(true)
+}
+
+pub async fn handle_callback(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    sessions: &ContainerSessionStore,
+    data: &str,
+) -> ResponseResult<bool> {
+    if !data.starts_with("c:") {
+        return Ok(false);
+    }
+
+    let raw_chat_id = chat_id.0;
+
+    match data {
+        "c:menu" => {
+            sessions.clear_chat(raw_chat_id);
+            show_menu(bot, chat_id).await?;
+            return Ok(true);
+        }
+        "c:n" => {
+            sessions.clear_chat(raw_chat_id);
+            show_home_picker(bot, chat_id, pool, HomePickerMode::Create).await?;
+            return Ok(true);
+        }
+        "c:l" => {
+            sessions.clear_chat(raw_chat_id);
+            show_home_picker(bot, chat_id, pool, HomePickerMode::List).await?;
+            return Ok(true);
+        }
+        _ => {}
+    }
+
+    if let Some(home_id) = parse_one_callback(data, "c:nh:") {
+        sessions.clear_chat(raw_chat_id);
+        show_scope_picker_for_new(bot, chat_id, pool, home_id).await?;
+        return Ok(true);
+    }
+
+    if let Some(home_id) = parse_one_callback(data, "c:lh:") {
+        sessions.clear_chat(raw_chat_id);
+        show_home_scope(bot, chat_id, pool, home_id).await?;
+        return Ok(true);
+    }
+
+    if let Some(room_id) = parse_one_callback(data, "c:lr:") {
+        sessions.clear_chat(raw_chat_id);
+        show_room_scope(bot, chat_id, pool, room_id).await?;
+        return Ok(true);
+    }
+
+    if let Some((home_id, room_raw)) = parse_two_callback(data, "c:nn:") {
+        let room_id = zero_as_none(room_raw);
+        if !scope_exists(pool, home_id, room_id).await {
+            bot.send_message(chat_id, "⚠️ La destinazione scelta non esiste più.")
+                .reply_markup(containers_menu_keyboard())
+                .await?;
+            return Ok(true);
+        }
+        sessions.set(
+            raw_chat_id,
+            ContainerConversationState::AwaitingName {
+                home_id,
+                room_id,
+                parent_id: None,
+                rename_id: None,
+            },
+        );
+        ask_container_name(bot, chat_id, None).await?;
+        return Ok(true);
+    }
+
+    if let Some(parent_id) = parse_one_callback(data, "c:nc:") {
+        match get_container(pool, parent_id).await {
+            Ok(Some(parent)) => {
+                sessions.set(
+                    raw_chat_id,
+                    ContainerConversationState::AwaitingName {
+                        home_id: parent.home_id,
+                        room_id: parent.room_id,
+                        parent_id: Some(parent.id),
+                        rename_id: None,
+                    },
+                );
+                ask_container_name(bot, chat_id, Some(&parent.name)).await?;
+            }
+            Ok(None) => {
+                bot.send_message(chat_id, format!("Contenitore #{parent_id} non trovato."))
+                    .reply_markup(containers_menu_keyboard())
+                    .await?;
+            }
+            Err(error) => {
+                tracing::error!(?error, parent_id, "Errore lettura contenitore padre");
+                bot.send_message(chat_id, "⚠️ Non riesco a leggere il contenitore.")
+                    .await?;
+            }
+        }
+        return Ok(true);
+    }
+
+    if let Some(id) = parse_one_callback(data, "c:v:") {
+        sessions.clear_chat(raw_chat_id);
+        show_container_detail(bot, chat_id, pool, id).await?;
+        return Ok(true);
+    }
+
+    if let Some(id) = parse_one_callback(data, "c:r:") {
+        match get_container(pool, id).await {
+            Ok(Some(container)) => {
+                sessions.set(
+                    raw_chat_id,
+                    ContainerConversationState::AwaitingName {
+                        home_id: container.home_id,
+                        room_id: container.room_id,
+                        parent_id: container.parent_id,
+                        rename_id: Some(id),
+                    },
+                );
+                bot.send_message(
+                    chat_id,
+                    format!(
+                        "✏️ Rinomina contenitore\n\nNome attuale: {}\n\nScrivi il nuovo nome oppure /annulla.",
+                        container.name
+                    ),
+                )
+                .await?;
+            }
+            Ok(None) => {
+                bot.send_message(chat_id, format!("Contenitore #{id} non trovato."))
+                    .reply_markup(containers_menu_keyboard())
+                    .await?;
+            }
+            Err(error) => {
+                tracing::error!(?error, container_id = id, "Errore lettura contenitore");
+                bot.send_message(chat_id, "⚠️ Non riesco a leggere il contenitore.")
+                    .await?;
+            }
+        }
+        return Ok(true);
+    }
+
+    if let Some(id) = parse_one_callback(data, "c:da:") {
+        sessions.clear_chat(raw_chat_id);
+        show_delete_confirmation(bot, chat_id, pool, id).await?;
+        return Ok(true);
+    }
+
+    if let Some(id) = parse_one_callback(data, "c:dd:") {
+        sessions.clear_chat(raw_chat_id);
+        delete_container_and_report(bot, chat_id, pool, id).await?;
+        return Ok(true);
+    }
+
+    if let Some(id) = parse_one_callback(data, "c:m:") {
+        sessions.clear_chat(raw_chat_id);
+        show_move_home_picker(bot, chat_id, pool, id).await?;
+        return Ok(true);
+    }
+
+    if let Some((id, home_id)) = parse_two_callback(data, "c:mh:") {
+        sessions.clear_chat(raw_chat_id);
+        show_move_scope_picker(bot, chat_id, pool, id, home_id).await?;
+        return Ok(true);
+    }
+
+    if let Some((id, home_id, room_raw)) = parse_three_callback(data, "c:ms:") {
+        sessions.clear_chat(raw_chat_id);
+        show_move_parent_picker(bot, chat_id, pool, id, home_id, zero_as_none(room_raw)).await?;
+        return Ok(true);
+    }
+
+    if let Some((id, home_id, room_raw, parent_raw)) = parse_four_callback(data, "c:mt:") {
+        sessions.clear_chat(raw_chat_id);
+        move_container_and_report(
+            bot,
+            chat_id,
+            pool,
+            id,
+            home_id,
+            zero_as_none(room_raw),
+            zero_as_none(parent_raw),
+        )
+        .await?;
+        return Ok(true);
+    }
+
+    Ok(false)
+}
+
+#[derive(Clone, Copy)]
+enum HomePickerMode {
+    Create,
+    List,
+}
+
+async fn show_home_picker(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    mode: HomePickerMode,
+) -> ResponseResult<()> {
+    let homes = match list_ui_homes(pool).await {
+        Ok(homes) => homes,
+        Err(error) => {
+            tracing::error!(?error, "Errore elenco case per contenitori");
+            bot.send_message(chat_id, "⚠️ Non riesco a leggere le case.")
+                .reply_markup(containers_menu_keyboard())
+                .await?;
+            return Ok(());
+        }
+    };
+
+    if homes.is_empty() {
+        bot.send_message(
+            chat_id,
+            "📦 Per usare i contenitori serve prima almeno una casa.",
+        )
+        .reply_markup(InlineKeyboardMarkup::new(vec![
+            vec![button("➕ Crea una casa", "loc:home:new")],
+            vec![button("↩️ Case e stanze", "loc:menu")],
+        ]))
+        .await?;
+        return Ok(());
+    }
+
+    let (title, prefix) = match mode {
+        HomePickerMode::Create => (
+            "➕ Nuovo contenitore\n\nScegli la casa in cui si trova.",
+            "c:nh:",
+        ),
+        HomePickerMode::List => ("📋 Elenco contenitori\n\nScegli una casa.", "c:lh:"),
+    };
+
+    let mut rows = homes
+        .iter()
+        .take(30)
+        .map(|home| {
+            vec![button(
+                &format!("🏠 {}", truncate_chars(&home.name, 42)),
+                &format!("{prefix}{}", encode_id(home.id)),
+            )]
+        })
+        .collect::<Vec<_>>();
+    rows.push(vec![button("↩️ Contenitori", "c:menu")]);
+
+    bot.send_message(chat_id, title)
+        .reply_markup(InlineKeyboardMarkup::new(rows))
+        .await?;
+    Ok(())
+}
+
+async fn show_scope_picker_for_new(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    home_id: i64,
+) -> ResponseResult<()> {
+    let Some(home) = read_ui_home(pool, home_id).await.unwrap_or(None) else {
+        bot.send_message(chat_id, format!("Casa #{home_id} non trovata."))
+            .reply_markup(containers_menu_keyboard())
+            .await?;
+        return Ok(());
+    };
+    let rooms = list_ui_rooms_for_home(pool, home_id)
+        .await
+        .unwrap_or_default();
+
+    let mut rows = vec![vec![button(
+        "🏠 Direttamente nella casa",
+        &format!("c:nn:{}:0", encode_id(home_id)),
+    )]];
+    for room in rooms.iter().take(30) {
+        rows.push(vec![button(
+            &format!("🚪 {}", truncate_chars(&room.name, 42)),
+            &format!("c:nn:{}:{}", encode_id(home_id), encode_id(room.id)),
+        )]);
+    }
+    rows.push(vec![button("↩️ Cambia casa", "c:n")]);
+
+    bot.send_message(
+        chat_id,
+        format!(
+            "➕ Nuovo contenitore\n\n🏠 {}\n\nScegli se il contenitore è direttamente nella casa oppure in una stanza.",
+            home.name
+        ),
+    )
+    .reply_markup(InlineKeyboardMarkup::new(rows))
+    .await?;
+    Ok(())
+}
+
+async fn ask_container_name(
+    bot: &Bot,
+    chat_id: ChatId,
+    parent_name: Option<&str>,
+) -> ResponseResult<()> {
+    let text = if let Some(parent_name) = parent_name {
+        format!(
+            "➕ Nuovo contenitore interno\n\nDentro: 📦 {parent_name}\n\nScrivi il nome del nuovo contenitore oppure /annulla."
+        )
+    } else {
+        "➕ Nuovo contenitore\n\nScrivi il nome del contenitore oppure /annulla.".to_string()
+    };
+    bot.send_message(chat_id, text).await?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn create_container_from_input(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    sessions: &ContainerSessionStore,
+    home_id: i64,
+    room_id: Option<i64>,
+    parent_id: Option<i64>,
+    input: &str,
+) -> ResponseResult<()> {
+    let Some(name) = clean_ui_name(input) else {
+        bot.send_message(
+            chat_id,
+            "⚠️ Il nome deve contenere da 1 a 120 caratteri. Riprova oppure usa /annulla.",
+        )
+        .await?;
+        return Ok(());
+    };
+
+    match create_container(pool, home_id, room_id, parent_id, &name, None).await {
+        Ok(id) => {
+            sessions.clear_chat(chat_id.0);
+            bot.send_message(chat_id, format!("✅ Contenitore creato: 📦 {name}"))
+                .await?;
+            show_container_detail(bot, chat_id, pool, id).await?;
+        }
+        Err(error) => {
+            tracing::error!(
+                ?error,
+                home_id,
+                room_id,
+                parent_id,
+                "Errore creazione contenitore"
+            );
+            bot.send_message(
+                chat_id,
+                "⚠️ Non riesco a creare il contenitore. Verifica che non esista già un contenitore con lo stesso nome allo stesso livello.",
+            )
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+async fn rename_container_from_input(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    sessions: &ContainerSessionStore,
+    id: i64,
+    input: &str,
+) -> ResponseResult<()> {
+    let Some(name) = clean_ui_name(input) else {
+        bot.send_message(
+            chat_id,
+            "⚠️ Il nome deve contenere da 1 a 120 caratteri. Riprova oppure usa /annulla.",
+        )
+        .await?;
+        return Ok(());
+    };
+
+    let before = match get_container(pool, id).await {
+        Ok(Some(container)) => container,
+        Ok(None) => {
+            sessions.clear_chat(chat_id.0);
+            bot.send_message(chat_id, format!("Contenitore #{id} non trovato."))
+                .reply_markup(containers_menu_keyboard())
+                .await?;
+            return Ok(());
+        }
+        Err(error) => {
+            tracing::error!(?error, container_id = id, "Errore lettura contenitore");
+            bot.send_message(chat_id, "⚠️ Non riesco a leggere il contenitore.")
+                .await?;
+            return Ok(());
+        }
+    };
+
+    match rename_container(pool, id, &name).await {
+        Ok(true) => {
+            sessions.clear_chat(chat_id.0);
+            bot.send_message(
+                chat_id,
+                format!("✅ Contenitore rinominato: {} → {}", before.name, name),
+            )
+            .await?;
+            show_container_detail(bot, chat_id, pool, id).await?;
+        }
+        Ok(false) => {
+            sessions.clear_chat(chat_id.0);
+            bot.send_message(
+                chat_id,
+                "ℹ️ Il nome è già quello attuale: nessuna modifica.",
+            )
+            .await?;
+            show_container_detail(bot, chat_id, pool, id).await?;
+        }
+        Err(error) => {
+            tracing::error!(?error, container_id = id, "Errore rinomina contenitore");
+            bot.send_message(
+                chat_id,
+                "⚠️ Non riesco a rinominare il contenitore. Potrebbe esistere già un contenitore con quel nome allo stesso livello.",
+            )
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+async fn show_home_scope(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    home_id: i64,
+) -> ResponseResult<()> {
+    let Some(home) = read_ui_home(pool, home_id).await.unwrap_or(None) else {
+        bot.send_message(chat_id, format!("Casa #{home_id} non trovata."))
+            .reply_markup(containers_menu_keyboard())
+            .await?;
+        return Ok(());
+    };
+    let rooms = list_ui_rooms_for_home(pool, home_id)
+        .await
+        .unwrap_or_default();
+    let roots = list_root_containers(pool, home_id, None)
+        .await
+        .unwrap_or_default();
+
+    let mut rows = roots
+        .iter()
+        .take(20)
+        .map(|container| {
+            vec![button(
+                &format!(
+                    "📦 #{} · {}",
+                    container.id,
+                    truncate_chars(&container.name, 34)
+                ),
+                &format!("c:v:{}", encode_id(container.id)),
+            )]
+        })
+        .collect::<Vec<_>>();
+
+    for room in rooms.iter().take(25) {
+        rows.push(vec![button(
+            &format!("🚪 {}", truncate_chars(&room.name, 42)),
+            &format!("c:lr:{}", encode_id(room.id)),
+        )]);
+    }
+    rows.push(vec![button(
+        "➕ Nuovo direttamente nella casa",
+        &format!("c:nn:{}:0", encode_id(home_id)),
+    )]);
+    rows.push(vec![button("↩️ Cambia casa", "c:l")]);
+
+    bot.send_message(
+        chat_id,
+        format!(
+            "📦 Contenitori — 🏠 {}\n\nDirettamente nella casa: {}\nStanze: {}\n\nApri un contenitore o una stanza.",
+            home.name,
+            roots.len(),
+            rooms.len()
+        ),
+    )
+    .reply_markup(InlineKeyboardMarkup::new(rows))
+    .await?;
+    Ok(())
+}
+
+async fn show_room_scope(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    room_id: i64,
+) -> ResponseResult<()> {
+    let Some(room) = read_ui_room(pool, room_id).await.unwrap_or(None) else {
+        bot.send_message(chat_id, format!("Stanza #{room_id} non trovata."))
+            .reply_markup(containers_menu_keyboard())
+            .await?;
+        return Ok(());
+    };
+    let roots = list_root_containers(pool, room.home_id, Some(room.id))
+        .await
+        .unwrap_or_default();
+
+    let mut rows = roots
+        .iter()
+        .take(30)
+        .map(|container| {
+            vec![button(
+                &format!(
+                    "📦 #{} · {}",
+                    container.id,
+                    truncate_chars(&container.name, 34)
+                ),
+                &format!("c:v:{}", encode_id(container.id)),
+            )]
+        })
+        .collect::<Vec<_>>();
+    rows.push(vec![button(
+        "➕ Nuovo in questa stanza",
+        &format!("c:nn:{}:{}", encode_id(room.home_id), encode_id(room.id)),
+    )]);
+    rows.push(vec![button(
+        "↩️ Torna alla casa",
+        &format!("c:lh:{}", encode_id(room.home_id)),
+    )]);
+
+    let empty_note = if roots.is_empty() {
+        "\n\nNon ci sono ancora contenitori direttamente in questa stanza."
+    } else {
+        ""
+    };
+
+    bot.send_message(
+        chat_id,
+        format!(
+            "📦 Contenitori\n\n🏠 {} / 🚪 {}\n\nContenitori principali: {}{}",
+            room.home_name,
+            room.name,
+            roots.len(),
+            empty_note
+        ),
+    )
+    .reply_markup(InlineKeyboardMarkup::new(rows))
+    .await?;
+    Ok(())
+}
+
+async fn show_container_detail(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    id: i64,
+) -> ResponseResult<()> {
+    let container = match get_container(pool, id).await {
+        Ok(Some(container)) => container,
+        Ok(None) => {
+            bot.send_message(chat_id, format!("Contenitore #{id} non trovato."))
+                .reply_markup(containers_menu_keyboard())
+                .await?;
+            return Ok(());
+        }
+        Err(error) => {
+            tracing::error!(?error, container_id = id, "Errore lettura contenitore");
+            bot.send_message(chat_id, "⚠️ Non riesco a leggere il contenitore.")
+                .await?;
+            return Ok(());
+        }
+    };
+
+    let path = match container_path(pool, id).await {
+        Ok(Some(path)) => path,
+        Ok(None) => {
+            bot.send_message(chat_id, format!("Contenitore #{id} non trovato."))
+                .await?;
+            return Ok(());
+        }
+        Err(error) => {
+            tracing::error!(?error, container_id = id, "Errore percorso contenitore");
+            bot.send_message(chat_id, "⚠️ Non riesco a ricostruire il percorso.")
+                .await?;
+            return Ok(());
+        }
+    };
+
+    let children = list_container_children(pool, id).await.unwrap_or_default();
+    let direct_items = count_items_in_container(pool, id).await.unwrap_or(0);
+    let path_text = format_container_path(&path);
+    let description = container
+        .description
+        .as_deref()
+        .map(|value| format!("\nDescrizione: {value}"))
+        .unwrap_or_default();
+
+    let mut rows = children
+        .iter()
+        .take(20)
+        .map(|child| {
+            vec![button(
+                &format!("📦 {}", truncate_chars(&child.name, 42)),
+                &format!("c:v:{}", encode_id(child.id)),
+            )]
+        })
+        .collect::<Vec<_>>();
+    rows.push(vec![button(
+        "➕ Nuovo contenitore interno",
+        &format!("c:nc:{}", encode_id(id)),
+    )]);
+    rows.push(vec![
+        button("✏️ Rinomina", &format!("c:r:{}", encode_id(id))),
+        button("🚚 Sposta", &format!("c:m:{}", encode_id(id))),
+    ]);
+    rows.push(vec![button(
+        "🗑 Elimina",
+        &format!("c:da:{}", encode_id(id)),
+    )]);
+
+    if let Some(parent_id) = container.parent_id {
+        rows.push(vec![button(
+            "↩️ Contenitore superiore",
+            &format!("c:v:{}", encode_id(parent_id)),
+        )]);
+    } else if let Some(room_id) = container.room_id {
+        rows.push(vec![button(
+            "↩️ Contenitori della stanza",
+            &format!("c:lr:{}", encode_id(room_id)),
+        )]);
+    } else {
+        rows.push(vec![button(
+            "↩️ Contenitori della casa",
+            &format!("c:lh:{}", encode_id(container.home_id)),
+        )]);
+    }
+
+    bot.send_message(
+        chat_id,
+        format!(
+            "📦 #{} · {}\n\n📍 {}\n\nContiene direttamente:\n📦 {} sottocontenitori\n📦 {} oggetti{}",
+            container.id,
+            container.name,
+            path_text,
+            children.len(),
+            direct_items,
+            description
+        ),
+    )
+    .reply_markup(InlineKeyboardMarkup::new(rows))
+    .await?;
+    Ok(())
+}
+
+async fn show_delete_confirmation(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    id: i64,
+) -> ResponseResult<()> {
+    let Some(container) = get_container(pool, id).await.unwrap_or(None) else {
+        bot.send_message(chat_id, format!("Contenitore #{id} non trovato."))
+            .reply_markup(containers_menu_keyboard())
+            .await?;
+        return Ok(());
+    };
+    let children = list_container_children(pool, id).await.unwrap_or_default();
+    let direct_items = count_items_in_container(pool, id).await.unwrap_or(0);
+
+    let promotion = if container.parent_id.is_some() {
+        "I sottocontenitori e gli oggetti diretti verranno spostati nel contenitore superiore."
+    } else {
+        "I sottocontenitori e gli oggetti diretti resteranno nella stessa casa/stanza, al livello principale."
+    };
+
+    bot.send_message(
+        chat_id,
+        format!(
+            "🗑 Eliminare 📦 {}?\n\nSottocontenitori diretti: {}\nOggetti diretti: {}\n\n{}\n\nNessun oggetto verrà eliminato.",
+            container.name,
+            children.len(),
+            direct_items,
+            promotion
+        ),
+    )
+    .reply_markup(InlineKeyboardMarkup::new(vec![
+        vec![button(
+            "🗑 Sì, elimina contenitore",
+            &format!("c:dd:{}", encode_id(id)),
+        )],
+        vec![button(
+            "↩️ Annulla",
+            &format!("c:v:{}", encode_id(id)),
+        )],
+    ]))
+    .await?;
+    Ok(())
+}
+
+async fn delete_container_and_report(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    id: i64,
+) -> ResponseResult<()> {
+    let Some(before) = get_container(pool, id).await.unwrap_or(None) else {
+        bot.send_message(chat_id, format!("Contenitore #{id} non trovato."))
+            .reply_markup(containers_menu_keyboard())
+            .await?;
+        return Ok(());
+    };
+
+    match delete_container(pool, id).await {
+        Ok(true) => {
+            bot.send_message(
+                chat_id,
+                format!(
+                    "✅ Contenitore eliminato: {}\nNessun oggetto è stato cancellato.",
+                    before.name
+                ),
+            )
+            .await?;
+            if let Some(parent_id) = before.parent_id {
+                show_container_detail(bot, chat_id, pool, parent_id).await?;
+            } else if let Some(room_id) = before.room_id {
+                show_room_scope(bot, chat_id, pool, room_id).await?;
+            } else {
+                show_home_scope(bot, chat_id, pool, before.home_id).await?;
+            }
+        }
+        Ok(false) => {
+            bot.send_message(chat_id, format!("Contenitore #{id} non trovato."))
+                .reply_markup(containers_menu_keyboard())
+                .await?;
+        }
+        Err(error) => {
+            tracing::error!(?error, container_id = id, "Errore eliminazione contenitore");
+            bot.send_message(
+                chat_id,
+                "⚠️ Non riesco a eliminare il contenitore. Se la promozione creasse due contenitori con lo stesso nome allo stesso livello, rinomina prima uno dei due.",
+            )
+            .reply_markup(InlineKeyboardMarkup::new(vec![vec![button(
+                "↩️ Torna al contenitore",
+                &format!("c:v:{}", encode_id(id)),
+            )]]))
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+async fn show_move_home_picker(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    id: i64,
+) -> ResponseResult<()> {
+    let Some(container) = get_container(pool, id).await.unwrap_or(None) else {
+        bot.send_message(chat_id, format!("Contenitore #{id} non trovato."))
+            .reply_markup(containers_menu_keyboard())
+            .await?;
+        return Ok(());
+    };
+    let homes = list_ui_homes(pool).await.unwrap_or_default();
+    let mut rows = homes
+        .iter()
+        .take(30)
+        .map(|home| {
+            vec![button(
+                &format!("🏠 {}", truncate_chars(&home.name, 42)),
+                &format!("c:mh:{}:{}", encode_id(id), encode_id(home.id)),
+            )]
+        })
+        .collect::<Vec<_>>();
+    rows.push(vec![button(
+        "↩️ Annulla",
+        &format!("c:v:{}", encode_id(id)),
+    )]);
+
+    bot.send_message(
+        chat_id,
+        format!(
+            "🚚 Sposta contenitore\n\n📦 {}\n\nScegli la casa di destinazione. Tutto il contenuto seguirà il contenitore.",
+            container.name
+        ),
+    )
+    .reply_markup(InlineKeyboardMarkup::new(rows))
+    .await?;
+    Ok(())
+}
+
+async fn show_move_scope_picker(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    id: i64,
+    home_id: i64,
+) -> ResponseResult<()> {
+    if get_container(pool, id).await.unwrap_or(None).is_none() {
+        bot.send_message(chat_id, format!("Contenitore #{id} non trovato."))
+            .reply_markup(containers_menu_keyboard())
+            .await?;
+        return Ok(());
+    }
+    let Some(home) = read_ui_home(pool, home_id).await.unwrap_or(None) else {
+        bot.send_message(chat_id, format!("Casa #{home_id} non trovata."))
+            .reply_markup(containers_menu_keyboard())
+            .await?;
+        return Ok(());
+    };
+    let rooms = list_ui_rooms_for_home(pool, home_id)
+        .await
+        .unwrap_or_default();
+    let mut rows = vec![vec![button(
+        "🏠 Direttamente nella casa",
+        &format!("c:ms:{}:{}:0", encode_id(id), encode_id(home_id)),
+    )]];
+    for room in rooms.iter().take(30) {
+        rows.push(vec![button(
+            &format!("🚪 {}", truncate_chars(&room.name, 42)),
+            &format!(
+                "c:ms:{}:{}:{}",
+                encode_id(id),
+                encode_id(home_id),
+                encode_id(room.id)
+            ),
+        )]);
+    }
+    rows.push(vec![button(
+        "↩️ Cambia casa",
+        &format!("c:m:{}", encode_id(id)),
+    )]);
+
+    bot.send_message(
+        chat_id,
+        format!(
+            "🚚 Sposta contenitore\n\nDestinazione: 🏠 {}\n\nScegli la stanza oppure la sola casa.",
+            home.name
+        ),
+    )
+    .reply_markup(InlineKeyboardMarkup::new(rows))
+    .await?;
+    Ok(())
+}
+
+async fn show_move_parent_picker(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    id: i64,
+    home_id: i64,
+    room_id: Option<i64>,
+) -> ResponseResult<()> {
+    let Some(container) = get_container(pool, id).await.unwrap_or(None) else {
+        bot.send_message(chat_id, format!("Contenitore #{id} non trovato."))
+            .reply_markup(containers_menu_keyboard())
+            .await?;
+        return Ok(());
+    };
+    if !scope_exists(pool, home_id, room_id).await {
+        bot.send_message(chat_id, "⚠️ La destinazione scelta non esiste più.")
+            .reply_markup(containers_menu_keyboard())
+            .await?;
+        return Ok(());
+    }
+
+    let candidates = list_move_parent_candidates(pool, id, home_id, room_id)
+        .await
+        .unwrap_or_default();
+    let scope_label = scope_label(pool, home_id, room_id).await;
+
+    let mut rows = vec![vec![button(
+        "📍 Livello principale",
+        &move_target_callback(id, home_id, room_id, None),
+    )]];
+    for candidate in candidates.iter().take(30) {
+        rows.push(vec![button(
+            &format!(
+                "📦 #{} · {}",
+                candidate.id,
+                truncate_chars(&candidate.name, 34)
+            ),
+            &move_target_callback(id, home_id, room_id, Some(candidate.id)),
+        )]);
+    }
+    rows.push(vec![button(
+        "↩️ Cambia stanza",
+        &format!("c:mh:{}:{}", encode_id(id), encode_id(home_id)),
+    )]);
+
+    let note = if candidates.is_empty() {
+        "\n\nNon ci sono altri contenitori validi in questa posizione: puoi scegliere solo il livello principale."
+    } else {
+        "\n\nPuoi metterlo al livello principale oppure dentro un altro contenitore."
+    };
+
+    bot.send_message(
+        chat_id,
+        format!(
+            "🚚 Sposta 📦 {}\n\nDestinazione: {}{}",
+            container.name, scope_label, note
+        ),
+    )
+    .reply_markup(InlineKeyboardMarkup::new(rows))
+    .await?;
+    Ok(())
+}
+
+async fn move_container_and_report(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    id: i64,
+    home_id: i64,
+    room_id: Option<i64>,
+    parent_id: Option<i64>,
+) -> ResponseResult<()> {
+    if !scope_exists(pool, home_id, room_id).await {
+        bot.send_message(chat_id, "⚠️ La destinazione scelta non esiste più.")
+            .reply_markup(containers_menu_keyboard())
+            .await?;
+        return Ok(());
+    }
+
+    match move_container(pool, id, home_id, room_id, parent_id).await {
+        Ok(true) => {
+            bot.send_message(
+                chat_id,
+                "✅ Contenitore spostato. Sottocontenitori e oggetti contenuti hanno seguito lo spostamento.",
+            )
+            .await?;
+            show_container_detail(bot, chat_id, pool, id).await?;
+        }
+        Ok(false) => {
+            bot.send_message(chat_id, "ℹ️ Il contenitore è già in quella posizione.")
+                .await?;
+            show_container_detail(bot, chat_id, pool, id).await?;
+        }
+        Err(error) => {
+            tracing::error!(?error, container_id = id, "Errore spostamento contenitore");
+            bot.send_message(
+                chat_id,
+                "⚠️ Spostamento non riuscito. La destinazione potrebbe creare un ciclo oppure un conflitto di nomi.",
+            )
+            .reply_markup(InlineKeyboardMarkup::new(vec![vec![button(
+                "↩️ Torna al contenitore",
+                &format!("c:v:{}", encode_id(id)),
+            )]]))
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+async fn list_ui_homes(pool: &SqlitePool) -> Result<Vec<UiHome>, sqlx::Error> {
+    sqlx::query_as::<_, UiHome>(
+        "SELECT id, nome AS name FROM abitazioni ORDER BY nome COLLATE NOCASE, id",
+    )
+    .fetch_all(pool)
+    .await
+}
+
+async fn read_ui_home(pool: &SqlitePool, id: i64) -> Result<Option<UiHome>, sqlx::Error> {
+    sqlx::query_as::<_, UiHome>("SELECT id, nome AS name FROM abitazioni WHERE id = ?")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+}
+
+async fn list_ui_rooms_for_home(
+    pool: &SqlitePool,
+    home_id: i64,
+) -> Result<Vec<UiRoom>, sqlx::Error> {
+    sqlx::query_as::<_, UiRoom>(
+        "SELECT s.id, s.abitazione_id AS home_id, s.nome AS name, a.nome AS home_name \
+         FROM stanze s JOIN abitazioni a ON a.id = s.abitazione_id \
+         WHERE s.abitazione_id = ? ORDER BY s.nome COLLATE NOCASE, s.id",
+    )
+    .bind(home_id)
+    .fetch_all(pool)
+    .await
+}
+
+async fn read_ui_room(pool: &SqlitePool, id: i64) -> Result<Option<UiRoom>, sqlx::Error> {
+    sqlx::query_as::<_, UiRoom>(
+        "SELECT s.id, s.abitazione_id AS home_id, s.nome AS name, a.nome AS home_name \
+         FROM stanze s JOIN abitazioni a ON a.id = s.abitazione_id WHERE s.id = ?",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+}
+
+async fn list_root_containers(
+    pool: &SqlitePool,
+    home_id: i64,
+    room_id: Option<i64>,
+) -> Result<Vec<ContainerRecord>, sqlx::Error> {
+    sqlx::query_as::<_, ContainerRecord>(
+        "SELECT id, abitazione_id AS home_id, stanza_id AS room_id, \
+                contenitore_padre_id AS parent_id, nome AS name, descrizione AS description \
+         FROM contenitori \
+         WHERE abitazione_id = ? AND stanza_id IS ? AND contenitore_padre_id IS NULL \
+         ORDER BY nome COLLATE NOCASE, id",
+    )
+    .bind(home_id)
+    .bind(room_id)
+    .fetch_all(pool)
+    .await
+}
+
+async fn list_move_parent_candidates(
+    pool: &SqlitePool,
+    moving_id: i64,
+    home_id: i64,
+    room_id: Option<i64>,
+) -> Result<Vec<ContainerRecord>, sqlx::Error> {
+    sqlx::query_as::<_, ContainerRecord>(
+        "WITH RECURSIVE subtree(id) AS ( \
+             SELECT id FROM contenitori WHERE id = ? \
+             UNION ALL \
+             SELECT c.id FROM contenitori c JOIN subtree s ON c.contenitore_padre_id = s.id \
+         ) \
+         SELECT c.id, c.abitazione_id AS home_id, c.stanza_id AS room_id, \
+                c.contenitore_padre_id AS parent_id, c.nome AS name, c.descrizione AS description \
+         FROM contenitori c \
+         WHERE c.abitazione_id = ? AND c.stanza_id IS ? \
+           AND c.id NOT IN (SELECT id FROM subtree) \
+         ORDER BY c.nome COLLATE NOCASE, c.id",
+    )
+    .bind(moving_id)
+    .bind(home_id)
+    .bind(room_id)
+    .fetch_all(pool)
+    .await
+}
+
+async fn count_items_in_container(pool: &SqlitePool, id: i64) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar("SELECT COUNT(*) FROM item_luogo WHERE contenitore_id = ?")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+}
+
+async fn scope_exists(pool: &SqlitePool, home_id: i64, room_id: Option<i64>) -> bool {
+    match room_id {
+        Some(room_id) => sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM stanze WHERE id = ? AND abitazione_id = ?)",
+        )
+        .bind(room_id)
+        .bind(home_id)
+        .fetch_one(pool)
+        .await
+        .unwrap_or(false),
+        None => {
+            sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM abitazioni WHERE id = ?)")
+                .bind(home_id)
+                .fetch_one(pool)
+                .await
+                .unwrap_or(false)
+        }
+    }
+}
+
+async fn scope_label(pool: &SqlitePool, home_id: i64, room_id: Option<i64>) -> String {
+    if let Some(room_id) = room_id {
+        if let Ok(Some(room)) = read_ui_room(pool, room_id).await {
+            return format!("🏠 {} / 🚪 {}", room.home_name, room.name);
+        }
+    }
+    if let Ok(Some(home)) = read_ui_home(pool, home_id).await {
+        return format!("🏠 {}", home.name);
+    }
+    format!("casa #{home_id}")
+}
+
+fn format_container_path(path: &ContainerPath) -> String {
+    let mut parts = vec![path.home_name.clone()];
+    if let Some(room_name) = &path.room_name {
+        parts.push(room_name.clone());
+    }
+    parts.extend(path.containers.iter().map(|entry| entry.name.clone()));
+    parts.join(" / ")
+}
+
+fn containers_menu_keyboard() -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![
+        vec![button("➕ Nuovo contenitore", "c:n")],
+        vec![button("📋 Elenco contenitori", "c:l")],
+        vec![button("↩️ Case e stanze", "loc:menu")],
+        vec![button("🏠 Menu principale", "menu:main")],
+    ])
+}
+
+fn button(label: &str, data: &str) -> InlineKeyboardButton {
+    InlineKeyboardButton::callback(label.to_string(), data.to_string())
+}
+
+fn clean_ui_name(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.is_empty() || value.chars().count() > 120 {
+        None
+    } else {
+        Some(value.to_string())
+    }
+}
+
+fn parse_command(text: &str) -> Option<(&str, &str)> {
+    let trimmed = text.trim();
+    let mut parts = trimmed.splitn(2, char::is_whitespace);
+    let command = parts.next()?;
+    if !command.starts_with('/') {
+        return None;
+    }
+    let command = command.split('@').next()?;
+    let args = parts.next().unwrap_or("").trim();
+    Some((command, args))
+}
+
+fn parse_positive_decimal_id(value: &str) -> Option<i64> {
+    value.trim().parse::<i64>().ok().filter(|id| *id > 0)
+}
+
+fn encode_id(value: i64) -> String {
+    debug_assert!(value >= 0);
+    if value == 0 {
+        return "0".to_string();
+    }
+
+    const DIGITS: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+    let mut value = value as u64;
+    let mut encoded = Vec::new();
+    while value > 0 {
+        encoded.push(DIGITS[(value % 36) as usize] as char);
+        value /= 36;
+    }
+    encoded.iter().rev().collect()
+}
+
+fn decode_id(value: &str) -> Option<i64> {
+    let decoded = i64::from_str_radix(value, 36).ok()?;
+    (decoded >= 0).then_some(decoded)
+}
+
+fn parse_one_callback(data: &str, prefix: &str) -> Option<i64> {
+    let value = data.strip_prefix(prefix)?;
+    if value.contains(':') {
+        return None;
+    }
+    decode_id(value).filter(|id| *id > 0)
+}
+
+fn parse_two_callback(data: &str, prefix: &str) -> Option<(i64, i64)> {
+    let rest = data.strip_prefix(prefix)?;
+    let mut parts = rest.split(':');
+    let a = decode_id(parts.next()?)?;
+    let b = decode_id(parts.next()?)?;
+    if parts.next().is_some() || a <= 0 || b < 0 {
+        return None;
+    }
+    Some((a, b))
+}
+
+fn parse_three_callback(data: &str, prefix: &str) -> Option<(i64, i64, i64)> {
+    let rest = data.strip_prefix(prefix)?;
+    let mut parts = rest.split(':');
+    let a = decode_id(parts.next()?)?;
+    let b = decode_id(parts.next()?)?;
+    let c = decode_id(parts.next()?)?;
+    if parts.next().is_some() || a <= 0 || b <= 0 || c < 0 {
+        return None;
+    }
+    Some((a, b, c))
+}
+
+fn parse_four_callback(data: &str, prefix: &str) -> Option<(i64, i64, i64, i64)> {
+    let rest = data.strip_prefix(prefix)?;
+    let mut parts = rest.split(':');
+    let a = decode_id(parts.next()?)?;
+    let b = decode_id(parts.next()?)?;
+    let c = decode_id(parts.next()?)?;
+    let d = decode_id(parts.next()?)?;
+    if parts.next().is_some() || a <= 0 || b <= 0 || c < 0 || d < 0 {
+        return None;
+    }
+    Some((a, b, c, d))
+}
+
+fn zero_as_none(value: i64) -> Option<i64> {
+    (value > 0).then_some(value)
+}
+
+fn move_target_callback(
+    id: i64,
+    home_id: i64,
+    room_id: Option<i64>,
+    parent_id: Option<i64>,
+) -> String {
+    format!(
+        "c:mt:{}:{}:{}:{}",
+        encode_id(id),
+        encode_id(home_id),
+        encode_id(room_id.unwrap_or(0)),
+        encode_id(parent_id.unwrap_or(0))
+    )
+}
+
+fn truncate_chars(value: &str, max_chars: usize) -> String {
+    if value.chars().count() <= max_chars {
+        value.to_string()
+    } else {
+        let mut truncated = value
+            .chars()
+            .take(max_chars.saturating_sub(1))
+            .collect::<String>();
+        truncated.push('…');
+        truncated
+    }
 }
 
 #[cfg(test)]
@@ -602,5 +1981,106 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(loc, (h, Some(r), None));
+    }
+}
+
+#[cfg(test)]
+mod ui_tests {
+    use super::*;
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+    use std::str::FromStr;
+
+    async fn test_pool() -> SqlitePool {
+        let options = SqliteConnectOptions::from_str("sqlite::memory:")
+            .expect("sqlite")
+            .foreign_keys(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .expect("pool");
+        sqlx::migrate!("./migrations")
+            .run(&pool)
+            .await
+            .expect("migrate");
+        pool
+    }
+
+    async fn home(pool: &SqlitePool, name: &str) -> i64 {
+        sqlx::query("INSERT INTO abitazioni (nome) VALUES (?)")
+            .bind(name)
+            .execute(pool)
+            .await
+            .expect("home")
+            .last_insert_rowid()
+    }
+
+    async fn room(pool: &SqlitePool, home_id: i64, name: &str) -> i64 {
+        sqlx::query("INSERT INTO stanze (abitazione_id, nome) VALUES (?, ?)")
+            .bind(home_id)
+            .bind(name)
+            .execute(pool)
+            .await
+            .expect("room")
+            .last_insert_rowid()
+    }
+
+    #[test]
+    fn callback_spostamento_restano_sotto_limite_telegram() {
+        let callback = move_target_callback(i64::MAX, i64::MAX, Some(i64::MAX), Some(i64::MAX));
+        assert!(callback.len() <= 64, "callback troppo lunga: {callback}");
+        assert_eq!(
+            parse_four_callback(&callback, "c:mt:"),
+            Some((i64::MAX, i64::MAX, i64::MAX, i64::MAX))
+        );
+    }
+
+    #[test]
+    fn callback_base36_roundtrip() {
+        for value in [0, 1, 35, 36, 12345, i64::MAX] {
+            assert_eq!(decode_id(&encode_id(value)), Some(value));
+        }
+    }
+
+    #[tokio::test]
+    async fn candidati_spostamento_escludono_se_stesso_e_discendenti() {
+        let pool = test_pool().await;
+        let h = home(&pool, "Casa").await;
+        let r = room(&pool, h, "Garage").await;
+        let a = create_container(&pool, h, Some(r), None, "A", None)
+            .await
+            .unwrap();
+        let b = create_container(&pool, h, Some(r), Some(a), "B", None)
+            .await
+            .unwrap();
+        let c = create_container(&pool, h, Some(r), Some(b), "C", None)
+            .await
+            .unwrap();
+        let x = create_container(&pool, h, Some(r), None, "X", None)
+            .await
+            .unwrap();
+
+        let candidates = list_move_parent_candidates(&pool, a, h, Some(r))
+            .await
+            .unwrap();
+        let ids = candidates.iter().map(|item| item.id).collect::<Vec<_>>();
+        assert!(!ids.contains(&a));
+        assert!(!ids.contains(&b));
+        assert!(!ids.contains(&c));
+        assert!(ids.contains(&x));
+    }
+
+    #[tokio::test]
+    async fn rinomina_identica_e_un_noop() {
+        let pool = test_pool().await;
+        let h = home(&pool, "Casa").await;
+        let id = create_container(&pool, h, None, None, "Armadio", None)
+            .await
+            .unwrap();
+        assert!(!rename_container(&pool, id, "Armadio").await.unwrap());
+        assert_eq!(
+            get_container(&pool, id).await.unwrap().unwrap().name,
+            "Armadio"
+        );
     }
 }

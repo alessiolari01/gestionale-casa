@@ -115,7 +115,7 @@ struct LocatedObjectSummary {
 pub async fn show_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
-        "🏠 Case e stanze\n\nGestisci le abitazioni, le stanze e consulta gli oggetti per luogo.",
+        "🏠 Case, stanze e contenitori\n\nGestisci le abitazioni, le stanze, i contenitori e consulta gli oggetti per luogo.",
     )
     .reply_markup(locations_menu_keyboard())
     .await?;
@@ -934,11 +934,12 @@ async fn send_room_delete_confirmation(
     match get_room(pool, id).await {
         Ok(Some(room)) => {
             let item_count = count_items_for_room(pool, id).await.unwrap_or(0);
+            let container_count = count_containers_for_room(pool, id).await.unwrap_or(0);
             bot.send_message(
                 chat_id,
                 format!(
-                    "⚠️ Eliminare la stanza?\n\n🚪 {}\n🏠 {}\n#{}\n\nI {} elementi collegati NON verranno eliminati: resteranno associati alla casa, ma senza stanza.\n\nL'operazione sulla stanza non può essere annullata.",
-                    room.name, room.home_name, room.id, item_count
+                    "⚠️ Eliminare la stanza?\n\n🚪 {}\n🏠 {}\n#{}\n\nI {} elementi collegati NON verranno eliminati: resteranno associati alla casa, ma senza stanza.\nI {} contenitori della stanza verranno mantenuti e promossi direttamente nella casa, conservando la loro gerarchia.\n\nL'operazione sulla stanza non può essere annullata.",
+                    room.name, room.home_name, room.id, item_count, container_count
                 ),
             )
             .reply_markup(room_delete_keyboard(&room))
@@ -1834,6 +1835,19 @@ async fn delete_room(pool: &SqlitePool, id: i64) -> Result<bool, sqlx::Error> {
         .await?;
     }
 
+    // Step 6C.2: i contenitori sono posizioni, non dati usa-e-getta.
+    // Eliminando una stanza li promuoviamo alla casa mantenendo intatta la
+    // gerarchia padre/figlio. Se la promozione creasse un conflitto di nomi,
+    // la transazione fallisce e la stanza non viene eliminata.
+    sqlx::query(
+        "UPDATE contenitori \
+         SET stanza_id = NULL, aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
+         WHERE stanza_id = ?",
+    )
+    .bind(id)
+    .execute(&mut *tx)
+    .await?;
+
     crate::modules::storico::mark_entity_deleted(&mut tx, room_history_id).await?;
     let result = sqlx::query("DELETE FROM stanze WHERE id = ?")
         .bind(id)
@@ -1884,6 +1898,13 @@ async fn count_items_for_home(pool: &SqlitePool, home_id: i64) -> Result<i64, sq
 
 async fn count_items_for_room(pool: &SqlitePool, room_id: i64) -> Result<i64, sqlx::Error> {
     sqlx::query_scalar("SELECT COUNT(*) FROM item_luogo WHERE stanza_id = ?")
+        .bind(room_id)
+        .fetch_one(pool)
+        .await
+}
+
+async fn count_containers_for_room(pool: &SqlitePool, room_id: i64) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar("SELECT COUNT(*) FROM contenitori WHERE stanza_id = ?")
         .bind(room_id)
         .fetch_one(pool)
         .await
@@ -2100,6 +2121,7 @@ fn locations_menu_keyboard() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
         vec![button("➕ Nuova casa", "loc:home:new")],
         vec![button("📋 Elenco case", "loc:home:list")],
+        vec![button("📦 Contenitori", "c:menu")],
         vec![button("🏠 Menu principale", "menu:main")],
     ])
 }
@@ -2478,6 +2500,15 @@ mod tests {
         set_item_room(&pool, item_id, room_id)
             .await
             .expect("assegnazione");
+        let container_id = sqlx::query(
+            "INSERT INTO contenitori (abitazione_id, stanza_id, nome) VALUES (?, ?, 'Armadio')",
+        )
+        .bind(home_id)
+        .bind(room_id)
+        .execute(&pool)
+        .await
+        .expect("contenitore")
+        .last_insert_rowid();
 
         assert!(delete_room(&pool, room_id).await.expect("delete stanza"));
         let location: (Option<i64>, Option<i64>) =
@@ -2487,6 +2518,14 @@ mod tests {
                 .await
                 .expect("riga luogo presente");
         assert_eq!(location, (Some(home_id), None));
+
+        let container_location: (i64, Option<i64>) =
+            sqlx::query_as("SELECT abitazione_id, stanza_id FROM contenitori WHERE id = ?")
+                .bind(container_id)
+                .fetch_one(&pool)
+                .await
+                .expect("contenitore mantenuto");
+        assert_eq!(container_location, (home_id, None));
 
         let item_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM items WHERE id = ?")
             .bind(item_id)
