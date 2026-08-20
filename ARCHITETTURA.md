@@ -1,5 +1,17 @@
 # Architettura
 
+## Spostamento oggetti nella gerarchia — Step 6C.3C
+
+`item_luogo` resta la sorgente della posizione corrente. Il selettore Telegram tratta `contenitore_id` come terzo livello strutturato dopo abitazione e stanza.
+
+Per un'assegnazione a contenitore vengono aggiornati atomicamente:
+- `abitazione_id` = ambito del contenitore;
+- `stanza_id` = stanza del contenitore, se presente;
+- `contenitore_id` = contenitore scelto.
+
+Per uno spostamento diretto a stanza/casa, `contenitore_id` viene esplicitamente azzerato.
+
+La UI ricostruisce il percorso completo tramite `contenitori::container_path`. Il modello storico attuale conserva ancora casa/stanza; l'estensione dello storico al contenitore/percorso è il compito del 6C.4.
 
 ## Rifiniture posizione e annullamento — Step 6C.3B
 

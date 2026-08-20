@@ -1,6 +1,6 @@
 //! Case, stanze e posizione strutturata degli item.
 //!
-//! Step 6C.3B rifinisce la navigazione dei luoghi:
+//! Step 6C.3C completa la navigazione e lo spostamento degli oggetti:
 //! abitazione -> stanza -> contenitori annidabili -> oggetto.
 //! Le azioni Telegram dipendono dal luogo visualizzato e mantengono sempre
 //! una scorciatoia verso il livello precedente e il menu principale.
@@ -121,10 +121,11 @@ pub(crate) struct RoomChoice {
     pub(crate) home_name: String,
 }
 
-#[derive(Debug, Clone, FromRow)]
+#[derive(Debug, Clone, FromRow, PartialEq, Eq)]
 struct ItemLocation {
     home_id: i64,
     room_id: Option<i64>,
+    container_id: Option<i64>,
     home_name: Option<String>,
     room_name: Option<String>,
 }
@@ -612,6 +613,52 @@ pub async fn handle_callback(
                 send_objects_for_room(bot, chat_id, pool, id).await?;
             }
         }
+        _ if data.starts_with("loc:item:setcontainer:") => {
+            if let Some((item_id, container_id)) =
+                parse_two_ids_callback(data, "loc:item:setcontainer:")
+            {
+                let previous = get_item_location(pool, item_id).await.unwrap_or(None);
+                match set_item_container(pool, item_id, container_id).await {
+                    Ok(()) => {
+                        let current = get_item_location(pool, item_id).await.unwrap_or(None);
+                        bot.send_message(
+                            chat_id,
+                            location_change_message_full(pool, previous.as_ref(), current.as_ref())
+                                .await,
+                        )
+                        .await?;
+                        crate::modules::oggetti::send_object_detail(bot, chat_id, pool, item_id)
+                            .await?;
+                    }
+                    Err(error) => {
+                        tracing::error!(
+                            ?error,
+                            item_id,
+                            container_id,
+                            "Errore assegnazione contenitore"
+                        );
+                        bot.send_message(
+                            chat_id,
+                            "⚠️ Non riesco a spostare l'oggetto in questo contenitore.",
+                        )
+                        .await?;
+                    }
+                }
+            }
+        }
+        _ if data.starts_with("loc:item:container:") => {
+            if let Some((item_id, container_id)) =
+                parse_two_ids_callback(data, "loc:item:container:")
+            {
+                show_container_destination_picker(bot, chat_id, pool, item_id, container_id)
+                    .await?;
+            }
+        }
+        _ if data.starts_with("loc:item:room:") => {
+            if let Some((item_id, room_id)) = parse_two_ids_callback(data, "loc:item:room:") {
+                show_room_destination_picker(bot, chat_id, pool, item_id, room_id).await?;
+            }
+        }
         _ if data.starts_with("loc:item:sethome:") => {
             if let Some((item_id, home_id)) = parse_two_ids_callback(data, "loc:item:sethome:") {
                 let previous = get_item_location(pool, item_id).await.unwrap_or(None);
@@ -620,7 +667,8 @@ pub async fn handle_callback(
                         let current = get_item_location(pool, item_id).await.unwrap_or(None);
                         bot.send_message(
                             chat_id,
-                            location_change_message(previous.as_ref(), current.as_ref()),
+                            location_change_message_full(pool, previous.as_ref(), current.as_ref())
+                                .await,
                         )
                         .await?;
                         crate::modules::oggetti::send_object_detail(bot, chat_id, pool, item_id)
@@ -642,7 +690,8 @@ pub async fn handle_callback(
                         let current = get_item_location(pool, item_id).await.unwrap_or(None);
                         bot.send_message(
                             chat_id,
-                            location_change_message(previous.as_ref(), current.as_ref()),
+                            location_change_message_full(pool, previous.as_ref(), current.as_ref())
+                                .await,
                         )
                         .await?;
                         crate::modules::oggetti::send_object_detail(bot, chat_id, pool, item_id)
@@ -664,7 +713,8 @@ pub async fn handle_callback(
                         let current = get_item_location(pool, item_id).await.unwrap_or(None);
                         bot.send_message(
                             chat_id,
-                            location_change_message(previous.as_ref(), current.as_ref()),
+                            location_change_message_full(pool, previous.as_ref(), current.as_ref())
+                                .await,
                         )
                         .await?;
                         crate::modules::oggetti::send_object_detail(bot, chat_id, pool, item_id)
@@ -680,7 +730,7 @@ pub async fn handle_callback(
         }
         _ if data.starts_with("loc:item:home:") => {
             if let Some((item_id, home_id)) = parse_two_ids_callback(data, "loc:item:home:") {
-                show_room_picker(bot, chat_id, pool, item_id, home_id).await?;
+                show_home_destination_picker(bot, chat_id, pool, item_id, home_id).await?;
             }
         }
         _ if data.starts_with("loc:item:") => {
@@ -1453,7 +1503,7 @@ async fn show_item_location_picker(
     };
     let location = get_item_location(pool, item_id).await.unwrap_or(None);
 
-    let current = format_location(location.as_ref());
+    let current = format_location_full(pool, location.as_ref()).await;
     let is_move = has_structured_location(location.as_ref());
     let text = if homes.is_empty() {
         if is_move {
@@ -1467,11 +1517,11 @@ async fn show_item_location_picker(
         }
     } else if is_move {
         format!(
-            "🚚 Sposta oggetto #{item_id}\n\nPosizione attuale: {current}\n\nScegli la nuova casa. Nel passaggio successivo potrai scegliere anche una stanza."
+            "🚚 Sposta oggetto #{item_id}\n\nPosizione attuale: {current}\n\nScegli la nuova casa. Nei passaggi successivi potrai scegliere anche una stanza o un contenitore."
         )
     } else {
         format!(
-            "🏠 Assegna luogo all'oggetto #{item_id}\n\nPosizione attuale: {current}\n\nScegli la casa. Nel passaggio successivo potrai scegliere anche una stanza."
+            "🏠 Assegna luogo all'oggetto #{item_id}\n\nPosizione attuale: {current}\n\nScegli la casa. Nei passaggi successivi potrai scegliere anche una stanza o un contenitore."
         )
     };
 
@@ -1481,7 +1531,7 @@ async fn show_item_location_picker(
     Ok(())
 }
 
-async fn show_room_picker(
+async fn show_home_destination_picker(
     bot: &Bot,
     chat_id: ChatId,
     pool: &SqlitePool,
@@ -1494,10 +1544,148 @@ async fn show_room_picker(
             .await?;
         return Ok(());
     };
+
     let rooms = list_rooms_for_home(pool, home_id).await.unwrap_or_default();
+    let containers = crate::modules::contenitori::list_root_containers(pool, home_id, None)
+        .await
+        .unwrap_or_default();
     let current_location = get_item_location(pool, item_id).await.unwrap_or(None);
     let is_move = has_structured_location(current_location.as_ref());
-    let current = format_location(current_location.as_ref());
+    let current = format_location_full(pool, current_location.as_ref()).await;
+    let action = if is_move {
+        "🚚 Sposta oggetto"
+    } else {
+        "🏠 Assegna luogo"
+    };
+
+    let current_is_home_only = current_location.as_ref().is_some_and(|location| {
+        location.home_id == home_id && location.room_id.is_none() && location.container_id.is_none()
+    });
+    let home_label = if is_move && current_is_home_only {
+        "🚚 Sposta qui (solo casa) · Attualmente qui"
+    } else if is_move {
+        "🚚 Sposta qui (solo casa)"
+    } else {
+        "🏠 Assegna solo alla casa"
+    };
+
+    let mut rows = vec![vec![button(
+        home_label,
+        &format!("loc:item:sethome:{item_id}:{home_id}"),
+    )]];
+
+    for room in rooms.iter().take(20) {
+        let exact_room = current_location.as_ref().is_some_and(|location| {
+            location.room_id == Some(room.id) && location.container_id.is_none()
+        });
+        let label = room_picker_label(&room.name, is_move, exact_room);
+        rows.push(vec![button(
+            &label,
+            &format!("loc:item:room:{item_id}:{}", room.id),
+        )]);
+    }
+
+    for container in containers.iter().take(20) {
+        let exact_container = current_location
+            .as_ref()
+            .and_then(|location| location.container_id)
+            == Some(container.id);
+        let label = if is_move && exact_container {
+            format!(
+                "📦 {} · Attualmente qui",
+                truncate_chars(&container.name, 28)
+            )
+        } else {
+            format!("📦 {}", truncate_chars(&container.name, 40))
+        };
+        rows.push(vec![button(
+            &label,
+            &format!("loc:item:container:{item_id}:{}", container.id),
+        )]);
+    }
+
+    rows.push(vec![
+        button("↩️ Scegli un'altra casa", &format!("loc:item:{item_id}")),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
+
+    bot.send_message(
+        chat_id,
+        format!(
+            "{action} #{item_id}\n\nPosizione attuale: {current}\nDestinazione scelta: 🏠 {}\n\nPuoi spostare l'oggetto direttamente nella casa, entrare in una stanza oppure scegliere un contenitore direttamente nella casa.",
+            home.name
+        ),
+    )
+    .reply_markup(InlineKeyboardMarkup::new(rows))
+    .await?;
+    Ok(())
+}
+
+async fn show_room_destination_picker(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    item_id: i64,
+    room_id: i64,
+) -> ResponseResult<()> {
+    let Some(room) = get_room(pool, room_id).await.unwrap_or(None) else {
+        bot.send_message(chat_id, format!("Stanza #{room_id} non trovata."))
+            .reply_markup(locations_menu_keyboard())
+            .await?;
+        return Ok(());
+    };
+
+    let containers =
+        crate::modules::contenitori::list_root_containers(pool, room.home_id, Some(room.id))
+            .await
+            .unwrap_or_default();
+    let current_location = get_item_location(pool, item_id).await.unwrap_or(None);
+    let is_move = has_structured_location(current_location.as_ref());
+    let current = format_location_full(pool, current_location.as_ref()).await;
+    let exact_room = current_location.as_ref().is_some_and(|location| {
+        location.room_id == Some(room.id) && location.container_id.is_none()
+    });
+
+    let room_label = if is_move && exact_room {
+        "🚚 Sposta qui (stanza) · Attualmente qui"
+    } else if is_move {
+        "🚚 Sposta qui (stanza)"
+    } else {
+        "🚪 Assegna direttamente alla stanza"
+    };
+
+    let mut rows = vec![vec![button(
+        room_label,
+        &format!("loc:item:setroom:{item_id}:{room_id}"),
+    )]];
+
+    for container in containers.iter().take(25) {
+        let exact_container = current_location
+            .as_ref()
+            .and_then(|location| location.container_id)
+            == Some(container.id);
+        let label = if is_move && exact_container {
+            format!(
+                "📦 {} · Attualmente qui",
+                truncate_chars(&container.name, 28)
+            )
+        } else {
+            format!("📦 {}", truncate_chars(&container.name, 40))
+        };
+        rows.push(vec![button(
+            &label,
+            &format!("loc:item:container:{item_id}:{}", container.id),
+        )]);
+    }
+
+    rows.push(vec![
+        button(
+            "↩️ Torna alla casa scelta",
+            &format!("loc:item:home:{item_id}:{}", room.home_id),
+        ),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
+
     let action = if is_move {
         "🚚 Sposta oggetto"
     } else {
@@ -1507,17 +1695,112 @@ async fn show_room_picker(
     bot.send_message(
         chat_id,
         format!(
-            "{action} #{item_id}\n\nPosizione attuale: {current}\nDestinazione scelta: 🏠 {}\n\nScegli una stanza oppure la sola casa.",
-            home.name
+            "{action} #{item_id}\n\nPosizione attuale: {current}\nDestinazione scelta: 🏠 {} / 🚪 {}\n\nPuoi fermarti nella stanza oppure entrare in uno dei suoi contenitori.",
+            room.home_name, room.name
         ),
     )
-    .reply_markup(item_room_picker_keyboard(
-        item_id,
-        home_id,
-        &rooms,
-        current_location.as_ref(),
-        &home.name,
-    ))
+    .reply_markup(InlineKeyboardMarkup::new(rows))
+    .await?;
+    Ok(())
+}
+
+async fn show_container_destination_picker(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    item_id: i64,
+    container_id: i64,
+) -> ResponseResult<()> {
+    let Some(container) = crate::modules::contenitori::get_container(pool, container_id)
+        .await
+        .ok()
+        .flatten()
+    else {
+        bot.send_message(chat_id, format!("Contenitore #{container_id} non trovato."))
+            .reply_markup(locations_menu_keyboard())
+            .await?;
+        return Ok(());
+    };
+
+    let Some(path) = crate::modules::contenitori::container_path(pool, container_id)
+        .await
+        .ok()
+        .flatten()
+    else {
+        bot.send_message(
+            chat_id,
+            "⚠️ Non riesco a ricostruire il percorso del contenitore.",
+        )
+        .await?;
+        return Ok(());
+    };
+
+    let children = crate::modules::contenitori::list_container_children(pool, container_id)
+        .await
+        .unwrap_or_default();
+    let current_location = get_item_location(pool, item_id).await.unwrap_or(None);
+    let is_move = has_structured_location(current_location.as_ref());
+    let current = format_location_full(pool, current_location.as_ref()).await;
+    let exact_container = current_location
+        .as_ref()
+        .and_then(|location| location.container_id)
+        == Some(container_id);
+
+    let set_label = if is_move && exact_container {
+        "🚚 Sposta qui (contenitore) · Attualmente qui"
+    } else if is_move {
+        "🚚 Sposta qui (contenitore)"
+    } else {
+        "📦 Assegna a questo contenitore"
+    };
+
+    let mut rows = vec![vec![button(
+        set_label,
+        &format!("loc:item:setcontainer:{item_id}:{container_id}"),
+    )]];
+
+    for child in children.iter().take(25) {
+        let child_is_current = current_location
+            .as_ref()
+            .and_then(|location| location.container_id)
+            == Some(child.id);
+        let label = if is_move && child_is_current {
+            format!("📦 {} · Attualmente qui", truncate_chars(&child.name, 28))
+        } else {
+            format!("📦 {}", truncate_chars(&child.name, 40))
+        };
+        rows.push(vec![button(
+            &label,
+            &format!("loc:item:container:{item_id}:{}", child.id),
+        )]);
+    }
+
+    let back_callback = match container.parent_id {
+        Some(parent_id) => format!("loc:item:container:{item_id}:{parent_id}"),
+        None => match container.room_id {
+            Some(room_id) => format!("loc:item:room:{item_id}:{room_id}"),
+            None => format!("loc:item:home:{item_id}:{}", container.home_id),
+        },
+    };
+    rows.push(vec![
+        button("↩️ Livello precedente", &back_callback),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
+
+    let action = if is_move {
+        "🚚 Sposta oggetto"
+    } else {
+        "🏠 Assegna luogo"
+    };
+
+    bot.send_message(
+        chat_id,
+        format!(
+            "{action} #{item_id}\n\nPosizione attuale: {current}\nDestinazione scelta: 📦 {}\n\nPuoi spostare qui l'oggetto oppure entrare in un sottocontenitore.",
+            crate::modules::contenitori::format_path_for_ui(&path)
+        ),
+    )
+    .reply_markup(InlineKeyboardMarkup::new(rows))
     .await?;
     Ok(())
 }
@@ -1630,12 +1913,62 @@ fn format_location(location: Option<&ItemLocation>) -> String {
     }
 }
 
+async fn format_location_full(pool: &SqlitePool, location: Option<&ItemLocation>) -> String {
+    let Some(location) = location else {
+        return "Nessun luogo strutturato".to_string();
+    };
+
+    if let Some(container_id) = location.container_id {
+        if let Ok(Some(path)) =
+            crate::modules::contenitori::container_path(pool, container_id).await
+        {
+            let mut parts = vec![format!("🏠 {}", path.home_name)];
+            if let Some(room_name) = path.room_name {
+                parts.push(format!("🚪 {room_name}"));
+            }
+            parts.extend(
+                path.containers
+                    .into_iter()
+                    .map(|container| format!("📦 {}", container.name)),
+            );
+            return parts.join(" / ");
+        }
+    }
+
+    format_location(Some(location))
+}
+
+async fn location_change_message_full(
+    pool: &SqlitePool,
+    previous: Option<&ItemLocation>,
+    current: Option<&ItemLocation>,
+) -> String {
+    let before = format_location_full(pool, previous).await;
+    let after = format_location_full(pool, current).await;
+    let had_location = has_structured_location(previous);
+    let has_location = has_structured_location(current);
+    let unchanged = previous == current;
+
+    match (had_location, has_location, unchanged) {
+        (false, false, _) => {
+            "ℹ️ L'oggetto non ha un luogo strutturato. Nessuna modifica effettuata.".to_string()
+        }
+        (false, true, _) => format!("✅ Luogo assegnato all'oggetto.\n\nNuovo luogo: {after}"),
+        (true, false, _) => format!("🧹 Luogo rimosso dall'oggetto.\n\nPrima: {before}"),
+        (true, true, true) => {
+            format!("ℹ️ L'oggetto è già in:\n{after}\n\nNessuno spostamento effettuato.")
+        }
+        (true, true, false) => format!("🚚 Oggetto spostato.\n\nDa: {before}\nA: {after}"),
+    }
+}
+
 fn has_structured_location(location: Option<&ItemLocation>) -> bool {
     location
         .and_then(|location| location.home_name.as_ref())
         .is_some()
 }
 
+#[cfg(test)]
 fn location_change_message(
     previous: Option<&ItemLocation>,
     current: Option<&ItemLocation>,
@@ -2365,6 +2698,7 @@ async fn get_item_location(
 ) -> Result<Option<ItemLocation>, sqlx::Error> {
     sqlx::query_as::<_, ItemLocation>(
         "SELECT il.abitazione_id AS home_id, il.stanza_id AS room_id, \
+                il.contenitore_id AS container_id, \
                 a.nome AS home_name, s.nome AS room_name \
          FROM item_luogo il \
          LEFT JOIN abitazioni a ON a.id = il.abitazione_id \
@@ -2382,6 +2716,7 @@ async fn get_item_location_tx(
 ) -> Result<Option<ItemLocation>, sqlx::Error> {
     sqlx::query_as::<_, ItemLocation>(
         "SELECT il.abitazione_id AS home_id, il.stanza_id AS room_id, \
+                il.contenitore_id AS container_id, \
                 a.nome AS home_name, s.nome AS room_name \
          FROM item_luogo il \
          LEFT JOIN abitazioni a ON a.id = il.abitazione_id \
@@ -2397,10 +2732,9 @@ async fn set_item_home(pool: &SqlitePool, item_id: i64, home_id: i64) -> Result<
     let mut tx = pool.begin().await?;
     let previous = get_item_location_tx(&mut tx, item_id).await?;
 
-    if previous
-        .as_ref()
-        .is_some_and(|location| location.home_id == home_id && location.room_id.is_none())
-    {
+    if previous.as_ref().is_some_and(|location| {
+        location.home_id == home_id && location.room_id.is_none() && location.container_id.is_none()
+    }) {
         return Ok(());
     }
 
@@ -2412,8 +2746,8 @@ async fn set_item_home(pool: &SqlitePool, item_id: i64, home_id: i64) -> Result<
     let after = history_location_snapshot(&mut tx, home_id, None).await?;
 
     sqlx::query(
-        "INSERT INTO item_luogo (item_id, abitazione_id, stanza_id) VALUES (?, ?, NULL) \
-         ON CONFLICT(item_id) DO UPDATE SET abitazione_id = excluded.abitazione_id, stanza_id = NULL",
+        "INSERT INTO item_luogo (item_id, abitazione_id, stanza_id, contenitore_id) VALUES (?, ?, NULL, NULL) \
+         ON CONFLICT(item_id) DO UPDATE SET abitazione_id = excluded.abitazione_id, stanza_id = NULL, contenitore_id = NULL",
     )
     .bind(item_id)
     .bind(home_id)
@@ -2439,10 +2773,11 @@ async fn set_item_room(pool: &SqlitePool, item_id: i64, room_id: i64) -> Result<
         .await?;
     let previous = get_item_location_tx(&mut tx, item_id).await?;
 
-    if previous
-        .as_ref()
-        .is_some_and(|location| location.home_id == home_id && location.room_id == Some(room_id))
-    {
+    if previous.as_ref().is_some_and(|location| {
+        location.home_id == home_id
+            && location.room_id == Some(room_id)
+            && location.container_id.is_none()
+    }) {
         return Ok(());
     }
 
@@ -2454,8 +2789,8 @@ async fn set_item_room(pool: &SqlitePool, item_id: i64, room_id: i64) -> Result<
     let after = history_location_snapshot(&mut tx, home_id, Some(room_id)).await?;
 
     sqlx::query(
-        "INSERT INTO item_luogo (item_id, abitazione_id, stanza_id) VALUES (?, ?, ?) \
-         ON CONFLICT(item_id) DO UPDATE SET abitazione_id = excluded.abitazione_id, stanza_id = excluded.stanza_id",
+        "INSERT INTO item_luogo (item_id, abitazione_id, stanza_id, contenitore_id) VALUES (?, ?, ?, NULL) \
+         ON CONFLICT(item_id) DO UPDATE SET abitazione_id = excluded.abitazione_id, stanza_id = excluded.stanza_id, contenitore_id = NULL",
     )
     .bind(item_id)
     .bind(home_id)
@@ -2468,6 +2803,66 @@ async fn set_item_room(pool: &SqlitePool, item_id: i64, room_id: i64) -> Result<
     } else {
         "assegnazione"
     };
+    record_item_location_event(&mut tx, item_id, operation, &before, &after, None).await?;
+
+    tx.commit().await?;
+    Ok(())
+}
+
+async fn set_item_container(
+    pool: &SqlitePool,
+    item_id: i64,
+    container_id: i64,
+) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let Some((home_id, room_id)) = sqlx::query_as::<_, (i64, Option<i64>)>(
+        "SELECT abitazione_id, stanza_id FROM contenitori WHERE id = ?",
+    )
+    .bind(container_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    else {
+        return Err(sqlx::Error::RowNotFound);
+    };
+
+    let previous = get_item_location_tx(&mut tx, item_id).await?;
+    if previous
+        .as_ref()
+        .is_some_and(|location| location.container_id == Some(container_id))
+    {
+        return Ok(());
+    }
+
+    let before = if let Some(previous) = previous.as_ref() {
+        history_snapshot_from_item_location(&mut tx, previous).await?
+    } else {
+        crate::modules::storico::LocationSnapshot::default()
+    };
+    let after = history_location_snapshot(&mut tx, home_id, room_id).await?;
+
+    sqlx::query(
+        "INSERT INTO item_luogo (item_id, abitazione_id, stanza_id, contenitore_id) \
+         VALUES (?, ?, ?, ?) \
+         ON CONFLICT(item_id) DO UPDATE SET \
+             abitazione_id = excluded.abitazione_id, \
+             stanza_id = excluded.stanza_id, \
+             contenitore_id = excluded.contenitore_id",
+    )
+    .bind(item_id)
+    .bind(home_id)
+    .bind(room_id)
+    .bind(container_id)
+    .execute(&mut *tx)
+    .await?;
+
+    let operation = if previous.is_some() {
+        "spostamento"
+    } else {
+        "assegnazione"
+    };
+
+    // Lo storico dei contenitori verrà completato nel 6C.4.
+    // Qui manteniamo il contesto casa/stanza già supportato dal modello storico.
     record_item_location_event(&mut tx, item_id, operation, &before, &after, None).await?;
 
     tx.commit().await?;
@@ -2725,48 +3120,6 @@ fn item_home_picker_keyboard(item_id: i64, homes: &[HomeRecord]) -> InlineKeyboa
     InlineKeyboardMarkup::new(rows)
 }
 
-fn item_room_picker_keyboard(
-    item_id: i64,
-    home_id: i64,
-    rooms: &[RoomRecord],
-    current_location: Option<&ItemLocation>,
-    selected_home_name: &str,
-) -> InlineKeyboardMarkup {
-    let is_move = has_structured_location(current_location);
-    let current_is_selected_home = current_location
-        .and_then(|location| location.home_name.as_deref())
-        == Some(selected_home_name);
-    let current_room_name = current_location
-        .filter(|_| current_is_selected_home)
-        .and_then(|location| location.room_name.as_deref());
-    let current_is_home_only = current_is_selected_home && current_room_name.is_none();
-
-    let home_label = if is_move && current_is_home_only {
-        "🚚 Sposta qui (solo casa) · Attualmente qui"
-    } else if is_move {
-        "🚚 Sposta qui (solo casa)"
-    } else {
-        "🏠 Assegna solo alla casa"
-    };
-    let mut rows = vec![vec![button(
-        home_label,
-        &format!("loc:item:sethome:{item_id}:{home_id}"),
-    )]];
-    for room in rooms.iter().take(20) {
-        let is_current_room = current_room_name == Some(room.name.as_str());
-        let room_label = room_picker_label(&room.name, is_move, is_current_room);
-        rows.push(vec![button(
-            &room_label,
-            &format!("loc:item:setroom:{item_id}:{}", room.id),
-        )]);
-    }
-    rows.push(vec![button(
-        "↩️ Scegli un'altra casa",
-        &format!("loc:item:{item_id}"),
-    )]);
-    InlineKeyboardMarkup::new(rows)
-}
-
 fn room_picker_label(room_name: &str, is_move: bool, is_current: bool) -> String {
     if is_move && is_current {
         format!("🚚 → {} (Attualmente qui)", truncate_chars(room_name, 24))
@@ -2985,6 +3338,162 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn oggetto_puo_spostarsi_da_stanza_a_contenitore_e_tornare_in_stanza() {
+        let pool = test_pool().await;
+        let item_id = create_test_object(&pool, "Trapano").await;
+        let home_id = create_home(&pool, "Casa principale").await.expect("casa");
+        let room_id = create_room(&pool, home_id, "Garage").await.expect("stanza");
+        let root = crate::modules::contenitori::create_container(
+            &pool,
+            home_id,
+            Some(room_id),
+            None,
+            "Scaffale",
+            None,
+        )
+        .await
+        .expect("contenitore");
+        let child = crate::modules::contenitori::create_container(
+            &pool,
+            home_id,
+            Some(room_id),
+            Some(root),
+            "Scatola",
+            None,
+        )
+        .await
+        .expect("sottocontenitore");
+
+        set_item_room(&pool, item_id, room_id)
+            .await
+            .expect("stanza iniziale");
+        set_item_container(&pool, item_id, root)
+            .await
+            .expect("spostamento nel contenitore");
+
+        let in_root: (i64, Option<i64>, Option<i64>) = sqlx::query_as(
+            "SELECT abitazione_id, stanza_id, contenitore_id FROM item_luogo WHERE item_id = ?",
+        )
+        .bind(item_id)
+        .fetch_one(&pool)
+        .await
+        .expect("luogo nel contenitore");
+        assert_eq!(in_root, (home_id, Some(room_id), Some(root)));
+
+        set_item_container(&pool, item_id, child)
+            .await
+            .expect("spostamento nel sottocontenitore");
+        let in_child: (i64, Option<i64>, Option<i64>) = sqlx::query_as(
+            "SELECT abitazione_id, stanza_id, contenitore_id FROM item_luogo WHERE item_id = ?",
+        )
+        .bind(item_id)
+        .fetch_one(&pool)
+        .await
+        .expect("luogo nel sottocontenitore");
+        assert_eq!(in_child, (home_id, Some(room_id), Some(child)));
+
+        set_item_room(&pool, item_id, room_id)
+            .await
+            .expect("ritorno diretto nella stanza");
+        let in_room: (i64, Option<i64>, Option<i64>) = sqlx::query_as(
+            "SELECT abitazione_id, stanza_id, contenitore_id FROM item_luogo WHERE item_id = ?",
+        )
+        .bind(item_id)
+        .fetch_one(&pool)
+        .await
+        .expect("luogo nella stanza");
+        assert_eq!(in_room, (home_id, Some(room_id), None));
+    }
+
+    #[tokio::test]
+    async fn spostare_da_contenitore_a_casa_rimuove_stanza_e_contenitore() {
+        let pool = test_pool().await;
+        let item_id = create_test_object(&pool, "Valigia").await;
+        let home_id = create_home(&pool, "Casa principale").await.expect("casa");
+        let room_id = create_room(&pool, home_id, "Camera").await.expect("stanza");
+        let container_id = crate::modules::contenitori::create_container(
+            &pool,
+            home_id,
+            Some(room_id),
+            None,
+            "Armadio",
+            None,
+        )
+        .await
+        .expect("contenitore");
+
+        set_item_container(&pool, item_id, container_id)
+            .await
+            .expect("assegnazione contenitore");
+        set_item_home(&pool, item_id, home_id)
+            .await
+            .expect("spostamento alla sola casa");
+
+        let location: (i64, Option<i64>, Option<i64>) = sqlx::query_as(
+            "SELECT abitazione_id, stanza_id, contenitore_id FROM item_luogo WHERE item_id = ?",
+        )
+        .bind(item_id)
+        .fetch_one(&pool)
+        .await
+        .expect("luogo finale");
+        assert_eq!(location, (home_id, None, None));
+    }
+
+    #[tokio::test]
+    async fn posizione_completa_include_contenitori_annidati() {
+        let pool = test_pool().await;
+        let item_id = create_test_object(&pool, "Chiavi").await;
+        let home_id = create_home(&pool, "Casa principale").await.expect("casa");
+        let room_id = create_room(&pool, home_id, "Garage").await.expect("stanza");
+        let root = crate::modules::contenitori::create_container(
+            &pool,
+            home_id,
+            Some(room_id),
+            None,
+            "Scaffale",
+            None,
+        )
+        .await
+        .expect("contenitore");
+        let child = crate::modules::contenitori::create_container(
+            &pool,
+            home_id,
+            Some(room_id),
+            Some(root),
+            "Scatola",
+            None,
+        )
+        .await
+        .expect("sottocontenitore");
+
+        set_item_container(&pool, item_id, child)
+            .await
+            .expect("assegnazione contenitore");
+        let location = get_item_location(&pool, item_id)
+            .await
+            .expect("lettura luogo")
+            .expect("luogo presente");
+        let formatted = format_location_full(&pool, Some(&location)).await;
+
+        assert!(formatted.contains("Casa principale"));
+        assert!(formatted.contains("Garage"));
+        assert!(formatted.contains("Scaffale"));
+        assert!(formatted.contains("Scatola"));
+    }
+
+    #[test]
+    fn callback_picker_contenitori_restano_sotto_limite_telegram() {
+        let max = i64::MAX;
+        for callback in [
+            format!("loc:item:room:{max}:{max}"),
+            format!("loc:item:container:{max}:{max}"),
+            format!("loc:item:setcontainer:{max}:{max}"),
+        ] {
+            assert!(callback.len() <= 64, "callback troppo lunga: {callback}");
+        }
+    }
+
+    #[tokio::test]
     async fn trigger_rifiuta_stanza_di_un_altra_casa() {
         let pool = test_pool().await;
         let item_id = create_test_object(&pool, "Trapano").await;
@@ -3098,12 +3607,14 @@ mod tests {
         let garage = ItemLocation {
             home_id: 1,
             room_id: Some(10),
+            container_id: None,
             home_name: Some("Casa principale".to_string()),
             room_name: Some("Garage".to_string()),
         };
         let camera = ItemLocation {
             home_id: 1,
             room_id: Some(11),
+            container_id: None,
             home_name: Some("Casa principale".to_string()),
             room_name: Some("Camera".to_string()),
         };

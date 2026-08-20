@@ -1,5 +1,20 @@
 # Handoff — Gestionale Casa
 
+## Handoff Step 6C.3C — spostamento completo oggetti ↔ contenitori
+
+Base di lavoro: snapshot successivo al commit `24944ac`, comprendente le rifiniture UI gerarchiche e il ritorno contestuale dagli elenchi.
+
+Il 6C.3C completa il pezzo rimasto del 6C.3:
+- picker gerarchico casa → stanza → contenitore → sottocontenitore;
+- posizione corrente completa nel flusso di spostamento;
+- destinazione diretta casa/stanza o contenitore;
+- ritorni coerenti al livello precedente;
+- pulizia di `contenitore_id` quando si risale a stanza/casa;
+- no-op sul medesimo contenitore.
+
+Non introduce migration. Lo storico specifico dei contenitori resta nel 6C.4.
+
+La base precedente aveva 58 test; il 6C.3C aggiunge 4 test, quindi dopo l'applicazione sono attesi **62 test** complessivi.
 
 ## Handoff Step 6C.3B — rifiniture sopra 413605e
 

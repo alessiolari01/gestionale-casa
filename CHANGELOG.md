@@ -1,5 +1,16 @@
 # Diario di sviluppo
 
+## Step 6C.3C — spostamento oggetti nei contenitori — 2026-08-20
+
+- completato il picker gerarchico di destinazione per gli oggetti: casa → stanza → contenitore → sottocontenitore;
+- la schermata di spostamento mostra ora il percorso corrente completo, incluso il contenitore;
+- aggiunte destinazioni dirette casa/stanza e navigazione nei contenitori;
+- aggiunto lo spostamento esplicito stanza → contenitore, contenitore → contenitore/sottocontenitore, contenitore → stanza e contenitore → casa;
+- `set_item_home` e `set_item_room` azzerano `contenitore_id`, evitando posizioni incoerenti;
+- lo stesso contenitore viene riconosciuto come no-op;
+- aggiunti test per spostamenti, azzeramento del contenitore, percorso completo e limite callback Telegram;
+- nessuna migration e nessuna cancellazione dati;
+- storico contenitore/percorso rimandato al 6C.4.
 
 ## Step 6C.3B — rifiniture UX e posizione completa — 2026-08-20
 

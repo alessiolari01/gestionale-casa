@@ -1872,7 +1872,7 @@ async fn read_ui_room(pool: &SqlitePool, id: i64) -> Result<Option<UiRoom>, sqlx
     .await
 }
 
-async fn list_root_containers(
+pub(crate) async fn list_root_containers(
     pool: &SqlitePool,
     home_id: i64,
     room_id: Option<i64>,

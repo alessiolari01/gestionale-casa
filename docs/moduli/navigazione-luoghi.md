@@ -1,5 +1,27 @@
 # Navigazione dei luoghi
 
+## Spostamento gerarchico degli oggetti (6C.3C)
+
+Il comando `🚚 Sposta` non si ferma più a casa/stanza. Il selettore segue la gerarchia reale:
+
+```text
+Casa
+└── Stanza
+    └── Contenitore
+        └── Sottocontenitore
+```
+
+Regole:
+- la posizione attuale è sempre ricostruita fino al contenitore più specifico;
+- a ogni livello esiste un'azione `Sposta qui` per fermarsi a quel livello;
+- casa e stanza mostrano i contenitori radice compatibili con il proprio ambito;
+- un contenitore mostra i propri figli e permette di scendere ricorsivamente;
+- `↩️ Livello precedente` risale al contenitore padre, alla stanza o alla casa coerente;
+- quando l'oggetto viene spostato direttamente in casa/stanza, `contenitore_id` viene impostato a `NULL`;
+- selezionare la destinazione identica a quella corrente non produce modifiche.
+
+Il 6C.3C non estende ancora il modello storico con l'identità del contenitore: questa integrazione è riservata al 6C.4.
+
 ## Principio
 
 La UI dipende dal **luogo che l'utente sta visualizzando**, non dal modulo o dal menu da cui è arrivato. Questa è una regola architetturale anche per gli sviluppi futuri.

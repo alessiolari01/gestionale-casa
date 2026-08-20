@@ -1,5 +1,16 @@
 # Contenitori e sotto-posizioni
 
+## Destinazione degli oggetti nei contenitori (6C.3C)
+
+I contenitori sono ora destinazioni esplicite del flusso `🚚 Sposta oggetto`.
+
+Da una stanza è possibile entrare nei contenitori radice; da un contenitore è possibile:
+- spostare l'oggetto direttamente lì;
+- entrare in un sottocontenitore;
+- tornare al livello gerarchico precedente.
+
+Lo spostamento aggiorna insieme `abitazione_id`, `stanza_id` e `contenitore_id`. Risalendo a stanza o casa, `contenitore_id` viene azzerato per evitare riferimenti residui.
+
 ## Modello
 
 `contenitori` rappresenta sotto-posizioni annidabili.

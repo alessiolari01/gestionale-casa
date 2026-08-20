@@ -1,5 +1,20 @@
 # Gestionale Casa
 
+## Step 6C.3C — spostamento oggetti nei contenitori
+
+Il selettore `🚚 Sposta` percorre ora tutta la gerarchia `casa -> stanza -> contenitore -> sottocontenitore`.
+
+Comportamento previsto:
+- la posizione attuale mostra il percorso completo fino al contenitore;
+- scelta una casa, si può fermare l'oggetto direttamente nella casa, entrare in una stanza oppure scegliere un contenitore direttamente nella casa;
+- scelta una stanza, si può fermare l'oggetto direttamente nella stanza oppure entrare nei suoi contenitori;
+- dentro un contenitore si può scegliere `Sposta qui` oppure scendere nei sottocontenitori;
+- il ritorno segue il livello gerarchico precedente;
+- spostare un oggetto da un contenitore alla stanza/casa azzera correttamente `contenitore_id`;
+- scegliere lo stesso contenitore è un no-op;
+- nessuna migration: viene usata la struttura `item_luogo.contenitore_id` già introdotta nel 6C.1.
+
+Lo storico specifico del cambio **contenitore/percorso** resta volutamente nel successivo Step 6C.4; il 6C.3C mantiene il contesto storico casa/stanza già supportato.
 
 ## Step 6C.3B — rifiniture UX e posizione completa
 
