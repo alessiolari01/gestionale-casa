@@ -128,6 +128,123 @@ struct ScopeNames {
     room_name: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+struct ContainerHistoryState {
+    id: i64,
+    name: String,
+    location: crate::modules::storico::LocationSnapshot,
+}
+
+pub(crate) async fn history_container_snapshot(
+    tx: &mut Transaction<'_, Sqlite>,
+    id: i64,
+) -> Result<crate::modules::storico::LocationSnapshot> {
+    let container = get_container_conn(tx, id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("contenitore #{id} inesistente"))?;
+    Ok(crate::modules::luoghi::history_location_snapshot(
+        tx,
+        container.home_id,
+        container.room_id,
+        Some(id),
+    )
+    .await?)
+}
+
+async fn capture_container_history_state(
+    tx: &mut Transaction<'_, Sqlite>,
+    id: i64,
+) -> Result<ContainerHistoryState> {
+    let container = get_container_conn(tx, id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("contenitore #{id} inesistente"))?;
+    let location = crate::modules::luoghi::history_location_snapshot(
+        tx,
+        container.home_id,
+        container.room_id,
+        Some(id),
+    )
+    .await?;
+    Ok(ContainerHistoryState {
+        id,
+        name: container.name,
+        location,
+    })
+}
+
+async fn subtree_container_ids(tx: &mut Transaction<'_, Sqlite>, root_id: i64) -> Result<Vec<i64>> {
+    Ok(sqlx::query_scalar(
+        "WITH RECURSIVE subtree(id, depth) AS ( \
+            SELECT id, 0 FROM contenitori WHERE id = ? \
+            UNION ALL \
+            SELECT c.id, subtree.depth + 1 \
+            FROM contenitori c \
+            JOIN subtree ON c.contenitore_padre_id = subtree.id \
+         ) SELECT id FROM subtree ORDER BY depth, id",
+    )
+    .bind(root_id)
+    .fetch_all(&mut **tx)
+    .await?)
+}
+
+async fn subtree_item_ids(tx: &mut Transaction<'_, Sqlite>, root_id: i64) -> Result<Vec<i64>> {
+    Ok(sqlx::query_scalar(
+        "WITH RECURSIVE subtree(id) AS ( \
+            SELECT id FROM contenitori WHERE id = ? \
+            UNION ALL \
+            SELECT c.id FROM contenitori c \
+            JOIN subtree ON c.contenitore_padre_id = subtree.id \
+         ) \
+         SELECT il.item_id \
+         FROM item_luogo il \
+         WHERE il.contenitore_id IN (SELECT id FROM subtree) \
+         ORDER BY il.item_id",
+    )
+    .bind(root_id)
+    .fetch_all(&mut **tx)
+    .await?)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn record_container_history_event(
+    tx: &mut Transaction<'_, Sqlite>,
+    id: i64,
+    name: &str,
+    operation: &str,
+    before: &crate::modules::storico::LocationSnapshot,
+    after: &crate::modules::storico::LocationSnapshot,
+    changes: &[crate::modules::storico::NewFieldChange],
+    parent_event_id: Option<i64>,
+) -> std::result::Result<i64, sqlx::Error> {
+    let history_id = crate::modules::storico::ensure_entity(tx, "contenitore", id, name).await?;
+    let context = if after.abitazione_storico_id.is_some() {
+        after
+    } else {
+        before
+    };
+
+    let event_id = crate::modules::storico::record_event(
+        tx,
+        &crate::modules::storico::NewHistoryEvent {
+            entita_storico_id: history_id,
+            modulo: "luoghi",
+            componente: "contenitori",
+            operazione: operation,
+            nome_entita_snapshot: name,
+            abitazione_storico_id: context.abitazione_storico_id,
+            abitazione_nome_snapshot: context.abitazione_nome.as_deref(),
+            stanza_storico_id: context.stanza_storico_id,
+            stanza_nome_snapshot: context.stanza_nome.as_deref(),
+            evento_padre_id: parent_event_id,
+        },
+    )
+    .await?;
+    crate::modules::storico::record_event_location_context(tx, event_id, context).await?;
+    crate::modules::storico::record_field_changes(tx, event_id, changes).await?;
+    crate::modules::storico::record_location_change(tx, event_id, before, after).await?;
+    Ok(event_id)
+}
+
 pub async fn create_container(
     pool: &SqlitePool,
     home_id: i64,
@@ -151,12 +268,39 @@ pub async fn create_container(
     .bind(home_id)
     .bind(room_id)
     .bind(parent_id)
-    .bind(name)
-    .bind(description)
+    .bind(&name)
+    .bind(description.as_deref())
     .execute(&mut *tx)
     .await?;
 
     let id = result.last_insert_rowid();
+    let after = history_container_snapshot(&mut tx, id).await?;
+    let mut changes = vec![crate::modules::storico::NewFieldChange {
+        campo: "nome",
+        tipo_valore: "testo",
+        valore_prima: None,
+        valore_dopo: Some(name.clone()),
+    }];
+    if let Some(description) = description.as_deref() {
+        changes.push(crate::modules::storico::NewFieldChange {
+            campo: "descrizione",
+            tipo_valore: "testo",
+            valore_prima: None,
+            valore_dopo: Some(description.to_string()),
+        });
+    }
+    record_container_history_event(
+        &mut tx,
+        id,
+        &name,
+        "creazione",
+        &crate::modules::storico::LocationSnapshot::default(),
+        &after,
+        &changes,
+        None,
+    )
+    .await?;
+
     tx.commit().await?;
     Ok(id)
 }
@@ -189,22 +333,47 @@ pub async fn list_container_children(
 
 pub async fn rename_container(pool: &SqlitePool, id: i64, name: &str) -> Result<bool> {
     let name = clean_required_name(name)?;
-    let Some(current) = get_container(pool, id).await? else {
+    let mut tx = pool.begin().await?;
+    let Some(current) = get_container_conn(&mut tx, id).await? else {
         return Ok(false);
     };
     if current.name == name {
         return Ok(false);
     }
 
+    crate::modules::storico::ensure_entity(&mut tx, "contenitore", id, &current.name).await?;
     let result = sqlx::query(
         "UPDATE contenitori SET nome = ?, \
          aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
     )
-    .bind(name)
+    .bind(&name)
     .bind(id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
-    Ok(result.rows_affected() == 1)
+    if result.rows_affected() != 1 {
+        return Ok(false);
+    }
+
+    let after = history_container_snapshot(&mut tx, id).await?;
+    record_container_history_event(
+        &mut tx,
+        id,
+        &name,
+        "rinomina",
+        &after,
+        &after,
+        &[crate::modules::storico::NewFieldChange {
+            campo: "nome",
+            tipo_valore: "testo",
+            valore_prima: Some(current.name),
+            valore_dopo: Some(name.clone()),
+        }],
+        None,
+    )
+    .await?;
+
+    tx.commit().await?;
+    Ok(true)
 }
 
 pub async fn set_container_description(
@@ -212,15 +381,47 @@ pub async fn set_container_description(
     id: i64,
     description: Option<&str>,
 ) -> Result<bool> {
+    let description = clean_optional_text(description);
+    let mut tx = pool.begin().await?;
+    let Some(current) = get_container_conn(&mut tx, id).await? else {
+        return Ok(false);
+    };
+    if current.description == description {
+        return Ok(false);
+    }
+
+    let location = history_container_snapshot(&mut tx, id).await?;
     let result = sqlx::query(
         "UPDATE contenitori SET descrizione = ?, \
          aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
     )
-    .bind(clean_optional_text(description))
+    .bind(description.as_deref())
     .bind(id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
-    Ok(result.rows_affected() == 1)
+    if result.rows_affected() != 1 {
+        return Ok(false);
+    }
+
+    record_container_history_event(
+        &mut tx,
+        id,
+        &current.name,
+        "modifica",
+        &location,
+        &location,
+        &[crate::modules::storico::NewFieldChange {
+            campo: "descrizione",
+            tipo_valore: "testo",
+            valore_prima: current.description,
+            valore_dopo: description,
+        }],
+        None,
+    )
+    .await?;
+
+    tx.commit().await?;
+    Ok(true)
 }
 
 pub async fn container_path(pool: &SqlitePool, id: i64) -> Result<Option<ContainerPath>> {
@@ -269,15 +470,34 @@ pub async fn assign_item_to_container(
     item_id: i64,
     container_id: i64,
 ) -> Result<()> {
-    let container = get_container(pool, container_id)
+    let mut tx = pool.begin().await?;
+    let container = get_container_conn(&mut tx, container_id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("contenitore #{container_id} inesistente"))?;
 
     let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM items WHERE id = ?)")
         .bind(item_id)
-        .fetch_one(pool)
+        .fetch_one(&mut *tx)
         .await?;
     ensure!(exists, "item #{item_id} inesistente");
+
+    let already_here: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM item_luogo WHERE item_id = ? AND contenitore_id = ?)",
+    )
+    .bind(item_id)
+    .bind(container_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if already_here {
+        return Ok(());
+    }
+
+    let had_location: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM item_luogo WHERE item_id = ?)")
+            .bind(item_id)
+            .fetch_one(&mut *tx)
+            .await?;
+    let before = crate::modules::luoghi::history_item_location_snapshot(&mut tx, item_id).await?;
 
     sqlx::query(
         "INSERT INTO item_luogo (item_id, abitazione_id, stanza_id, contenitore_id) \
@@ -291,9 +511,25 @@ pub async fn assign_item_to_container(
     .bind(container.home_id)
     .bind(container.room_id)
     .bind(container.id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
 
+    let after = crate::modules::luoghi::history_item_location_snapshot(&mut tx, item_id).await?;
+    crate::modules::luoghi::record_item_location_event(
+        &mut tx,
+        item_id,
+        if had_location {
+            "spostamento"
+        } else {
+            "assegnazione"
+        },
+        &before,
+        &after,
+        None,
+    )
+    .await?;
+
+    tx.commit().await?;
     Ok(())
 }
 
@@ -350,6 +586,21 @@ pub async fn move_container(
         return Ok(false);
     }
 
+    let subtree_ids = subtree_container_ids(&mut tx, id).await?;
+    let mut container_before = Vec::with_capacity(subtree_ids.len());
+    for container_id in &subtree_ids {
+        container_before.push(capture_container_history_state(&mut tx, *container_id).await?);
+    }
+
+    let affected_items = subtree_item_ids(&mut tx, id).await?;
+    let mut item_before = Vec::with_capacity(affected_items.len());
+    for item_id in &affected_items {
+        item_before.push((
+            *item_id,
+            crate::modules::luoghi::history_item_location_snapshot(&mut tx, *item_id).await?,
+        ));
+    }
+
     sqlx::query("UPDATE contenitori SET contenitore_padre_id = NULL WHERE id = ?")
         .bind(id)
         .execute(&mut *tx)
@@ -397,6 +648,54 @@ pub async fn move_container(
     .execute(&mut *tx)
     .await?;
 
+    let root_before = container_before
+        .iter()
+        .find(|state| state.id == id)
+        .ok_or_else(|| anyhow::anyhow!("snapshot storico radice mancante"))?;
+    let root_after = history_container_snapshot(&mut tx, id).await?;
+    let root_event_id = record_container_history_event(
+        &mut tx,
+        id,
+        &current.name,
+        "spostamento",
+        &root_before.location,
+        &root_after,
+        &[],
+        None,
+    )
+    .await?;
+
+    for state in container_before.iter().filter(|state| state.id != id) {
+        let after = history_container_snapshot(&mut tx, state.id).await?;
+        if state.location != after {
+            record_container_history_event(
+                &mut tx,
+                state.id,
+                &state.name,
+                "spostamento",
+                &state.location,
+                &after,
+                &[],
+                Some(root_event_id),
+            )
+            .await?;
+        }
+    }
+
+    for (item_id, before) in item_before {
+        let after =
+            crate::modules::luoghi::history_item_location_snapshot(&mut tx, item_id).await?;
+        crate::modules::luoghi::record_item_location_event(
+            &mut tx,
+            item_id,
+            "spostamento",
+            &before,
+            &after,
+            Some(root_event_id),
+        )
+        .await?;
+    }
+
     tx.commit().await?;
     Ok(true)
 }
@@ -406,6 +705,21 @@ pub async fn delete_container(pool: &SqlitePool, id: i64) -> Result<bool> {
     let Some(container) = get_container_conn(&mut tx, id).await? else {
         return Ok(false);
     };
+
+    let subtree_ids = subtree_container_ids(&mut tx, id).await?;
+    let mut container_before = Vec::with_capacity(subtree_ids.len());
+    for container_id in &subtree_ids {
+        container_before.push(capture_container_history_state(&mut tx, *container_id).await?);
+    }
+
+    let affected_items = subtree_item_ids(&mut tx, id).await?;
+    let mut item_before = Vec::with_capacity(affected_items.len());
+    for item_id in &affected_items {
+        item_before.push((
+            *item_id,
+            crate::modules::luoghi::history_item_location_snapshot(&mut tx, *item_id).await?,
+        ));
+    }
 
     sqlx::query(
         "UPDATE contenitori SET contenitore_padre_id = ?, \
@@ -427,9 +741,77 @@ pub async fn delete_container(pool: &SqlitePool, id: i64) -> Result<bool> {
         .bind(id)
         .execute(&mut *tx)
         .await?;
+    if result.rows_affected() != 1 {
+        return Ok(false);
+    }
+
+    let root_before = container_before
+        .iter()
+        .find(|state| state.id == id)
+        .ok_or_else(|| anyhow::anyhow!("snapshot storico contenitore mancante"))?;
+    let mut deletion_changes = vec![crate::modules::storico::NewFieldChange {
+        campo: "nome",
+        tipo_valore: "testo",
+        valore_prima: Some(container.name.clone()),
+        valore_dopo: None,
+    }];
+    if let Some(description) = container.description.clone() {
+        deletion_changes.push(crate::modules::storico::NewFieldChange {
+            campo: "descrizione",
+            tipo_valore: "testo",
+            valore_prima: Some(description),
+            valore_dopo: None,
+        });
+    }
+
+    let root_event_id = record_container_history_event(
+        &mut tx,
+        id,
+        &container.name,
+        "eliminazione",
+        &root_before.location,
+        &crate::modules::storico::LocationSnapshot::default(),
+        &deletion_changes,
+        None,
+    )
+    .await?;
+    if let Some(history_id) = root_before.location.contenitore_storico_id {
+        crate::modules::storico::mark_entity_deleted(&mut tx, history_id).await?;
+    }
+
+    for state in container_before.iter().filter(|state| state.id != id) {
+        let after = history_container_snapshot(&mut tx, state.id).await?;
+        if state.location != after {
+            record_container_history_event(
+                &mut tx,
+                state.id,
+                &state.name,
+                "spostamento",
+                &state.location,
+                &after,
+                &[],
+                Some(root_event_id),
+            )
+            .await?;
+        }
+    }
+
+    for (item_id, before) in item_before {
+        let after =
+            crate::modules::luoghi::history_item_location_snapshot(&mut tx, item_id).await?;
+        crate::modules::luoghi::record_item_location_event(
+            &mut tx,
+            item_id,
+            "spostamento",
+            &before,
+            &after,
+            Some(root_event_id),
+        )
+        .await?;
+    }
 
     tx.commit().await?;
-    Ok(result.rows_affected() == 1)
+    Ok(true)
 }
 
 async fn get_container_conn(
@@ -2338,6 +2720,283 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(loc, (h, Some(r), None));
+    }
+
+    #[tokio::test]
+    async fn storico_contenitore_salva_creazione_rinomina_e_percorso() {
+        let pool = test_pool().await;
+        let h = home(&pool, "Casa").await;
+        let r = room(&pool, h, "Garage").await;
+        let id = create_container(&pool, h, Some(r), None, "Armadio", Some("Attrezzi"))
+            .await
+            .expect("contenitore");
+
+        assert!(rename_container(&pool, id, "Armadio utensili")
+            .await
+            .expect("rinomina"));
+
+        let history_id: i64 = sqlx::query_scalar(
+            "SELECT id FROM storico_entita \
+             WHERE tipo_entita = 'contenitore' AND id_origine = ? AND eliminato_il IS NULL",
+        )
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .expect("identita storica");
+
+        let events: Vec<(String, String, Option<String>)> = sqlx::query_as(
+            "SELECT operazione, nome_entita_snapshot, contenitore_percorso_snapshot \
+             FROM storico_eventi WHERE entita_storico_id = ? ORDER BY id",
+        )
+        .bind(history_id)
+        .fetch_all(&pool)
+        .await
+        .expect("eventi");
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].0, "creazione");
+        assert_eq!(events[0].1, "Armadio");
+        assert_eq!(events[0].2.as_deref(), Some("Armadio"));
+        assert_eq!(events[1].0, "rinomina");
+        assert_eq!(events[1].1, "Armadio utensili");
+        assert_eq!(events[1].2.as_deref(), Some("Armadio utensili"));
+
+        let rename_location_changes: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM storico_cambi_luogo scl \
+             JOIN storico_eventi e ON e.id = scl.evento_id \
+             WHERE e.entita_storico_id = ? AND e.operazione = 'rinomina'",
+        )
+        .bind(history_id)
+        .fetch_one(&pool)
+        .await
+        .expect("cambi luogo rinomina");
+        assert_eq!(rename_location_changes, 0);
+    }
+
+    #[tokio::test]
+    async fn storico_spostamento_sottoalbero_collega_contenitori_e_item() {
+        let pool = test_pool().await;
+        let h = home(&pool, "Casa").await;
+        let garage = room(&pool, h, "Garage").await;
+        let camera = room(&pool, h, "Camera").await;
+        let root = create_container(&pool, h, Some(garage), None, "Armadio", None)
+            .await
+            .expect("radice");
+        let child = create_container(&pool, h, Some(garage), Some(root), "Scatola", None)
+            .await
+            .expect("figlio");
+        let item_id = item(&pool, "Trapano").await;
+        assign_item_to_container(&pool, item_id, child)
+            .await
+            .expect("assegnazione item");
+
+        assert!(move_container(&pool, root, h, Some(camera), None)
+            .await
+            .expect("spostamento"));
+
+        let root_history: i64 = sqlx::query_scalar(
+            "SELECT id FROM storico_entita WHERE tipo_entita='contenitore' AND id_origine=?",
+        )
+        .bind(root)
+        .fetch_one(&pool)
+        .await
+        .expect("storico root");
+        let child_history: i64 = sqlx::query_scalar(
+            "SELECT id FROM storico_entita WHERE tipo_entita='contenitore' AND id_origine=?",
+        )
+        .bind(child)
+        .fetch_one(&pool)
+        .await
+        .expect("storico child");
+        let item_history: i64 = sqlx::query_scalar(
+            "SELECT id FROM storico_entita WHERE tipo_entita='oggetto' AND id_origine=?",
+        )
+        .bind(item_id)
+        .fetch_one(&pool)
+        .await
+        .expect("storico item");
+
+        let root_event: i64 = sqlx::query_scalar(
+            "SELECT id FROM storico_eventi \
+             WHERE entita_storico_id=? AND operazione='spostamento' ORDER BY id DESC LIMIT 1",
+        )
+        .bind(root_history)
+        .fetch_one(&pool)
+        .await
+        .expect("evento root");
+
+        let child_parent: Option<i64> = sqlx::query_scalar(
+            "SELECT evento_padre_id FROM storico_eventi \
+             WHERE entita_storico_id=? AND operazione='spostamento' ORDER BY id DESC LIMIT 1",
+        )
+        .bind(child_history)
+        .fetch_one(&pool)
+        .await
+        .expect("evento child");
+        let item_parent: Option<i64> = sqlx::query_scalar(
+            "SELECT evento_padre_id FROM storico_eventi \
+             WHERE entita_storico_id=? AND operazione='spostamento' ORDER BY id DESC LIMIT 1",
+        )
+        .bind(item_history)
+        .fetch_one(&pool)
+        .await
+        .expect("evento item");
+        assert_eq!(child_parent, Some(root_event));
+        assert_eq!(item_parent, Some(root_event));
+
+        let root_change: (
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        ) = sqlx::query_as(
+            "SELECT stanza_prima_nome, contenitore_prima_percorso, \
+                        stanza_dopo_nome, contenitore_dopo_percorso \
+                 FROM storico_cambi_luogo WHERE evento_id=?",
+        )
+        .bind(root_event)
+        .fetch_one(&pool)
+        .await
+        .expect("cambio root");
+        assert_eq!(root_change.0.as_deref(), Some("Garage"));
+        assert_eq!(root_change.1.as_deref(), Some("Armadio"));
+        assert_eq!(root_change.2.as_deref(), Some("Camera"));
+        assert_eq!(root_change.3.as_deref(), Some("Armadio"));
+    }
+
+    #[tokio::test]
+    async fn storico_riparentamento_nella_stessa_stanza_salva_il_percorso() {
+        let pool = test_pool().await;
+        let h = home(&pool, "Casa").await;
+        let r = room(&pool, h, "Garage").await;
+        let a = create_container(&pool, h, Some(r), None, "Armadio", None)
+            .await
+            .expect("A");
+        let b = create_container(&pool, h, Some(r), Some(a), "Scatola", None)
+            .await
+            .expect("B");
+        let x = create_container(&pool, h, Some(r), None, "Scaffale", None)
+            .await
+            .expect("X");
+
+        assert!(move_container(&pool, b, h, Some(r), Some(x))
+            .await
+            .expect("riparentamento"));
+
+        let history_id: i64 = sqlx::query_scalar(
+            "SELECT id FROM storico_entita WHERE tipo_entita='contenitore' AND id_origine=?",
+        )
+        .bind(b)
+        .fetch_one(&pool)
+        .await
+        .expect("storico");
+        let event_id: i64 = sqlx::query_scalar(
+            "SELECT id FROM storico_eventi \
+             WHERE entita_storico_id=? AND operazione='spostamento' ORDER BY id DESC LIMIT 1",
+        )
+        .bind(history_id)
+        .fetch_one(&pool)
+        .await
+        .expect("evento");
+        let paths: (Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT contenitore_prima_percorso, contenitore_dopo_percorso \
+             FROM storico_cambi_luogo WHERE evento_id=?",
+        )
+        .bind(event_id)
+        .fetch_one(&pool)
+        .await
+        .expect("percorsi");
+
+        assert_eq!(paths.0.as_deref(), Some("Armadio / Scatola"));
+        assert_eq!(paths.1.as_deref(), Some("Scaffale / Scatola"));
+    }
+
+    #[tokio::test]
+    async fn storico_eliminazione_promozione_mantiene_effetti_collegati() {
+        let pool = test_pool().await;
+        let h = home(&pool, "Casa").await;
+        let r = room(&pool, h, "Garage").await;
+        let parent = create_container(&pool, h, Some(r), None, "Armadio", None)
+            .await
+            .expect("padre");
+        let deleting = create_container(&pool, h, Some(r), Some(parent), "Scatola", None)
+            .await
+            .expect("da eliminare");
+        let child = create_container(&pool, h, Some(r), Some(deleting), "Punte", None)
+            .await
+            .expect("figlio");
+        let item_id = item(&pool, "Trapano").await;
+        assign_item_to_container(&pool, item_id, deleting)
+            .await
+            .expect("item");
+
+        assert!(delete_container(&pool, deleting)
+            .await
+            .expect("eliminazione"));
+
+        let deleting_history: (i64, Option<String>) = sqlx::query_as(
+            "SELECT id, eliminato_il FROM storico_entita \
+             WHERE tipo_entita='contenitore' AND id_origine=? ORDER BY id DESC LIMIT 1",
+        )
+        .bind(deleting)
+        .fetch_one(&pool)
+        .await
+        .expect("storico eliminato");
+        assert!(deleting_history.1.is_some());
+
+        let delete_event: i64 = sqlx::query_scalar(
+            "SELECT id FROM storico_eventi \
+             WHERE entita_storico_id=? AND operazione='eliminazione' ORDER BY id DESC LIMIT 1",
+        )
+        .bind(deleting_history.0)
+        .fetch_one(&pool)
+        .await
+        .expect("evento eliminazione");
+
+        let child_history: i64 = sqlx::query_scalar(
+            "SELECT id FROM storico_entita WHERE tipo_entita='contenitore' AND id_origine=?",
+        )
+        .bind(child)
+        .fetch_one(&pool)
+        .await
+        .expect("storico figlio");
+        let child_event: (Option<i64>, i64) = sqlx::query_as(
+            "SELECT evento_padre_id, id FROM storico_eventi \
+             WHERE entita_storico_id=? AND operazione='spostamento' ORDER BY id DESC LIMIT 1",
+        )
+        .bind(child_history)
+        .fetch_one(&pool)
+        .await
+        .expect("evento figlio");
+        assert_eq!(child_event.0, Some(delete_event));
+
+        let paths: (Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT contenitore_prima_percorso, contenitore_dopo_percorso \
+             FROM storico_cambi_luogo WHERE evento_id=?",
+        )
+        .bind(child_event.1)
+        .fetch_one(&pool)
+        .await
+        .expect("percorsi figlio");
+        assert_eq!(paths.0.as_deref(), Some("Armadio / Scatola / Punte"));
+        assert_eq!(paths.1.as_deref(), Some("Armadio / Punte"));
+
+        let item_history: i64 = sqlx::query_scalar(
+            "SELECT id FROM storico_entita WHERE tipo_entita='oggetto' AND id_origine=?",
+        )
+        .bind(item_id)
+        .fetch_one(&pool)
+        .await
+        .expect("storico item");
+        let item_parent: Option<i64> = sqlx::query_scalar(
+            "SELECT evento_padre_id FROM storico_eventi \
+             WHERE entita_storico_id=? AND operazione='spostamento' ORDER BY id DESC LIMIT 1",
+        )
+        .bind(item_history)
+        .fetch_one(&pool)
+        .await
+        .expect("evento item");
+        assert_eq!(item_parent, Some(delete_event));
     }
 }
 

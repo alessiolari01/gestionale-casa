@@ -2182,6 +2182,12 @@ async fn create_object(pool: &SqlitePool, draft: &ObjectDraft) -> anyhow::Result
         },
     )
     .await?;
+    crate::modules::storico::record_event_location_context(
+        &mut tx,
+        creation_event,
+        &event_location,
+    )
+    .await?;
     let creation_changes = object_creation_changes(draft);
     crate::modules::storico::record_field_changes(&mut tx, creation_event, &creation_changes)
         .await?;
@@ -2202,6 +2208,12 @@ async fn create_object(pool: &SqlitePool, draft: &ObjectDraft) -> anyhow::Result
                 stanza_nome_snapshot: location_after.stanza_nome.as_deref(),
                 evento_padre_id: Some(creation_event),
             },
+        )
+        .await?;
+        crate::modules::storico::record_event_location_context(
+            &mut tx,
+            location_event,
+            &location_after,
         )
         .await?;
         crate::modules::storico::record_location_change(
@@ -2289,6 +2301,8 @@ async fn update_object(pool: &SqlitePool, id: i64, draft: &ObjectDraft) -> anyho
         },
     )
     .await?;
+    crate::modules::storico::record_event_location_context(&mut tx, event_id, &event_location)
+        .await?;
     crate::modules::storico::record_field_changes(&mut tx, event_id, &changes).await?;
 
     if before.name != draft.name {
@@ -2326,6 +2340,8 @@ async fn delete_object(pool: &SqlitePool, id: i64) -> anyhow::Result<bool> {
         },
     )
     .await?;
+    crate::modules::storico::record_event_location_context(&mut tx, event_id, &event_location)
+        .await?;
     let deletion_changes = object_deletion_changes(&before);
     crate::modules::storico::record_field_changes(&mut tx, event_id, &deletion_changes).await?;
     crate::modules::storico::mark_entity_deleted(&mut tx, storico_id).await?;
@@ -3492,17 +3508,30 @@ mod tests {
                 .expect("stanza");
         let room_id = room.last_insert_rowid();
 
+        let container_id = crate::modules::contenitori::create_container(
+            &pool,
+            home_id,
+            Some(room_id),
+            None,
+            "Scaffale storico",
+            None,
+        )
+        .await
+        .expect("contenitore");
+
         let mut draft = ObjectDraft::new("Trapano storico").expect("bozza");
         draft.brand = Some("Bosch".to_string());
         draft.home_id = Some(home_id);
         draft.home_name = Some("Casa storico".to_string());
         draft.room_id = Some(room_id);
         draft.room_name = Some("Garage storico".to_string());
+        draft.container_id = Some(container_id);
+        draft.container_path = Some("Scaffale storico".to_string());
 
         let id = create_object(&pool, &draft).await.expect("creazione");
 
-        let creation_context: (Option<String>, Option<String>) = sqlx::query_as(
-            "SELECT abitazione_nome_snapshot, stanza_nome_snapshot \
+        let creation_context: (Option<String>, Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT abitazione_nome_snapshot, stanza_nome_snapshot, contenitore_percorso_snapshot \
              FROM storico_eventi \
              WHERE operazione = 'creazione' AND nome_entita_snapshot = 'Trapano storico' \
              ORDER BY id DESC LIMIT 1",
@@ -3514,7 +3543,8 @@ mod tests {
             creation_context,
             (
                 Some("Casa storico".to_string()),
-                Some("Garage storico".to_string())
+                Some("Garage storico".to_string()),
+                Some("Scaffale storico".to_string())
             )
         );
 
@@ -3551,8 +3581,8 @@ mod tests {
         .expect("conteggio dopo noop");
         assert_eq!(modification_count_after, 1);
 
-        let modification_context: (Option<String>, Option<String>) = sqlx::query_as(
-            "SELECT abitazione_nome_snapshot, stanza_nome_snapshot \
+        let modification_context: (Option<String>, Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT abitazione_nome_snapshot, stanza_nome_snapshot, contenitore_percorso_snapshot \
              FROM storico_eventi \
              WHERE operazione = 'modifica' AND nome_entita_snapshot = 'Trapano storico' \
              ORDER BY id DESC LIMIT 1",
@@ -3564,14 +3594,15 @@ mod tests {
             modification_context,
             (
                 Some("Casa storico".to_string()),
-                Some("Garage storico".to_string())
+                Some("Garage storico".to_string()),
+                Some("Scaffale storico".to_string())
             )
         );
 
         assert!(delete_object(&pool, id).await.expect("eliminazione"));
 
-        let deletion_context: (Option<String>, Option<String>) = sqlx::query_as(
-            "SELECT abitazione_nome_snapshot, stanza_nome_snapshot \
+        let deletion_context: (Option<String>, Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT abitazione_nome_snapshot, stanza_nome_snapshot, contenitore_percorso_snapshot \
              FROM storico_eventi \
              WHERE operazione = 'eliminazione' AND nome_entita_snapshot = 'Trapano storico' \
              ORDER BY id DESC LIMIT 1",
@@ -3583,7 +3614,8 @@ mod tests {
             deletion_context,
             (
                 Some("Casa storico".to_string()),
-                Some("Garage storico".to_string())
+                Some("Garage storico".to_string()),
+                Some("Scaffale storico".to_string())
             )
         );
     }

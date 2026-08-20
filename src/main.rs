@@ -1,7 +1,7 @@
 //! Punto di ingresso del Gestionale Casa.
 //!
-//! Step corrente: Step 6C.3B, rifiniture UX della navigazione contestuale,
-//! posizione completa degli oggetti e liste oggetti nei contenitori.
+//! Step corrente: Step 6C.4, integrazione dei contenitori e dei percorsi
+//! gerarchici nello storico trasversale.
 
 mod auth;
 mod config;

@@ -1,5 +1,21 @@
 # Diario di sviluppo
 
+## Step 6C.4 — contenitori nello storico — 2026-08-20 — da verificare
+
+- aggiunta la migration `20260820230000_storico_contenitori.sql`;
+- estesi `storico_eventi` e `storico_cambi_luogo` con identità e percorso snapshot del contenitore;
+- backfill dei contenitori esistenti in `storico_entita` senza creare eventi retroattivi;
+- aggiunti eventi per creazione, rinomina, modifica descrizione, spostamento ed eliminazione dei contenitori;
+- gli spostamenti di sottoalberi e le promozioni dopo eliminazione generano eventi figli per contenitori e oggetti coinvolti;
+- `evento_padre_id` collega gli effetti automatici all'azione principale;
+- eliminazione stanza/casa conserva i percorsi prima dell'operazione e storicizza gli effetti su contenitori/oggetti;
+- eventi oggetto/foto conservano ora anche il contesto contenitore;
+- aggiunta icona storico `📦` e visualizzazione del percorso completo nel contesto e nel prima/dopo;
+- nessun reset, nessuna cancellazione globale e nessun evento storico inventato per dati già esistenti;
+- aggiunti 7 test: attesi **69 test totali** dopo l'applicazione.
+
+Verifica S9, Clippy e runtime Telegram ancora richiesti prima di dichiarare chiuso il 6C.4.
+
 ## Step 6C.3C — spostamento oggetti nei contenitori — 2026-08-20
 
 - completato il picker gerarchico di destinazione per gli oggetti: casa → stanza → contenitore → sottocontenitore;

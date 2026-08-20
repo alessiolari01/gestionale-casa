@@ -1,5 +1,20 @@
 # Architettura
 
+## Snapshot storico dei contenitori — Step 6C.4
+
+La posizione viva continua a essere derivata da `item_luogo` + `contenitori`; lo storico, invece, deve essere immutabile. Per questo il 6C.4 salva nel momento dell'evento:
+- identità storica di casa e stanza;
+- identità storica del contenitore finale;
+- percorso testuale completo dei contenitori (`Armadio / Ripiano 2 / Scatola`).
+
+`storico_eventi` conserva il contesto dell'evento; `storico_cambi_luogo` conserva prima/dopo. Il percorso snapshot **non è la sorgente della posizione corrente** e non viene ricalcolato dopo rinomine/spostamenti/eliminazioni.
+
+I contenitori usano `tipo_entita = 'contenitore'`, `modulo = 'luoghi'`, `componente = 'contenitori'`. Gli effetti automatici di un'azione gerarchica sono collegati con `evento_padre_id`: per esempio lo spostamento di un armadio è l'evento principale, mentre gli spostamenti del sottoalbero e degli oggetti contenuti sono eventi figli.
+
+La rinomina di un contenitore non produce falsi eventi di spostamento per i discendenti: i vecchi snapshot conservano il vecchio nome, gli eventi successivi useranno il nuovo percorso.
+
+La migration `20260820230000_storico_contenitori.sql` estende soltanto lo schema storico e registra le identità dei contenitori già esistenti senza creare eventi retroattivi.
+
 ## Spostamento oggetti nella gerarchia — Step 6C.3C
 
 `item_luogo` resta la sorgente della posizione corrente. Il selettore Telegram tratta `contenitore_id` come terzo livello strutturato dopo abitazione e stanza.
@@ -11,7 +26,7 @@ Per un'assegnazione a contenitore vengono aggiornati atomicamente:
 
 Per uno spostamento diretto a stanza/casa, `contenitore_id` viene esplicitamente azzerato.
 
-La UI ricostruisce il percorso completo tramite `contenitori::container_path`. Il modello storico attuale conserva ancora casa/stanza; l'estensione dello storico al contenitore/percorso è il compito del 6C.4.
+La UI ricostruisce il percorso completo tramite `contenitori::container_path`. Dal 6C.4 lo storico conserva anche l'identità del contenitore finale e uno snapshot immutabile del percorso completo.
 
 ## Rifiniture posizione e annullamento — Step 6C.3B
 

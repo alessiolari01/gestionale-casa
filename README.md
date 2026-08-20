@@ -1,5 +1,23 @@
 # Gestionale Casa
 
+## Step 6C.4 — contenitori nello storico (predisposto per verifica S9)
+
+Base esatta: `658e455` (`step-6c-test`), con 6C.3C già verificato e pushato.
+
+Il 6C.4 estende lo storico trasversale fino al livello contenitore:
+- `contenitore` diventa un tipo di entità storica con icona `📦`;
+- gli snapshot di luogo conservano casa, stanza, contenitore finale e **percorso completo dei contenitori**;
+- il percorso viene salvato come snapshot storico, quindi rinomine o eliminazioni future non riscrivono il passato;
+- creazione, rinomina, modifica descrizione, spostamento ed eliminazione di un contenitore generano eventi;
+- spostamento/eliminazione di un contenitore registra come eventi figli gli effetti sul sottoalbero e sugli oggetti contenuti tramite `evento_padre_id`;
+- eliminare una stanza storicizza la promozione dei contenitori e degli oggetti alla casa;
+- eliminare una casa conserva nello storico contenitori, percorsi e rimozione del luogo degli oggetti;
+- anche eventi ordinari di oggetti e foto conservano il percorso del contenitore corrente.
+
+Nuova migration: `migrations/20260820230000_storico_contenitori.sql`. La migration aggiunge solo campi/snapshot e fa il backfill delle **identità** dei contenitori già presenti: non crea eventi retroattivi.
+
+Stato: implementazione predisposta, **da verificare sul Galaxy S9 prima di commit/push**. Suite attesa: **69 test** (62 della base + 7 nuovi).
+
 ## Step 6C.3C — spostamento oggetti nei contenitori
 
 Il selettore `🚚 Sposta` percorre ora tutta la gerarchia `casa -> stanza -> contenitore -> sottocontenitore`.

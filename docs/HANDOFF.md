@@ -1,5 +1,25 @@
 # Handoff — Gestionale Casa
 
+## Handoff Step 6C.4 — storico contenitori/percorso
+
+Base obbligatoria: branch `step-6c-test`, commit `658e455`, working tree pulito.
+
+Il 6C.3 è completo: il 6C.3C è stato verificato con **62/62 test** e runtime Telegram, quindi il lavoro corrente è esclusivamente il 6C.4.
+
+Il 6C.4 introduce `migrations/20260820230000_storico_contenitori.sql` e amplia lo storico senza riscrivere le migration precedenti. I contenitori già presenti ricevono soltanto una riga identitaria in `storico_entita`; non vengono creati eventi retroattivi.
+
+Decisioni da preservare:
+- percorso contenitore salvato come snapshot storico testuale, non ricalcolato dal DB vivo quando si legge un vecchio evento;
+- ID storico del contenitore finale salvato separatamente;
+- modulo storico `luoghi`, componente `contenitori`;
+- rinomina contenitore = evento di rinomina, **non** finto spostamento dei discendenti;
+- vero spostamento del contenitore = evento principale + eventi figli per discendenti/oggetti il cui percorso cambia;
+- eliminazione contenitore = promozione sicura come già previsto dal 6C.1 + storico degli effetti;
+- eliminazione stanza/casa non elimina gli oggetti; lo storico conserva i percorsi precedenti;
+- nessuna utility di reset/cancellazione globale DB.
+
+Suite prevista dopo l'applicazione: **69 test**. Il pacchetto non va committato prima di `fmt`, `check`, test low-memory S9, Clippy `-D warnings`, `git diff --check` e prove Telegram dello storico.
+
 ## Handoff Step 6C.3C — spostamento completo oggetti ↔ contenitori
 
 Base di lavoro: snapshot successivo al commit `24944ac`, comprendente le rifiniture UI gerarchiche e il ritorno contestuale dagli elenchi.

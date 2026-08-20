@@ -1,5 +1,13 @@
 # Contenitori e sotto-posizioni
 
+## Storico dei contenitori — Step 6C.4 (da verificare)
+
+Ogni contenitore possiede un'identità in `storico_entita` e gli eventi conservano il percorso gerarchico come snapshot. Sono tracciati creazione, rinomina, descrizione, spostamento ed eliminazione.
+
+Uno spostamento/eliminazione che cambia il percorso di figli o oggetti genera eventi figli collegati all'azione principale tramite `evento_padre_id`. L'eliminazione continua a usare la promozione sicura definita nel 6C.1: lo storico osserva l'effetto, non cambia la regola applicativa.
+
+I contenitori già presenti prima della migration vengono soltanto registrati come identità storiche; nessun evento precedente viene inventato.
+
 ## Destinazione degli oggetti nei contenitori (6C.3C)
 
 I contenitori sono ora destinazioni esplicite del flusso `🚚 Sposta oggetto`.
@@ -48,7 +56,7 @@ Se si elimina una stanza, i contenitori radice vengono promossi alla casa manten
 
 Per le regole comuni vedere `navigazione-luoghi.md`.
 
-Prossimi passi: completare il movimento degli oggetti tra contenitori (6C.3), poi integrare lo storico specifico dei contenitori/percorso (6C.4).
+Il 6C.3C (`658e455`) ha completato e verificato il movimento degli oggetti tra contenitori. Il 6C.4 integra ora contenitori e percorsi nello storico; dopo la verifica resta il 6C.5 di chiusura/PR.
 
 Nessuna utility persistente di reset/cancellazione globale del database.
 ## Oggetti diretti nel contenitore (6C.3B)

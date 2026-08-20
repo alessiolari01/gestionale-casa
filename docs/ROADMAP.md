@@ -1,26 +1,17 @@
 # Roadmap funzionale
 
 
-## Step 6C.3B — rifiniture UX
-
-- 6C.3A ✅ navigazione unificata + creazione contestuale — `413605e`.
-- 6C.3B 🔧 annullamento contestuale, percorso completo oggetti, `/luogo_*`, lista oggetti nei contenitori, ritorno post-salvataggio al luogo, simboli distinti `🏷️`/`📦`, campo posizione libero deprecato nella UI.
-- 6C.3C 🔧 spostamento esplicito oggetti ↔ contenitori con picker gerarchico completo.
-- 6C.4 ⏭️ storico contenitori e cambi percorso.
-- 6C.5 ⏭️ verifica finale, documentazione, PR/CI/merge.
-
-
-## Stato Step 6C — contenitori e luoghi
+## Stato Step 6C — checkpoint corrente
 
 - 6C.1 ✅ backend gerarchia contenitori — `cc3ba4c`.
 - 6C.2 ✅ UI Telegram contenitori, verificata su S9 — `4c64798`.
-- 6C.3A ✅ navigazione unificata + creazione contestuale oggetti — `413605e`.
-- 6C.3C 🔧 completare e verificare assegnazione/spostamento oggetti tra contenitori.
-- 6C.4 ⏭️ storico contenitori e cambi percorso.
-- 6C.5 ⏭️ verifica finale, documentazione, PR/CI/merge.
+- 6C.3A ✅ navigazione unificata + creazione contestuale — `413605e`.
+- 6C.3B ✅ rifiniture UX, posizione completa e infrastruttura — `24944ac`.
+- 6C.3C ✅ spostamento oggetti fino a contenitori/sottocontenitori, **62/62 test + runtime S9** — `658e455`.
+- 6C.4 🔧 storico contenitori e cambi percorso: implementazione predisposta, nuova migration e 7 test aggiunti; verifica S9 ancora necessaria.
+- 6C.5 ⏭️ verifica finale dello Step 6C, documentazione conclusiva, PR/CI/merge.
 
-Principio approvato: navigare per **luogo corrente**, non per silos separati casa/stanza/contenitore.
-
+Principio approvato: navigare per **luogo corrente**, non per silos separati casa/stanza/contenitore. Lo storico deve usare snapshot immutabili dei percorsi, senza inventare cronologia retroattiva.
 
 ## Stato aggiornato dopo l'implementazione Step 6B
 
