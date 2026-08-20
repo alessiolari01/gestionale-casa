@@ -1,6 +1,20 @@
 # Gestionale Casa
 
 
+## Step 6C.3B — rifiniture UX e posizione completa
+
+Il checkpoint di partenza è `413605e` (6C.3A verificato). Il 6C.3B rende coerente l'uso quotidiano dei luoghi:
+- `/annulla` esiste durante un'operazione/input e torna al contesto da cui l'azione è partita;
+- gli oggetti mostrano il percorso strutturato completo fino al contenitore e il riferimento `/luogo_*` del luogo più specifico;
+- ogni contenitore permette di aprire l'elenco degli oggetti direttamente contenuti;
+- dopo `Nuovo oggetto qui`, la scheda appena salvata offre `↩️ Torna a <luogo>` verso la casa, stanza o contenitore di partenza;
+- l'etichetta della scheda usa `📋 Elenco oggetti` invece del generico `📋 Elenco`;
+- oggetti e contenitori hanno simboli distinti: `🏷️` per gli oggetti e `📦` per i contenitori;
+- il vecchio campo libero `oggetti.posizione` è legacy: viene preservato per compatibilità ma non è più richiesto nei nuovi flussi.
+
+Le regole sono descritte in `docs/moduli/navigazione-luoghi.md` e `docs/moduli/contenitori.md`. L'infrastruttura PC ↔ S9 ↔ GitHub ↔ Telegram è descritta separatamente in `docs/INFRASTRUTTURA.md`.
+
+
 ## Step 6C — Luoghi gerarchici e navigazione contestuale
 
 Il gestionale tratta **case, stanze e contenitori** come un unico sistema di luoghi. `4c64798` è il checkpoint 6C.2 verificato su Galaxy S9; 6C.3A aggiunge navigazione contestuale, vista ad albero e creazione di un oggetto direttamente dal luogo corrente.
@@ -36,7 +50,8 @@ Prima di modificare il progetto, leggere nell'ordine:
 7. **[docs/moduli/foto.md](./docs/moduli/foto.md)** — specifica Step 5B;
 8. **[docs/moduli/modifica-eliminazione.md](./docs/moduli/modifica-eliminazione.md)** — specifica Step 5C;
 9. **[docs/moduli/luoghi.md](./docs/moduli/luoghi.md)** — specifica Step 6A;
-10. **[docs/ROADMAP.md](./docs/ROADMAP.md)** — sequenza approvata e future implementazioni.
+10. **[docs/INFRASTRUTTURA.md](./docs/INFRASTRUTTURA.md)** — collegamenti PC/S9, Tailscale, SSH e GitHub;
+11. **[docs/ROADMAP.md](./docs/ROADMAP.md)** — sequenza approvata e future implementazioni.
 
 ## Stato del progetto
 
@@ -157,21 +172,31 @@ terzi, è descritto in `docs/HANDOFF.md`.
 
 ## Accesso operativo al Galaxy S9
 
-Sulla rete locale è ora disponibile un **server OpenSSH in Termux**. Dal PC si
-può quindi aprire direttamente il terminale dell'S9 e trasferire patch senza
-usare GitHub come semplice mezzo di trasporto:
+L'accesso remoto è ora operativo tramite **Tailscale + OpenSSH Termux** e non dipende più dall'IP LAN del telefono. Sul PC l'alias SSH è:
 
 ```text
-ssh -p 8022 <utente-termux>@<ip-lan-s9>
-scp -P 8022 <file> <utente-termux>@<ip-lan-s9>:~/
+Host s9
+    HostName galaxy-s9-di-alessio
+    User u0_a266
+    Port 8022
+    IdentityFile ~/.ssh/id_ed25519_s9
+    IdentitiesOnly yes
 ```
 
-GitHub `main` resta comunque la **fonte ufficiale**: SSH/SCP servono per sviluppo
-e test, poi le modifiche verificate devono essere committate e pubblicate. Non
-vanno salvati nel repository IP locali, password o altri segreti.
+Uso quotidiano dal PC:
 
-L'accesso da reti esterne resta futuro: la soluzione prevista è
-**Tailscale + OpenSSH Termux**, senza port forwarding pubblico della porta SSH.
+```powershell
+ssh s9
+scp "C:\percorso\patch.zip" s9:~/
+```
+
+La chiave consente l'accesso senza password. Tailscale fornisce il collegamento privato tra PC e S9 anche se cambia l'IP locale; non viene esposta pubblicamente la porta SSH.
+
+Anche il Galaxy S9 usa GitHub via SSH con una chiave dedicata e remote `git@github.com:alessiolari01/gestionale-casa.git`, quindi `git push` non richiede più PAT. GitHub resta comunque la fonte ufficiale del codice.
+
+Termux:Boot avvia wake lock e `sshd` dopo il reboot. Sul Galaxy S9 è stato osservato che Android può ritardare di alcuni minuti l'esecuzione di Termux:Boot; una volta avviato, SSH diventa disponibile praticamente subito.
+
+La topologia completa, i comandi di diagnostica e le regole sui segreti sono in **`docs/INFRASTRUTTURA.md`**.
 
 ## Evoluzione funzionale già approvata
 
@@ -310,3 +335,7 @@ Ogni nuovo step deve:
 7. non dichiarare “fatto” ciò che non è stato realmente verificato;
 8. non committare mai `.env`, token Telegram, PAT GitHub, database reale o
    altri segreti.
+
+## UX Telegram compatta
+
+Le tastiere inline raggruppano le azioni simili, usano `⚙️ Gestisci` per rinomina/modifica/eliminazione e mantengono `🗑 Elimina` isolato. Le azioni frequenti, come lo spostamento degli oggetti, restano direttamente accessibili. I figli gerarchici vengono mostrati prima dei comandi; le righe di creazione usano etichette compatte come `➕🚪 Stanza`, `➕📦 Contenitore`, `➕🏷️ Oggetto`, mentre gli elenchi usano `📋` + simbolo dell'entità.

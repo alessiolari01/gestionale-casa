@@ -1345,7 +1345,7 @@ pub async fn show_item_history(
             bot.send_message(
                 chat_id,
                 format_history_list(
-                    &format!("📜 Storico\n📦 {}", entity.1),
+                    &format!("📜 Storico\n🏷️ {}", entity.1),
                     &events,
                     page,
                     total,
@@ -1840,7 +1840,7 @@ fn operation_label(operation: &str) -> &'static str {
 
 fn entity_icon(entity_type: &str) -> &'static str {
     match entity_type {
-        "oggetto" => "📦",
+        "oggetto" => "🏷️",
         "abitazione" => "🏠",
         "stanza" => "🚪",
         "veicolo" => "🚗",

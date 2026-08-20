@@ -1,7 +1,7 @@
 //! Punto di ingresso del Gestionale Casa.
 //!
-//! Step corrente: Step 6C.3A, navigazione contestuale di case, stanze e contenitori
-//! con creazione oggetti direttamente dal luogo corrente.
+//! Step corrente: Step 6C.3B, rifiniture UX della navigazione contestuale,
+//! posizione completa degli oggetti e liste oggetti nei contenitori.
 
 mod auth;
 mod config;
@@ -259,7 +259,7 @@ async fn handle_callback(
         "menu:soon" => {
             bot.send_message(
                 chat_id,
-                "Questo modulo non è ancora implementato. Per ora sono disponibili 📦 Oggetti e 🏠 Case, stanze e contenitori.",
+                "Questo modulo non è ancora implementato. Per ora sono disponibili 🏷️ Oggetti e 🏠 Case, stanze e contenitori.",
             )
             .await?;
         }

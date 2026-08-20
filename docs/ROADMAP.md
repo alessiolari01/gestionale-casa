@@ -1,11 +1,20 @@
 # Roadmap funzionale
 
 
+## Step 6C.3B — rifiniture UX
+
+- 6C.3A ✅ navigazione unificata + creazione contestuale — `413605e`.
+- 6C.3B 🔧 annullamento contestuale, percorso completo oggetti, `/luogo_*`, lista oggetti nei contenitori, ritorno post-salvataggio al luogo, simboli distinti `🏷️`/`📦`, campo posizione libero deprecato nella UI.
+- 6C.3 restante ⏭️ assegnazione/spostamento esplicito oggetti ↔ contenitori.
+- 6C.4 ⏭️ storico contenitori e cambi percorso.
+- 6C.5 ⏭️ verifica finale, documentazione, PR/CI/merge.
+
+
 ## Stato Step 6C — contenitori e luoghi
 
 - 6C.1 ✅ backend gerarchia contenitori — `cc3ba4c`.
 - 6C.2 ✅ UI Telegram contenitori, verificata su S9 — `4c64798`.
-- 6C.3A 🔧 navigazione unificata + creazione contestuale oggetti — in verifica.
+- 6C.3A ✅ navigazione unificata + creazione contestuale oggetti — `413605e`.
 - 6C.3 ⏭️ completare assegnazione/spostamento oggetti tra contenitori.
 - 6C.4 ⏭️ storico contenitori e cambi percorso.
 - 6C.5 ⏭️ verifica finale, documentazione, PR/CI/merge.

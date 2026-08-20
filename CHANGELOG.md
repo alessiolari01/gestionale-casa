@@ -1,6 +1,22 @@
 # Diario di sviluppo
 
 
+## Step 6C.3B — rifiniture UX e posizione completa — 2026-08-20
+
+- rifinita la gerarchia visiva delle tastiere: figli immediati prima delle azioni, casa con `➕🚪 Stanza` · `➕📦 Contenitore` · `➕🏷️ Oggetto` sulla stessa riga e pulsanti elenco compatti `📋📦 ... qui` / `📋🏷️ ... qui`;
+
+- `/annulla` ritorna al contesto di partenza per creazione/rinomina di case, stanze, contenitori e per la creazione/modifica oggetti.
+- Elenchi, ricerca e dettaglio oggetto mostrano il percorso completo fino al contenitore e `/luogo_*` del luogo più specifico.
+- La scheda contenitore espone `Oggetti in questo contenitore` con elenco degli oggetti diretti.
+- Dopo la creazione contestuale, la scheda dell'oggetto offre `↩️ Torna a <luogo>` verso la casa/stanza/contenitore da cui è stato avviato `Nuovo oggetto qui`.
+- La scheda oggetto usa `📋 Elenco oggetti`; oggetti e contenitori sono visivamente distinti con `🏷️` e `📦`.
+- Le tastiere inline adottano una gerarchia compatta: azioni simili affiancate, `⚙️ Gestisci` per le operazioni amministrative e `🗑 Elimina` isolato nelle schermate di gestione.
+- Rimosso dai nuovi flussi il passaggio `Dettaglio posizione`: la posizione operativa è strutturata.
+- `oggetti.posizione` resta nel DB e nella ricerca come dato legacy, senza cancellazioni o migration distruttive.
+- Aggiunto `docs/INFRASTRUTTURA.md` con topologia PC ↔ S9 ↔ GitHub ↔ Telegram, Tailscale, SSH/SCP senza password, GitHub SSH senza PAT, Termux:Boot e diagnostica.
+- Nessuna nuova migration.
+
+
 ## Step 6C.1–6C.3A — Contenitori e navigazione dei luoghi — 2026-08-17 → 2026-08-19
 
 - 6C.1 (`cc3ba4c`): backend contenitori gerarchici.

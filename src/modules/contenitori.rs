@@ -1,4 +1,4 @@
-//! Step 6C.3A - contenitori gerarchici integrati nella navigazione dei luoghi.
+//! Step 6C.3B - contenitori gerarchici con navigazione e liste oggetti contestuali.
 //! La UI consente anche di creare un oggetto direttamente dal contenitore corrente.
 
 use std::{
@@ -52,12 +52,22 @@ impl ContainerSessionStore {
 }
 
 #[derive(Debug, Clone)]
+enum ContainerReturnTarget {
+    ContainersHome(i64),
+    ContainersRoom(i64),
+    LocationHome(i64),
+    LocationRoom(i64),
+    Container(i64),
+}
+
+#[derive(Debug, Clone)]
 enum ContainerConversationState {
     AwaitingName {
         home_id: i64,
         room_id: Option<i64>,
         parent_id: Option<i64>,
         rename_id: Option<i64>,
+        return_to: ContainerReturnTarget,
     },
 }
 
@@ -73,6 +83,12 @@ struct UiRoom {
     home_id: i64,
     name: String,
     home_name: String,
+}
+
+#[derive(Debug, Clone, FromRow)]
+struct UiObject {
+    id: i64,
+    name: String,
 }
 
 #[derive(Debug, Clone, FromRow, PartialEq, Eq)]
@@ -524,6 +540,38 @@ fn clean_optional_text(value: Option<&str>) -> Option<String> {
 // Step 6C.2 - Interfaccia Telegram dei contenitori.
 // -----------------------------------------------------------------------------
 
+fn container_return_target(state: &ContainerConversationState) -> ContainerReturnTarget {
+    match state {
+        ContainerConversationState::AwaitingName { return_to, .. } => return_to.clone(),
+    }
+}
+
+async fn show_container_return_target(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    target: ContainerReturnTarget,
+) -> ResponseResult<()> {
+    match target {
+        ContainerReturnTarget::ContainersHome(id) => {
+            show_home_scope(bot, chat_id, pool, id).await?
+        }
+        ContainerReturnTarget::ContainersRoom(id) => {
+            show_room_scope(bot, chat_id, pool, id).await?
+        }
+        ContainerReturnTarget::LocationHome(id) => {
+            crate::modules::luoghi::show_home_detail(bot, chat_id, pool, id).await?
+        }
+        ContainerReturnTarget::LocationRoom(id) => {
+            crate::modules::luoghi::show_room_detail(bot, chat_id, pool, id).await?
+        }
+        ContainerReturnTarget::Container(id) => {
+            show_container_detail(bot, chat_id, pool, id).await?
+        }
+    }
+    Ok(())
+}
+
 pub async fn show_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
@@ -565,11 +613,12 @@ pub async fn handle_message(
                 return Ok(true);
             }
             "/annulla" => {
-                if sessions.get(chat_id).is_some() {
+                if let Some(state) = sessions.get(chat_id) {
+                    let return_to = container_return_target(&state);
                     sessions.clear_chat(chat_id);
-                    bot.send_message(msg.chat.id, "Operazione sui contenitori annullata.")
-                        .reply_markup(containers_menu_keyboard())
+                    bot.send_message(msg.chat.id, "↩️ Operazione annullata.")
                         .await?;
+                    show_container_return_target(bot, msg.chat.id, pool, return_to).await?;
                     return Ok(true);
                 }
                 return Ok(false);
@@ -588,6 +637,7 @@ pub async fn handle_message(
             room_id,
             parent_id,
             rename_id: None,
+            ..
         } => {
             create_container_from_input(
                 bot,
@@ -667,6 +717,31 @@ pub async fn handle_callback(
         return Ok(true);
     }
 
+    if let Some((home_id, room_raw)) = parse_two_callback(data, "c:nl:") {
+        let room_id = zero_as_none(room_raw);
+        if !scope_exists(pool, home_id, room_id).await {
+            bot.send_message(chat_id, "⚠️ La destinazione scelta non esiste più.")
+                .reply_markup(containers_menu_keyboard())
+                .await?;
+            return Ok(true);
+        }
+        sessions.set(
+            raw_chat_id,
+            ContainerConversationState::AwaitingName {
+                home_id,
+                room_id,
+                parent_id: None,
+                rename_id: None,
+                return_to: match room_id {
+                    Some(room_id) => ContainerReturnTarget::LocationRoom(room_id),
+                    None => ContainerReturnTarget::LocationHome(home_id),
+                },
+            },
+        );
+        ask_container_name(bot, chat_id, None).await?;
+        return Ok(true);
+    }
+
     if let Some((home_id, room_raw)) = parse_two_callback(data, "c:nn:") {
         let room_id = zero_as_none(room_raw);
         if !scope_exists(pool, home_id, room_id).await {
@@ -682,6 +757,10 @@ pub async fn handle_callback(
                 room_id,
                 parent_id: None,
                 rename_id: None,
+                return_to: match room_id {
+                    Some(room_id) => ContainerReturnTarget::ContainersRoom(room_id),
+                    None => ContainerReturnTarget::ContainersHome(home_id),
+                },
             },
         );
         ask_container_name(bot, chat_id, None).await?;
@@ -698,6 +777,7 @@ pub async fn handle_callback(
                         room_id: parent.room_id,
                         parent_id: Some(parent.id),
                         rename_id: None,
+                        return_to: ContainerReturnTarget::Container(parent.id),
                     },
                 );
                 ask_container_name(bot, chat_id, Some(&parent.name)).await?;
@@ -716,9 +796,21 @@ pub async fn handle_callback(
         return Ok(true);
     }
 
+    if let Some(id) = parse_one_callback(data, "c:oi:") {
+        sessions.clear_chat(raw_chat_id);
+        show_container_objects(bot, chat_id, pool, id).await?;
+        return Ok(true);
+    }
+
     if let Some(id) = parse_one_callback(data, "c:v:") {
         sessions.clear_chat(raw_chat_id);
         show_container_detail(bot, chat_id, pool, id).await?;
+        return Ok(true);
+    }
+
+    if let Some(id) = parse_one_callback(data, "c:g:") {
+        sessions.clear_chat(raw_chat_id);
+        show_container_manage(bot, chat_id, pool, id).await?;
         return Ok(true);
     }
 
@@ -732,6 +824,7 @@ pub async fn handle_callback(
                         room_id: container.room_id,
                         parent_id: container.parent_id,
                         rename_id: Some(id),
+                        return_to: ContainerReturnTarget::Container(id),
                     },
                 );
                 bot.send_message(
@@ -1120,41 +1213,37 @@ async fn show_home_scope(
         .await
         .unwrap_or_default();
 
-    let mut rows = roots
+    let mut rows = rooms
         .iter()
-        .take(20)
-        .map(|container| {
+        .take(25)
+        .map(|room| {
             vec![button(
-                &format!(
-                    "📦 #{} · {}",
-                    container.id,
-                    truncate_chars(&container.name, 34)
-                ),
-                &format!("c:v:{}", encode_id(container.id)),
+                &format!("🚪 {}", truncate_chars(&room.name, 42)),
+                &format!("c:lr:{}", encode_id(room.id)),
             )]
         })
         .collect::<Vec<_>>();
 
-    for room in rooms.iter().take(25) {
+    for container in roots.iter().take(20) {
         rows.push(vec![button(
-            &format!("🚪 {}", truncate_chars(&room.name, 42)),
-            &format!("c:lr:{}", encode_id(room.id)),
+            &format!(
+                "📦 #{} · {}",
+                container.id,
+                truncate_chars(&container.name, 34)
+            ),
+            &format!("c:v:{}", encode_id(container.id)),
         )]);
     }
-    rows.push(vec![button(
-        "➕ Nuovo contenitore nella casa",
-        &format!("c:nn:{}:0", encode_id(home_id)),
-    )]);
-    rows.push(vec![button(
-        "🚪 Nuova stanza",
-        &format!("loc:room:new:{home_id}"),
-    )]);
-    rows.push(vec![button(
-        "➕ Nuovo oggetto qui",
-        &format!("oggetti:newat:h:{home_id}"),
-    )]);
     rows.push(vec![
-        button("↩️ Elenco contenitori", "c:a"),
+        button("➕🚪 Stanza", &format!("loc:room:new:{home_id}")),
+        button(
+            "➕📦 Contenitore",
+            &format!("c:nn:{}:0", encode_id(home_id)),
+        ),
+        button("➕🏷️ Oggetto", &format!("oggetti:newat:h:{home_id}")),
+    ]);
+    rows.push(vec![
+        button("↩️ Torna alla casa", &format!("loc:home:{home_id}")),
         button("🏠 Menu principale", "menu:main"),
     ]);
 
@@ -1202,19 +1291,15 @@ async fn show_room_scope(
             )]
         })
         .collect::<Vec<_>>();
-    rows.push(vec![button(
-        "➕ Nuovo contenitore nella stanza",
-        &format!("c:nn:{}:{}", encode_id(room.home_id), encode_id(room.id)),
-    )]);
-    rows.push(vec![button(
-        "➕ Nuovo oggetto qui",
-        &format!("oggetti:newat:r:{}", room.id),
-    )]);
     rows.push(vec![
         button(
-            "↩️ Torna alla casa",
-            &format!("c:lh:{}", encode_id(room.home_id)),
+            "➕📦 Contenitore",
+            &format!("c:nn:{}:{}", encode_id(room.home_id), encode_id(room.id)),
         ),
+        button("➕🏷️ Oggetto", &format!("oggetti:newat:r:{}", room.id)),
+    ]);
+    rows.push(vec![
+        button("↩️ Torna alla stanza", &format!("loc:room:{}", room.id)),
         button("🏠 Menu principale", "menu:main"),
     ]);
 
@@ -1295,21 +1380,17 @@ pub(crate) async fn show_container_detail(
             )]
         })
         .collect::<Vec<_>>();
-    rows.push(vec![button(
-        "➕ Nuovo contenitore interno",
-        &format!("c:nc:{}", encode_id(id)),
-    )]);
-    rows.push(vec![button(
-        "➕ Nuovo oggetto qui",
-        &format!("oggetti:newat:c:{id}"),
-    )]);
     rows.push(vec![
-        button("✏️ Rinomina", &format!("c:r:{}", encode_id(id))),
-        button("🚚 Sposta", &format!("c:m:{}", encode_id(id))),
+        button("➕📦 Contenitore", &format!("c:nc:{}", encode_id(id))),
+        button("➕🏷️ Oggetto", &format!("oggetti:newat:c:{id}")),
     ]);
     rows.push(vec![button(
-        "🗑 Elimina",
-        &format!("c:da:{}", encode_id(id)),
+        &format!("📋🏷️ Oggetti qui ({direct_items})"),
+        &format!("c:oi:{}", encode_id(id)),
+    )]);
+    rows.push(vec![button(
+        "⚙️ Gestisci",
+        &format!("c:g:{}", encode_id(id)),
     )]);
 
     if let Some(parent_id) = container.parent_id {
@@ -1341,7 +1422,7 @@ pub(crate) async fn show_container_detail(
     bot.send_message(
         chat_id,
         format!(
-            "📦 #{} · {}\n\n📍 {}\n\nContiene direttamente:\n📦 {} sottocontenitori\n📦 {} oggetti{}",
+            "📦 #{} · {}\n\n📍 {}\n\nContiene direttamente:\n📦 {} sottocontenitori\n🏷️ {} oggetti{}",
             container.id,
             container.name,
             path_text,
@@ -1352,6 +1433,93 @@ pub(crate) async fn show_container_detail(
     )
     .reply_markup(InlineKeyboardMarkup::new(rows))
     .await?;
+    Ok(())
+}
+
+async fn show_container_manage(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    id: i64,
+) -> ResponseResult<()> {
+    let Some(container) = get_container(pool, id).await.unwrap_or(None) else {
+        bot.send_message(chat_id, format!("Contenitore #{id} non trovato."))
+            .reply_markup(containers_menu_keyboard())
+            .await?;
+        return Ok(());
+    };
+
+    bot.send_message(
+        chat_id,
+        format!(
+            "⚙️ Gestisci contenitore\n\n📦 #{} · {}",
+            container.id, container.name
+        ),
+    )
+    .reply_markup(InlineKeyboardMarkup::new(vec![
+        vec![
+            button("✏️ Rinomina", &format!("c:r:{}", encode_id(id))),
+            button("🚚 Sposta", &format!("c:m:{}", encode_id(id))),
+        ],
+        vec![button("🗑 Elimina", &format!("c:da:{}", encode_id(id)))],
+        vec![
+            button("↩️ Torna al contenitore", &format!("c:v:{}", encode_id(id))),
+            button("🏠 Menu principale", "menu:main"),
+        ],
+    ]))
+    .await?;
+    Ok(())
+}
+
+async fn show_container_objects(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    id: i64,
+) -> ResponseResult<()> {
+    let Some(container) = get_container(pool, id).await.unwrap_or(None) else {
+        bot.send_message(chat_id, format!("Contenitore #{id} non trovato."))
+            .reply_markup(containers_menu_keyboard())
+            .await?;
+        return Ok(());
+    };
+    let path = container_path(pool, id)
+        .await
+        .ok()
+        .flatten()
+        .map(|path| format_container_path(&path))
+        .unwrap_or_else(|| container.name.clone());
+    let objects = list_objects_in_container(pool, id)
+        .await
+        .unwrap_or_default();
+
+    let mut rows = objects
+        .iter()
+        .map(|object| {
+            vec![button(
+                &format!("🏷️ #{} · {}", object.id, truncate_chars(&object.name, 36)),
+                &format!("oggetti:view:{}", object.id),
+            )]
+        })
+        .collect::<Vec<_>>();
+    rows.push(vec![
+        button("↩️ Torna al contenitore", &format!("c:v:{}", encode_id(id))),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
+
+    let text = if objects.is_empty() {
+        format!("📋 Oggetti in questo contenitore\n\n📍 {path}\n/luogo_c{id}\n\nNessun oggetto direttamente in questo contenitore.")
+    } else {
+        let mut text = format!("📋 Oggetti in questo contenitore\n\n📍 {path}\n/luogo_c{id}\n\n");
+        for object in &objects {
+            text.push_str(&format!("#{} · {}\n", object.id, object.name));
+        }
+        text
+    };
+
+    bot.send_message(chat_id, text)
+        .reply_markup(InlineKeyboardMarkup::new(rows))
+        .await?;
     Ok(())
 }
 
@@ -1749,10 +1917,28 @@ async fn list_move_parent_candidates(
 }
 
 async fn count_items_in_container(pool: &SqlitePool, id: i64) -> Result<i64, sqlx::Error> {
-    sqlx::query_scalar("SELECT COUNT(*) FROM item_luogo WHERE contenitore_id = ?")
-        .bind(id)
-        .fetch_one(pool)
-        .await
+    sqlx::query_scalar(
+        "SELECT COUNT(*) FROM item_luogo il JOIN items i ON i.id = il.item_id \
+         WHERE il.contenitore_id = ? AND i.tipo = 'oggetto'",
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await
+}
+
+async fn list_objects_in_container(
+    pool: &SqlitePool,
+    id: i64,
+) -> Result<Vec<UiObject>, sqlx::Error> {
+    sqlx::query_as::<_, UiObject>(
+        "SELECT i.id, i.nome AS name \
+         FROM items i JOIN item_luogo il ON il.item_id = i.id \
+         WHERE i.tipo = 'oggetto' AND il.contenitore_id = ? \
+         ORDER BY i.nome COLLATE NOCASE, i.id LIMIT 50",
+    )
+    .bind(id)
+    .fetch_all(pool)
+    .await
 }
 
 async fn scope_exists(pool: &SqlitePool, home_id: i64, room_id: Option<i64>) -> bool {
@@ -1819,10 +2005,11 @@ async fn direct_scope_move_label(pool: &SqlitePool, home_id: i64, room_id: Optio
 fn containers_menu_keyboard() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
         vec![button("➕ Nuovo contenitore", "c:n")],
-        vec![button("📋 Tutti i contenitori", "c:a")],
-        vec![button("🔎 Sfoglia per casa", "c:l")],
-        vec![button("↩️ Case, stanze e contenitori", "loc:menu")],
-        vec![button("🏠 Menu principale", "menu:main")],
+        vec![button("📋 Tutti", "c:a"), button("🔎 Per casa", "c:l")],
+        vec![
+            button("↩️ Case, stanze e contenitori", "loc:menu"),
+            button("🏠 Menu principale", "menu:main"),
+        ],
     ])
 }
 
@@ -1853,6 +2040,10 @@ fn parse_command(text: &str) -> Option<(&str, &str)> {
 
 fn parse_positive_decimal_id(value: &str) -> Option<i64> {
     value.trim().parse::<i64>().ok().filter(|id| *id > 0)
+}
+
+pub(crate) fn container_detail_callback(id: i64) -> String {
+    format!("c:v:{}", encode_id(id))
 }
 
 fn encode_id(value: i64) -> String {
@@ -2202,6 +2393,14 @@ mod ui_tests {
     }
 
     #[test]
+    fn callback_gestione_contenitore_resta_compatto() {
+        let id = i64::MAX;
+        let callback = format!("c:g:{}", encode_id(id));
+        assert!(callback.len() <= 64);
+        assert_eq!(parse_one_callback(&callback, "c:g:"), Some(id));
+    }
+
+    #[test]
     fn callback_base36_roundtrip() {
         for value in [0, 1, 35, 36, 12345, i64::MAX] {
             assert_eq!(decode_id(&encode_id(value)), Some(value));
@@ -2248,5 +2447,65 @@ mod ui_tests {
             get_container(&pool, id).await.unwrap().unwrap().name,
             "Armadio"
         );
+    }
+
+    #[tokio::test]
+    async fn elenco_oggetti_del_contenitore_restituisce_solo_quelli_diretti() {
+        let pool = test_pool().await;
+        let h = home(&pool, "Casa").await;
+        let r = room(&pool, h, "Garage").await;
+        let container = create_container(&pool, h, Some(r), None, "Armadio", None)
+            .await
+            .unwrap();
+        let other = create_container(&pool, h, Some(r), None, "Scaffale", None)
+            .await
+            .unwrap();
+
+        let first = sqlx::query("INSERT INTO items (tipo, nome) VALUES ('oggetto', 'Trapano')")
+            .execute(&pool)
+            .await
+            .unwrap()
+            .last_insert_rowid();
+        sqlx::query("INSERT INTO oggetti (item_id) VALUES (?)")
+            .bind(first)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO item_luogo (item_id, abitazione_id, stanza_id, contenitore_id) VALUES (?, ?, ?, ?)",
+        )
+        .bind(first)
+        .bind(h)
+        .bind(r)
+        .bind(container)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let second = sqlx::query("INSERT INTO items (tipo, nome) VALUES ('oggetto', 'Martello')")
+            .execute(&pool)
+            .await
+            .unwrap()
+            .last_insert_rowid();
+        sqlx::query("INSERT INTO oggetti (item_id) VALUES (?)")
+            .bind(second)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO item_luogo (item_id, abitazione_id, stanza_id, contenitore_id) VALUES (?, ?, ?, ?)",
+        )
+        .bind(second)
+        .bind(h)
+        .bind(r)
+        .bind(other)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let objects = list_objects_in_container(&pool, container).await.unwrap();
+        assert_eq!(objects.len(), 1);
+        assert_eq!(objects[0].id, first);
+        assert_eq!(objects[0].name, "Trapano");
     }
 }

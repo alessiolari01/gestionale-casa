@@ -1,6 +1,45 @@
 # Handoff — Gestionale Casa
 
 
+## Handoff Step 6C.3B — rifiniture sopra 413605e
+
+- UX gerarchica compatta: figli prima delle azioni; `➕🚪 Stanza` / `➕📦 Contenitore` / `➕🏷️ Oggetto`; elenchi `📋📦` / `📋🏷️`.
+
+Base stabile: `413605e` — Step 6C.3A verificato e pushato su `step-6c-test`.
+
+Il 6C.3B aggiunge: annullamento contestuale; percorso completo e `/luogo_*` negli oggetti; elenco oggetti diretti nei contenitori; deprecazione UI del vecchio `oggetti.posizione` senza perdita dati; `📋 Elenco oggetti`; ritorno inline al luogo dopo `Nuovo oggetto qui`; simboli distinti `🏷️` oggetto / `📦` contenitore. Non introduce migration.
+
+La prima parte del 6C.3B è stata verificata su S9 con test automatici e prove Telegram. La finalizzazione aggiunge un test unitario per il ritorno post-salvataggio: dopo l'applicazione aspettarsi **55 test** complessivi, poi ripetere runtime Telegram prima del commit.
+
+Prima del commit: `cargo fmt`, `cargo check --locked`, test low-memory S9, Clippy `-D warnings`, `git diff --check` e runtime Telegram.
+
+Resta successivamente da completare il movimento/assegnazione esplicita di oggetti verso contenitori dal selettore di posizione (6C.3 restante), poi storico dei contenitori/percorso (6C.4).
+
+## Infrastruttura operativa corrente
+
+La struttura di comunicazione è ora parte della documentazione del progetto in `docs/INFRASTRUTTURA.md`. In sintesi:
+
+```text
+PC Windows -- Tailscale + SSH/SCP --> Galaxy S9 / Termux
+     \                                  |
+      \------ Git/GitHub --------------+
+                                         |
+                                         +-- HTTPS long polling --> Telegram
+```
+
+Punti da non perdere nel passaggio a una terza persona:
+
+- dal PC l'S9 si raggiunge con l'alias `ssh s9`, senza password, usando una chiave dedicata;
+- l'host Tailscale è `galaxy-s9-di-alessio`, quindi il workflow non dipende dall'IP LAN;
+- `scp ... s9:~/` è il canale normale per trasferire patch e snapshot tra PC e telefono;
+- sull'S9 il remote GitHub è SSH (`git@github.com:alessiolari01/gestionale-casa.git`) e il push non richiede PAT;
+- GitHub resta la fonte ufficiale e `main` la baseline stabile;
+- Termux:Boot avvia wake lock + `sshd`; dopo un reboot Android può ritardarne l'esecuzione di alcuni minuti, ma una volta partito SSH è disponibile quasi immediatamente;
+- nessuna chiave privata, token, password, `.env` reale o database personale deve essere versionato.
+
+Per configurazioni, comandi e diagnostica leggere `docs/INFRASTRUTTURA.md` prima di modificare il workflow.
+
+
 ## Handoff Step 6C — checkpoint 4c64798 e 6C.3A
 
 Branch: `step-6c-test`.
@@ -75,7 +114,8 @@ Ordine consigliato:
 2. `ARCHITETTURA.md` — decisioni di design e motivazioni;
 3. `CHANGELOG.md` — cosa è stato fatto e realmente verificato;
 4. questo `docs/HANDOFF.md` — workflow operativo;
-5. `docs/schema-core.md` e i documenti del modulo su cui si deve lavorare.
+5. `docs/INFRASTRUTTURA.md` — Tailscale, SSH, SCP, GitHub e diagnostica;
+6. `docs/schema-core.md` e i documenti del modulo su cui si deve lavorare.
 
 Non cambiare una decisione architetturale importante senza motivarla e
 aggiornare la documentazione pertinente.
@@ -522,6 +562,11 @@ Test runtime minimi prima della chiusura:
 9. delete casa con oggetto: item resta senza luogo;
 10. persistenza dopo riavvio;
 11. `fmt`, `check`, `test`, Clippy, PR CI verde.
+
+
+### Regola UX tastiere inline (6C.3B)
+
+Prima di chiudere il 6C.3B è stata adottata una convenzione generale per evitare schermate Telegram troppo dense: massimo due pulsanti per riga di norma, azioni affini affiancate, `⚙️ Gestisci` per le operazioni amministrative e `🗑 Elimina` isolato. Casa, stanza, contenitore e oggetto seguono la stessa gerarchia; sugli oggetti lo spostamento resta visibile perché considerato frequente.
 
 ## 14. Regola di chiusura di ogni step
 

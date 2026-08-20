@@ -96,6 +96,8 @@ Se confermato, casa/stanza/contenitore vengono mantenuti come relazioni struttur
 
 Se si sceglie un'altra posizione, dopo il nome viene riaperto il normale selettore di posizione.
 
+Dopo il salvataggio di un oggetto creato da casa, stanza o contenitore, la scheda appena creata conserva il contesto di partenza e aggiunge un pulsante inline `↩️ Torna a <luogo>`. Il pulsante è contestuale: compare per la creazione avviata da `Nuovo oggetto qui`, non per un oggetto aperto normalmente da ricerca/elenco.
+
 ## Terminologia
 
 Evitare `Livello principale`. Mostrare la destinazione reale, ad esempio:
@@ -106,9 +108,70 @@ Evitare `Livello principale`. Mostrare la destinazione reale, ad esempio:
 
 - 6C.1 ✅ backend gerarchia contenitori.
 - 6C.2 ✅ UI Telegram contenitori, verificata su S9.
-- 6C.3A 🔧 navigazione unificata + creazione contestuale oggetti, in verifica.
+- 6C.3A ✅ navigazione unificata + creazione contestuale oggetti — `413605e`.
 - 6C.3 successivo ⏭️ completare assegnazione/spostamento oggetti tra contenitori.
 - 6C.4 ⏭️ storico contenitori/percorso.
 - 6C.5 ⏭️ verifica finale, docs, PR/CI/merge.
 
 Nessun reset globale del database e nessuna cancellazione automatica degli oggetti dovuta alla rimozione di un luogo.
+## Annullamento contestuale (6C.3B)
+
+`/annulla` non è una voce permanente. È disponibile quando il bot sta aspettando un dato o sta eseguendo un flusso temporaneo. L'annullamento deve riaprire il contesto di partenza: casa, stanza, contenitore, oggetto oppure menu di sezione.
+
+Esempi:
+- Casa principale → `Nuova stanza` → `/annulla` → Casa principale;
+- Garage → `Nuovo contenitore` → `/annulla` → Garage;
+- Armadio → `Nuovo oggetto qui` → `/annulla` → Armadio.
+
+## Posizione completa degli oggetti (6C.3B)
+
+Quando un oggetto ha un luogo strutturato, elenchi, ricerca e dettaglio mostrano tutto il percorso fino al luogo più specifico e, su una riga separata, il riferimento diretto:
+
+```text
+📍 Casa principale / Garage / Armadio / Ripiano 2
+/luogo_c9
+```
+
+Se l'oggetto è direttamente in una stanza si usa `/luogo_r<ID>`; se è direttamente nella casa si usa `/luogo_h<ID>`.
+
+Il vecchio campo libero `oggetti.posizione` non viene più richiesto nei nuovi flussi. Rimane nel database come dato legacy e può continuare a essere letto/ricercato finché non verrà eventualmente gestita una migrazione esplicita futura.
+
+## Convenzione visiva oggetti/contenitori (6C.3B)
+
+Per evitare ambiguità nella gerarchia:
+
+- `🏷️` = oggetto/item catalogato;
+- `📦` = contenitore/sottocontenitore.
+
+La convenzione vale per menu, schede, elenchi, albero dei luoghi e storico individuale. `🏭` viene usato per marca/modello così da non confondere il simbolo dell'oggetto con i suoi attributi.
+
+## Gerarchia delle azioni e tastiere compatte
+
+Per evitare schermate troppo trafficate, le tastiere inline seguono una regola comune:
+
+- normalmente massimo due azioni per riga; sono ammesse tre azioni quando le etichette sono corte e omogenee, soprattutto nelle righe di creazione;
+- azioni simili e brevi vengono affiancate;
+- i figli gerarchici già presenti nella schermata vengono mostrati prima delle azioni operative: stanza → contenitore → oggetto;
+- gli elementi dinamici con nomi potenzialmente lunghi restano su una riga propria;
+- i comandi di creazione usano la forma compatta `➕<simbolo> Nome`, per esempio `➕🚪 Stanza`, `➕📦 Contenitore`, `➕🏷️ Oggetto`;
+- i pulsanti che aprono un elenco usano `📋` insieme al simbolo dell'entità, per esempio `📋📦 Contenitori qui` e `📋🏷️ Oggetti qui`;
+- le azioni amministrative sono raccolte sotto `⚙️ Gestisci`;
+- `🗑 Elimina` resta isolato su una riga propria nelle schermate di gestione;
+- la navigazione (`↩️ ...` e `🏠 Menu principale`) resta in fondo.
+
+Applicazione attuale:
+
+- casa: `⚙️ Gestisci` → rinomina / elimina;
+- stanza: `⚙️ Gestisci` → rinomina / elimina;
+- contenitore: `⚙️ Gestisci` → rinomina + sposta, poi elimina isolato;
+- oggetto: lo spostamento resta visibile perché è un'azione frequente, mentre `⚙️ Gestisci` raccoglie modifica dati ed eliminazione.
+
+Nella casa, le stanze già presenti vengono mostrate prima dei comandi. Subito dopo viene usata una sola riga compatta `➕🚪 Stanza` · `➕📦 Contenitore` · `➕🏷️ Oggetto`, seguita dagli elenchi `📋📦 Contenitori qui` e `📋🏷️ Oggetti qui`. Nella stanza e nel contenitore la stessa convenzione si riduce alle sole entità che possono essere create in quel livello.
+
+### Ritorno dagli elenchi contestuali
+
+Gli elenchi aperti con `Contenitori qui` mantengono il contesto del luogo:
+- da una casa, `↩️ Torna alla casa` riapre quella casa;
+- da una stanza, `↩️ Torna alla stanza` riapre quella stanza.
+
+Il pulsante non deve risalire automaticamente al livello superiore della gerarchia: deve tornare al luogo dal quale l'elenco contestuale è stato aperto.
