@@ -1,5 +1,77 @@
 # Architettura
 
+## Stato architetturale dopo Step 6C
+
+Il branch `step-6c-test` ha completato e verificato l'estensione dei luoghi fino ai contenitori gerarchici. Il checkpoint funzionale è `fd4cbea` (6C.4): **69/69 test**, Clippy `-D warnings` e runtime Telegram verificati su Galaxy S9. Il 6C.5 è solo chiusura documentale/PR e non cambia schema o codice applicativo.
+
+La posizione corrente resta relazionale (`abitazioni` + `stanze` + `contenitori` + `item_luogo`); lo storico conserva invece snapshot immutabili del percorso per non riscrivere il passato quando la gerarchia cambia.
+
+## Snapshot storico dei contenitori — Step 6C.4
+
+La posizione viva continua a essere derivata da `item_luogo` + `contenitori`; lo storico, invece, deve essere immutabile. Per questo il 6C.4 salva nel momento dell'evento:
+- identità storica di casa e stanza;
+- identità storica del contenitore finale;
+- percorso testuale completo dei contenitori (`Armadio / Ripiano 2 / Scatola`).
+
+`storico_eventi` conserva il contesto dell'evento; `storico_cambi_luogo` conserva prima/dopo. Il percorso snapshot **non è la sorgente della posizione corrente** e non viene ricalcolato dopo rinomine/spostamenti/eliminazioni.
+
+I contenitori usano `tipo_entita = 'contenitore'`, `modulo = 'luoghi'`, `componente = 'contenitori'`. Gli effetti automatici di un'azione gerarchica sono collegati con `evento_padre_id`: per esempio lo spostamento di un armadio è l'evento principale, mentre gli spostamenti del sottoalbero e degli oggetti contenuti sono eventi figli.
+
+La rinomina di un contenitore non produce falsi eventi di spostamento per i discendenti: i vecchi snapshot conservano il vecchio nome, gli eventi successivi useranno il nuovo percorso.
+
+La migration `20260820230000_storico_contenitori.sql` estende soltanto lo schema storico e registra le identità dei contenitori già esistenti senza creare eventi retroattivi.
+
+## Spostamento oggetti nella gerarchia — Step 6C.3C
+
+`item_luogo` resta la sorgente della posizione corrente. Il selettore Telegram tratta `contenitore_id` come terzo livello strutturato dopo abitazione e stanza.
+
+Per un'assegnazione a contenitore vengono aggiornati atomicamente:
+- `abitazione_id` = ambito del contenitore;
+- `stanza_id` = stanza del contenitore, se presente;
+- `contenitore_id` = contenitore scelto.
+
+Per uno spostamento diretto a stanza/casa, `contenitore_id` viene esplicitamente azzerato.
+
+La UI ricostruisce il percorso completo tramite `contenitori::container_path`. Dal 6C.4 lo storico conserva anche l'identità del contenitore finale e uno snapshot immutabile del percorso completo.
+
+## Rifiniture posizione e annullamento — Step 6C.3B
+
+La posizione operativa di un oggetto è la relazione strutturata `casa -> stanza opzionale -> contenitore opzionale`. Quando viene mostrata in UI, il gestionale ricostruisce il percorso completo e aggiunge il riferimento del luogo più specifico (`/luogo_h<ID>`, `/luogo_r<ID>`, `/luogo_c<ID>`).
+
+Il campo storico `oggetti.posizione` non viene eliminato né migrato automaticamente: è considerato **legacy**, resta leggibile/ricercabile per compatibilità, ma non viene più richiesto nella creazione o modifica ordinaria.
+
+`/annulla` è un comando contestuale, non una voce di navigazione permanente: compare/ha effetto durante input o operazioni temporanee e deve ripristinare la schermata logica di partenza.
+
+Dopo una creazione avviata con `Nuovo oggetto qui`, il contesto di partenza viene mantenuto anche dopo il salvataggio: la scheda appena creata può quindi mostrare un pulsante inline `↩️ Torna a <luogo>` senza alterare la posizione dell'oggetto.
+
+Convenzione visiva: `🏷️` identifica un **oggetto/item catalogato**, mentre `📦` identifica un **contenitore**. La distinzione deve restare coerente in menu, elenchi, schede, albero dei luoghi e storico individuale.
+
+
+## Navigazione contestuale dei luoghi — Step 6C
+
+Gerarchia canonica: `casa -> stanza opzionale -> contenitori annidabili -> item`. Il percorso visualizzato è derivato dalle relazioni, non è una stringa duplicata usata come sorgente dati.
+
+La UI è place-contextual: le azioni dipendono dal luogo corrente, indipendentemente dal menu di provenienza.
+
+Riferimenti Telegram canonici: `/luogo_h<ID>` (casa), `/luogo_r<ID>` (stanza), `/luogo_c<ID>` (contenitore). Gli ID tipizzati evitano ambiguità con nomi duplicati.
+
+Contratto UI: ogni schermata interna rilevante deve offrire ritorno semantico al livello precedente e accesso diretto a `🏠 Menu principale`.
+
+`Nuovo oggetto qui` mantiene casa/stanza/contenitore come relazione strutturata nella creazione dell'oggetto. Dettagli in `docs/moduli/navigazione-luoghi.md`.
+
+
+## Infrastruttura di comunicazione operativa
+
+La rete di sviluppo è separata dall'architettura applicativa del bot:
+
+```text
+PC Windows -- Tailscale + SSH/SCP --> Galaxy S9 / Termux
+Galaxy S9 -- Git via SSH ----------> GitHub
+Galaxy S9 -- HTTPS long polling ---> Telegram
+```
+
+Tailscale evita di dipendere dall'IP LAN e OpenSSH fornisce accesso/trasferimento senza password tramite chiavi dedicate. GitHub resta la fonte ufficiale del codice e non viene sostituito da SCP. La configurazione completa e le regole sui segreti sono documentate in `docs/INFRASTRUTTURA.md`.
+
 Questo documento descrive come è fatto il progetto e perché è stato fatto
 così. L'obiettivo è che chiunque lo legga — anche senza aver seguito le
 discussioni originali — capisca la struttura abbastanza da poterci mettere
@@ -282,8 +354,8 @@ Decisioni:
 
 La scelta `abitazioni` + `stanze` è intenzionalmente più esplicita di una tabella
 gerarchica generica: oggi sono certi due livelli e i vincoli risultano più
-semplici e leggibili. Lo Step 6C valuterà contenitori e sotto-posizioni senza
-obbligare il 6A a decidere già una gerarchia arbitraria.
+semplici e leggibili. Lo Step 6C ha poi aggiunto `contenitori` come gerarchia
+arbitraria sotto casa/stanza, senza riscrivere il modello introdotto dal 6A.
 
 Dettagli in `docs/moduli/luoghi.md`.
 
@@ -297,10 +369,9 @@ Dettagli in `docs/moduli/luoghi.md`.
 - ~~**Step 5A — Oggetti generici**~~ — chiuso e verificato.
 - ~~**Step 5B — Foto oggetti**~~ — chiuso e verificato.
 - ~~**Step 5C — Modifica/eliminazione**~~ — chiuso, mergiato su `main` con CI verde.
-- **Step 6A — Case, stanze e posizione strutturata** — corrente.
-- **Step 6B — Storico globale + individuale** — eventi strutturati con data/ora,
-  prima/dopo e filtri per modulo, casa, stanza, periodo e operazione.
-- **Step 6C — Contenitori e sotto-posizioni**.
+- ~~**Step 6A — Case, stanze e posizione strutturata**~~ — chiuso e verificato.
+- ~~**Step 6B — Storico globale + individuale**~~ — chiuso, verificato e mergiato su `main`.
+- **Step 6C — Contenitori e sotto-posizioni** — implementazione e runtime verificati; PR/CI/merge finale in corso.
 - **Step 7A — Documenti e garanzie**.
 - **Step 7B — Promemoria e scadenze**.
 - **Step 7C — Tag e ricerca globale**.

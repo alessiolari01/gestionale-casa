@@ -1,5 +1,25 @@
 # Storico trasversale — Step 6B
 
+## Estensione Step 6C.4 — contenitori e percorsi (verificata)
+
+La migration `20260820230000_storico_contenitori.sql` estende il modello 6B senza cambiare le migration già applicate:
+- `storico_eventi`: `contenitore_storico_id` + `contenitore_percorso_snapshot`;
+- `storico_cambi_luogo`: contenitore/percorso prima e dopo;
+- backfill in `storico_entita` dei contenitori esistenti, senza eventi retroattivi.
+
+Il percorso viene memorizzato come snapshot (`Armadio / Ripiano 2 / Scatola`), mentre casa e stanza continuano ad avere i propri snapshot. In Telegram il risultato è, per esempio, `Casa principale / Garage / Armadio / Ripiano 2 / Scatola`.
+
+Eventi container-aware:
+- contenitore: creazione, rinomina, modifica descrizione, spostamento, eliminazione;
+- oggetto: assegnazione/spostamento/rimozione con percorso contenitore prima/dopo;
+- oggetti e foto: contesto del luogo completo anche quando l'evento non è uno spostamento;
+- eliminazione stanza: promozione dei contenitori/oggetti alla casa con eventi figli;
+- eliminazione casa: eliminazione storica dei contenitori e rimozione del luogo degli oggetti, mantenendo gli snapshot precedenti.
+
+`evento_padre_id` distingue l'azione richiesta dagli effetti automatici sul sottoalbero. La rinomina, invece, non viene trattata come movimento fisico dei discendenti.
+
+Stato del 6C.4: verificato sul Galaxy S9 e pushato come `fd4cbea`; **69/69 test**, Clippy `-D warnings` e runtime Telegram superati.
+
 ## Stato
 
 Lo Step 6B introduce lo storico tecnico trasversale del gestionale.
@@ -11,7 +31,7 @@ Implementazione verificata sul Galaxy S9:
 - `cargo clippy --all-targets --locked -- -D warnings`;
 - test runtime Telegram completato con storico globale, storico individuale, dettaglio eventi, paginazione e filtri combinati.
 
-Lo step entra nella baseline ufficiale solo dopo Pull Request, CI GitHub verde e merge su `main`.
+Lo Step 6B è entrato nella baseline ufficiale `main`; il 6C.4 ne estende lo schema storico sul branch `step-6c-test`, pronto per PR/CI/merge.
 
 ## Architettura
 
@@ -45,7 +65,7 @@ Gli eventi sopravvivono alla cancellazione dell'entità applicativa. Il riuso fu
 - creazione/rinomina/eliminazione stanza;
 - effetti secondari sui luoghi quando casa o stanza vengono eliminate.
 
-Gli eventi oggetto conservano anche il contesto casa/stanza corrente quando l'evento non è direttamente uno spostamento.
+Gli eventi oggetto conservano anche il contesto completo casa/stanza/contenitore corrente quando l'evento non è direttamente uno spostamento.
 
 ## UI Telegram
 
@@ -75,7 +95,7 @@ I callback dei filtri usano prefisso compatto `h:` e base62 per restare nel limi
 
 ## Test
 
-Suite finale verificata: **37/37 test**.
+Suite storica 6B verificata: **37/37 test**. Suite complessiva dopo il 6C.4: **69/69 test**.
 
 Sono coperti anche:
 - migration senza eventi inventati;

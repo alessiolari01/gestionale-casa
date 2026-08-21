@@ -1,11 +1,82 @@
 # Gestionale Casa
 
+## Step 6C.5 — chiusura finale dello Step 6C
+
+Base di chiusura: `fd4cbea` sul branch `step-6c-test`.
+
+Lo **Step 6C — Contenitori e sotto-posizioni** è funzionalmente completo e verificato sul Galaxy S9:
+
+- gerarchia arbitraria di contenitori con spostamento sicuro del sottoalbero;
+- navigazione unificata casa → stanza → contenitore → sottocontenitore;
+- creazione contestuale e spostamento oggetti fino a qualunque contenitore;
+- storico container-aware con snapshot immutabili del percorso ed eventi padre/figlio;
+- migration `20260820230000_storico_contenitori.sql` applicata sul database reale dopo backup;
+- **69/69 test**, `cargo check --locked`, Clippy con `-D warnings`, `git diff --check` e prove Telegram runtime superati.
+
+Il 6C.5 è una **chiusura documentale e di rilascio**: non introduce codice applicativo, migration o modifiche ai dati. Il branch è pronto per l'ultima verifica, Pull Request, CI GitHub e merge in `main`.
+
+## Archivio Step 6C.4 — contenitori nello storico (verificato)
+
+Base di partenza del 6C.4: `658e455` (`step-6c-test`), con 6C.3C già verificato e pushato.
+
+Il 6C.4 estende lo storico trasversale fino al livello contenitore:
+- `contenitore` diventa un tipo di entità storica con icona `📦`;
+- gli snapshot di luogo conservano casa, stanza, contenitore finale e **percorso completo dei contenitori**;
+- il percorso viene salvato come snapshot storico, quindi rinomine o eliminazioni future non riscrivono il passato;
+- creazione, rinomina, modifica descrizione, spostamento ed eliminazione di un contenitore generano eventi;
+- spostamento/eliminazione di un contenitore registra come eventi figli gli effetti sul sottoalbero e sugli oggetti contenuti tramite `evento_padre_id`;
+- eliminare una stanza storicizza la promozione dei contenitori e degli oggetti alla casa;
+- eliminare una casa conserva nello storico contenitori, percorsi e rimozione del luogo degli oggetti;
+- anche eventi ordinari di oggetti e foto conservano il percorso del contenitore corrente.
+
+Nuova migration: `migrations/20260820230000_storico_contenitori.sql`. La migration aggiunge solo campi/snapshot e fa il backfill delle **identità** dei contenitori già presenti: non crea eventi retroattivi.
+
+Stato finale 6C.4: verificato sul Galaxy S9 e pushato come `fd4cbea`; **69/69 test**, Clippy `-D warnings` e runtime Telegram superati.
+
+## Step 6C.3C — spostamento oggetti nei contenitori
+
+Il selettore `🚚 Sposta` percorre ora tutta la gerarchia `casa -> stanza -> contenitore -> sottocontenitore`.
+
+Comportamento previsto:
+- la posizione attuale mostra il percorso completo fino al contenitore;
+- scelta una casa, si può fermare l'oggetto direttamente nella casa, entrare in una stanza oppure scegliere un contenitore direttamente nella casa;
+- scelta una stanza, si può fermare l'oggetto direttamente nella stanza oppure entrare nei suoi contenitori;
+- dentro un contenitore si può scegliere `Sposta qui` oppure scendere nei sottocontenitori;
+- il ritorno segue il livello gerarchico precedente;
+- spostare un oggetto da un contenitore alla stanza/casa azzera correttamente `contenitore_id`;
+- scegliere lo stesso contenitore è un no-op;
+- nessuna migration: viene usata la struttura `item_luogo.contenitore_id` già introdotta nel 6C.1.
+
+Il 6C.3C manteneva ancora il contesto storico casa/stanza; il successivo 6C.4 ha completato lo storico di contenitori e percorsi.
+
+## Step 6C.3B — rifiniture UX e posizione completa
+
+Il checkpoint di partenza è `413605e` (6C.3A verificato). Il 6C.3B rende coerente l'uso quotidiano dei luoghi:
+- `/annulla` esiste durante un'operazione/input e torna al contesto da cui l'azione è partita;
+- gli oggetti mostrano il percorso strutturato completo fino al contenitore e il riferimento `/luogo_*` del luogo più specifico;
+- ogni contenitore permette di aprire l'elenco degli oggetti direttamente contenuti;
+- dopo `Nuovo oggetto qui`, la scheda appena salvata offre `↩️ Torna a <luogo>` verso la casa, stanza o contenitore di partenza;
+- l'etichetta della scheda usa `📋 Elenco oggetti` invece del generico `📋 Elenco`;
+- oggetti e contenitori hanno simboli distinti: `🏷️` per gli oggetti e `📦` per i contenitori;
+- il vecchio campo libero `oggetti.posizione` è legacy: viene preservato per compatibilità ma non è più richiesto nei nuovi flussi.
+
+Le regole sono descritte in `docs/moduli/navigazione-luoghi.md` e `docs/moduli/contenitori.md`. L'infrastruttura PC ↔ S9 ↔ GitHub ↔ Telegram è descritta separatamente in `docs/INFRASTRUTTURA.md`.
+
+
+## Step 6C — Luoghi gerarchici e navigazione contestuale
+
+Il gestionale tratta **case, stanze e contenitori** come un unico sistema di luoghi. I checkpoint verificati sono `4c64798` (6C.2), `413605e` (6C.3A), `24944ac` (6C.3B), `658e455` (6C.3C) e `fd4cbea` (6C.4).
+
+Regola UI: le azioni dipendono dal luogo visualizzato e ogni schermata interna rilevante offre ritorno al livello logico precedente e `🏠 Menu principale`.
+
+Specifiche: `docs/moduli/navigazione-luoghi.md` e `docs/moduli/contenitori.md`.
+
 
 ## Stato Step 6B
 
 Lo **Step 6B — Storico trasversale globale + individuale** è implementato e verificato sul Galaxy S9. Sono disponibili storico globale e individuale, dettaglio prima/dopo, paginazione e filtri combinabili per periodo, modulo, operazione, casa, stanza ed elemento.
 
-Verifica finale locale: **37/37 test**, Clippy con `-D warnings` e test runtime Telegram superati. Prima della chiusura ufficiale restano PR, CI GitHub verde e merge su `main`. Dopo il merge il prossimo sviluppo approvato è **Step 6C — Contenitori e sotto-posizioni**.
+Lo Step 6B è già entrato nella baseline `main`; il suo storico trasversale è stato successivamente esteso dal 6C.4 con contenitori e snapshot dei percorsi.
 
 Documentazione tecnica: `docs/moduli/storico.md`.
 
@@ -27,7 +98,8 @@ Prima di modificare il progetto, leggere nell'ordine:
 7. **[docs/moduli/foto.md](./docs/moduli/foto.md)** — specifica Step 5B;
 8. **[docs/moduli/modifica-eliminazione.md](./docs/moduli/modifica-eliminazione.md)** — specifica Step 5C;
 9. **[docs/moduli/luoghi.md](./docs/moduli/luoghi.md)** — specifica Step 6A;
-10. **[docs/ROADMAP.md](./docs/ROADMAP.md)** — sequenza approvata e future implementazioni.
+10. **[docs/INFRASTRUTTURA.md](./docs/INFRASTRUTTURA.md)** — collegamenti PC/S9, Tailscale, SSH e GitHub;
+11. **[docs/ROADMAP.md](./docs/ROADMAP.md)** — sequenza approvata e future implementazioni.
 
 ## Stato del progetto
 
@@ -40,10 +112,10 @@ Prima di modificare il progetto, leggere nell'ordine:
   - [x] Step 5A — anagrafica, creazione, elenco, ricerca e scheda
   - [x] Step 5B — foto locali + navigazione di avvio/status
   - [x] Step 5C — modifica ed eliminazione sicura
-- [ ] Step 6 — Luoghi e funzioni trasversali
-  - [ ] **Step 6A — case, stanze e posizione strutturata (corrente)**
-  - [ ] Step 6B — storico globale + individuale
-  - [ ] Step 6C — contenitori e sotto-posizioni
+- [x] Step 6 — Luoghi e funzioni trasversali, implementazione verificata
+  - [x] Step 6A — case, stanze e posizione strutturata
+  - [x] Step 6B — storico globale + individuale
+  - [x] Step 6C — contenitori e sotto-posizioni; branch pronto per PR/CI/merge
 - [ ] Step 7 — documenti/garanzie, promemoria/scadenze, tag/ricerca globale
 - [ ] Modulo vestiti
 - [ ] Modulo veicoli
@@ -51,41 +123,20 @@ Prima di modificare il progetto, leggere nell'ordine:
 
 ### Ultimo step funzionale verificato
 
-Lo **Step 5C — Modifica ed eliminazione oggetti è chiuso e verificato**. È
-stato mergiato su `main` con CI GitHub Actions verde. Sul Galaxy S9 sono stati
-verificati modifica senza duplicati, `/salta`, `/rimuovi`, annullamento
-contestuale, eliminazione con conferma, cascade SQLite e rimozione dei media
-locali.
+Lo **Step 6C.4 — Contenitori nello storico** è verificato sul Galaxy S9 e
+pushato come `fd4cbea`. La suite corrente è **69/69 test**; `cargo check`,
+Clippy `-D warnings`, migration sul database reale e prove Telegram dello
+storico container-aware sono verdi.
 
 Il warning di compatibilità futura relativo a `proc-macro-error2 v2.0.1` non ha
 bloccato build o test e resta una nota da rivalutare durante futuri aggiornamenti.
 
 ### Passo corrente
 
-È in sviluppo lo **Step 6A — Case, stanze e posizione strutturata**. La scelta
-architetturale è stata approvata e usa tre elementi:
-
-```text
-abitazioni
-   └── stanze
-
-items ── item_luogo ──> abitazione + stanza opzionale
-```
-
-Obiettivi dello step:
-
-- più case nello stesso gestionale;
-- stanze riconosciute e legate alla propria casa;
-- oggetti assegnabili direttamente a una casa o a una stanza;
-- spostamento guidato;
-- filtri per casa/stanza;
-- ricerca anche per nome casa e stanza;
-- mantenimento di `oggetti.posizione` come dettaglio libero, senza perdere dati
-  già presenti.
-
-La specifica è in `docs/moduli/luoghi.md`. Lo Step 6A non va considerato chiuso
-finché migration, test automatici, test runtime sul Galaxy S9 e CI della Pull
-Request non sono tutti verdi.
+Lo **Step 6C.5** chiude documentazione e rilascio del 6C. Non aggiunge
+funzionalità: dopo l'ultima verifica del branch `step-6c-test` restano Pull
+Request, CI GitHub verde e merge in `main`. Solo dopo il merge si apre lo
+sviluppo dello **Step 7A — Documenti e garanzie**.
 
 ## Fonte ufficiale e workflow corrente
 
@@ -148,21 +199,31 @@ terzi, è descritto in `docs/HANDOFF.md`.
 
 ## Accesso operativo al Galaxy S9
 
-Sulla rete locale è ora disponibile un **server OpenSSH in Termux**. Dal PC si
-può quindi aprire direttamente il terminale dell'S9 e trasferire patch senza
-usare GitHub come semplice mezzo di trasporto:
+L'accesso remoto è ora operativo tramite **Tailscale + OpenSSH Termux** e non dipende più dall'IP LAN del telefono. Sul PC l'alias SSH è:
 
 ```text
-ssh -p 8022 <utente-termux>@<ip-lan-s9>
-scp -P 8022 <file> <utente-termux>@<ip-lan-s9>:~/
+Host s9
+    HostName galaxy-s9-di-alessio
+    User u0_a266
+    Port 8022
+    IdentityFile ~/.ssh/id_ed25519_s9
+    IdentitiesOnly yes
 ```
 
-GitHub `main` resta comunque la **fonte ufficiale**: SSH/SCP servono per sviluppo
-e test, poi le modifiche verificate devono essere committate e pubblicate. Non
-vanno salvati nel repository IP locali, password o altri segreti.
+Uso quotidiano dal PC:
 
-L'accesso da reti esterne resta futuro: la soluzione prevista è
-**Tailscale + OpenSSH Termux**, senza port forwarding pubblico della porta SSH.
+```powershell
+ssh s9
+scp "C:\percorso\patch.zip" s9:~/
+```
+
+La chiave consente l'accesso senza password. Tailscale fornisce il collegamento privato tra PC e S9 anche se cambia l'IP locale; non viene esposta pubblicamente la porta SSH.
+
+Anche il Galaxy S9 usa GitHub via SSH con una chiave dedicata e remote `git@github.com:alessiolari01/gestionale-casa.git`, quindi `git push` non richiede più PAT. GitHub resta comunque la fonte ufficiale del codice.
+
+Termux:Boot avvia wake lock e `sshd` dopo il reboot. Sul Galaxy S9 è stato osservato che Android può ritardare di alcuni minuti l'esecuzione di Termux:Boot; una volta avviato, SSH diventa disponibile praticamente subito.
+
+La topologia completa, i comandi di diagnostica e le regole sui segreti sono in **`docs/INFRASTRUTTURA.md`**.
 
 ## Evoluzione funzionale già approvata
 
@@ -301,3 +362,7 @@ Ogni nuovo step deve:
 7. non dichiarare “fatto” ciò che non è stato realmente verificato;
 8. non committare mai `.env`, token Telegram, PAT GitHub, database reale o
    altri segreti.
+
+## UX Telegram compatta
+
+Le tastiere inline raggruppano le azioni simili, usano `⚙️ Gestisci` per rinomina/modifica/eliminazione e mantengono `🗑 Elimina` isolato. Le azioni frequenti, come lo spostamento degli oggetti, restano direttamente accessibili. I figli gerarchici vengono mostrati prima dei comandi; le righe di creazione usano etichette compatte come `➕🚪 Stanza`, `➕📦 Contenitore`, `➕🏷️ Oggetto`, mentre gli elenchi usano `📋` + simbolo dell'entità.

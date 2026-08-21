@@ -1,9 +1,9 @@
 //! Case, stanze e posizione strutturata degli item.
 //!
-//! Step 6A introduce una gerarchia riutilizzabile da tutti i moduli:
-//! abitazione -> stanza -> dettaglio libero specifico del modulo.
-//! Gli oggetti generici usano `item_luogo` per casa/stanza e mantengono
-//! `oggetti.posizione` come dettaglio libero (es. scaffale o cassetto).
+//! Step 6C.4 estende lo storico della posizione fino ai contenitori annidabili,
+//! mantenendo snapshot immutabili di casa, stanza e percorso del contenitore.
+//! La navigazione resta quella completata nel 6C.3C:
+//! abitazione -> stanza -> contenitori annidabili -> oggetto.
 
 use std::{
     collections::HashMap,
@@ -57,13 +57,23 @@ impl LocationSessionStore {
 }
 
 #[derive(Debug, Clone)]
+enum LocationReturnTarget {
+    LocationsMenu,
+    CreateMenu,
+    Home(i64),
+    Room(i64),
+}
+
+#[derive(Debug, Clone)]
 enum LocationConversationState {
     AwaitingHomeName {
         rename_id: Option<i64>,
+        return_to: LocationReturnTarget,
     },
     AwaitingRoomName {
         home_id: i64,
         rename_id: Option<i64>,
+        return_to: LocationReturnTarget,
     },
 }
 
@@ -81,6 +91,22 @@ struct RoomRecord {
     home_name: String,
 }
 
+#[derive(Debug, Clone, FromRow)]
+struct TreeContainerRecord {
+    id: i64,
+    home_id: i64,
+    room_id: Option<i64>,
+    parent_id: Option<i64>,
+    name: String,
+}
+
+#[derive(Debug, Clone)]
+struct LocationTreeNode {
+    label: String,
+    command: String,
+    children: Vec<LocationTreeNode>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct HomeChoice {
     pub(crate) id: i64,
@@ -95,10 +121,11 @@ pub(crate) struct RoomChoice {
     pub(crate) home_name: String,
 }
 
-#[derive(Debug, Clone, FromRow)]
+#[derive(Debug, Clone, FromRow, PartialEq, Eq)]
 struct ItemLocation {
     home_id: i64,
     room_id: Option<i64>,
+    container_id: Option<i64>,
     home_name: Option<String>,
     room_name: Option<String>,
 }
@@ -107,15 +134,39 @@ struct ItemLocation {
 struct LocatedObjectSummary {
     id: i64,
     name: String,
-    detail_position: Option<String>,
+    home_id: Option<i64>,
     home_name: Option<String>,
+    room_id: Option<i64>,
     room_name: Option<String>,
+    container_id: Option<i64>,
+}
+
+fn location_return_target(state: &LocationConversationState) -> LocationReturnTarget {
+    match state {
+        LocationConversationState::AwaitingHomeName { return_to, .. }
+        | LocationConversationState::AwaitingRoomName { return_to, .. } => return_to.clone(),
+    }
+}
+
+async fn show_location_return_target(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    target: LocationReturnTarget,
+) -> ResponseResult<()> {
+    match target {
+        LocationReturnTarget::LocationsMenu => show_menu(bot, chat_id).await?,
+        LocationReturnTarget::CreateMenu => show_create_menu(bot, chat_id).await?,
+        LocationReturnTarget::Home(id) => show_home_detail(bot, chat_id, pool, id).await?,
+        LocationReturnTarget::Room(id) => show_room_detail(bot, chat_id, pool, id).await?,
+    }
+    Ok(())
 }
 
 pub async fn show_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
-        "🏠 Case e stanze\n\nGestisci le abitazioni, le stanze e consulta gli oggetti per luogo.",
+        "🏠 Case, stanze e contenitori\n\nVisualizza, crea e naviga tutti i luoghi del gestionale da un'unica sezione.",
     )
     .reply_markup(locations_menu_keyboard())
     .await?;
@@ -132,6 +183,20 @@ pub async fn handle_message(
     let chat_id = msg.chat.id.0;
 
     if let Some((command, args)) = parse_command(text) {
+        if let Some((kind, id)) = parse_location_command(command) {
+            sessions.clear_chat(chat_id);
+            match kind {
+                'h' => show_home_detail(bot, msg.chat.id, pool, id).await?,
+                'r' => show_room_detail(bot, msg.chat.id, pool, id).await?,
+                'c' => {
+                    crate::modules::contenitori::show_container_detail(bot, msg.chat.id, pool, id)
+                        .await?
+                }
+                _ => {}
+            }
+            return Ok(true);
+        }
+
         match command {
             "/luoghi" | "/case" => {
                 sessions.clear_chat(chat_id);
@@ -142,7 +207,10 @@ pub async fn handle_message(
                 if args.is_empty() {
                     sessions.set(
                         chat_id,
-                        LocationConversationState::AwaitingHomeName { rename_id: None },
+                        LocationConversationState::AwaitingHomeName {
+                            rename_id: None,
+                            return_to: LocationReturnTarget::LocationsMenu,
+                        },
                     );
                     ask_home_name(bot, msg.chat.id, false).await?;
                 } else {
@@ -155,10 +223,20 @@ pub async fn handle_message(
                 send_home_list(bot, msg.chat.id, pool).await?;
                 return Ok(true);
             }
+            "/stanze_lista" => {
+                sessions.clear_chat(chat_id);
+                send_room_list(bot, msg.chat.id, pool).await?;
+                return Ok(true);
+            }
+            "/struttura" => {
+                sessions.clear_chat(chat_id);
+                send_location_tree(bot, msg.chat.id, pool).await?;
+                return Ok(true);
+            }
             "/casa" => {
                 sessions.clear_chat(chat_id);
                 if let Some(id) = parse_positive_id(args) {
-                    send_home_detail(bot, msg.chat.id, pool, id).await?;
+                    show_home_detail(bot, msg.chat.id, pool, id).await?;
                 } else {
                     bot.send_message(msg.chat.id, "Uso: /casa <id>\nEsempio: /casa 1")
                         .await?;
@@ -176,6 +254,7 @@ pub async fn handle_message(
                             chat_id,
                             LocationConversationState::AwaitingHomeName {
                                 rename_id: Some(id),
+                                return_to: LocationReturnTarget::Home(id),
                             },
                         );
                         ask_home_name(bot, msg.chat.id, true).await?;
@@ -217,6 +296,7 @@ pub async fn handle_message(
                             LocationConversationState::AwaitingRoomName {
                                 home_id,
                                 rename_id: None,
+                                return_to: LocationReturnTarget::Home(home_id),
                             },
                         );
                         ask_room_name(bot, msg.chat.id, false).await?;
@@ -243,7 +323,7 @@ pub async fn handle_message(
             "/stanza" => {
                 sessions.clear_chat(chat_id);
                 if let Some(id) = parse_positive_id(args) {
-                    send_room_detail(bot, msg.chat.id, pool, id).await?;
+                    show_room_detail(bot, msg.chat.id, pool, id).await?;
                 } else {
                     bot.send_message(msg.chat.id, "Uso: /stanza <id>\nEsempio: /stanza 3")
                         .await?;
@@ -259,6 +339,7 @@ pub async fn handle_message(
                                 LocationConversationState::AwaitingRoomName {
                                     home_id: room.home_id,
                                     rename_id: Some(id),
+                                    return_to: LocationReturnTarget::Room(id),
                                 },
                             );
                             ask_room_name(bot, msg.chat.id, true).await?;
@@ -321,11 +402,12 @@ pub async fn handle_message(
                 return Ok(true);
             }
             "/annulla" => {
-                if sessions.get(chat_id).is_some() {
+                if let Some(state) = sessions.get(chat_id) {
+                    let return_to = location_return_target(&state);
                     sessions.clear_chat(chat_id);
-                    bot.send_message(msg.chat.id, "Operazione sui luoghi annullata.")
-                        .reply_markup(locations_menu_keyboard())
+                    bot.send_message(msg.chat.id, "↩️ Operazione annullata.")
                         .await?;
+                    show_location_return_target(bot, msg.chat.id, pool, return_to).await?;
                     return Ok(true);
                 }
                 return Ok(false);
@@ -339,17 +421,21 @@ pub async fn handle_message(
     };
 
     match state {
-        LocationConversationState::AwaitingHomeName { rename_id: None } => {
+        LocationConversationState::AwaitingHomeName {
+            rename_id: None, ..
+        } => {
             create_home_from_input(bot, msg.chat.id, pool, sessions, text).await?;
         }
         LocationConversationState::AwaitingHomeName {
             rename_id: Some(id),
+            ..
         } => {
             rename_home_from_input(bot, msg.chat.id, pool, sessions, id, text).await?;
         }
         LocationConversationState::AwaitingRoomName {
             home_id,
             rename_id: None,
+            ..
         } => {
             create_room_from_input(bot, msg.chat.id, pool, sessions, home_id, text).await?;
         }
@@ -391,16 +477,41 @@ pub async fn handle_callback(
             sessions.clear_chat(raw_chat_id);
             show_menu(bot, chat_id).await?;
         }
+        "loc:create" => {
+            sessions.clear_chat(raw_chat_id);
+            show_create_menu(bot, chat_id).await?;
+        }
+        "loc:tree" => {
+            sessions.clear_chat(raw_chat_id);
+            send_location_tree(bot, chat_id, pool).await?;
+        }
+        "loc:room:list" => {
+            sessions.clear_chat(raw_chat_id);
+            send_room_list(bot, chat_id, pool).await?;
+        }
+        "loc:room:new:pick" => {
+            sessions.clear_chat(raw_chat_id);
+            show_home_picker_for_new_room(bot, chat_id, pool).await?;
+        }
         "loc:home:new" => {
             sessions.set(
                 raw_chat_id,
-                LocationConversationState::AwaitingHomeName { rename_id: None },
+                LocationConversationState::AwaitingHomeName {
+                    rename_id: None,
+                    return_to: LocationReturnTarget::CreateMenu,
+                },
             );
             ask_home_name(bot, chat_id, false).await?;
         }
         "loc:home:list" => {
             sessions.clear_chat(raw_chat_id);
             send_home_list(bot, chat_id, pool).await?;
+        }
+        _ if data.starts_with("loc:home:manage:") => {
+            if let Some(id) = parse_id_callback(data, "loc:home:manage:") {
+                sessions.clear_chat(raw_chat_id);
+                show_home_manage(bot, chat_id, pool, id).await?;
+            }
         }
         _ if data.starts_with("loc:home:rename:") => {
             if let Some(id) = parse_id_callback(data, "loc:home:rename:") {
@@ -409,6 +520,7 @@ pub async fn handle_callback(
                         raw_chat_id,
                         LocationConversationState::AwaitingHomeName {
                             rename_id: Some(id),
+                            return_to: LocationReturnTarget::Home(id),
                         },
                     );
                     ask_home_name(bot, chat_id, true).await?;
@@ -437,6 +549,7 @@ pub async fn handle_callback(
                         LocationConversationState::AwaitingRoomName {
                             home_id,
                             rename_id: None,
+                            return_to: LocationReturnTarget::Home(home_id),
                         },
                     );
                     ask_room_name(bot, chat_id, false).await?;
@@ -445,6 +558,12 @@ pub async fn handle_callback(
                         .reply_markup(locations_menu_keyboard())
                         .await?;
                 }
+            }
+        }
+        _ if data.starts_with("loc:room:manage:") => {
+            if let Some(id) = parse_id_callback(data, "loc:room:manage:") {
+                sessions.clear_chat(raw_chat_id);
+                show_room_manage(bot, chat_id, pool, id).await?;
             }
         }
         _ if data.starts_with("loc:room:rename:") => {
@@ -456,6 +575,7 @@ pub async fn handle_callback(
                             LocationConversationState::AwaitingRoomName {
                                 home_id: room.home_id,
                                 rename_id: Some(id),
+                                return_to: LocationReturnTarget::Room(id),
                             },
                         );
                         ask_room_name(bot, chat_id, true).await?;
@@ -493,6 +613,52 @@ pub async fn handle_callback(
                 send_objects_for_room(bot, chat_id, pool, id).await?;
             }
         }
+        _ if data.starts_with("loc:item:setcontainer:") => {
+            if let Some((item_id, container_id)) =
+                parse_two_ids_callback(data, "loc:item:setcontainer:")
+            {
+                let previous = get_item_location(pool, item_id).await.unwrap_or(None);
+                match set_item_container(pool, item_id, container_id).await {
+                    Ok(()) => {
+                        let current = get_item_location(pool, item_id).await.unwrap_or(None);
+                        bot.send_message(
+                            chat_id,
+                            location_change_message_full(pool, previous.as_ref(), current.as_ref())
+                                .await,
+                        )
+                        .await?;
+                        crate::modules::oggetti::send_object_detail(bot, chat_id, pool, item_id)
+                            .await?;
+                    }
+                    Err(error) => {
+                        tracing::error!(
+                            ?error,
+                            item_id,
+                            container_id,
+                            "Errore assegnazione contenitore"
+                        );
+                        bot.send_message(
+                            chat_id,
+                            "⚠️ Non riesco a spostare l'oggetto in questo contenitore.",
+                        )
+                        .await?;
+                    }
+                }
+            }
+        }
+        _ if data.starts_with("loc:item:container:") => {
+            if let Some((item_id, container_id)) =
+                parse_two_ids_callback(data, "loc:item:container:")
+            {
+                show_container_destination_picker(bot, chat_id, pool, item_id, container_id)
+                    .await?;
+            }
+        }
+        _ if data.starts_with("loc:item:room:") => {
+            if let Some((item_id, room_id)) = parse_two_ids_callback(data, "loc:item:room:") {
+                show_room_destination_picker(bot, chat_id, pool, item_id, room_id).await?;
+            }
+        }
         _ if data.starts_with("loc:item:sethome:") => {
             if let Some((item_id, home_id)) = parse_two_ids_callback(data, "loc:item:sethome:") {
                 let previous = get_item_location(pool, item_id).await.unwrap_or(None);
@@ -501,7 +667,8 @@ pub async fn handle_callback(
                         let current = get_item_location(pool, item_id).await.unwrap_or(None);
                         bot.send_message(
                             chat_id,
-                            location_change_message(previous.as_ref(), current.as_ref()),
+                            location_change_message_full(pool, previous.as_ref(), current.as_ref())
+                                .await,
                         )
                         .await?;
                         crate::modules::oggetti::send_object_detail(bot, chat_id, pool, item_id)
@@ -523,7 +690,8 @@ pub async fn handle_callback(
                         let current = get_item_location(pool, item_id).await.unwrap_or(None);
                         bot.send_message(
                             chat_id,
-                            location_change_message(previous.as_ref(), current.as_ref()),
+                            location_change_message_full(pool, previous.as_ref(), current.as_ref())
+                                .await,
                         )
                         .await?;
                         crate::modules::oggetti::send_object_detail(bot, chat_id, pool, item_id)
@@ -545,7 +713,8 @@ pub async fn handle_callback(
                         let current = get_item_location(pool, item_id).await.unwrap_or(None);
                         bot.send_message(
                             chat_id,
-                            location_change_message(previous.as_ref(), current.as_ref()),
+                            location_change_message_full(pool, previous.as_ref(), current.as_ref())
+                                .await,
                         )
                         .await?;
                         crate::modules::oggetti::send_object_detail(bot, chat_id, pool, item_id)
@@ -561,7 +730,7 @@ pub async fn handle_callback(
         }
         _ if data.starts_with("loc:item:home:") => {
             if let Some((item_id, home_id)) = parse_two_ids_callback(data, "loc:item:home:") {
-                show_room_picker(bot, chat_id, pool, item_id, home_id).await?;
+                show_home_destination_picker(bot, chat_id, pool, item_id, home_id).await?;
             }
         }
         _ if data.starts_with("loc:item:") => {
@@ -571,12 +740,12 @@ pub async fn handle_callback(
         }
         _ if data.starts_with("loc:room:") => {
             if let Some(id) = parse_id_callback(data, "loc:room:") {
-                send_room_detail(bot, chat_id, pool, id).await?;
+                show_room_detail(bot, chat_id, pool, id).await?;
             }
         }
         _ if data.starts_with("loc:home:") => {
             if let Some(id) = parse_id_callback(data, "loc:home:") {
-                send_home_detail(bot, chat_id, pool, id).await?;
+                show_home_detail(bot, chat_id, pool, id).await?;
             }
         }
         _ => return Ok(false),
@@ -585,13 +754,139 @@ pub async fn handle_callback(
     Ok(true)
 }
 
+async fn send_location_tree(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> ResponseResult<()> {
+    let homes = list_homes(pool).await.unwrap_or_default();
+    if homes.is_empty() {
+        bot.send_message(chat_id, "🌳 La struttura è vuota: non ci sono ancora case.")
+            .reply_markup(location_navigation_keyboard())
+            .await?;
+        return Ok(());
+    }
+
+    let rooms = sqlx::query_as::<_, RoomRecord>(
+        "SELECT s.id AS id, s.abitazione_id AS home_id, s.nome AS name, a.nome AS home_name \
+         FROM stanze s JOIN abitazioni a ON a.id = s.abitazione_id \
+         ORDER BY s.nome COLLATE NOCASE, s.id",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+    let containers = sqlx::query_as::<_, TreeContainerRecord>(
+        "SELECT id, abitazione_id AS home_id, stanza_id AS room_id, \
+                contenitore_padre_id AS parent_id, nome AS name \
+         FROM contenitori ORDER BY nome COLLATE NOCASE, id",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+
+    let mut text = "🌳 Struttura completa dei luoghi\n\n".to_string();
+    for home in &homes {
+        text.push_str(&format!("🏠 {}  /luogo_h{}\n", home.name, home.id));
+        let nodes = build_home_nodes(home.id, &rooms, &containers);
+        render_tree_nodes(&nodes, "", &mut text, 0);
+        text.push('\n');
+        if text.chars().count() > 3500 {
+            text.push_str("… struttura abbreviata per il limite dei messaggi Telegram.\n");
+            break;
+        }
+    }
+    text.push_str("Tocca un comando /luogo_… per aprire direttamente quel luogo.");
+
+    bot.send_message(chat_id, text)
+        .reply_markup(location_navigation_keyboard())
+        .await?;
+    Ok(())
+}
+
+fn build_home_nodes(
+    home_id: i64,
+    rooms: &[RoomRecord],
+    containers: &[TreeContainerRecord],
+) -> Vec<LocationTreeNode> {
+    let mut nodes = Vec::new();
+    for room in rooms.iter().filter(|room| room.home_id == home_id) {
+        let children = build_container_nodes(containers, home_id, Some(room.id), None, 0);
+        nodes.push(LocationTreeNode {
+            label: format!("🚪 {}", room.name),
+            command: format!("/luogo_r{}", room.id),
+            children,
+        });
+    }
+    nodes.extend(build_container_nodes(containers, home_id, None, None, 0));
+    nodes
+}
+
+fn build_container_nodes(
+    containers: &[TreeContainerRecord],
+    home_id: i64,
+    room_id: Option<i64>,
+    parent_id: Option<i64>,
+    depth: usize,
+) -> Vec<LocationTreeNode> {
+    if depth >= 20 {
+        return Vec::new();
+    }
+    containers
+        .iter()
+        .filter(|container| {
+            container.home_id == home_id
+                && container.room_id == room_id
+                && container.parent_id == parent_id
+        })
+        .map(|container| LocationTreeNode {
+            label: format!("📦 {}", container.name),
+            command: format!("/luogo_c{}", container.id),
+            children: build_container_nodes(
+                containers,
+                home_id,
+                room_id,
+                Some(container.id),
+                depth + 1,
+            ),
+        })
+        .collect()
+}
+
+fn render_tree_nodes(nodes: &[LocationTreeNode], prefix: &str, text: &mut String, depth: usize) {
+    if depth >= 20 || text.chars().count() > 3500 {
+        return;
+    }
+    for (index, node) in nodes.iter().enumerate() {
+        let last = index + 1 == nodes.len();
+        let branch = if last { "└── " } else { "├── " };
+        text.push_str(&format!(
+            "{prefix}{branch}{}  {}\n",
+            node.label, node.command
+        ));
+        let child_prefix = format!("{prefix}{}", if last { "    " } else { "│   " });
+        render_tree_nodes(&node.children, &child_prefix, text, depth + 1);
+        if text.chars().count() > 3500 {
+            break;
+        }
+    }
+}
+
+fn parse_location_command(command: &str) -> Option<(char, i64)> {
+    let value = command.strip_prefix("/luogo_")?;
+    let mut chars = value.chars();
+    let kind = chars.next()?;
+    if !matches!(kind, 'h' | 'r' | 'c') {
+        return None;
+    }
+    let id = chars.as_str().parse::<i64>().ok().filter(|id| *id > 0)?;
+    Some((kind, id))
+}
+
 async fn ask_home_name(bot: &Bot, chat_id: ChatId, rename: bool) -> ResponseResult<()> {
     let text = if rename {
         "✏️ Scrivi il nuovo nome della casa.\n\n/annulla per uscire."
     } else {
         "➕ Nuova casa\n\nScrivi il nome dell'abitazione.\nEsempio: Casa principale\n\n/annulla per uscire."
     };
-    bot.send_message(chat_id, text).await?;
+    bot.send_message(chat_id, text)
+        .reply_markup(location_navigation_keyboard())
+        .await?;
     Ok(())
 }
 
@@ -601,7 +896,9 @@ async fn ask_room_name(bot: &Bot, chat_id: ChatId, rename: bool) -> ResponseResu
     } else {
         "➕ Nuova stanza\n\nScrivi il nome della stanza.\nEsempio: Garage\n\n/annulla per uscire."
     };
-    bot.send_message(chat_id, text).await?;
+    bot.send_message(chat_id, text)
+        .reply_markup(location_navigation_keyboard())
+        .await?;
     Ok(())
 }
 
@@ -626,7 +923,7 @@ async fn create_home_from_input(
             sessions.clear_chat(chat_id.0);
             bot.send_message(chat_id, format!("✅ Casa creata: {name}"))
                 .await?;
-            send_home_detail(bot, chat_id, pool, id).await?;
+            show_home_detail(bot, chat_id, pool, id).await?;
         }
         Err(error) => {
             tracing::warn!(?error, home_name = %name, "Creazione casa fallita");
@@ -662,7 +959,7 @@ async fn rename_home_from_input(
             sessions.clear_chat(chat_id.0);
             bot.send_message(chat_id, format!("✅ Casa rinominata: {name}"))
                 .await?;
-            send_home_detail(bot, chat_id, pool, id).await?;
+            show_home_detail(bot, chat_id, pool, id).await?;
         }
         Ok(false) => {
             sessions.clear_chat(chat_id.0);
@@ -704,7 +1001,7 @@ async fn create_room_from_input(
             sessions.clear_chat(chat_id.0);
             bot.send_message(chat_id, format!("✅ Stanza creata: {name}"))
                 .await?;
-            send_room_detail(bot, chat_id, pool, id).await?;
+            show_room_detail(bot, chat_id, pool, id).await?;
         }
         Err(error) => {
             tracing::warn!(?error, home_id, room_name = %name, "Creazione stanza fallita");
@@ -740,7 +1037,7 @@ async fn rename_room_from_input(
             sessions.clear_chat(chat_id.0);
             bot.send_message(chat_id, format!("✅ Stanza rinominata: {name}"))
                 .await?;
-            send_room_detail(bot, chat_id, pool, room.id).await?;
+            show_room_detail(bot, chat_id, pool, room.id).await?;
         }
         Ok(false) => {
             sessions.clear_chat(chat_id.0);
@@ -773,7 +1070,10 @@ async fn send_home_list(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> Respon
         Ok(homes) => {
             let mut text = "🏠 Case registrate\n\n".to_string();
             for home in &homes {
-                text.push_str(&format!("#{} · {}\n", home.id, home.name));
+                text.push_str(&format!(
+                    "#{} · {}\n/luogo_h{}\n\n",
+                    home.id, home.name, home.id
+                ));
             }
             bot.send_message(chat_id, text)
                 .reply_markup(home_list_keyboard(&homes))
@@ -788,7 +1088,115 @@ async fn send_home_list(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> Respon
     Ok(())
 }
 
-async fn send_home_detail(
+async fn send_room_list(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> ResponseResult<()> {
+    let rooms = sqlx::query_as::<_, RoomRecord>(
+        "SELECT s.id AS id, s.abitazione_id AS home_id, s.nome AS name, a.nome AS home_name \
+         FROM stanze s JOIN abitazioni a ON a.id = s.abitazione_id \
+         ORDER BY a.nome COLLATE NOCASE, s.nome COLLATE NOCASE, s.id",
+    )
+    .fetch_all(pool)
+    .await;
+
+    match rooms {
+        Ok(rooms) if rooms.is_empty() => {
+            bot.send_message(chat_id, "🚪 Non ci sono ancora stanze registrate.")
+                .reply_markup(location_navigation_keyboard())
+                .await?;
+        }
+        Ok(rooms) => {
+            let mut text = "🚪 Elenco stanze\n\n".to_string();
+            let mut rows = Vec::new();
+            for room in rooms.iter().take(50) {
+                text.push_str(&format!(
+                    "#{} · {}\n📍 {}\n/luogo_r{}\n\n",
+                    room.id, room.name, room.home_name, room.id
+                ));
+                rows.push(vec![button(
+                    &format!("🚪 #{} · {}", room.id, truncate_chars(&room.name, 32)),
+                    &format!("loc:room:{}", room.id),
+                )]);
+                if text.chars().count() > 3200 {
+                    text.push_str(
+                        "… elenco testuale abbreviato. Usa i pulsanti o la struttura completa.\n",
+                    );
+                    break;
+                }
+            }
+            rows.push(vec![
+                button("↩️ Case, stanze e contenitori", "loc:menu"),
+                button("🏠 Menu principale", "menu:main"),
+            ]);
+            bot.send_message(chat_id, text)
+                .reply_markup(InlineKeyboardMarkup::new(rows))
+                .await?;
+        }
+        Err(error) => {
+            tracing::error!(?error, "Errore elenco stanze");
+            bot.send_message(chat_id, "⚠️ Non riesco a leggere l'elenco delle stanze.")
+                .reply_markup(location_navigation_keyboard())
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+async fn show_create_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
+    bot.send_message(chat_id, "➕ Crea un nuovo luogo\n\nCosa vuoi aggiungere?")
+        .reply_markup(InlineKeyboardMarkup::new(vec![
+            vec![
+                button("➕🏠 Casa", "loc:home:new"),
+                button("➕🚪 Stanza", "loc:room:new:pick"),
+                button("➕📦 Contenitore", "c:n"),
+            ],
+            vec![
+                button("↩️ Case, stanze e contenitori", "loc:menu"),
+                button("🏠 Menu principale", "menu:main"),
+            ],
+        ]))
+        .await?;
+    Ok(())
+}
+
+async fn show_home_picker_for_new_room(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+) -> ResponseResult<()> {
+    let homes = list_homes(pool).await.unwrap_or_default();
+    if homes.is_empty() {
+        bot.send_message(chat_id, "🚪 Per creare una stanza serve prima una casa.")
+            .reply_markup(InlineKeyboardMarkup::new(vec![
+                vec![button("➕ Crea una casa", "loc:home:new")],
+                vec![
+                    button("↩️ Crea…", "loc:create"),
+                    button("🏠 Menu principale", "menu:main"),
+                ],
+            ]))
+            .await?;
+        return Ok(());
+    }
+
+    let mut rows = homes
+        .iter()
+        .take(30)
+        .map(|home| {
+            vec![button(
+                &format!("🏠 {}", truncate_chars(&home.name, 38)),
+                &format!("loc:room:new:{}", home.id),
+            )]
+        })
+        .collect::<Vec<_>>();
+    rows.push(vec![
+        button("↩️ Crea…", "loc:create"),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
+    bot.send_message(chat_id, "🚪 Nuova stanza\n\nScegli la casa.")
+        .reply_markup(InlineKeyboardMarkup::new(rows))
+        .await?;
+    Ok(())
+}
+
+pub(crate) async fn show_home_detail(
     bot: &Bot,
     chat_id: ChatId,
     pool: &SqlitePool,
@@ -829,7 +1237,7 @@ async fn send_home_detail(
     Ok(())
 }
 
-async fn send_room_detail(
+pub(crate) async fn show_room_detail(
     bot: &Bot,
     chat_id: ChatId,
     pool: &SqlitePool,
@@ -859,6 +1267,73 @@ async fn send_room_detail(
                 .await?;
         }
     }
+    Ok(())
+}
+
+async fn show_home_manage(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    id: i64,
+) -> ResponseResult<()> {
+    let Some(home) = get_home(pool, id).await.unwrap_or(None) else {
+        bot.send_message(chat_id, format!("Casa #{id} non trovata."))
+            .reply_markup(locations_menu_keyboard())
+            .await?;
+        return Ok(());
+    };
+
+    bot.send_message(
+        chat_id,
+        format!("⚙️ Gestisci casa\n\n🏠 #{} · {}", home.id, home.name),
+    )
+    .reply_markup(InlineKeyboardMarkup::new(vec![
+        vec![button("✏️ Rinomina", &format!("loc:home:rename:{id}"))],
+        vec![button(
+            "🗑 Elimina casa",
+            &format!("loc:home:delete:ask:{id}"),
+        )],
+        vec![
+            button("↩️ Torna alla casa", &format!("loc:home:{id}")),
+            button("🏠 Menu principale", "menu:main"),
+        ],
+    ]))
+    .await?;
+    Ok(())
+}
+
+async fn show_room_manage(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    id: i64,
+) -> ResponseResult<()> {
+    let Some(room) = get_room(pool, id).await.unwrap_or(None) else {
+        bot.send_message(chat_id, format!("Stanza #{id} non trovata."))
+            .reply_markup(locations_menu_keyboard())
+            .await?;
+        return Ok(());
+    };
+
+    bot.send_message(
+        chat_id,
+        format!(
+            "⚙️ Gestisci stanza\n\n🚪 #{} · {}\n🏠 {}",
+            room.id, room.name, room.home_name
+        ),
+    )
+    .reply_markup(InlineKeyboardMarkup::new(vec![
+        vec![button("✏️ Rinomina", &format!("loc:room:rename:{id}"))],
+        vec![button(
+            "🗑 Elimina stanza",
+            &format!("loc:room:delete:ask:{id}"),
+        )],
+        vec![
+            button("↩️ Torna alla stanza", &format!("loc:room:{id}")),
+            button("🏠 Menu principale", "menu:main"),
+        ],
+    ]))
+    .await?;
     Ok(())
 }
 
@@ -934,11 +1409,12 @@ async fn send_room_delete_confirmation(
     match get_room(pool, id).await {
         Ok(Some(room)) => {
             let item_count = count_items_for_room(pool, id).await.unwrap_or(0);
+            let container_count = count_containers_for_room(pool, id).await.unwrap_or(0);
             bot.send_message(
                 chat_id,
                 format!(
-                    "⚠️ Eliminare la stanza?\n\n🚪 {}\n🏠 {}\n#{}\n\nI {} elementi collegati NON verranno eliminati: resteranno associati alla casa, ma senza stanza.\n\nL'operazione sulla stanza non può essere annullata.",
-                    room.name, room.home_name, room.id, item_count
+                    "⚠️ Eliminare la stanza?\n\n🚪 {}\n🏠 {}\n#{}\n\nI {} elementi collegati NON verranno eliminati: resteranno associati alla casa, ma senza stanza.\nI {} contenitori della stanza verranno mantenuti e promossi direttamente nella casa, conservando la loro gerarchia.\n\nL'operazione sulla stanza non può essere annullata.",
+                    room.name, room.home_name, room.id, item_count, container_count
                 ),
             )
             .reply_markup(room_delete_keyboard(&room))
@@ -988,7 +1464,7 @@ async fn delete_room_and_report(
             )
             .reply_markup(home_detail_keyboard(room.home_id, &[]))
             .await?;
-            send_home_detail(bot, chat_id, pool, room.home_id).await?;
+            show_home_detail(bot, chat_id, pool, room.home_id).await?;
         }
         Ok(false) => {
             bot.send_message(chat_id, format!("Stanza #{id} non trovata."))
@@ -1027,7 +1503,7 @@ async fn show_item_location_picker(
     };
     let location = get_item_location(pool, item_id).await.unwrap_or(None);
 
-    let current = format_location(location.as_ref());
+    let current = format_location_full(pool, location.as_ref()).await;
     let is_move = has_structured_location(location.as_ref());
     let text = if homes.is_empty() {
         if is_move {
@@ -1041,11 +1517,11 @@ async fn show_item_location_picker(
         }
     } else if is_move {
         format!(
-            "🚚 Sposta oggetto #{item_id}\n\nPosizione attuale: {current}\n\nScegli la nuova casa. Nel passaggio successivo potrai scegliere anche una stanza."
+            "🚚 Sposta oggetto #{item_id}\n\nPosizione attuale: {current}\n\nScegli la nuova casa. Nei passaggi successivi potrai scegliere anche una stanza o un contenitore."
         )
     } else {
         format!(
-            "🏠 Assegna luogo all'oggetto #{item_id}\n\nPosizione attuale: {current}\n\nScegli la casa. Nel passaggio successivo potrai scegliere anche una stanza."
+            "🏠 Assegna luogo all'oggetto #{item_id}\n\nPosizione attuale: {current}\n\nScegli la casa. Nei passaggi successivi potrai scegliere anche una stanza o un contenitore."
         )
     };
 
@@ -1055,7 +1531,7 @@ async fn show_item_location_picker(
     Ok(())
 }
 
-async fn show_room_picker(
+async fn show_home_destination_picker(
     bot: &Bot,
     chat_id: ChatId,
     pool: &SqlitePool,
@@ -1068,10 +1544,148 @@ async fn show_room_picker(
             .await?;
         return Ok(());
     };
+
     let rooms = list_rooms_for_home(pool, home_id).await.unwrap_or_default();
+    let containers = crate::modules::contenitori::list_root_containers(pool, home_id, None)
+        .await
+        .unwrap_or_default();
     let current_location = get_item_location(pool, item_id).await.unwrap_or(None);
     let is_move = has_structured_location(current_location.as_ref());
-    let current = format_location(current_location.as_ref());
+    let current = format_location_full(pool, current_location.as_ref()).await;
+    let action = if is_move {
+        "🚚 Sposta oggetto"
+    } else {
+        "🏠 Assegna luogo"
+    };
+
+    let current_is_home_only = current_location.as_ref().is_some_and(|location| {
+        location.home_id == home_id && location.room_id.is_none() && location.container_id.is_none()
+    });
+    let home_label = if is_move && current_is_home_only {
+        "🚚 Sposta qui (solo casa) · Attualmente qui"
+    } else if is_move {
+        "🚚 Sposta qui (solo casa)"
+    } else {
+        "🏠 Assegna solo alla casa"
+    };
+
+    let mut rows = vec![vec![button(
+        home_label,
+        &format!("loc:item:sethome:{item_id}:{home_id}"),
+    )]];
+
+    for room in rooms.iter().take(20) {
+        let exact_room = current_location.as_ref().is_some_and(|location| {
+            location.room_id == Some(room.id) && location.container_id.is_none()
+        });
+        let label = room_picker_label(&room.name, is_move, exact_room);
+        rows.push(vec![button(
+            &label,
+            &format!("loc:item:room:{item_id}:{}", room.id),
+        )]);
+    }
+
+    for container in containers.iter().take(20) {
+        let exact_container = current_location
+            .as_ref()
+            .and_then(|location| location.container_id)
+            == Some(container.id);
+        let label = if is_move && exact_container {
+            format!(
+                "📦 {} · Attualmente qui",
+                truncate_chars(&container.name, 28)
+            )
+        } else {
+            format!("📦 {}", truncate_chars(&container.name, 40))
+        };
+        rows.push(vec![button(
+            &label,
+            &format!("loc:item:container:{item_id}:{}", container.id),
+        )]);
+    }
+
+    rows.push(vec![
+        button("↩️ Scegli un'altra casa", &format!("loc:item:{item_id}")),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
+
+    bot.send_message(
+        chat_id,
+        format!(
+            "{action} #{item_id}\n\nPosizione attuale: {current}\nDestinazione scelta: 🏠 {}\n\nPuoi spostare l'oggetto direttamente nella casa, entrare in una stanza oppure scegliere un contenitore direttamente nella casa.",
+            home.name
+        ),
+    )
+    .reply_markup(InlineKeyboardMarkup::new(rows))
+    .await?;
+    Ok(())
+}
+
+async fn show_room_destination_picker(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    item_id: i64,
+    room_id: i64,
+) -> ResponseResult<()> {
+    let Some(room) = get_room(pool, room_id).await.unwrap_or(None) else {
+        bot.send_message(chat_id, format!("Stanza #{room_id} non trovata."))
+            .reply_markup(locations_menu_keyboard())
+            .await?;
+        return Ok(());
+    };
+
+    let containers =
+        crate::modules::contenitori::list_root_containers(pool, room.home_id, Some(room.id))
+            .await
+            .unwrap_or_default();
+    let current_location = get_item_location(pool, item_id).await.unwrap_or(None);
+    let is_move = has_structured_location(current_location.as_ref());
+    let current = format_location_full(pool, current_location.as_ref()).await;
+    let exact_room = current_location.as_ref().is_some_and(|location| {
+        location.room_id == Some(room.id) && location.container_id.is_none()
+    });
+
+    let room_label = if is_move && exact_room {
+        "🚚 Sposta qui (stanza) · Attualmente qui"
+    } else if is_move {
+        "🚚 Sposta qui (stanza)"
+    } else {
+        "🚪 Assegna direttamente alla stanza"
+    };
+
+    let mut rows = vec![vec![button(
+        room_label,
+        &format!("loc:item:setroom:{item_id}:{room_id}"),
+    )]];
+
+    for container in containers.iter().take(25) {
+        let exact_container = current_location
+            .as_ref()
+            .and_then(|location| location.container_id)
+            == Some(container.id);
+        let label = if is_move && exact_container {
+            format!(
+                "📦 {} · Attualmente qui",
+                truncate_chars(&container.name, 28)
+            )
+        } else {
+            format!("📦 {}", truncate_chars(&container.name, 40))
+        };
+        rows.push(vec![button(
+            &label,
+            &format!("loc:item:container:{item_id}:{}", container.id),
+        )]);
+    }
+
+    rows.push(vec![
+        button(
+            "↩️ Torna alla casa scelta",
+            &format!("loc:item:home:{item_id}:{}", room.home_id),
+        ),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
+
     let action = if is_move {
         "🚚 Sposta oggetto"
     } else {
@@ -1081,17 +1695,112 @@ async fn show_room_picker(
     bot.send_message(
         chat_id,
         format!(
-            "{action} #{item_id}\n\nPosizione attuale: {current}\nDestinazione scelta: 🏠 {}\n\nScegli una stanza oppure la sola casa.",
-            home.name
+            "{action} #{item_id}\n\nPosizione attuale: {current}\nDestinazione scelta: 🏠 {} / 🚪 {}\n\nPuoi fermarti nella stanza oppure entrare in uno dei suoi contenitori.",
+            room.home_name, room.name
         ),
     )
-    .reply_markup(item_room_picker_keyboard(
-        item_id,
-        home_id,
-        &rooms,
-        current_location.as_ref(),
-        &home.name,
-    ))
+    .reply_markup(InlineKeyboardMarkup::new(rows))
+    .await?;
+    Ok(())
+}
+
+async fn show_container_destination_picker(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    item_id: i64,
+    container_id: i64,
+) -> ResponseResult<()> {
+    let Some(container) = crate::modules::contenitori::get_container(pool, container_id)
+        .await
+        .ok()
+        .flatten()
+    else {
+        bot.send_message(chat_id, format!("Contenitore #{container_id} non trovato."))
+            .reply_markup(locations_menu_keyboard())
+            .await?;
+        return Ok(());
+    };
+
+    let Some(path) = crate::modules::contenitori::container_path(pool, container_id)
+        .await
+        .ok()
+        .flatten()
+    else {
+        bot.send_message(
+            chat_id,
+            "⚠️ Non riesco a ricostruire il percorso del contenitore.",
+        )
+        .await?;
+        return Ok(());
+    };
+
+    let children = crate::modules::contenitori::list_container_children(pool, container_id)
+        .await
+        .unwrap_or_default();
+    let current_location = get_item_location(pool, item_id).await.unwrap_or(None);
+    let is_move = has_structured_location(current_location.as_ref());
+    let current = format_location_full(pool, current_location.as_ref()).await;
+    let exact_container = current_location
+        .as_ref()
+        .and_then(|location| location.container_id)
+        == Some(container_id);
+
+    let set_label = if is_move && exact_container {
+        "🚚 Sposta qui (contenitore) · Attualmente qui"
+    } else if is_move {
+        "🚚 Sposta qui (contenitore)"
+    } else {
+        "📦 Assegna a questo contenitore"
+    };
+
+    let mut rows = vec![vec![button(
+        set_label,
+        &format!("loc:item:setcontainer:{item_id}:{container_id}"),
+    )]];
+
+    for child in children.iter().take(25) {
+        let child_is_current = current_location
+            .as_ref()
+            .and_then(|location| location.container_id)
+            == Some(child.id);
+        let label = if is_move && child_is_current {
+            format!("📦 {} · Attualmente qui", truncate_chars(&child.name, 28))
+        } else {
+            format!("📦 {}", truncate_chars(&child.name, 40))
+        };
+        rows.push(vec![button(
+            &label,
+            &format!("loc:item:container:{item_id}:{}", child.id),
+        )]);
+    }
+
+    let back_callback = match container.parent_id {
+        Some(parent_id) => format!("loc:item:container:{item_id}:{parent_id}"),
+        None => match container.room_id {
+            Some(room_id) => format!("loc:item:room:{item_id}:{room_id}"),
+            None => format!("loc:item:home:{item_id}:{}", container.home_id),
+        },
+    };
+    rows.push(vec![
+        button("↩️ Livello precedente", &back_callback),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
+
+    let action = if is_move {
+        "🚚 Sposta oggetto"
+    } else {
+        "🏠 Assegna luogo"
+    };
+
+    bot.send_message(
+        chat_id,
+        format!(
+            "{action} #{item_id}\n\nPosizione attuale: {current}\nDestinazione scelta: 📦 {}\n\nPuoi spostare qui l'oggetto oppure entrare in un sottocontenitore.",
+            crate::modules::contenitori::format_path_for_ui(&path)
+        ),
+    )
+    .reply_markup(InlineKeyboardMarkup::new(rows))
     .await?;
     Ok(())
 }
@@ -1115,6 +1824,7 @@ async fn send_objects_for_home(
     send_filtered_objects(
         bot,
         chat_id,
+        pool,
         format!("🏠 {}", home.name),
         total,
         &objects,
@@ -1142,6 +1852,7 @@ async fn send_objects_for_room(
     send_filtered_objects(
         bot,
         chat_id,
+        pool,
         format!("🏠 {} / 🚪 {}", room.home_name, room.name),
         total,
         &objects,
@@ -1153,26 +1864,27 @@ async fn send_objects_for_room(
 async fn send_filtered_objects(
     bot: &Bot,
     chat_id: ChatId,
+    pool: &SqlitePool,
     title: String,
     total: i64,
     objects: &[LocatedObjectSummary],
     back_callback: String,
 ) -> ResponseResult<()> {
     if objects.is_empty() {
-        bot.send_message(chat_id, format!("📦 Nessun oggetto in:\n{title}"))
-            .reply_markup(InlineKeyboardMarkup::new(vec![vec![button(
-                "↩️ Indietro",
-                &back_callback,
-            )]]))
+        bot.send_message(chat_id, format!("🏷️ Nessun oggetto in:\n{title}"))
+            .reply_markup(InlineKeyboardMarkup::new(vec![vec![
+                button("↩️ Indietro", &back_callback),
+                button("🏠 Menu principale", "menu:main"),
+            ]]))
             .await?;
         return Ok(());
     }
 
-    let mut text = format!("📦 Oggetti in:\n{title}\n\n");
+    let mut text = format!("🏷️ Oggetti in:\n{title}\n\n");
     for object in objects {
         text.push_str(&format!("#{} · {}", object.id, object.name));
-        if let Some(location) = summary_location(object) {
-            text.push_str(&format!("\n{location}"));
+        if let Some((location, command)) = summary_location(pool, object).await {
+            text.push_str(&format!("\n📍 {location}\n{command}"));
         }
         text.push_str("\n\n");
     }
@@ -1201,12 +1913,62 @@ fn format_location(location: Option<&ItemLocation>) -> String {
     }
 }
 
+async fn format_location_full(pool: &SqlitePool, location: Option<&ItemLocation>) -> String {
+    let Some(location) = location else {
+        return "Nessun luogo strutturato".to_string();
+    };
+
+    if let Some(container_id) = location.container_id {
+        if let Ok(Some(path)) =
+            crate::modules::contenitori::container_path(pool, container_id).await
+        {
+            let mut parts = vec![format!("🏠 {}", path.home_name)];
+            if let Some(room_name) = path.room_name {
+                parts.push(format!("🚪 {room_name}"));
+            }
+            parts.extend(
+                path.containers
+                    .into_iter()
+                    .map(|container| format!("📦 {}", container.name)),
+            );
+            return parts.join(" / ");
+        }
+    }
+
+    format_location(Some(location))
+}
+
+async fn location_change_message_full(
+    pool: &SqlitePool,
+    previous: Option<&ItemLocation>,
+    current: Option<&ItemLocation>,
+) -> String {
+    let before = format_location_full(pool, previous).await;
+    let after = format_location_full(pool, current).await;
+    let had_location = has_structured_location(previous);
+    let has_location = has_structured_location(current);
+    let unchanged = previous == current;
+
+    match (had_location, has_location, unchanged) {
+        (false, false, _) => {
+            "ℹ️ L'oggetto non ha un luogo strutturato. Nessuna modifica effettuata.".to_string()
+        }
+        (false, true, _) => format!("✅ Luogo assegnato all'oggetto.\n\nNuovo luogo: {after}"),
+        (true, false, _) => format!("🧹 Luogo rimosso dall'oggetto.\n\nPrima: {before}"),
+        (true, true, true) => {
+            format!("ℹ️ L'oggetto è già in:\n{after}\n\nNessuno spostamento effettuato.")
+        }
+        (true, true, false) => format!("🚚 Oggetto spostato.\n\nDa: {before}\nA: {after}"),
+    }
+}
+
 fn has_structured_location(location: Option<&ItemLocation>) -> bool {
     location
         .and_then(|location| location.home_name.as_ref())
         .is_some()
 }
 
+#[cfg(test)]
 fn location_change_message(
     previous: Option<&ItemLocation>,
     current: Option<&ItemLocation>,
@@ -1231,19 +1993,31 @@ fn location_change_message(
     }
 }
 
-fn summary_location(object: &LocatedObjectSummary) -> Option<String> {
-    let mut parts = Vec::new();
-    if let Some(home) = &object.home_name {
-        if let Some(room) = &object.room_name {
-            parts.push(format!("🏠 {home} / {room}"));
-        } else {
-            parts.push(format!("🏠 {home}"));
+async fn summary_location(
+    pool: &SqlitePool,
+    object: &LocatedObjectSummary,
+) -> Option<(String, String)> {
+    if let Some(container_id) = object.container_id {
+        if let Ok(Some(path)) =
+            crate::modules::contenitori::container_path(pool, container_id).await
+        {
+            return Some((
+                crate::modules::contenitori::format_path_for_ui(&path),
+                format!("/luogo_c{container_id}"),
+            ));
         }
     }
-    if let Some(detail) = &object.detail_position {
-        parts.push(format!("📌 {detail}"));
+    if let (Some(room_id), Some(home), Some(room)) = (
+        object.room_id,
+        object.home_name.as_deref(),
+        object.room_name.as_deref(),
+    ) {
+        return Some((format!("{home} / {room}"), format!("/luogo_r{room_id}")));
     }
-    (!parts.is_empty()).then(|| parts.join(" · "))
+    if let (Some(home_id), Some(home)) = (object.home_id, object.home_name.as_deref()) {
+        return Some((home.to_string(), format!("/luogo_h{home_id}")));
+    }
+    None
 }
 
 pub(crate) async fn home_choices(pool: &SqlitePool) -> Result<Vec<HomeChoice>, sqlx::Error> {
@@ -1314,6 +2088,7 @@ pub(crate) async fn history_location_snapshot(
     tx: &mut Transaction<'_, Sqlite>,
     home_id: i64,
     room_id: Option<i64>,
+    container_id: Option<i64>,
 ) -> Result<crate::modules::storico::LocationSnapshot, sqlx::Error> {
     let home_name: String = sqlx::query_scalar("SELECT nome FROM abitazioni WHERE id = ?")
         .bind(home_id)
@@ -1336,11 +2111,49 @@ pub(crate) async fn history_location_snapshot(
         (None, None)
     };
 
+    let (container_history_id, container_path) = if let Some(container_id) = container_id {
+        let Some((container_home_id, container_room_id, container_name)) =
+            sqlx::query_as::<_, (i64, Option<i64>, String)>(
+                "SELECT abitazione_id, stanza_id, nome FROM contenitori WHERE id = ?",
+            )
+            .bind(container_id)
+            .fetch_optional(&mut **tx)
+            .await?
+        else {
+            return Err(sqlx::Error::RowNotFound);
+        };
+
+        if container_home_id != home_id || container_room_id != room_id {
+            return Err(sqlx::Error::RowNotFound);
+        }
+
+        let history_id = crate::modules::storico::ensure_entity(
+            tx,
+            "contenitore",
+            container_id,
+            &container_name,
+        )
+        .await?;
+
+        let path_parts: Vec<String> = sqlx::query_scalar(
+            "WITH RECURSIVE chain(id, nome, contenitore_padre_id, depth) AS (                 SELECT id, nome, contenitore_padre_id, 0 FROM contenitori WHERE id = ?                 UNION ALL                 SELECT c.id, c.nome, c.contenitore_padre_id, chain.depth + 1                 FROM contenitori c JOIN chain ON chain.contenitore_padre_id = c.id              ) SELECT nome FROM chain ORDER BY depth DESC",
+        )
+        .bind(container_id)
+        .fetch_all(&mut **tx)
+        .await?;
+
+        (Some(history_id), Some(path_parts.join(" / ")))
+    } else {
+        (None, None)
+    };
+
     Ok(crate::modules::storico::LocationSnapshot {
         abitazione_storico_id: Some(home_history_id),
         abitazione_nome: Some(home_name),
         stanza_storico_id: room_history_id,
         stanza_nome: room_name,
+        contenitore_storico_id: container_history_id,
+        contenitore_percorso: container_path,
     })
 }
 
@@ -1358,7 +2171,13 @@ async fn history_snapshot_from_item_location(
     tx: &mut Transaction<'_, Sqlite>,
     location: &ItemLocation,
 ) -> Result<crate::modules::storico::LocationSnapshot, sqlx::Error> {
-    history_location_snapshot(tx, location.home_id, location.room_id).await
+    history_location_snapshot(
+        tx,
+        location.home_id,
+        location.room_id,
+        location.container_id,
+    )
+    .await
 }
 
 async fn history_item_identity(
@@ -1373,7 +2192,7 @@ async fn history_item_identity(
     Ok((history_id, name))
 }
 
-async fn record_item_location_event(
+pub(crate) async fn record_item_location_event(
     tx: &mut Transaction<'_, Sqlite>,
     item_id: i64,
     operation: &str,
@@ -1409,6 +2228,7 @@ async fn record_item_location_event(
     )
     .await?;
 
+    crate::modules::storico::record_event_location_context(tx, event_id, context).await?;
     crate::modules::storico::record_location_change(tx, event_id, before, after).await
 }
 
@@ -1527,6 +2347,44 @@ async fn delete_home(pool: &SqlitePool, id: i64) -> Result<bool, sqlx::Error> {
         return Ok(false);
     };
 
+    let rooms: Vec<(i64, String)> =
+        sqlx::query_as("SELECT id, nome FROM stanze WHERE abitazione_id = ? ORDER BY id")
+            .bind(id)
+            .fetch_all(&mut *tx)
+            .await?;
+
+    let containers: Vec<(i64, Option<i64>, String, Option<String>)> = sqlx::query_as(
+        "SELECT id, stanza_id, nome, descrizione \
+         FROM contenitori WHERE abitazione_id = ? ORDER BY id",
+    )
+    .bind(id)
+    .fetch_all(&mut *tx)
+    .await?;
+    let mut container_before = Vec::with_capacity(containers.len());
+    for (container_id, room_id, container_name, description) in &containers {
+        container_before.push((
+            *container_id,
+            *room_id,
+            container_name.clone(),
+            description.clone(),
+            history_location_snapshot(&mut tx, id, *room_id, Some(*container_id)).await?,
+        ));
+    }
+
+    let affected_items: Vec<i64> = sqlx::query_scalar(
+        "SELECT item_id FROM item_luogo WHERE abitazione_id = ? ORDER BY item_id",
+    )
+    .bind(id)
+    .fetch_all(&mut *tx)
+    .await?;
+    let mut item_before = Vec::with_capacity(affected_items.len());
+    for item_id in &affected_items {
+        item_before.push((
+            *item_id,
+            history_item_location_snapshot(&mut tx, *item_id).await?,
+        ));
+    }
+
     let home_history_id =
         crate::modules::storico::ensure_entity(&mut tx, "abitazione", id, &home_name).await?;
     let home_event_id = crate::modules::storico::record_event(
@@ -1557,20 +2415,75 @@ async fn delete_home(pool: &SqlitePool, id: i64) -> Result<bool, sqlx::Error> {
     )
     .await?;
 
-    let rooms: Vec<(i64, String)> =
-        sqlx::query_as("SELECT id, nome FROM stanze WHERE abitazione_id = ? ORDER BY id")
-            .bind(id)
-            .fetch_all(&mut *tx)
-            .await?;
+    let mut room_events = HashMap::new();
+    for (room_id, room_name) in &rooms {
+        let room_history_id =
+            crate::modules::storico::ensure_entity(&mut tx, "stanza", *room_id, room_name).await?;
+        let room_event_id = crate::modules::storico::record_event(
+            &mut tx,
+            &crate::modules::storico::NewHistoryEvent {
+                entita_storico_id: room_history_id,
+                modulo: "luoghi",
+                componente: "stanze",
+                operazione: "eliminazione",
+                nome_entita_snapshot: room_name,
+                abitazione_storico_id: Some(home_history_id),
+                abitazione_nome_snapshot: Some(&home_name),
+                stanza_storico_id: Some(room_history_id),
+                stanza_nome_snapshot: Some(room_name),
+                evento_padre_id: Some(home_event_id),
+            },
+        )
+        .await?;
+        crate::modules::storico::record_field_changes(
+            &mut tx,
+            room_event_id,
+            &[crate::modules::storico::NewFieldChange {
+                campo: "nome",
+                tipo_valore: "testo",
+                valore_prima: Some(room_name.clone()),
+                valore_dopo: None,
+            }],
+        )
+        .await?;
+        room_events.insert(*room_id, (room_history_id, room_event_id));
+    }
 
-    let affected_items: Vec<(i64, Option<i64>)> =
-        sqlx::query_as("SELECT item_id, stanza_id FROM item_luogo WHERE abitazione_id = ?")
-            .bind(id)
-            .fetch_all(&mut *tx)
-            .await?;
+    for (container_id, room_id, container_name, description, before) in container_before {
+        let mut changes = vec![crate::modules::storico::NewFieldChange {
+            campo: "nome",
+            tipo_valore: "testo",
+            valore_prima: Some(container_name.clone()),
+            valore_dopo: None,
+        }];
+        if let Some(description) = description {
+            changes.push(crate::modules::storico::NewFieldChange {
+                campo: "descrizione",
+                tipo_valore: "testo",
+                valore_prima: Some(description),
+                valore_dopo: None,
+            });
+        }
+        let parent_event_id = room_id
+            .and_then(|room_id| room_events.get(&room_id).map(|(_, event_id)| *event_id))
+            .unwrap_or(home_event_id);
+        crate::modules::contenitori::record_container_history_event(
+            &mut tx,
+            container_id,
+            &container_name,
+            "eliminazione",
+            &before,
+            &crate::modules::storico::LocationSnapshot::default(),
+            &changes,
+            Some(parent_event_id),
+        )
+        .await?;
+        if let Some(history_id) = before.contenitore_storico_id {
+            crate::modules::storico::mark_entity_deleted(&mut tx, history_id).await?;
+        }
+    }
 
-    for (item_id, room_id) in affected_items {
-        let before = history_location_snapshot(&mut tx, id, room_id).await?;
+    for (item_id, before) in item_before {
         record_item_location_event(
             &mut tx,
             item_id,
@@ -1582,39 +2495,9 @@ async fn delete_home(pool: &SqlitePool, id: i64) -> Result<bool, sqlx::Error> {
         .await?;
     }
 
-    for (room_id, room_name) in rooms {
-        let room_history_id =
-            crate::modules::storico::ensure_entity(&mut tx, "stanza", room_id, &room_name).await?;
-        let room_event_id = crate::modules::storico::record_event(
-            &mut tx,
-            &crate::modules::storico::NewHistoryEvent {
-                entita_storico_id: room_history_id,
-                modulo: "luoghi",
-                componente: "stanze",
-                operazione: "eliminazione",
-                nome_entita_snapshot: &room_name,
-                abitazione_storico_id: Some(home_history_id),
-                abitazione_nome_snapshot: Some(&home_name),
-                stanza_storico_id: Some(room_history_id),
-                stanza_nome_snapshot: Some(&room_name),
-                evento_padre_id: Some(home_event_id),
-            },
-        )
-        .await?;
-        crate::modules::storico::record_field_changes(
-            &mut tx,
-            room_event_id,
-            &[crate::modules::storico::NewFieldChange {
-                campo: "nome",
-                tipo_valore: "testo",
-                valore_prima: Some(room_name),
-                valore_dopo: None,
-            }],
-        )
-        .await?;
-        crate::modules::storico::mark_entity_deleted(&mut tx, room_history_id).await?;
+    for (room_history_id, _) in room_events.values() {
+        crate::modules::storico::mark_entity_deleted(&mut tx, *room_history_id).await?;
     }
-
     crate::modules::storico::mark_entity_deleted(&mut tx, home_history_id).await?;
 
     let result = sqlx::query("DELETE FROM abitazioni WHERE id = ?")
@@ -1780,14 +2663,41 @@ async fn delete_room(pool: &SqlitePool, id: i64) -> Result<bool, sqlx::Error> {
         return Ok(false);
     };
 
-    let before = history_location_snapshot(&mut tx, home_id, Some(id)).await?;
-    let after = history_location_snapshot(&mut tx, home_id, None).await?;
-    let home_history_id = after
+    let room_before = history_location_snapshot(&mut tx, home_id, Some(id), None).await?;
+    let home_after = history_location_snapshot(&mut tx, home_id, None, None).await?;
+    let home_history_id = home_after
         .abitazione_storico_id
         .expect("la casa esiste durante l'eliminazione della stanza");
-    let room_history_id = before
+    let room_history_id = room_before
         .stanza_storico_id
         .expect("la stanza esiste durante la propria eliminazione");
+
+    let affected_containers: Vec<(i64, String)> =
+        sqlx::query_as("SELECT id, nome FROM contenitori WHERE stanza_id = ? ORDER BY id")
+            .bind(id)
+            .fetch_all(&mut *tx)
+            .await?;
+    let mut container_before = Vec::with_capacity(affected_containers.len());
+    for (container_id, container_name) in &affected_containers {
+        container_before.push((
+            *container_id,
+            container_name.clone(),
+            history_location_snapshot(&mut tx, home_id, Some(id), Some(*container_id)).await?,
+        ));
+    }
+
+    let affected_items: Vec<i64> =
+        sqlx::query_scalar("SELECT item_id FROM item_luogo WHERE stanza_id = ? ORDER BY item_id")
+            .bind(id)
+            .fetch_all(&mut *tx)
+            .await?;
+    let mut item_before = Vec::with_capacity(affected_items.len());
+    for item_id in &affected_items {
+        item_before.push((
+            *item_id,
+            history_item_location_snapshot(&mut tx, *item_id).await?,
+        ));
+    }
 
     let room_event_id = crate::modules::storico::record_event(
         &mut tx,
@@ -1817,12 +2727,46 @@ async fn delete_room(pool: &SqlitePool, id: i64) -> Result<bool, sqlx::Error> {
     )
     .await?;
 
-    let affected_items: Vec<i64> =
-        sqlx::query_scalar("SELECT item_id FROM item_luogo WHERE stanza_id = ?")
-            .bind(id)
-            .fetch_all(&mut *tx)
+    // I contenitori sono posizioni, non dati usa-e-getta. Eliminando una
+    // stanza vengono promossi alla casa e la gerarchia padre/figlio resta
+    // intatta. Gli effetti vengono tracciati come eventi figli.
+    sqlx::query(
+        "UPDATE contenitori \
+         SET stanza_id = NULL, aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
+         WHERE stanza_id = ?",
+    )
+    .bind(id)
+    .execute(&mut *tx)
+    .await?;
+
+    crate::modules::storico::mark_entity_deleted(&mut tx, room_history_id).await?;
+    let result = sqlx::query("DELETE FROM stanze WHERE id = ?")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    if result.rows_affected() != 1 {
+        return Ok(false);
+    }
+
+    for (container_id, container_name, before) in container_before {
+        let after = history_location_snapshot(&mut tx, home_id, None, Some(container_id)).await?;
+        if before != after {
+            crate::modules::contenitori::record_container_history_event(
+                &mut tx,
+                container_id,
+                &container_name,
+                "spostamento",
+                &before,
+                &after,
+                &[],
+                Some(room_event_id),
+            )
             .await?;
-    for item_id in affected_items {
+        }
+    }
+
+    for (item_id, before) in item_before {
+        let after = history_item_location_snapshot(&mut tx, item_id).await?;
         record_item_location_event(
             &mut tx,
             item_id,
@@ -1834,14 +2778,8 @@ async fn delete_room(pool: &SqlitePool, id: i64) -> Result<bool, sqlx::Error> {
         .await?;
     }
 
-    crate::modules::storico::mark_entity_deleted(&mut tx, room_history_id).await?;
-    let result = sqlx::query("DELETE FROM stanze WHERE id = ?")
-        .bind(id)
-        .execute(&mut *tx)
-        .await?;
-
     tx.commit().await?;
-    Ok(result.rows_affected() == 1)
+    Ok(true)
 }
 
 async fn get_room(pool: &SqlitePool, id: i64) -> Result<Option<RoomRecord>, sqlx::Error> {
@@ -1889,6 +2827,13 @@ async fn count_items_for_room(pool: &SqlitePool, room_id: i64) -> Result<i64, sq
         .await
 }
 
+async fn count_containers_for_room(pool: &SqlitePool, room_id: i64) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar("SELECT COUNT(*) FROM contenitori WHERE stanza_id = ?")
+        .bind(room_id)
+        .fetch_one(pool)
+        .await
+}
+
 async fn object_exists(pool: &SqlitePool, item_id: i64) -> Result<bool, sqlx::Error> {
     let count: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM items WHERE id = ? AND tipo = 'oggetto'")
@@ -1904,6 +2849,7 @@ async fn get_item_location(
 ) -> Result<Option<ItemLocation>, sqlx::Error> {
     sqlx::query_as::<_, ItemLocation>(
         "SELECT il.abitazione_id AS home_id, il.stanza_id AS room_id, \
+                il.contenitore_id AS container_id, \
                 a.nome AS home_name, s.nome AS room_name \
          FROM item_luogo il \
          LEFT JOIN abitazioni a ON a.id = il.abitazione_id \
@@ -1921,6 +2867,7 @@ async fn get_item_location_tx(
 ) -> Result<Option<ItemLocation>, sqlx::Error> {
     sqlx::query_as::<_, ItemLocation>(
         "SELECT il.abitazione_id AS home_id, il.stanza_id AS room_id, \
+                il.contenitore_id AS container_id, \
                 a.nome AS home_name, s.nome AS room_name \
          FROM item_luogo il \
          LEFT JOIN abitazioni a ON a.id = il.abitazione_id \
@@ -1936,10 +2883,9 @@ async fn set_item_home(pool: &SqlitePool, item_id: i64, home_id: i64) -> Result<
     let mut tx = pool.begin().await?;
     let previous = get_item_location_tx(&mut tx, item_id).await?;
 
-    if previous
-        .as_ref()
-        .is_some_and(|location| location.home_id == home_id && location.room_id.is_none())
-    {
+    if previous.as_ref().is_some_and(|location| {
+        location.home_id == home_id && location.room_id.is_none() && location.container_id.is_none()
+    }) {
         return Ok(());
     }
 
@@ -1948,11 +2894,11 @@ async fn set_item_home(pool: &SqlitePool, item_id: i64, home_id: i64) -> Result<
     } else {
         crate::modules::storico::LocationSnapshot::default()
     };
-    let after = history_location_snapshot(&mut tx, home_id, None).await?;
+    let after = history_location_snapshot(&mut tx, home_id, None, None).await?;
 
     sqlx::query(
-        "INSERT INTO item_luogo (item_id, abitazione_id, stanza_id) VALUES (?, ?, NULL) \
-         ON CONFLICT(item_id) DO UPDATE SET abitazione_id = excluded.abitazione_id, stanza_id = NULL",
+        "INSERT INTO item_luogo (item_id, abitazione_id, stanza_id, contenitore_id) VALUES (?, ?, NULL, NULL) \
+         ON CONFLICT(item_id) DO UPDATE SET abitazione_id = excluded.abitazione_id, stanza_id = NULL, contenitore_id = NULL",
     )
     .bind(item_id)
     .bind(home_id)
@@ -1978,10 +2924,11 @@ async fn set_item_room(pool: &SqlitePool, item_id: i64, room_id: i64) -> Result<
         .await?;
     let previous = get_item_location_tx(&mut tx, item_id).await?;
 
-    if previous
-        .as_ref()
-        .is_some_and(|location| location.home_id == home_id && location.room_id == Some(room_id))
-    {
+    if previous.as_ref().is_some_and(|location| {
+        location.home_id == home_id
+            && location.room_id == Some(room_id)
+            && location.container_id.is_none()
+    }) {
         return Ok(());
     }
 
@@ -1990,11 +2937,11 @@ async fn set_item_room(pool: &SqlitePool, item_id: i64, room_id: i64) -> Result<
     } else {
         crate::modules::storico::LocationSnapshot::default()
     };
-    let after = history_location_snapshot(&mut tx, home_id, Some(room_id)).await?;
+    let after = history_location_snapshot(&mut tx, home_id, Some(room_id), None).await?;
 
     sqlx::query(
-        "INSERT INTO item_luogo (item_id, abitazione_id, stanza_id) VALUES (?, ?, ?) \
-         ON CONFLICT(item_id) DO UPDATE SET abitazione_id = excluded.abitazione_id, stanza_id = excluded.stanza_id",
+        "INSERT INTO item_luogo (item_id, abitazione_id, stanza_id, contenitore_id) VALUES (?, ?, ?, NULL) \
+         ON CONFLICT(item_id) DO UPDATE SET abitazione_id = excluded.abitazione_id, stanza_id = excluded.stanza_id, contenitore_id = NULL",
     )
     .bind(item_id)
     .bind(home_id)
@@ -2007,6 +2954,64 @@ async fn set_item_room(pool: &SqlitePool, item_id: i64, room_id: i64) -> Result<
     } else {
         "assegnazione"
     };
+    record_item_location_event(&mut tx, item_id, operation, &before, &after, None).await?;
+
+    tx.commit().await?;
+    Ok(())
+}
+
+async fn set_item_container(
+    pool: &SqlitePool,
+    item_id: i64,
+    container_id: i64,
+) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let Some((home_id, room_id)) = sqlx::query_as::<_, (i64, Option<i64>)>(
+        "SELECT abitazione_id, stanza_id FROM contenitori WHERE id = ?",
+    )
+    .bind(container_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    else {
+        return Err(sqlx::Error::RowNotFound);
+    };
+
+    let previous = get_item_location_tx(&mut tx, item_id).await?;
+    if previous
+        .as_ref()
+        .is_some_and(|location| location.container_id == Some(container_id))
+    {
+        return Ok(());
+    }
+
+    let before = if let Some(previous) = previous.as_ref() {
+        history_snapshot_from_item_location(&mut tx, previous).await?
+    } else {
+        crate::modules::storico::LocationSnapshot::default()
+    };
+    let after = history_location_snapshot(&mut tx, home_id, room_id, Some(container_id)).await?;
+
+    sqlx::query(
+        "INSERT INTO item_luogo (item_id, abitazione_id, stanza_id, contenitore_id) \
+         VALUES (?, ?, ?, ?) \
+         ON CONFLICT(item_id) DO UPDATE SET \
+             abitazione_id = excluded.abitazione_id, \
+             stanza_id = excluded.stanza_id, \
+             contenitore_id = excluded.contenitore_id",
+    )
+    .bind(item_id)
+    .bind(home_id)
+    .bind(room_id)
+    .bind(container_id)
+    .execute(&mut *tx)
+    .await?;
+
+    let operation = if previous.is_some() {
+        "spostamento"
+    } else {
+        "assegnazione"
+    };
+
     record_item_location_event(&mut tx, item_id, operation, &before, &after, None).await?;
 
     tx.commit().await?;
@@ -2058,8 +3063,9 @@ async fn list_objects_for_home(
     limit: i64,
 ) -> Result<Vec<LocatedObjectSummary>, sqlx::Error> {
     sqlx::query_as::<_, LocatedObjectSummary>(
-        "SELECT i.id AS id, i.nome AS name, o.posizione AS detail_position, \
-                a.nome AS home_name, s.nome AS room_name \
+        "SELECT i.id AS id, i.nome AS name, \
+                il.abitazione_id AS home_id, a.nome AS home_name, \
+                il.stanza_id AS room_id, s.nome AS room_name, il.contenitore_id AS container_id \
          FROM items i \
          JOIN oggetti o ON o.item_id = i.id \
          JOIN item_luogo il ON il.item_id = i.id \
@@ -2080,8 +3086,9 @@ async fn list_objects_for_room(
     limit: i64,
 ) -> Result<Vec<LocatedObjectSummary>, sqlx::Error> {
     sqlx::query_as::<_, LocatedObjectSummary>(
-        "SELECT i.id AS id, i.nome AS name, o.posizione AS detail_position, \
-                a.nome AS home_name, s.nome AS room_name \
+        "SELECT i.id AS id, i.nome AS name, \
+                il.abitazione_id AS home_id, a.nome AS home_name, \
+                il.stanza_id AS room_id, s.nome AS room_name, il.contenitore_id AS container_id \
          FROM items i \
          JOIN oggetti o ON o.item_id = i.id \
          JOIN item_luogo il ON il.item_id = i.id \
@@ -2098,10 +3105,24 @@ async fn list_objects_for_room(
 
 fn locations_menu_keyboard() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
-        vec![button("➕ Nuova casa", "loc:home:new")],
-        vec![button("📋 Elenco case", "loc:home:list")],
+        vec![
+            button("🏠 Case", "loc:home:list"),
+            button("🚪 Stanze", "loc:room:list"),
+        ],
+        vec![
+            button("📦 Contenitori", "c:a"),
+            button("🌳 Struttura", "loc:tree"),
+        ],
+        vec![button("➕ Crea…", "loc:create")],
         vec![button("🏠 Menu principale", "menu:main")],
     ])
+}
+
+pub(crate) fn location_navigation_keyboard() -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![vec![
+        button("↩️ Case, stanze e contenitori", "loc:menu"),
+        button("🏠 Menu principale", "menu:main"),
+    ]])
 }
 
 fn home_list_keyboard(homes: &[HomeRecord]) -> InlineKeyboardMarkup {
@@ -2114,48 +3135,89 @@ fn home_list_keyboard(homes: &[HomeRecord]) -> InlineKeyboardMarkup {
             )]
         })
         .collect::<Vec<_>>();
-    rows.push(vec![button("➕ Nuova casa", "loc:home:new")]);
-    rows.push(vec![button("🏠 Menu principale", "menu:main")]);
+    rows.push(vec![button("➕🏠 Casa", "loc:home:new")]);
+    rows.push(vec![
+        button("↩️ Case, stanze e contenitori", "loc:menu"),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
     InlineKeyboardMarkup::new(rows)
 }
 
 fn home_detail_keyboard(home_id: i64, rooms: &[RoomRecord]) -> InlineKeyboardMarkup {
-    let mut rows = vec![vec![button(
-        "➕ Nuova stanza",
-        &format!("loc:room:new:{home_id}"),
-    )]];
-    for room in rooms.iter().take(20) {
-        rows.push(vec![button(
-            &format!("🚪 {}", truncate_chars(&room.name, 42)),
-            &format!("loc:room:{}", room.id),
-        )]);
-    }
+    let mut rows = rooms
+        .iter()
+        .take(20)
+        .map(|room| {
+            vec![button(
+                &format!("🚪 {}", truncate_chars(&room.name, 42)),
+                &format!("loc:room:{}", room.id),
+            )]
+        })
+        .collect::<Vec<_>>();
+
+    rows.push(vec![
+        button("➕🚪 Stanza", &format!("loc:room:new:{home_id}")),
+        button(
+            "➕📦 Contenitore",
+            &format!(
+                "c:nl:{}:0",
+                crate::modules::contenitori::encode_callback_id(home_id)
+            ),
+        ),
+        button("➕🏷️ Oggetto", &format!("oggetti:newat:h:{home_id}")),
+    ]);
+    rows.push(vec![
+        button(
+            "📋📦 Contenitori qui",
+            &format!(
+                "c:lh:{}",
+                crate::modules::contenitori::encode_callback_id(home_id)
+            ),
+        ),
+        button("📋🏷️ Oggetti qui", &format!("loc:filter:home:{home_id}")),
+    ]);
     rows.push(vec![button(
-        "📦 Oggetti in questa casa",
-        &format!("loc:filter:home:{home_id}"),
+        "⚙️ Gestisci",
+        &format!("loc:home:manage:{home_id}"),
     )]);
     rows.push(vec![
-        button("✏️ Rinomina", &format!("loc:home:rename:{home_id}")),
-        button("🗑 Elimina", &format!("loc:home:delete:ask:{home_id}")),
+        button("↩️ Elenco case", "loc:home:list"),
+        button("🏠 Menu principale", "menu:main"),
     ]);
-    rows.push(vec![button("↩️ Elenco case", "loc:home:list")]);
     InlineKeyboardMarkup::new(rows)
 }
 
 fn room_detail_keyboard(room: &RoomRecord) -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
-        vec![button(
-            "📦 Oggetti nella stanza",
-            &format!("loc:filter:room:{}", room.id),
-        )],
         vec![
-            button("✏️ Rinomina", &format!("loc:room:rename:{}", room.id)),
-            button("🗑 Elimina", &format!("loc:room:delete:ask:{}", room.id)),
+            button(
+                "➕📦 Contenitore",
+                &format!(
+                    "c:nl:{}:{}",
+                    crate::modules::contenitori::encode_callback_id(room.home_id),
+                    crate::modules::contenitori::encode_callback_id(room.id)
+                ),
+            ),
+            button("➕🏷️ Oggetto", &format!("oggetti:newat:r:{}", room.id)),
+        ],
+        vec![
+            button(
+                "📋📦 Contenitori qui",
+                &format!(
+                    "c:lr:{}",
+                    crate::modules::contenitori::encode_callback_id(room.id)
+                ),
+            ),
+            button("📋🏷️ Oggetti qui", &format!("loc:filter:room:{}", room.id)),
         ],
         vec![button(
-            "↩️ Torna alla casa",
-            &format!("loc:home:{}", room.home_id),
+            "⚙️ Gestisci",
+            &format!("loc:room:manage:{}", room.id),
         )],
+        vec![
+            button("↩️ Torna alla casa", &format!("loc:home:{}", room.home_id)),
+            button("🏠 Menu principale", "menu:main"),
+        ],
     ])
 }
 
@@ -2165,7 +3227,10 @@ fn home_delete_keyboard(id: i64) -> InlineKeyboardMarkup {
             "🗑 Sì, elimina casa",
             &format!("loc:home:delete:do:{id}"),
         )],
-        vec![button("↩️ Annulla", &format!("loc:home:{id}"))],
+        vec![
+            button("↩️ Annulla", &format!("loc:home:{id}")),
+            button("🏠 Menu principale", "menu:main"),
+        ],
     ])
 }
 
@@ -2175,7 +3240,10 @@ fn room_delete_keyboard(room: &RoomRecord) -> InlineKeyboardMarkup {
             "🗑 Sì, elimina stanza",
             &format!("loc:room:delete:do:{}", room.id),
         )],
-        vec![button("↩️ Annulla", &format!("loc:room:{}", room.id))],
+        vec![
+            button("↩️ Annulla", &format!("loc:room:{}", room.id)),
+            button("🏠 Menu principale", "menu:main"),
+        ],
     ])
 }
 
@@ -2194,52 +3262,10 @@ fn item_home_picker_keyboard(item_id: i64, homes: &[HomeRecord]) -> InlineKeyboa
         "🧹 Nessun luogo",
         &format!("loc:item:clear:{item_id}"),
     )]);
-    rows.push(vec![button(
-        "↩️ Scheda oggetto",
-        &format!("oggetti:view:{item_id}"),
-    )]);
-    InlineKeyboardMarkup::new(rows)
-}
-
-fn item_room_picker_keyboard(
-    item_id: i64,
-    home_id: i64,
-    rooms: &[RoomRecord],
-    current_location: Option<&ItemLocation>,
-    selected_home_name: &str,
-) -> InlineKeyboardMarkup {
-    let is_move = has_structured_location(current_location);
-    let current_is_selected_home = current_location
-        .and_then(|location| location.home_name.as_deref())
-        == Some(selected_home_name);
-    let current_room_name = current_location
-        .filter(|_| current_is_selected_home)
-        .and_then(|location| location.room_name.as_deref());
-    let current_is_home_only = current_is_selected_home && current_room_name.is_none();
-
-    let home_label = if is_move && current_is_home_only {
-        "🚚 Sposta qui (solo casa) · Attualmente qui"
-    } else if is_move {
-        "🚚 Sposta qui (solo casa)"
-    } else {
-        "🏠 Assegna solo alla casa"
-    };
-    let mut rows = vec![vec![button(
-        home_label,
-        &format!("loc:item:sethome:{item_id}:{home_id}"),
-    )]];
-    for room in rooms.iter().take(20) {
-        let is_current_room = current_room_name == Some(room.name.as_str());
-        let room_label = room_picker_label(&room.name, is_move, is_current_room);
-        rows.push(vec![button(
-            &room_label,
-            &format!("loc:item:setroom:{item_id}:{}", room.id),
-        )]);
-    }
-    rows.push(vec![button(
-        "↩️ Scegli un'altra casa",
-        &format!("loc:item:{item_id}"),
-    )]);
+    rows.push(vec![
+        button("↩️ Scheda oggetto", &format!("oggetti:view:{item_id}")),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
     InlineKeyboardMarkup::new(rows)
 }
 
@@ -2261,12 +3287,15 @@ fn filtered_objects_keyboard(
         .iter()
         .map(|object| {
             vec![button(
-                &format!("📦 #{} · {}", object.id, truncate_chars(&object.name, 36)),
+                &format!("🏷️ #{} · {}", object.id, truncate_chars(&object.name, 36)),
                 &format!("oggetti:view:{}", object.id),
             )]
         })
         .collect::<Vec<_>>();
-    rows.push(vec![button("↩️ Indietro", back_callback)]);
+    rows.push(vec![
+        button("↩️ Indietro", back_callback),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
     InlineKeyboardMarkup::new(rows)
 }
 
@@ -2382,6 +3411,16 @@ mod tests {
         );
     }
 
+    #[test]
+    fn callback_gestione_luoghi_restano_sotto_limite_telegram() {
+        let home = format!("loc:home:manage:{}", i64::MAX);
+        let room = format!("loc:room:manage:{}", i64::MAX);
+        assert!(home.len() <= 64);
+        assert!(room.len() <= 64);
+        assert_eq!(parse_id_callback(&home, "loc:home:manage:"), Some(i64::MAX));
+        assert_eq!(parse_id_callback(&room, "loc:room:manage:"), Some(i64::MAX));
+    }
+
     #[tokio::test]
     async fn case_e_stanze_vengono_create_e_lette() {
         let pool = test_pool().await;
@@ -2448,6 +3487,162 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn oggetto_puo_spostarsi_da_stanza_a_contenitore_e_tornare_in_stanza() {
+        let pool = test_pool().await;
+        let item_id = create_test_object(&pool, "Trapano").await;
+        let home_id = create_home(&pool, "Casa principale").await.expect("casa");
+        let room_id = create_room(&pool, home_id, "Garage").await.expect("stanza");
+        let root = crate::modules::contenitori::create_container(
+            &pool,
+            home_id,
+            Some(room_id),
+            None,
+            "Scaffale",
+            None,
+        )
+        .await
+        .expect("contenitore");
+        let child = crate::modules::contenitori::create_container(
+            &pool,
+            home_id,
+            Some(room_id),
+            Some(root),
+            "Scatola",
+            None,
+        )
+        .await
+        .expect("sottocontenitore");
+
+        set_item_room(&pool, item_id, room_id)
+            .await
+            .expect("stanza iniziale");
+        set_item_container(&pool, item_id, root)
+            .await
+            .expect("spostamento nel contenitore");
+
+        let in_root: (i64, Option<i64>, Option<i64>) = sqlx::query_as(
+            "SELECT abitazione_id, stanza_id, contenitore_id FROM item_luogo WHERE item_id = ?",
+        )
+        .bind(item_id)
+        .fetch_one(&pool)
+        .await
+        .expect("luogo nel contenitore");
+        assert_eq!(in_root, (home_id, Some(room_id), Some(root)));
+
+        set_item_container(&pool, item_id, child)
+            .await
+            .expect("spostamento nel sottocontenitore");
+        let in_child: (i64, Option<i64>, Option<i64>) = sqlx::query_as(
+            "SELECT abitazione_id, stanza_id, contenitore_id FROM item_luogo WHERE item_id = ?",
+        )
+        .bind(item_id)
+        .fetch_one(&pool)
+        .await
+        .expect("luogo nel sottocontenitore");
+        assert_eq!(in_child, (home_id, Some(room_id), Some(child)));
+
+        set_item_room(&pool, item_id, room_id)
+            .await
+            .expect("ritorno diretto nella stanza");
+        let in_room: (i64, Option<i64>, Option<i64>) = sqlx::query_as(
+            "SELECT abitazione_id, stanza_id, contenitore_id FROM item_luogo WHERE item_id = ?",
+        )
+        .bind(item_id)
+        .fetch_one(&pool)
+        .await
+        .expect("luogo nella stanza");
+        assert_eq!(in_room, (home_id, Some(room_id), None));
+    }
+
+    #[tokio::test]
+    async fn spostare_da_contenitore_a_casa_rimuove_stanza_e_contenitore() {
+        let pool = test_pool().await;
+        let item_id = create_test_object(&pool, "Valigia").await;
+        let home_id = create_home(&pool, "Casa principale").await.expect("casa");
+        let room_id = create_room(&pool, home_id, "Camera").await.expect("stanza");
+        let container_id = crate::modules::contenitori::create_container(
+            &pool,
+            home_id,
+            Some(room_id),
+            None,
+            "Armadio",
+            None,
+        )
+        .await
+        .expect("contenitore");
+
+        set_item_container(&pool, item_id, container_id)
+            .await
+            .expect("assegnazione contenitore");
+        set_item_home(&pool, item_id, home_id)
+            .await
+            .expect("spostamento alla sola casa");
+
+        let location: (i64, Option<i64>, Option<i64>) = sqlx::query_as(
+            "SELECT abitazione_id, stanza_id, contenitore_id FROM item_luogo WHERE item_id = ?",
+        )
+        .bind(item_id)
+        .fetch_one(&pool)
+        .await
+        .expect("luogo finale");
+        assert_eq!(location, (home_id, None, None));
+    }
+
+    #[tokio::test]
+    async fn posizione_completa_include_contenitori_annidati() {
+        let pool = test_pool().await;
+        let item_id = create_test_object(&pool, "Chiavi").await;
+        let home_id = create_home(&pool, "Casa principale").await.expect("casa");
+        let room_id = create_room(&pool, home_id, "Garage").await.expect("stanza");
+        let root = crate::modules::contenitori::create_container(
+            &pool,
+            home_id,
+            Some(room_id),
+            None,
+            "Scaffale",
+            None,
+        )
+        .await
+        .expect("contenitore");
+        let child = crate::modules::contenitori::create_container(
+            &pool,
+            home_id,
+            Some(room_id),
+            Some(root),
+            "Scatola",
+            None,
+        )
+        .await
+        .expect("sottocontenitore");
+
+        set_item_container(&pool, item_id, child)
+            .await
+            .expect("assegnazione contenitore");
+        let location = get_item_location(&pool, item_id)
+            .await
+            .expect("lettura luogo")
+            .expect("luogo presente");
+        let formatted = format_location_full(&pool, Some(&location)).await;
+
+        assert!(formatted.contains("Casa principale"));
+        assert!(formatted.contains("Garage"));
+        assert!(formatted.contains("Scaffale"));
+        assert!(formatted.contains("Scatola"));
+    }
+
+    #[test]
+    fn callback_picker_contenitori_restano_sotto_limite_telegram() {
+        let max = i64::MAX;
+        for callback in [
+            format!("loc:item:room:{max}:{max}"),
+            format!("loc:item:container:{max}:{max}"),
+            format!("loc:item:setcontainer:{max}:{max}"),
+        ] {
+            assert!(callback.len() <= 64, "callback troppo lunga: {callback}");
+        }
+    }
+
+    #[tokio::test]
     async fn trigger_rifiuta_stanza_di_un_altra_casa() {
         let pool = test_pool().await;
         let item_id = create_test_object(&pool, "Trapano").await;
@@ -2478,6 +3673,15 @@ mod tests {
         set_item_room(&pool, item_id, room_id)
             .await
             .expect("assegnazione");
+        let container_id = sqlx::query(
+            "INSERT INTO contenitori (abitazione_id, stanza_id, nome) VALUES (?, ?, 'Armadio')",
+        )
+        .bind(home_id)
+        .bind(room_id)
+        .execute(&pool)
+        .await
+        .expect("contenitore")
+        .last_insert_rowid();
 
         assert!(delete_room(&pool, room_id).await.expect("delete stanza"));
         let location: (Option<i64>, Option<i64>) =
@@ -2487,6 +3691,14 @@ mod tests {
                 .await
                 .expect("riga luogo presente");
         assert_eq!(location, (Some(home_id), None));
+
+        let container_location: (i64, Option<i64>) =
+            sqlx::query_as("SELECT abitazione_id, stanza_id FROM contenitori WHERE id = ?")
+                .bind(container_id)
+                .fetch_one(&pool)
+                .await
+                .expect("contenitore mantenuto");
+        assert_eq!(container_location, (home_id, None));
 
         let item_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM items WHERE id = ?")
             .bind(item_id)
@@ -2524,6 +3736,180 @@ mod tests {
         assert_eq!(location_count, 0);
     }
 
+    #[tokio::test]
+    async fn eliminare_stanza_storicizza_promozione_di_contenitori_e_oggetti() {
+        let pool = test_pool().await;
+        let item_id = create_test_object(&pool, "Trapano").await;
+        let home_id = create_home(&pool, "Casa principale").await.expect("casa");
+        let room_id = create_room(&pool, home_id, "Garage").await.expect("stanza");
+        let root = crate::modules::contenitori::create_container(
+            &pool,
+            home_id,
+            Some(room_id),
+            None,
+            "Scaffale",
+            None,
+        )
+        .await
+        .expect("root");
+        let child = crate::modules::contenitori::create_container(
+            &pool,
+            home_id,
+            Some(room_id),
+            Some(root),
+            "Scatola",
+            None,
+        )
+        .await
+        .expect("child");
+        set_item_container(&pool, item_id, child)
+            .await
+            .expect("item nel contenitore");
+
+        let room_history: i64 = sqlx::query_scalar(
+            "SELECT id FROM storico_entita WHERE tipo_entita='stanza' AND id_origine=?",
+        )
+        .bind(room_id)
+        .fetch_one(&pool)
+        .await
+        .expect("storico stanza");
+
+        assert!(delete_room(&pool, room_id).await.expect("delete stanza"));
+
+        let room_event: i64 = sqlx::query_scalar(
+            "SELECT id FROM storico_eventi \
+             WHERE entita_storico_id=? AND operazione='eliminazione' ORDER BY id DESC LIMIT 1",
+        )
+        .bind(room_history)
+        .fetch_one(&pool)
+        .await
+        .expect("evento stanza");
+
+        let child_history: i64 = sqlx::query_scalar(
+            "SELECT id FROM storico_entita WHERE tipo_entita='contenitore' AND id_origine=?",
+        )
+        .bind(child)
+        .fetch_one(&pool)
+        .await
+        .expect("storico child");
+        let child_event: (i64, Option<i64>) = sqlx::query_as(
+            "SELECT id, evento_padre_id FROM storico_eventi \
+             WHERE entita_storico_id=? AND operazione='spostamento' ORDER BY id DESC LIMIT 1",
+        )
+        .bind(child_history)
+        .fetch_one(&pool)
+        .await
+        .expect("evento child");
+        assert_eq!(child_event.1, Some(room_event));
+
+        let child_change: (
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        ) = sqlx::query_as(
+            "SELECT stanza_prima_nome, contenitore_prima_percorso, \
+                    stanza_dopo_nome, contenitore_dopo_percorso \
+             FROM storico_cambi_luogo WHERE evento_id=?",
+        )
+        .bind(child_event.0)
+        .fetch_one(&pool)
+        .await
+        .expect("cambio child");
+        assert_eq!(child_change.0.as_deref(), Some("Garage"));
+        assert_eq!(child_change.1.as_deref(), Some("Scaffale / Scatola"));
+        assert_eq!(child_change.2, None);
+        assert_eq!(child_change.3.as_deref(), Some("Scaffale / Scatola"));
+
+        let item_history: i64 = sqlx::query_scalar(
+            "SELECT id FROM storico_entita WHERE tipo_entita='oggetto' AND id_origine=?",
+        )
+        .bind(item_id)
+        .fetch_one(&pool)
+        .await
+        .expect("storico item");
+        let item_event: (i64, Option<i64>) = sqlx::query_as(
+            "SELECT id, evento_padre_id FROM storico_eventi \
+             WHERE entita_storico_id=? AND operazione='spostamento' ORDER BY id DESC LIMIT 1",
+        )
+        .bind(item_history)
+        .fetch_one(&pool)
+        .await
+        .expect("evento item");
+        assert_eq!(item_event.1, Some(room_event));
+        let item_path_after: Option<String> = sqlx::query_scalar(
+            "SELECT contenitore_dopo_percorso FROM storico_cambi_luogo WHERE evento_id=?",
+        )
+        .bind(item_event.0)
+        .fetch_one(&pool)
+        .await
+        .expect("path item");
+        assert_eq!(item_path_after.as_deref(), Some("Scaffale / Scatola"));
+    }
+
+    #[tokio::test]
+    async fn eliminare_casa_storicizza_contenitori_e_percorso_oggetto() {
+        let pool = test_pool().await;
+        let item_id = create_test_object(&pool, "Trapano").await;
+        let home_id = create_home(&pool, "Casa principale").await.expect("casa");
+        let room_id = create_room(&pool, home_id, "Garage").await.expect("stanza");
+        let root = crate::modules::contenitori::create_container(
+            &pool,
+            home_id,
+            Some(room_id),
+            None,
+            "Scaffale",
+            None,
+        )
+        .await
+        .expect("contenitore");
+        set_item_container(&pool, item_id, root)
+            .await
+            .expect("item nel contenitore");
+
+        let container_history: i64 = sqlx::query_scalar(
+            "SELECT id FROM storico_entita WHERE tipo_entita='contenitore' AND id_origine=?",
+        )
+        .bind(root)
+        .fetch_one(&pool)
+        .await
+        .expect("storico contenitore");
+
+        assert!(delete_home(&pool, home_id).await.expect("delete casa"));
+
+        let deleted_at: Option<String> =
+            sqlx::query_scalar("SELECT eliminato_il FROM storico_entita WHERE id=?")
+                .bind(container_history)
+                .fetch_one(&pool)
+                .await
+                .expect("contenitore storico");
+        assert!(deleted_at.is_some());
+
+        let item_history: i64 = sqlx::query_scalar(
+            "SELECT id FROM storico_entita WHERE tipo_entita='oggetto' AND id_origine=?",
+        )
+        .bind(item_id)
+        .fetch_one(&pool)
+        .await
+        .expect("storico item");
+        let removal_event: i64 = sqlx::query_scalar(
+            "SELECT id FROM storico_eventi \
+             WHERE entita_storico_id=? AND operazione='rimozione' ORDER BY id DESC LIMIT 1",
+        )
+        .bind(item_history)
+        .fetch_one(&pool)
+        .await
+        .expect("evento rimozione");
+        let before_path: Option<String> = sqlx::query_scalar(
+            "SELECT contenitore_prima_percorso FROM storico_cambi_luogo WHERE evento_id=?",
+        )
+        .bind(removal_event)
+        .fetch_one(&pool)
+        .await
+        .expect("path prima");
+        assert_eq!(before_path.as_deref(), Some("Scaffale"));
+    }
+
     #[test]
     fn picker_stanza_segnala_quella_attuale_durante_lo_spostamento() {
         let current = room_picker_label("Garage", true, true);
@@ -2544,12 +3930,14 @@ mod tests {
         let garage = ItemLocation {
             home_id: 1,
             room_id: Some(10),
+            container_id: None,
             home_name: Some("Casa principale".to_string()),
             room_name: Some("Garage".to_string()),
         };
         let camera = ItemLocation {
             home_id: 1,
             room_id: Some(11),
+            container_id: None,
             home_name: Some("Casa principale".to_string()),
             room_name: Some("Camera".to_string()),
         };
@@ -2571,5 +3959,58 @@ mod tests {
         let rimozione = location_change_message(Some(&camera), nessun_luogo.as_ref());
         assert!(rimozione.contains("Luogo rimosso"));
         assert!(rimozione.contains("Prima:"));
+    }
+    #[test]
+    fn comando_luogo_tipizzato_apre_case_stanze_e_contenitori() {
+        assert_eq!(parse_location_command("/luogo_h12"), Some(('h', 12)));
+        assert_eq!(parse_location_command("/luogo_r7"), Some(('r', 7)));
+        assert_eq!(parse_location_command("/luogo_c33"), Some(('c', 33)));
+        assert_eq!(parse_location_command("/luogo_x1"), None);
+        assert_eq!(parse_location_command("/luogo_h0"), None);
+    }
+
+    #[test]
+    fn albero_luoghi_mantiene_gerarchia_stanza_e_contenitori() {
+        let rooms = vec![RoomRecord {
+            id: 2,
+            home_id: 1,
+            name: "Garage".to_string(),
+            home_name: "Casa".to_string(),
+        }];
+        let containers = vec![
+            TreeContainerRecord {
+                id: 10,
+                home_id: 1,
+                room_id: Some(2),
+                parent_id: None,
+                name: "Armadio".to_string(),
+            },
+            TreeContainerRecord {
+                id: 11,
+                home_id: 1,
+                room_id: Some(2),
+                parent_id: Some(10),
+                name: "Ripiano".to_string(),
+            },
+        ];
+
+        let nodes = build_home_nodes(1, &rooms, &containers);
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].command, "/luogo_r2");
+        assert_eq!(nodes[0].children[0].command, "/luogo_c10");
+        assert_eq!(nodes[0].children[0].children[0].command, "/luogo_c11");
+    }
+
+    #[test]
+    fn annulla_nuova_stanza_ricorda_la_casa_di_partenza() {
+        let state = LocationConversationState::AwaitingRoomName {
+            home_id: 7,
+            rename_id: None,
+            return_to: LocationReturnTarget::Home(7),
+        };
+        assert!(matches!(
+            location_return_target(&state),
+            LocationReturnTarget::Home(7)
+        ));
     }
 }

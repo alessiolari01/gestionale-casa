@@ -9,7 +9,10 @@ modifica, con nome `<timestamp>_<descrizione>.sql` compatibile con SQLx.
   `tag`, `item_tag`, `promemoria`;
 - `20260814121600_oggetti.sql` — tabella specifica `oggetti` dello Step 5A;
 - `20260815183000_luoghi.sql` — Step 6A: `abitazioni`, `stanze`, `item_luogo`,
-  indici e trigger di coerenza casa/stanza.
+  indici e trigger di coerenza casa/stanza;
+- `20260815215400_storico.sql` — Step 6B: infrastruttura dello storico trasversale;
+- `20260817171600_contenitori.sql` — Step 6C.1: contenitori gerarchici e `item_luogo.contenitore_id`;
+- `20260820230000_storico_contenitori.sql` — Step 6C.4: snapshot storico del contenitore/percorso e backfill delle sole identità.
 
 Documentazione:
 
@@ -44,3 +47,8 @@ aggiunge una terza migration separata.
 Migration: `20260815215400_storico.sql`. Introduce `storico_entita`, `storico_eventi`, `storico_cambiamenti` e `storico_cambi_luogo`, oltre agli indici necessari.
 
 La migration esegue il backfill delle identità per elementi, abitazioni e stanze già esistenti ma **non crea eventi retroattivi**. Le migration precedenti restano immutabili.
+
+
+## Step 6C.4 — storico contenitori
+
+`20260820230000_storico_contenitori.sql` aggiunge campi nullable alle tabelle dello storico esistenti e registra in `storico_entita` i contenitori già presenti. Non modifica le migration precedenti e **non crea eventi retroattivi**.

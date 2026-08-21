@@ -38,6 +38,8 @@ pub(crate) struct LocationSnapshot {
     pub(crate) abitazione_nome: Option<String>,
     pub(crate) stanza_storico_id: Option<i64>,
     pub(crate) stanza_nome: Option<String>,
+    pub(crate) contenitore_storico_id: Option<i64>,
+    pub(crate) contenitore_percorso: Option<String>,
 }
 
 pub(crate) async fn ensure_entity(
@@ -168,6 +170,24 @@ pub(crate) async fn record_field_changes(
     Ok(())
 }
 
+pub(crate) async fn record_event_location_context(
+    conn: &mut SqliteConnection,
+    evento_id: i64,
+    location: &LocationSnapshot,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE storico_eventi SET \
+            contenitore_storico_id = ?, contenitore_percorso_snapshot = ? \
+         WHERE id = ?",
+    )
+    .bind(location.contenitore_storico_id)
+    .bind(location.contenitore_percorso.as_deref())
+    .bind(evento_id)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}
+
 pub(crate) async fn record_location_change(
     conn: &mut SqliteConnection,
     evento_id: i64,
@@ -183,19 +203,25 @@ pub(crate) async fn record_location_change(
             evento_id, \
             abitazione_prima_id, abitazione_prima_nome, \
             stanza_prima_id, stanza_prima_nome, \
+            contenitore_prima_id, contenitore_prima_percorso, \
             abitazione_dopo_id, abitazione_dopo_nome, \
-            stanza_dopo_id, stanza_dopo_nome\
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            stanza_dopo_id, stanza_dopo_nome, \
+            contenitore_dopo_id, contenitore_dopo_percorso\
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(evento_id)
     .bind(before.abitazione_storico_id)
     .bind(before.abitazione_nome.as_deref())
     .bind(before.stanza_storico_id)
     .bind(before.stanza_nome.as_deref())
+    .bind(before.contenitore_storico_id)
+    .bind(before.contenitore_percorso.as_deref())
     .bind(after.abitazione_storico_id)
     .bind(after.abitazione_nome.as_deref())
     .bind(after.stanza_storico_id)
     .bind(after.stanza_nome.as_deref())
+    .bind(after.contenitore_storico_id)
+    .bind(after.contenitore_percorso.as_deref())
     .execute(&mut *conn)
     .await?;
 
@@ -213,6 +239,7 @@ struct HistoryListRow {
     nome_entita_snapshot: String,
     abitazione_nome_snapshot: Option<String>,
     stanza_nome_snapshot: Option<String>,
+    contenitore_percorso_snapshot: Option<String>,
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -226,6 +253,7 @@ struct HistoryEventDetail {
     nome_entita_snapshot: String,
     abitazione_nome_snapshot: Option<String>,
     stanza_nome_snapshot: Option<String>,
+    contenitore_percorso_snapshot: Option<String>,
     evento_padre_id: Option<i64>,
 }
 
@@ -241,8 +269,10 @@ struct HistoryFieldChangeUi {
 struct HistoryLocationChangeUi {
     abitazione_prima_nome: Option<String>,
     stanza_prima_nome: Option<String>,
+    contenitore_prima_percorso: Option<String>,
     abitazione_dopo_nome: Option<String>,
     stanza_dopo_nome: Option<String>,
+    contenitore_dopo_percorso: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -636,7 +666,8 @@ async fn load_filtered_global_history_page(
         "SELECT e.id, se.tipo_entita, \
                 strftime('%d/%m/%Y %H:%M', e.avvenuto_il, 'localtime') AS when_local, \
                 e.operazione, e.nome_entita_snapshot, \
-                e.abitazione_nome_snapshot, e.stanza_nome_snapshot \
+                e.abitazione_nome_snapshot, e.stanza_nome_snapshot, \
+                e.contenitore_percorso_snapshot \
          FROM storico_eventi e \
          JOIN storico_entita se ON se.id = e.entita_storico_id \
          WHERE 1 = 1",
@@ -1345,7 +1376,7 @@ pub async fn show_item_history(
             bot.send_message(
                 chat_id,
                 format_history_list(
-                    &format!("📜 Storico\n📦 {}", entity.1),
+                    &format!("📜 Storico\n🏷️ {}", entity.1),
                     &events,
                     page,
                     total,
@@ -1494,7 +1525,8 @@ async fn load_entity_history_page(
         "SELECT e.id, se.tipo_entita, \
                 strftime('%d/%m/%Y %H:%M', e.avvenuto_il, 'localtime') AS when_local, \
                 e.operazione, e.nome_entita_snapshot, \
-                e.abitazione_nome_snapshot, e.stanza_nome_snapshot \
+                e.abitazione_nome_snapshot, e.stanza_nome_snapshot, \
+                e.contenitore_percorso_snapshot \
          FROM storico_eventi e \
          JOIN storico_entita se ON se.id = e.entita_storico_id \
          WHERE e.entita_storico_id = ? \
@@ -1525,7 +1557,8 @@ async fn load_event_detail(
         "SELECT e.id, se.tipo_entita, \
                 strftime('%d/%m/%Y %H:%M', e.avvenuto_il, 'localtime') AS when_local, \
                 e.modulo, e.componente, e.operazione, e.nome_entita_snapshot, \
-                e.abitazione_nome_snapshot, e.stanza_nome_snapshot, e.evento_padre_id \
+                e.abitazione_nome_snapshot, e.stanza_nome_snapshot, \
+                e.contenitore_percorso_snapshot, e.evento_padre_id \
          FROM storico_eventi e \
          JOIN storico_entita se ON se.id = e.entita_storico_id \
          WHERE e.id = ?",
@@ -1549,8 +1582,8 @@ async fn load_event_detail(
     .await?;
 
     let location = sqlx::query_as::<_, HistoryLocationChangeUi>(
-        "SELECT abitazione_prima_nome, stanza_prima_nome, \
-                abitazione_dopo_nome, stanza_dopo_nome \
+        "SELECT abitazione_prima_nome, stanza_prima_nome, contenitore_prima_percorso, \
+                abitazione_dopo_nome, stanza_dopo_nome, contenitore_dopo_percorso \
          FROM storico_cambi_luogo \
          WHERE evento_id = ?",
     )
@@ -1645,10 +1678,12 @@ fn format_event_detail(
             format_location(
                 location.abitazione_prima_nome.as_deref(),
                 location.stanza_prima_nome.as_deref(),
+                location.contenitore_prima_percorso.as_deref(),
             ),
             format_location(
                 location.abitazione_dopo_nome.as_deref(),
                 location.stanza_dopo_nome.as_deref(),
+                location.contenitore_dopo_percorso.as_deref(),
             ),
         ));
     }
@@ -1790,25 +1825,39 @@ fn truncate_chars(value: &str, max: usize) -> String {
 }
 
 fn event_context(event: &HistoryListRow) -> Option<String> {
-    event
-        .abitazione_nome_snapshot
-        .as_deref()
-        .map(|home| format_location(Some(home), event.stanza_nome_snapshot.as_deref()))
+    event.abitazione_nome_snapshot.as_deref().map(|home| {
+        format_location(
+            Some(home),
+            event.stanza_nome_snapshot.as_deref(),
+            event.contenitore_percorso_snapshot.as_deref(),
+        )
+    })
 }
 
 fn detail_context(event: &HistoryEventDetail) -> Option<String> {
-    event
-        .abitazione_nome_snapshot
-        .as_deref()
-        .map(|home| format_location(Some(home), event.stanza_nome_snapshot.as_deref()))
+    event.abitazione_nome_snapshot.as_deref().map(|home| {
+        format_location(
+            Some(home),
+            event.stanza_nome_snapshot.as_deref(),
+            event.contenitore_percorso_snapshot.as_deref(),
+        )
+    })
 }
 
-fn format_location(home: Option<&str>, room: Option<&str>) -> String {
-    match (home, room) {
-        (Some(home), Some(room)) => format!("{home} / {room}"),
-        (Some(home), None) => home.to_string(),
-        (None, _) => "Nessun luogo".to_string(),
+fn format_location(home: Option<&str>, room: Option<&str>, container_path: Option<&str>) -> String {
+    let mut parts = Vec::new();
+    if let Some(home) = home {
+        parts.push(home);
+    } else {
+        return "Nessun luogo".to_string();
     }
+    if let Some(room) = room {
+        parts.push(room);
+    }
+    if let Some(path) = container_path {
+        parts.extend(path.split(" / ").filter(|part| !part.is_empty()));
+    }
+    parts.join(" / ")
 }
 
 fn operation_icon(operation: &str) -> &'static str {
@@ -1840,9 +1889,10 @@ fn operation_label(operation: &str) -> &'static str {
 
 fn entity_icon(entity_type: &str) -> &'static str {
     match entity_type {
-        "oggetto" => "📦",
+        "oggetto" => "🏷️",
         "abitazione" => "🏠",
         "stanza" => "🚪",
+        "contenitore" => "📦",
         "veicolo" => "🚗",
         "vestito" => "👕",
         _ => "🔹",
@@ -2028,6 +2078,19 @@ mod tests {
             })
         );
         assert_eq!(parse_history_action("history:item:0:1"), None);
+    }
+
+    #[test]
+    fn percorso_storico_include_contenitori_annidati() {
+        assert_eq!(
+            format_location(
+                Some("Casa principale"),
+                Some("Garage"),
+                Some("Armadio / Ripiano 2 / Scatola"),
+            ),
+            "Casa principale / Garage / Armadio / Ripiano 2 / Scatola"
+        );
+        assert_eq!(entity_icon("contenitore"), "📦");
     }
 
     #[test]
@@ -2232,12 +2295,14 @@ mod tests {
                 abitazione_nome: Some("Casa A".to_string()),
                 stanza_storico_id: None,
                 stanza_nome: None,
+                ..LocationSnapshot::default()
             },
             &LocationSnapshot {
                 abitazione_storico_id: Some(home_b),
                 abitazione_nome: Some("Casa B".to_string()),
                 stanza_storico_id: None,
                 stanza_nome: None,
+                ..LocationSnapshot::default()
             },
         )
         .await

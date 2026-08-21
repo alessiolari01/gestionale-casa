@@ -37,7 +37,7 @@ Per lo Step 6A è stata scelta la seconda soluzione perché il dominio attuale h
 solo due livelli certi, casa e stanza. È più leggibile, rende semplici i vincoli
 SQLite e non costringe a introdurre subito una gerarchia arbitraria.
 
-Lo Step 6C potrà aggiungere contenitori/sotto-posizioni senza cancellare questo
+Lo Step 6C ha aggiunto contenitori/sotto-posizioni senza cancellare questo
 modello. In quel momento si valuterà se aggiungere un terzo livello dedicato o
 una gerarchia generica sotto la stanza.
 

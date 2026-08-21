@@ -485,6 +485,8 @@ async fn register_photo(
         },
     )
     .await?;
+    crate::modules::storico::record_event_location_context(&mut tx, event_id, &event_location)
+        .await?;
 
     let mut changes = vec![
         crate::modules::storico::NewFieldChange {
@@ -695,20 +697,35 @@ mod tests {
             .expect("stanza");
         let room_id = room.last_insert_rowid();
 
-        sqlx::query("INSERT INTO item_luogo (item_id, abitazione_id, stanza_id) VALUES (?, ?, ?)")
-            .bind(item_id)
-            .bind(home_id)
-            .bind(room_id)
-            .execute(&pool)
-            .await
-            .expect("luogo");
+        let container_id = crate::modules::contenitori::create_container(
+            &pool,
+            home_id,
+            Some(room_id),
+            None,
+            "Archivio foto",
+            None,
+        )
+        .await
+        .expect("contenitore");
+
+        sqlx::query(
+            "INSERT INTO item_luogo (item_id, abitazione_id, stanza_id, contenitore_id) \
+             VALUES (?, ?, ?, ?)",
+        )
+        .bind(item_id)
+        .bind(home_id)
+        .bind(room_id)
+        .bind(container_id)
+        .execute(&pool)
+        .await
+        .expect("luogo");
 
         register_photo(&pool, item_id, "data/media/foto_contesto.jpg", None)
             .await
             .expect("foto");
 
-        let context: (Option<String>, Option<String>) = sqlx::query_as(
-            "SELECT abitazione_nome_snapshot, stanza_nome_snapshot \
+        let context: (Option<String>, Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT abitazione_nome_snapshot, stanza_nome_snapshot, contenitore_percorso_snapshot \
              FROM storico_eventi \
              WHERE operazione = 'foto_aggiunta' AND nome_entita_snapshot = 'Foto con luogo' \
              ORDER BY id DESC LIMIT 1",
@@ -719,7 +736,11 @@ mod tests {
 
         assert_eq!(
             context,
-            (Some("Casa foto".to_string()), Some("Studio".to_string()))
+            (
+                Some("Casa foto".to_string()),
+                Some("Studio".to_string()),
+                Some("Archivio foto".to_string())
+            )
         );
     }
 }

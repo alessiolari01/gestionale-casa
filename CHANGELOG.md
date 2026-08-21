@@ -1,5 +1,69 @@
 # Diario di sviluppo
 
+## Step 6C.5 — chiusura documentale e preparazione PR — 2026-08-22
+
+- checkpoint di partenza: `fd4cbea` (`Step 6C.4: integra contenitori nello storico`);
+- 6C.4 verificato su Galaxy S9 con **69/69 test**, `cargo check --locked`, Clippy `-D warnings`, `git diff --check` e runtime Telegram;
+- migration `20260820230000_storico_contenitori.sql` applicata al database reale dopo backup senza reset o perdita dati;
+- verificati su Telegram: percorsi contenitore prima/dopo, riparentamento nella stessa stanza, eventi padre/figlio del sottoalbero, rinomina senza falso spostamento, contesto contenitore sugli oggetti e filtro per entità contenitore;
+- il 6C.5 aggiorna soltanto documentazione/stato di progetto: **nessuna nuova migration e nessuna modifica applicativa**;
+- stato finale locale: Step 6C funzionalmente completo; resta la chiusura di rilascio tramite PR, CI GitHub verde e merge `step-6c-test -> main`.
+
+
+## Step 6C.4 — contenitori nello storico — 2026-08-20 — verificato
+
+- aggiunta la migration `20260820230000_storico_contenitori.sql`;
+- estesi `storico_eventi` e `storico_cambi_luogo` con identità e percorso snapshot del contenitore;
+- backfill dei contenitori esistenti in `storico_entita` senza creare eventi retroattivi;
+- aggiunti eventi per creazione, rinomina, modifica descrizione, spostamento ed eliminazione dei contenitori;
+- gli spostamenti di sottoalberi e le promozioni dopo eliminazione generano eventi figli per contenitori e oggetti coinvolti;
+- `evento_padre_id` collega gli effetti automatici all'azione principale;
+- eliminazione stanza/casa conserva i percorsi prima dell'operazione e storicizza gli effetti su contenitori/oggetti;
+- eventi oggetto/foto conservano ora anche il contesto contenitore;
+- aggiunta icona storico `📦` e visualizzazione del percorso completo nel contesto e nel prima/dopo;
+- nessun reset, nessuna cancellazione globale e nessun evento storico inventato per dati già esistenti;
+- aggiunti 7 test: attesi **69 test totali** dopo l'applicazione.
+
+Verifica completata sul Galaxy S9: **69/69 test**, Clippy `-D warnings` e runtime Telegram superati; commit `fd4cbea` pushato su `step-6c-test`.
+
+## Step 6C.3C — spostamento oggetti nei contenitori — 2026-08-20
+
+- completato il picker gerarchico di destinazione per gli oggetti: casa → stanza → contenitore → sottocontenitore;
+- la schermata di spostamento mostra ora il percorso corrente completo, incluso il contenitore;
+- aggiunte destinazioni dirette casa/stanza e navigazione nei contenitori;
+- aggiunto lo spostamento esplicito stanza → contenitore, contenitore → contenitore/sottocontenitore, contenitore → stanza e contenitore → casa;
+- `set_item_home` e `set_item_room` azzerano `contenitore_id`, evitando posizioni incoerenti;
+- lo stesso contenitore viene riconosciuto come no-op;
+- aggiunti test per spostamenti, azzeramento del contenitore, percorso completo e limite callback Telegram;
+- nessuna migration e nessuna cancellazione dati;
+- storico contenitore/percorso rimandato al 6C.4.
+
+## Step 6C.3B — rifiniture UX e posizione completa — 2026-08-20
+
+- rifinita la gerarchia visiva delle tastiere: figli immediati prima delle azioni, casa con `➕🚪 Stanza` · `➕📦 Contenitore` · `➕🏷️ Oggetto` sulla stessa riga e pulsanti elenco compatti `📋📦 ... qui` / `📋🏷️ ... qui`;
+
+- `/annulla` ritorna al contesto di partenza per creazione/rinomina di case, stanze, contenitori e per la creazione/modifica oggetti.
+- Elenchi, ricerca e dettaglio oggetto mostrano il percorso completo fino al contenitore e `/luogo_*` del luogo più specifico.
+- La scheda contenitore espone `Oggetti in questo contenitore` con elenco degli oggetti diretti.
+- Dopo la creazione contestuale, la scheda dell'oggetto offre `↩️ Torna a <luogo>` verso la casa/stanza/contenitore da cui è stato avviato `Nuovo oggetto qui`.
+- La scheda oggetto usa `📋 Elenco oggetti`; oggetti e contenitori sono visivamente distinti con `🏷️` e `📦`.
+- Le tastiere inline adottano una gerarchia compatta: azioni simili affiancate, `⚙️ Gestisci` per le operazioni amministrative e `🗑 Elimina` isolato nelle schermate di gestione.
+- Rimosso dai nuovi flussi il passaggio `Dettaglio posizione`: la posizione operativa è strutturata.
+- `oggetti.posizione` resta nel DB e nella ricerca come dato legacy, senza cancellazioni o migration distruttive.
+- Aggiunto `docs/INFRASTRUTTURA.md` con topologia PC ↔ S9 ↔ GitHub ↔ Telegram, Tailscale, SSH/SCP senza password, GitHub SSH senza PAT, Termux:Boot e diagnostica.
+- Nessuna nuova migration.
+
+
+## Step 6C.1–6C.3A — Contenitori e navigazione dei luoghi — 2026-08-17 → 2026-08-19
+
+- 6C.1 (`cc3ba4c`): backend contenitori gerarchici.
+- 6C.2 (`4c64798`): UI Telegram contenitori; 47/47 test e runtime S9 verificati.
+- 6C.3A: sezione unificata `Case, stanze e contenitori`, elenchi globali, albero, `/luogo_*`, azioni contestuali e `Nuovo oggetto qui` con posizione strutturata precompilata.
+- Spostamento: destinazioni esplicite (`Sposta in Camera`, `Sposta in Casa principale`) al posto di `Livello principale`.
+- Contratto UI: `Indietro` semantico + accesso diretto al menu principale.
+
+6C.3A non introduce migration; è stato verificato su S9 e consolidato nel checkpoint `413605e`.
+
 
 ## Step 6B — Storico trasversale globale + individuale — 2026-08-15 → 2026-08-16
 
