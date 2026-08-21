@@ -3022,7 +3022,7 @@ fn parse_money_to_cents(input: &str) -> Option<i64> {
 
     let (whole, fraction) = normalized
         .split_once('.')
-        .map_or((normalized.as_str(), ""), |parts| parts);
+        .unwrap_or((normalized.as_str(), ""));
     if whole.is_empty()
         || !whole.chars().all(|ch| ch.is_ascii_digit())
         || !fraction.chars().all(|ch| ch.is_ascii_digit())
