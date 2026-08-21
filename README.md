@@ -1,8 +1,23 @@
 # Gestionale Casa
 
-## Step 6C.4 — contenitori nello storico (predisposto per verifica S9)
+## Step 6C.5 — chiusura finale dello Step 6C
 
-Base esatta: `658e455` (`step-6c-test`), con 6C.3C già verificato e pushato.
+Base di chiusura: `fd4cbea` sul branch `step-6c-test`.
+
+Lo **Step 6C — Contenitori e sotto-posizioni** è funzionalmente completo e verificato sul Galaxy S9:
+
+- gerarchia arbitraria di contenitori con spostamento sicuro del sottoalbero;
+- navigazione unificata casa → stanza → contenitore → sottocontenitore;
+- creazione contestuale e spostamento oggetti fino a qualunque contenitore;
+- storico container-aware con snapshot immutabili del percorso ed eventi padre/figlio;
+- migration `20260820230000_storico_contenitori.sql` applicata sul database reale dopo backup;
+- **69/69 test**, `cargo check --locked`, Clippy con `-D warnings`, `git diff --check` e prove Telegram runtime superati.
+
+Il 6C.5 è una **chiusura documentale e di rilascio**: non introduce codice applicativo, migration o modifiche ai dati. Il branch è pronto per l'ultima verifica, Pull Request, CI GitHub e merge in `main`.
+
+## Archivio Step 6C.4 — contenitori nello storico (verificato)
+
+Base di partenza del 6C.4: `658e455` (`step-6c-test`), con 6C.3C già verificato e pushato.
 
 Il 6C.4 estende lo storico trasversale fino al livello contenitore:
 - `contenitore` diventa un tipo di entità storica con icona `📦`;
@@ -16,7 +31,7 @@ Il 6C.4 estende lo storico trasversale fino al livello contenitore:
 
 Nuova migration: `migrations/20260820230000_storico_contenitori.sql`. La migration aggiunge solo campi/snapshot e fa il backfill delle **identità** dei contenitori già presenti: non crea eventi retroattivi.
 
-Stato: implementazione predisposta, **da verificare sul Galaxy S9 prima di commit/push**. Suite attesa: **69 test** (62 della base + 7 nuovi).
+Stato finale 6C.4: verificato sul Galaxy S9 e pushato come `fd4cbea`; **69/69 test**, Clippy `-D warnings` e runtime Telegram superati.
 
 ## Step 6C.3C — spostamento oggetti nei contenitori
 
@@ -32,7 +47,7 @@ Comportamento previsto:
 - scegliere lo stesso contenitore è un no-op;
 - nessuna migration: viene usata la struttura `item_luogo.contenitore_id` già introdotta nel 6C.1.
 
-Lo storico specifico del cambio **contenitore/percorso** resta volutamente nel successivo Step 6C.4; il 6C.3C mantiene il contesto storico casa/stanza già supportato.
+Il 6C.3C manteneva ancora il contesto storico casa/stanza; il successivo 6C.4 ha completato lo storico di contenitori e percorsi.
 
 ## Step 6C.3B — rifiniture UX e posizione completa
 
@@ -50,7 +65,7 @@ Le regole sono descritte in `docs/moduli/navigazione-luoghi.md` e `docs/moduli/c
 
 ## Step 6C — Luoghi gerarchici e navigazione contestuale
 
-Il gestionale tratta **case, stanze e contenitori** come un unico sistema di luoghi. `4c64798` è il checkpoint 6C.2 verificato su Galaxy S9; 6C.3A aggiunge navigazione contestuale, vista ad albero e creazione di un oggetto direttamente dal luogo corrente.
+Il gestionale tratta **case, stanze e contenitori** come un unico sistema di luoghi. I checkpoint verificati sono `4c64798` (6C.2), `413605e` (6C.3A), `24944ac` (6C.3B), `658e455` (6C.3C) e `fd4cbea` (6C.4).
 
 Regola UI: le azioni dipendono dal luogo visualizzato e ogni schermata interna rilevante offre ritorno al livello logico precedente e `🏠 Menu principale`.
 
@@ -61,7 +76,7 @@ Specifiche: `docs/moduli/navigazione-luoghi.md` e `docs/moduli/contenitori.md`.
 
 Lo **Step 6B — Storico trasversale globale + individuale** è implementato e verificato sul Galaxy S9. Sono disponibili storico globale e individuale, dettaglio prima/dopo, paginazione e filtri combinabili per periodo, modulo, operazione, casa, stanza ed elemento.
 
-Verifica finale locale: **37/37 test**, Clippy con `-D warnings` e test runtime Telegram superati. Prima della chiusura ufficiale restano PR, CI GitHub verde e merge su `main`. Dopo il merge il prossimo sviluppo approvato è **Step 6C — Contenitori e sotto-posizioni**.
+Lo Step 6B è già entrato nella baseline `main`; il suo storico trasversale è stato successivamente esteso dal 6C.4 con contenitori e snapshot dei percorsi.
 
 Documentazione tecnica: `docs/moduli/storico.md`.
 
@@ -97,10 +112,10 @@ Prima di modificare il progetto, leggere nell'ordine:
   - [x] Step 5A — anagrafica, creazione, elenco, ricerca e scheda
   - [x] Step 5B — foto locali + navigazione di avvio/status
   - [x] Step 5C — modifica ed eliminazione sicura
-- [ ] Step 6 — Luoghi e funzioni trasversali
-  - [ ] **Step 6A — case, stanze e posizione strutturata (corrente)**
-  - [ ] Step 6B — storico globale + individuale
-  - [ ] Step 6C — contenitori e sotto-posizioni
+- [x] Step 6 — Luoghi e funzioni trasversali, implementazione verificata
+  - [x] Step 6A — case, stanze e posizione strutturata
+  - [x] Step 6B — storico globale + individuale
+  - [x] Step 6C — contenitori e sotto-posizioni; branch pronto per PR/CI/merge
 - [ ] Step 7 — documenti/garanzie, promemoria/scadenze, tag/ricerca globale
 - [ ] Modulo vestiti
 - [ ] Modulo veicoli
@@ -108,41 +123,20 @@ Prima di modificare il progetto, leggere nell'ordine:
 
 ### Ultimo step funzionale verificato
 
-Lo **Step 5C — Modifica ed eliminazione oggetti è chiuso e verificato**. È
-stato mergiato su `main` con CI GitHub Actions verde. Sul Galaxy S9 sono stati
-verificati modifica senza duplicati, `/salta`, `/rimuovi`, annullamento
-contestuale, eliminazione con conferma, cascade SQLite e rimozione dei media
-locali.
+Lo **Step 6C.4 — Contenitori nello storico** è verificato sul Galaxy S9 e
+pushato come `fd4cbea`. La suite corrente è **69/69 test**; `cargo check`,
+Clippy `-D warnings`, migration sul database reale e prove Telegram dello
+storico container-aware sono verdi.
 
 Il warning di compatibilità futura relativo a `proc-macro-error2 v2.0.1` non ha
 bloccato build o test e resta una nota da rivalutare durante futuri aggiornamenti.
 
 ### Passo corrente
 
-È in sviluppo lo **Step 6A — Case, stanze e posizione strutturata**. La scelta
-architetturale è stata approvata e usa tre elementi:
-
-```text
-abitazioni
-   └── stanze
-
-items ── item_luogo ──> abitazione + stanza opzionale
-```
-
-Obiettivi dello step:
-
-- più case nello stesso gestionale;
-- stanze riconosciute e legate alla propria casa;
-- oggetti assegnabili direttamente a una casa o a una stanza;
-- spostamento guidato;
-- filtri per casa/stanza;
-- ricerca anche per nome casa e stanza;
-- mantenimento di `oggetti.posizione` come dettaglio libero, senza perdere dati
-  già presenti.
-
-La specifica è in `docs/moduli/luoghi.md`. Lo Step 6A non va considerato chiuso
-finché migration, test automatici, test runtime sul Galaxy S9 e CI della Pull
-Request non sono tutti verdi.
+Lo **Step 6C.5** chiude documentazione e rilascio del 6C. Non aggiunge
+funzionalità: dopo l'ultima verifica del branch `step-6c-test` restano Pull
+Request, CI GitHub verde e merge in `main`. Solo dopo il merge si apre lo
+sviluppo dello **Step 7A — Documenti e garanzie**.
 
 ## Fonte ufficiale e workflow corrente
 

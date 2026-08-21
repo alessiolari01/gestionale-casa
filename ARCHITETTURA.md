@@ -1,5 +1,11 @@
 # Architettura
 
+## Stato architetturale dopo Step 6C
+
+Il branch `step-6c-test` ha completato e verificato l'estensione dei luoghi fino ai contenitori gerarchici. Il checkpoint funzionale è `fd4cbea` (6C.4): **69/69 test**, Clippy `-D warnings` e runtime Telegram verificati su Galaxy S9. Il 6C.5 è solo chiusura documentale/PR e non cambia schema o codice applicativo.
+
+La posizione corrente resta relazionale (`abitazioni` + `stanze` + `contenitori` + `item_luogo`); lo storico conserva invece snapshot immutabili del percorso per non riscrivere il passato quando la gerarchia cambia.
+
 ## Snapshot storico dei contenitori — Step 6C.4
 
 La posizione viva continua a essere derivata da `item_luogo` + `contenitori`; lo storico, invece, deve essere immutabile. Per questo il 6C.4 salva nel momento dell'evento:
@@ -348,8 +354,8 @@ Decisioni:
 
 La scelta `abitazioni` + `stanze` è intenzionalmente più esplicita di una tabella
 gerarchica generica: oggi sono certi due livelli e i vincoli risultano più
-semplici e leggibili. Lo Step 6C valuterà contenitori e sotto-posizioni senza
-obbligare il 6A a decidere già una gerarchia arbitraria.
+semplici e leggibili. Lo Step 6C ha poi aggiunto `contenitori` come gerarchia
+arbitraria sotto casa/stanza, senza riscrivere il modello introdotto dal 6A.
 
 Dettagli in `docs/moduli/luoghi.md`.
 
@@ -363,10 +369,9 @@ Dettagli in `docs/moduli/luoghi.md`.
 - ~~**Step 5A — Oggetti generici**~~ — chiuso e verificato.
 - ~~**Step 5B — Foto oggetti**~~ — chiuso e verificato.
 - ~~**Step 5C — Modifica/eliminazione**~~ — chiuso, mergiato su `main` con CI verde.
-- **Step 6A — Case, stanze e posizione strutturata** — corrente.
-- **Step 6B — Storico globale + individuale** — eventi strutturati con data/ora,
-  prima/dopo e filtri per modulo, casa, stanza, periodo e operazione.
-- **Step 6C — Contenitori e sotto-posizioni**.
+- ~~**Step 6A — Case, stanze e posizione strutturata**~~ — chiuso e verificato.
+- ~~**Step 6B — Storico globale + individuale**~~ — chiuso, verificato e mergiato su `main`.
+- **Step 6C — Contenitori e sotto-posizioni** — implementazione e runtime verificati; PR/CI/merge finale in corso.
 - **Step 7A — Documenti e garanzie**.
 - **Step 7B — Promemoria e scadenze**.
 - **Step 7C — Tag e ricerca globale**.

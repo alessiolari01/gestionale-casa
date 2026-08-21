@@ -20,7 +20,7 @@ Regole:
 - quando l'oggetto viene spostato direttamente in casa/stanza, `contenitore_id` viene impostato a `NULL`;
 - selezionare la destinazione identica a quella corrente non produce modifiche.
 
-Il 6C.3C non estende ancora il modello storico con l'identità del contenitore: questa integrazione è riservata al 6C.4.
+Il 6C.3C aveva lasciato fuori l'identità storica del contenitore; il 6C.4 l'ha poi integrata con snapshot del percorso e prima/dopo container-aware.
 
 ## Principio
 
@@ -128,12 +128,13 @@ Evitare `Livello principale`. Mostrare la destinazione reale, ad esempio:
 
 ## Stato Step 6C
 
-- 6C.1 ✅ backend gerarchia contenitori.
-- 6C.2 ✅ UI Telegram contenitori, verificata su S9.
+- 6C.1 ✅ backend gerarchia contenitori — `cc3ba4c`.
+- 6C.2 ✅ UI Telegram contenitori, verificata su S9 — `4c64798`.
 - 6C.3A ✅ navigazione unificata + creazione contestuale oggetti — `413605e`.
-- 6C.3 successivo ⏭️ completare assegnazione/spostamento oggetti tra contenitori.
-- 6C.4 ⏭️ storico contenitori/percorso.
-- 6C.5 ⏭️ verifica finale, docs, PR/CI/merge.
+- 6C.3B ✅ UX gerarchica e posizione completa — `24944ac`.
+- 6C.3C ✅ spostamento oggetti tra contenitori — `658e455`.
+- 6C.4 ✅ storico contenitori/percorso, **69/69 test + runtime S9** — `fd4cbea`.
+- 6C.5 🔧 chiusura documentale e PR/CI/merge.
 
 Nessun reset globale del database e nessuna cancellazione automatica degli oggetti dovuta alla rimozione di un luogo.
 ## Annullamento contestuale (6C.3B)

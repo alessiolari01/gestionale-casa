@@ -1,6 +1,6 @@
 # Contenitori e sotto-posizioni
 
-## Storico dei contenitori — Step 6C.4 (da verificare)
+## Storico dei contenitori — Step 6C.4 (verificato)
 
 Ogni contenitore possiede un'identità in `storico_entita` e gli eventi conservano il percorso gerarchico come snapshot. Sono tracciati creazione, rinomina, descrizione, spostamento ed eliminazione.
 
@@ -56,7 +56,7 @@ Se si elimina una stanza, i contenitori radice vengono promossi alla casa manten
 
 Per le regole comuni vedere `navigazione-luoghi.md`.
 
-Il 6C.3C (`658e455`) ha completato e verificato il movimento degli oggetti tra contenitori. Il 6C.4 integra ora contenitori e percorsi nello storico; dopo la verifica resta il 6C.5 di chiusura/PR.
+Il 6C.3C (`658e455`) ha completato il movimento degli oggetti tra contenitori. Il 6C.4 (`fd4cbea`) ha completato e verificato contenitori e percorsi nello storico con **69/69 test** e runtime S9. Il 6C.5 è solo chiusura documentale/PR.
 
 Nessuna utility persistente di reset/cancellazione globale del database.
 ## Oggetti diretti nel contenitore (6C.3B)

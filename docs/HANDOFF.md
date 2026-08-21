@@ -1,6 +1,24 @@
 # Handoff — Gestionale Casa
 
-## Handoff Step 6C.4 — storico contenitori/percorso
+## Handoff corrente — Step 6C.5 / branch pronto per PR
+
+Branch: `step-6c-test`. Checkpoint funzionale: `fd4cbea`.
+
+Lo **Step 6C è funzionalmente completo e verificato**. Stato da preservare:
+
+- 6C.1 backend contenitori gerarchici — `cc3ba4c`;
+- 6C.2 UI Telegram contenitori — `4c64798`;
+- 6C.3A navigazione unificata — `413605e`;
+- 6C.3B UX/posizione completa — `24944ac`;
+- 6C.3C spostamento oggetti fino ai contenitori — `658e455`;
+- 6C.4 storico container-aware — `fd4cbea`.
+
+Verifica finale 6C.4 su Galaxy S9: **69/69 test**, `cargo check --locked`, Clippy `-D warnings`, `git diff --check`, migration reale e runtime Telegram superati. Il linker dell'S9 può richiedere `CARGO_BUILD_JOBS=1`, `CARGO_INCREMENTAL=0` e `-Wl,--threads=1` per limiti di memoria; non è un errore applicativo.
+
+Il 6C.5 deve restare **docs-only**: nessuna nuova migration, nessun reset del database e nessuna modifica funzionale. Prossima operazione: verifica del diff, commit 6C.5, push, Pull Request, CI verde e merge in `main`; poi riallineare PC e S9 a `main` e aprire lo Step 7A.
+
+
+## Archivio handoff Step 6C.4 — storico contenitori/percorso
 
 Base obbligatoria: branch `step-6c-test`, commit `658e455`, working tree pulito.
 
@@ -18,7 +36,7 @@ Decisioni da preservare:
 - eliminazione stanza/casa non elimina gli oggetti; lo storico conserva i percorsi precedenti;
 - nessuna utility di reset/cancellazione globale DB.
 
-Suite prevista dopo l'applicazione: **69 test**. Il pacchetto non va committato prima di `fmt`, `check`, test low-memory S9, Clippy `-D warnings`, `git diff --check` e prove Telegram dello storico.
+Suite verificata dopo l'applicazione: **69/69 test**; `fmt`, `check`, Clippy `-D warnings`, `git diff --check` e prove Telegram dello storico sono stati completati prima del commit `fd4cbea`.
 
 ## Handoff Step 6C.3C — spostamento completo oggetti ↔ contenitori
 
@@ -237,16 +255,17 @@ Completati e verificati:
 - Step 4 — SQLite operativo, migration automatiche e `/status`;
 - Step 5A — oggetti generici;
 - Step 5B — foto degli oggetti;
-- Step 5C — modifica/eliminazione sicura, mergiato su `main` con CI verde.
+- Step 5C — modifica/eliminazione sicura, mergiato su `main` con CI verde;
+- Step 6A — case, stanze e posizione strutturata;
+- Step 6B — storico globale + individuale, mergiato su `main`;
+- Step 6C — contenitori e sotto-posizioni, implementazione/runtime verificati su `step-6c-test`.
 
 Step corrente:
 
-- **Step 6A — case, stanze e posizione strutturata**, branch `step-6a-test`.
+- **Step 6C.5 — chiusura docs, PR/CI/merge**.
 
 Sequenza successiva approvata:
 
-- Step 6B — storico globale + individuale;
-- Step 6C — contenitori e sotto-posizioni;
 - Step 7A — documenti e garanzie;
 - Step 7B — promemoria e scadenze;
 - Step 7C — tag e ricerca globale;
@@ -369,7 +388,7 @@ Regole operative:
 
 ## 8.3 Requisiti trasversali già approvati
 
-La multi-abitazione non è più una proposta: è lo Step 6A corrente. Le decisioni
+La multi-abitazione non è più una proposta: è stata introdotta nello Step 6A. Le decisioni
 sono:
 
 - più case nello stesso gestionale;
@@ -554,54 +573,31 @@ supportato ufficialmente su Linux e macOS open-source, non su Android. Per
 l'S9 il progetto prevede quindi Tailscale come rete privata + OpenSSH di
 Termux come servizio SSH, non il server Tailscale SSH integrato.
 
-## 13. Step corrente — Step 6A Case e stanze
+## 13. Step corrente — chiusura Step 6C
 
-Base di partenza: commit `main` successivo al merge dello Step 5C. Lo sviluppo
-va eseguito su `step-6a-test` e non mergiato finché non sono verdi test, runtime
-S9 e CI della Pull Request.
+Il branch `step-6c-test` è verificato fino a `fd4cbea`. Il 6C.5 non deve introdurre nuove funzionalità: serve a rendere coerenti documentazione e stato del progetto prima della PR.
 
-File principali coinvolti:
-
-- `migrations/20260815183000_luoghi.sql`;
-- `src/modules/luoghi.rs`;
-- `src/modules/oggetti.rs`;
-- `src/modules/mod.rs`;
-- `src/main.rs`;
-- `docs/moduli/luoghi.md`;
-- documentazione generale e roadmap.
+Prima del merge:
+1. verificare working tree e diff documentale;
+2. eseguire l'ultimo controllo locale concordato;
+3. commit/push del 6C.5;
+4. aprire PR `step-6c-test -> main`;
+5. attendere CI GitHub verde;
+6. mergiare e riallineare PC/S9 a `main`.
 
 Decisioni da preservare:
-
-- `abitazioni` e `stanze` sono entità proprie;
-- `item_luogo` collega `items` alla casa/stanza e rende il modello riusabile;
-- una stanza deve appartenere alla casa indicata anche a livello DB;
-- cancellare una stanza mantiene gli item nella casa senza stanza;
-- cancellare una casa rimuove solo la relazione di luogo, non gli item;
-- il campo storico `oggetti.posizione` resta disponibile come dettaglio libero;
-- nessuna conversione automatica delle vecchie stringhe posizione;
-- dalla scheda oggetto si deve poter assegnare/spostare/rimuovere il luogo;
-- elenco e ricerca devono mostrare e usare casa/stanza;
-- case e stanze richiedono conferma prima della cancellazione;
-- le migration già applicate non vanno modificate.
-
-Test runtime minimi prima della chiusura:
-
-1. due case;
-2. stanze in entrambe;
-3. rinomina casa/stanza;
-4. assegnazione oggetto alla sola casa;
-5. spostamento in stanza e poi in altra casa;
-6. filtro casa/stanza e ricerca per nome luogo;
-7. rimozione luogo;
-8. delete stanza con oggetto: item resta nella casa;
-9. delete casa con oggetto: item resta senza luogo;
-10. persistenza dopo riavvio;
-11. `fmt`, `check`, `test`, Clippy, PR CI verde.
-
+- niente reset/cancellazione globale DB;
+- migration già applicate non vanno riscritte;
+- `item_luogo` resta il collegamento condiviso per la posizione;
+- contenitori annidabili senza cicli;
+- eliminazioni di luoghi/contenitori non cancellano gli oggetti;
+- storico dei percorsi basato su snapshot immutabili;
+- eventi figli collegati tramite `evento_padre_id` per effetti automatici;
+- `🏷️` oggetti e `📦` contenitori restano distinti nella UI.
 
 ### Regola UX tastiere inline (6C.3B)
 
-Prima di chiudere il 6C.3B è stata adottata una convenzione generale per evitare schermate Telegram troppo dense: massimo due pulsanti per riga di norma, azioni affini affiancate, `⚙️ Gestisci` per le operazioni amministrative e `🗑 Elimina` isolato. Casa, stanza, contenitore e oggetto seguono la stessa gerarchia; sugli oggetti lo spostamento resta visibile perché considerato frequente.
+La convenzione generale resta: massimo due pulsanti per riga di norma, azioni affini affiancate, `⚙️ Gestisci` per le operazioni amministrative e `🗑 Elimina` isolato. Casa, stanza, contenitore e oggetto seguono la stessa gerarchia; sugli oggetti lo spostamento resta visibile perché considerato frequente.
 
 ## 14. Regola di chiusura di ogni step
 

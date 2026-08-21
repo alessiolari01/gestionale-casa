@@ -1,6 +1,16 @@
 # Diario di sviluppo
 
-## Step 6C.4 — contenitori nello storico — 2026-08-20 — da verificare
+## Step 6C.5 — chiusura documentale e preparazione PR — 2026-08-22
+
+- checkpoint di partenza: `fd4cbea` (`Step 6C.4: integra contenitori nello storico`);
+- 6C.4 verificato su Galaxy S9 con **69/69 test**, `cargo check --locked`, Clippy `-D warnings`, `git diff --check` e runtime Telegram;
+- migration `20260820230000_storico_contenitori.sql` applicata al database reale dopo backup senza reset o perdita dati;
+- verificati su Telegram: percorsi contenitore prima/dopo, riparentamento nella stessa stanza, eventi padre/figlio del sottoalbero, rinomina senza falso spostamento, contesto contenitore sugli oggetti e filtro per entità contenitore;
+- il 6C.5 aggiorna soltanto documentazione/stato di progetto: **nessuna nuova migration e nessuna modifica applicativa**;
+- stato finale locale: Step 6C funzionalmente completo; resta la chiusura di rilascio tramite PR, CI GitHub verde e merge `step-6c-test -> main`.
+
+
+## Step 6C.4 — contenitori nello storico — 2026-08-20 — verificato
 
 - aggiunta la migration `20260820230000_storico_contenitori.sql`;
 - estesi `storico_eventi` e `storico_cambi_luogo` con identità e percorso snapshot del contenitore;
@@ -14,7 +24,7 @@
 - nessun reset, nessuna cancellazione globale e nessun evento storico inventato per dati già esistenti;
 - aggiunti 7 test: attesi **69 test totali** dopo l'applicazione.
 
-Verifica S9, Clippy e runtime Telegram ancora richiesti prima di dichiarare chiuso il 6C.4.
+Verifica completata sul Galaxy S9: **69/69 test**, Clippy `-D warnings` e runtime Telegram superati; commit `fd4cbea` pushato su `step-6c-test`.
 
 ## Step 6C.3C — spostamento oggetti nei contenitori — 2026-08-20
 
@@ -52,7 +62,7 @@ Verifica S9, Clippy e runtime Telegram ancora richiesti prima di dichiarare chiu
 - Spostamento: destinazioni esplicite (`Sposta in Camera`, `Sposta in Casa principale`) al posto di `Livello principale`.
 - Contratto UI: `Indietro` semantico + accesso diretto al menu principale.
 
-6C.3A non introduce migration e deve essere verificato su S9 prima del commit.
+6C.3A non introduce migration; è stato verificato su S9 e consolidato nel checkpoint `413605e`.
 
 
 ## Step 6B — Storico trasversale globale + individuale — 2026-08-15 → 2026-08-16

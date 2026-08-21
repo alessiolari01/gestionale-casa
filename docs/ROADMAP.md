@@ -1,17 +1,17 @@
 # Roadmap funzionale
 
 
-## Stato Step 6C — checkpoint corrente
+## Stato Step 6C — implementazione completa, rilascio finale
 
 - 6C.1 ✅ backend gerarchia contenitori — `cc3ba4c`.
 - 6C.2 ✅ UI Telegram contenitori, verificata su S9 — `4c64798`.
 - 6C.3A ✅ navigazione unificata + creazione contestuale — `413605e`.
 - 6C.3B ✅ rifiniture UX, posizione completa e infrastruttura — `24944ac`.
 - 6C.3C ✅ spostamento oggetti fino a contenitori/sottocontenitori, **62/62 test + runtime S9** — `658e455`.
-- 6C.4 🔧 storico contenitori e cambi percorso: implementazione predisposta, nuova migration e 7 test aggiunti; verifica S9 ancora necessaria.
-- 6C.5 ⏭️ verifica finale dello Step 6C, documentazione conclusiva, PR/CI/merge.
+- 6C.4 ✅ storico contenitori e cambi percorso, migration reale, **69/69 test + runtime S9** — `fd4cbea`.
+- 6C.5 🔧 chiusura documentale e preparazione PR/CI/merge; nessuna nuova funzionalità.
 
-Principio approvato: navigare per **luogo corrente**, non per silos separati casa/stanza/contenitore. Lo storico deve usare snapshot immutabili dei percorsi, senza inventare cronologia retroattiva.
+Principio consolidato: navigare per **luogo corrente**, non per silos separati casa/stanza/contenitore. Lo storico usa snapshot immutabili dei percorsi e non inventa cronologia retroattiva.
 
 ## Stato aggiornato dopo l'implementazione Step 6B
 
@@ -24,14 +24,14 @@ Principio approvato: navigare per **luogo corrente**, non per silos separati cas
 - Step 5B ✅ Foto degli oggetti
 - Step 5C ✅ Modifica ed eliminazione oggetti
 - Step 6A ✅ Case, stanze e posizione strutturata
-- Step 6B ✅ Implementato e verificato su S9; PR/CI/merge ancora necessari
-- Step 6C ⏭️ Contenitori e sotto-posizioni
+- Step 6B ✅ Storico globale + individuale, mergiato su `main`
+- Step 6C ✅ Implementato e verificato su S9; PR/CI/merge finale in corso
 - Step 7A ⏳ Documenti e garanzie
 - Step 7B ⏳ Promemoria e scadenze
 - Step 7C ⏳ Tag + ricerca globale
 - Step 8 ⏳ Primo nuovo modulo applicativo: Veicoli o Vestiti
 
-Il 6C parte solo dopo l'ingresso del 6B nella baseline ufficiale `main`.
+Il 6C è stato sviluppato dopo l'ingresso del 6B nella baseline ufficiale `main`.
 
 ---
 
@@ -46,7 +46,9 @@ persona o a un'altra AI.
 - Step 5B — Foto oggetti: **chiuso e verificato**.
 - Step 5C — Modifica/eliminazione oggetti: **chiuso e verificato**, mergiato su
   `main` con CI verde.
-- Step 6A — Case, stanze e posizione strutturata: **step corrente in sviluppo**.
+- Step 6A — Case, stanze e posizione strutturata: **chiuso e verificato**.
+- Step 6B — Storico globale + individuale: **chiuso e mergiato su `main`**.
+- Step 6C — Contenitori e sotto-posizioni: **implementazione/runtime verificati; rilascio finale in corso**.
 
 ## Sequenza approvata
 
@@ -111,7 +113,7 @@ rimane coerente quando verrà introdotto lo storico.
 
 ### Step 6C — Contenitori e sotto-posizioni
 
-Estensione futura della posizione fisica:
+Implementato come estensione gerarchica della posizione fisica:
 
 ```text
 Casa principale
@@ -121,8 +123,11 @@ Casa principale
 → Chiave dinamometrica
 ```
 
-Lo Step 6A non forza già questa gerarchia. Nel 6C si valuterà se usare un terzo
-livello dedicato oppure una struttura gerarchica generica sotto la stanza.
+La soluzione consolidata usa `contenitori` con `contenitore_padre_id` ricorsivo,
+sempre associato alla casa e opzionalmente alla stanza. `item_luogo.contenitore_id`
+collega l'item al nodo più specifico. Il percorso operativo è derivato dalle
+relazioni; lo storico ne conserva uno snapshot immutabile. Spostamenti ed
+eliminazioni mantengono gli oggetti e registrano gli effetti sul sottoalbero.
 
 ### Step 7A — Documenti e garanzie
 
