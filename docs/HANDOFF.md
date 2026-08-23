@@ -1,32 +1,44 @@
 # Handoff — Gestionale Casa
 
-## Handoff corrente — Step 7.1 / fondazioni condivise
+## Handoff corrente — Step 7.1 / spazi operativi
 
-Baseline `main`: `219caba` (merge dello Step 6C). Checkpoint Step 7.0 sul branch: `135dd33`.
+Baseline `main`: `219caba` (merge dello Step 6C).
 
 Branch di sviluppo: `step-7-alimentazione`, tracciato su
-`origin/step-7-alimentazione`. Il 7.0 documentale è già stato pushato come
-`135dd33`.
+`origin/step-7-alimentazione`.
 
-Il checkpoint docs-only 7.0 è chiuso. Il lavoro corrente è il primo checkpoint
-tecnico della macro-fase 7.1 e introduce migration, identità Telegram→utente
-interno, spazio bootstrap e audit autore. Non esporre ancora creazione/cambio
-spazio finché tutte le query Step 6 non sono space-aware.
+Checkpoint già verificati sul branch:
+
+- `135dd33` — Step 7.0 documentale;
+- `a650bc8` — prime fondazioni 7.1, identità Telegram, spazio bootstrap e audit autore.
+
+Il blocco corrente completa la parte operativa degli spazi:
+
+- migration `20260823174500_spazi_operativi.sql`;
+- unicità case/tag per spazio;
+- `/spazi`, creazione, cambio e rinomina spazio;
+- spazio personale automatico per i nuovi utenti successivi al bootstrap;
+- isolamento di oggetti, luoghi, contenitori, foto e storico;
+- blocco delle scritture per il ruolo `lettura`;
+- invalidazione delle sessioni temporanee al cambio spazio;
+- fallback automatico se viene rimossa la membership dello spazio attivo;
+- risoluzione Telegram fail-closed: lo spazio attivo deve essere ancora una membership valida;
+- test cross-space per letture e mutazioni dirette tramite ID su oggetti, contenitori e foto.
 
 Il vecchio `gestionale_step7_prototipo_bundle` è superato e non va usato.
 
-Documenti da leggere prima di implementare 7.1:
+Prima del commit questo blocco deve passare sull'S9:
 
-1. `docs/step7/README.md`;
-2. `docs/step7/decisioni-architetturali.md`;
-3. `docs/step7/modello-condivisione.md`;
-4. `docs/step7/storico-e-audit.md`;
-5. `docs/step7/database-e-migrazioni.md`;
-6. `docs/moduli/alimentazione/README.md`.
+1. `cargo fmt --all -- --check`;
+2. `cargo check --locked`;
+3. test low-memory;
+4. Clippy `-D warnings`;
+5. migration sul DB di sviluppo con backup;
+6. test Telegram su almeno due spazi;
+7. `PRAGMA integrity_check` e `PRAGMA foreign_key_check`.
 
-Il pacchetto 7.1 corrente va prima applicato e verificato localmente. Solo dopo
-`fmt`, `check`, test, Clippy, migration su copia DB e runtime Telegram si potrà
-creare un commit intermedio della macro-fase 7.1.
+Inviti, gestione completa dei membri e uscita/eliminazione degli spazi restano
+nel seguito della macro-fase 7.1. Non aggiungere un reset globale del database.
 
 ## Archivio handoff Step 6C.4 — storico contenitori/percorso
 
@@ -580,7 +592,9 @@ Obiettivi del checkpoint tecnico 7.1 corrente:
 4. attribuire i nuovi eventi storici ad autore/origine/spazio;
 5. distinguere gli eventi automatici tramite `evento_padre_id` + flag `automatico`;
 6. esporre `/profilo` come controllo visibile di identità/spazio/ruolo;
-7. mantenere la UI multi-spazio disabilitata finché il CRUD non è completamente space-aware.
+7. rendere lo spazio attivo il confine effettivo delle query;
+8. esporre `/spazi` solo insieme all'isolamento operativo;
+9. mantenere inviti/gestione membri completi nel seguito della 7.1.
 
 Decisioni da preservare:
 

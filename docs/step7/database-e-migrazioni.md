@@ -2,7 +2,10 @@
 
 ## Stato
 
-**IN SVILUPPO.** Il checkpoint 7.0 è stato chiuso con `135dd33`; il primo pacchetto tecnico 7.1 introduce la migration `20260823153000_fondazioni_condivise.sql`.
+**IN SVILUPPO.** Il checkpoint `a650bc8` ha verificato la migration
+`20260823153000_fondazioni_condivise.sql`; il blocco corrente aggiunge
+`20260823174500_spazi_operativi.sql` per attivare isolamento e unicità per
+spazio.
 
 Base tecnica del pacchetto: `135dd33`.
 
@@ -102,7 +105,11 @@ Introduce:
 
 `items`, `abitazioni`, `tag`, `storico_entita` e `storico_eventi` ricevono `spazio_id INTEGER NOT NULL DEFAULT 1`. Con `ALTER TABLE`, SQLite non permette in modo portabile di aggiungere nello stesso passaggio una colonna `REFERENCES NOT NULL` con default non nullo. Fino al futuro rebuild space-aware, l'esistenza dello spazio viene quindi protetta da trigger.
 
-I vincoli `UNIQUE` globali legacy di `abitazioni.nome` e `tag.nome` non vengono ricostruiti in questa prima migration. Non viene ancora esposta la creazione di spazi multipli in UI, quindi il limite non è visibile all'utente. La loro conversione a unicità per-spazio avverrà insieme allo scoping completo delle query, evitando un rebuild anticipato di tabelle già referenziate da luoghi/contenitori/storico.
+La prima migration lascia temporaneamente i vincoli `UNIQUE` globali legacy.
+La migration `20260823174500_spazi_operativi.sql` ricostruisce `abitazioni` e
+`tag` mantenendo gli ID e sostituisce tali vincoli con
+`UNIQUE(spazio_id, nome)`. I trigger cross-space di `item_luogo` e `item_tag`
+vengono ricreati nello stesso passaggio.
 
 ### Bootstrap runtime
 
@@ -110,7 +117,43 @@ La migration non inventa utenti o Telegram ID. Alla prima interazione di una cha
 
 Durante lo sviluppo:
 
-- primo account → `proprietario`;
-- account autorizzati successivi → `amministratore`.
+- primo account → `proprietario` dello spazio bootstrap `#1`;
+- account autorizzati successivi senza membership → nuovo spazio personale di cui diventano `proprietario`.
 
-Questa è una regola di bootstrap transitoria, non il flusso definitivo di invito famiglia.
+La condivisione fra utenti avverrà tramite membership/inviti espliciti, non inserendo automaticamente nuovi account nello spazio bootstrap.
+
+
+## Migration `20260823174500_spazi_operativi.sql`
+
+**Stato: IMPLEMENTATO, da verificare sull'S9 prima del commit.**
+
+La migration:
+
+- non crea né sposta dati fra spazi;
+- mantiene i dati legacy nello spazio `#1`;
+- ricostruisce `abitazioni` e `tag` preservando gli ID;
+- rende i nomi unici nel singolo spazio;
+- mantiene i vincoli che impediscono collegamenti item↔casa/tag cross-space;
+- mantiene le foreign key attive durante il rebuild e ne rinvia il controllo al commit SQLx;
+- mantiene coerente `preferenze_utente.spazio_attivo_id` quando viene rimossa una membership attiva;
+- impedisce di aggirare tale coerenza modificando direttamente gli ID della chiave di `membri_spazio`.
+
+Con SQLx `0.8.6` le migration SQLite vengono sempre eseguite dentro una
+transazione del driver: in questa versione il flag `-- no-transaction` non è
+ancora supportato dal backend SQLite. La migration resta quindi pienamente
+transazionale e mantiene `foreign_keys` attivo. Per eliminare i vecchi vincoli
+`UNIQUE(nome)` senza disabilitare le FK, salva temporaneamente e ricostruisce
+anche le tabelle figlie di `abitazioni` e `tag`, reinserendo le righe con gli
+stessi ID. `PRAGMA defer_foreign_keys = ON` rinvia la verifica dei vincoli al
+commit della transazione SQLx.
+
+Verifiche obbligatorie:
+
+- migrazione da database Step 7.1 esistente;
+- migrazione da database vuoto attraverso tutta la catena;
+- `integrity_check = ok`;
+- `foreign_key_check` vuoto;
+- stessa casa/tag consentiti in spazi diversi e rifiutati nello stesso spazio;
+- trigger cross-space ancora operativi;
+- rimozione membership attiva → fallback a un altro spazio disponibile;
+- rimozione ultima membership → preferenza attiva rimossa e ricreabile dal bootstrap identità.

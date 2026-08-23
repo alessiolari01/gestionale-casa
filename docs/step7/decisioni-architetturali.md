@@ -203,3 +203,36 @@ ultime decisioni e non rappresenta la specifica corrente.
 Lo schema utenti/spazi può essere introdotto prima della UI multi-spazio, ma il bot non deve permettere di creare o cambiare spazio finché tutte le query CRUD dei moduli Step 6 non filtrano esplicitamente lo spazio attivo.
 
 Durante questa transizione lo spazio `#1` è il contesto di compatibilità e i default DB mantengono il comportamento precedente. È preferibile una fase single-space chiaramente documentata a una UI multiutente che possa mostrare o modificare dati dello spazio sbagliato.
+
+
+## D24 — Lo spazio attivo è un confine di sicurezza applicativo
+
+Quando la UI multi-spazio viene attivata, ogni lettura e scrittura dei moduli
+già operativi deve essere filtrata usando lo `spazio_id` dell'attore corrente.
+Un callback o comando contenente l'ID di un'entità di un altro spazio deve
+comportarsi come se quell'entità non esistesse.
+
+Il cambio spazio cancella le sessioni temporanee, così una bozza non può
+attraversare accidentalmente il confine fra spazi.
+
+## D25 — I nuovi utenti non entrano automaticamente nel bootstrap
+
+Lo spazio `#1` rimane la casa dei dati legacy e viene assegnato al primo utente.
+Un nuovo account Telegram che non possiede ancora membership riceve invece uno
+spazio personale proprio. La condivisione con altri spazi dovrà avvenire tramite
+invito esplicito, non per effetto collaterale del bootstrap.
+
+## D26 — Membership e spazio attivo devono restare atomicamente coerenti
+
+`preferenze_utente.spazio_attivo_id` non è sufficiente da sola per autorizzare
+un contesto: lo spazio attivo deve essere anche una membership corrente
+dell'utente. La rimozione della membership attiva produce un fallback
+deterministico verso un altro spazio disponibile; se non restano membership,
+la preferenza viene eliminata e il bootstrap identità la ricrea al successivo
+accesso.
+
+La risoluzione Telegram verifica nuovamente la membership prima di costruire
+l'`AuditActor`, così eventuali database legacy o stati incoerenti non possono
+produrre accessi in lettura a uno spazio dal quale l'utente è già stato rimosso.
+In produzione le operazioni space-aware richiedono inoltre un contesto
+`AuditActor` installato: non esiste fallback silenzioso verso lo spazio `#1`.

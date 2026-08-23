@@ -1,5 +1,33 @@
 # Diario di sviluppo
 
+## Step 7.1 — spazi operativi e isolamento reale — 2026-08-23
+
+### Implementazione
+
+- nuova migration `20260823174500_spazi_operativi.sql`;
+- migration resa compatibile con SQLx 0.8.6/SQLite senza transazioni annidate e senza disabilitare le foreign key;
+- `abitazioni.nome` e `tag.nome` diventano unici per `spazio_id`, non globalmente;
+- `/spazi`, `/spazio_nuovo <nome>` e `/spazio_rinomina <nome>`;
+- cambio spazio tramite pulsanti inline;
+- nuovi utenti successivi al bootstrap ricevono uno spazio personale proprio;
+- oggetti, luoghi, contenitori, foto e storico filtrano lo spazio attivo;
+- i flussi temporanei vengono cancellati al cambio spazio;
+- scritture principali protette dai ruoli (`lettura` non può modificare);
+- `/status` espone `Isolamento multi-spazio`;
+- test aggiunti per oggetti, case, contenitori, foto e storico cross-space, incluse mutazioni dirette per ID;
+- test CRUD reale del ruolo `lettura`;
+- la rimozione della membership attiva riallinea automaticamente `preferenze_utente`;
+- la risoluzione Telegram ricontrolla sempre che lo spazio attivo sia ancora una membership valida;
+- in produzione un accesso space-aware senza `AuditActor` fallisce invece di ricadere silenziosamente nello spazio `#1`.
+
+### Sicurezza e compatibilità
+
+- i dati preesistenti restano nello spazio bootstrap `#1`;
+- nessun dato viene copiato o spostato automaticamente fra spazi;
+- conoscere un ID di un altro spazio non deve renderlo accessibile;
+- inviti e gestione completa dei membri restano nel seguito della 7.1;
+- nessuna funzione di reset globale viene aggiunta.
+
 ## Step 7.1 — fondazioni condivise, primo checkpoint tecnico — 2026-08-23
 
 ### Stato precedente

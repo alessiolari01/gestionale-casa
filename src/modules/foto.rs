@@ -417,17 +417,26 @@ async fn send_photos(
 }
 
 async fn object_name(pool: &SqlitePool, item_id: i64) -> Result<Option<String>, sqlx::Error> {
-    sqlx::query_scalar("SELECT nome FROM items WHERE id = ? AND tipo = 'oggetto'")
-        .bind(item_id)
-        .fetch_optional(pool)
-        .await
+    sqlx::query_scalar(
+        "SELECT nome FROM items \
+         WHERE id = ? AND tipo = 'oggetto' AND spazio_id = ?",
+    )
+    .bind(item_id)
+    .bind(crate::identity::current_space_id())
+    .fetch_optional(pool)
+    .await
 }
 
 async fn count_photos(pool: &SqlitePool, item_id: i64) -> Result<i64, sqlx::Error> {
-    sqlx::query_scalar("SELECT COUNT(*) FROM foto WHERE item_id = ?")
-        .bind(item_id)
-        .fetch_one(pool)
-        .await
+    sqlx::query_scalar(
+        "SELECT COUNT(*) \
+         FROM foto f JOIN items i ON i.id = f.item_id \
+         WHERE f.item_id = ? AND i.tipo = 'oggetto' AND i.spazio_id = ?",
+    )
+    .bind(item_id)
+    .bind(crate::identity::current_space_id())
+    .fetch_one(pool)
+    .await
 }
 
 async fn register_photo(
@@ -436,23 +445,33 @@ async fn register_photo(
     path: &str,
     description: Option<&str>,
 ) -> Result<&'static str, sqlx::Error> {
+    crate::identity::ensure_can_write_sqlx(pool).await?;
     let mut tx = pool.begin().await?;
 
-    let existing: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM foto WHERE item_id = ?")
-        .bind(item_id)
-        .fetch_one(&mut *tx)
-        .await?;
+    let space_id = crate::identity::current_space_id();
+    let existing: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) \
+         FROM foto f JOIN items i ON i.id = f.item_id \
+         WHERE f.item_id = ? AND i.tipo = 'oggetto' AND i.spazio_id = ?",
+    )
+    .bind(item_id)
+    .bind(space_id)
+    .fetch_one(&mut *tx)
+    .await?;
     let role = if existing == 0 {
         "principale"
     } else {
         "galleria"
     };
 
-    let object_name: String =
-        sqlx::query_scalar("SELECT nome FROM items WHERE id = ? AND tipo = 'oggetto'")
-            .bind(item_id)
-            .fetch_one(&mut *tx)
-            .await?;
+    let object_name: String = sqlx::query_scalar(
+        "SELECT nome FROM items \
+         WHERE id = ? AND tipo = 'oggetto' AND spazio_id = ?",
+    )
+    .bind(item_id)
+    .bind(space_id)
+    .fetch_one(&mut *tx)
+    .await?;
     let storico_id =
         crate::modules::storico::ensure_entity(&mut tx, "oggetto", item_id, &object_name).await?;
 
@@ -524,11 +543,13 @@ async fn register_photo(
 
 async fn list_photos(pool: &SqlitePool, item_id: i64) -> Result<Vec<PhotoRecord>, sqlx::Error> {
     sqlx::query_as::<_, PhotoRecord>(
-        "SELECT id, percorso_file, ruolo, descrizione \
-         FROM foto WHERE item_id = ? \
-         ORDER BY CASE WHEN ruolo = 'principale' THEN 0 ELSE 1 END, id",
+        "SELECT f.id, f.percorso_file, f.ruolo, f.descrizione \
+         FROM foto f JOIN items i ON i.id = f.item_id \
+         WHERE f.item_id = ? AND i.tipo = 'oggetto' AND i.spazio_id = ? \
+         ORDER BY CASE WHEN f.ruolo = 'principale' THEN 0 ELSE 1 END, f.id",
     )
     .bind(item_id)
+    .bind(crate::identity::current_space_id())
     .fetch_all(pool)
     .await
 }
@@ -684,7 +705,7 @@ mod tests {
             .await
             .expect("oggetto");
 
-        let home = sqlx::query("INSERT INTO abitazioni (nome) VALUES ('Casa foto')")
+        let home = sqlx::query("INSERT INTO abitazioni (nome, spazio_id) VALUES ('Casa foto', 1)")
             .execute(&pool)
             .await
             .expect("casa");
@@ -742,5 +763,72 @@ mod tests {
                 Some("Archivio foto".to_string())
             )
         );
+    }
+    #[tokio::test]
+    async fn foto_non_sono_leggibili_ne_aggiungibili_cross_space_per_id() {
+        let pool = test_pool().await;
+        let space_two =
+            sqlx::query("INSERT INTO spazi (nome, tipo) VALUES ('Spazio due', 'personale')")
+                .execute(&pool)
+                .await
+                .expect("spazio due")
+                .last_insert_rowid();
+
+        let item_two = sqlx::query(
+            "INSERT INTO items (tipo, nome, spazio_id) VALUES ('oggetto', 'Oggetto due', ?)",
+        )
+        .bind(space_two)
+        .execute(&pool)
+        .await
+        .expect("item spazio due")
+        .last_insert_rowid();
+        sqlx::query("INSERT INTO oggetti (item_id) VALUES (?)")
+            .bind(item_two)
+            .execute(&pool)
+            .await
+            .expect("oggetto spazio due");
+
+        let actor_two = crate::identity::AuditActor {
+            utente_id: None,
+            nome_snapshot: "Sistema test".to_string(),
+            spazio_id: space_two,
+            spazio_nome_snapshot: "Spazio due".to_string(),
+            origine: "sistema",
+            telegram_user_id: None,
+            telegram_username: None,
+        };
+        crate::identity::with_actor(actor_two.clone(), async {
+            register_photo(&pool, item_two, "data/media/spazio_due.jpg", None)
+                .await
+                .expect("foto spazio due");
+        })
+        .await;
+
+        crate::identity::with_actor(crate::identity::AuditActor::system(), async {
+            assert!(object_name(&pool, item_two)
+                .await
+                .expect("nome cross-space")
+                .is_none());
+            assert_eq!(count_photos(&pool, item_two).await.expect("conteggio"), 0);
+            assert!(list_photos(&pool, item_two)
+                .await
+                .expect("galleria cross-space")
+                .is_empty());
+            assert!(
+                register_photo(&pool, item_two, "data/media/intrusa.jpg", None)
+                    .await
+                    .is_err()
+            );
+        })
+        .await;
+
+        crate::identity::with_actor(actor_two, async {
+            let photos = list_photos(&pool, item_two)
+                .await
+                .expect("galleria propria");
+            assert_eq!(photos.len(), 1);
+            assert_eq!(photos[0].percorso_file, "data/media/spazio_due.jpg");
+        })
+        .await;
     }
 }

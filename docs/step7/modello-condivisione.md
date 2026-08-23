@@ -1,6 +1,8 @@
 # Modello di condivisione
 
-**Stato: PREVISTO — da implementare nel 7.1.**
+**Stato: IN SVILUPPO.** Utenti, membership, spazio attivo e isolamento dei
+moduli Step 6 sono implementati nel blocco corrente; inviti/gestione membri e
+condivisione/copia completa restano da implementare.
 
 ## 1. Entità principali
 
@@ -24,6 +26,20 @@ Esempi:
 - spazio personale;
 - famiglia;
 - casa condivisa.
+
+
+## 1.1 Spazio attivo operativo
+
+Ogni utente ha una preferenza `spazio_attivo_id`. I moduli operativi usano
+quello spazio come confine di lettura/scrittura.
+
+Regole:
+
+- un ID di un altro spazio non concede accesso;
+- cambiare spazio invalida le sessioni temporanee;
+- case e tag possono riusare lo stesso nome in spazi differenti;
+- un ruolo `lettura` non può eseguire le scritture principali;
+- la creazione di uno spazio non trasferisce dati dallo spazio precedente.
 
 ### Membro dello spazio
 

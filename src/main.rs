@@ -42,6 +42,7 @@ async fn main() -> anyhow::Result<()> {
         applied_migrations = database_status.applied_migrations,
         schema_core = database_status.schema_core_present,
         shared_foundations = database_status.shared_foundations_present,
+        operational_spaces = database_status.operational_spaces_present,
         "Database SQLite pronto"
     );
 
@@ -257,6 +258,74 @@ async fn handle_authorized_message(
             photo_sessions.clear_chat(chat_id);
             send_profile(&bot, msg.chat.id, &pool, &actor).await?;
         }
+        Some("/spazi") => {
+            sessions.clear_chat(chat_id);
+            location_sessions.clear_chat(chat_id);
+            container_sessions.clear_chat(chat_id);
+            photo_sessions.clear_chat(chat_id);
+            send_spaces(&bot, msg.chat.id, &pool, &actor).await?;
+        }
+        Some("/spazio_nuovo") => {
+            sessions.clear_chat(chat_id);
+            location_sessions.clear_chat(chat_id);
+            container_sessions.clear_chat(chat_id);
+            photo_sessions.clear_chat(chat_id);
+            let name = command_args(text);
+            if name.is_empty() {
+                bot.send_message(
+                    msg.chat.id,
+                    "Uso: /spazio_nuovo <nome>\nEsempio: /spazio_nuovo Famiglia",
+                )
+                .reply_markup(profile_keyboard())
+                .await?;
+            } else {
+                match identity::create_space(&pool, &actor, name, "condiviso").await {
+                    Ok(space) => {
+                        bot.send_message(
+                            msg.chat.id,
+                            format!(
+                                "✅ Spazio creato e attivato: {}\n\nDa questo momento le sezioni del gestionale usano questo spazio.",
+                                space.nome
+                            ),
+                        )
+                        .reply_markup(profile_keyboard())
+                        .await?;
+                    }
+                    Err(error) => {
+                        tracing::warn!(?error, "Creazione spazio non riuscita");
+                        bot.send_message(msg.chat.id, format!("⚠️ {error}"))
+                            .reply_markup(profile_keyboard())
+                            .await?;
+                    }
+                }
+            }
+        }
+        Some("/spazio_rinomina") => {
+            sessions.clear_chat(chat_id);
+            location_sessions.clear_chat(chat_id);
+            container_sessions.clear_chat(chat_id);
+            photo_sessions.clear_chat(chat_id);
+            let name = command_args(text);
+            if name.is_empty() {
+                bot.send_message(msg.chat.id, "Uso: /spazio_rinomina <nuovo nome>")
+                    .reply_markup(profile_keyboard())
+                    .await?;
+            } else {
+                match identity::rename_active_space(&pool, &actor, name).await {
+                    Ok(name) => {
+                        bot.send_message(msg.chat.id, format!("✅ Spazio rinominato: {name}"))
+                            .reply_markup(profile_keyboard())
+                            .await?;
+                    }
+                    Err(error) => {
+                        tracing::warn!(?error, "Rinomina spazio non riuscita");
+                        bot.send_message(msg.chat.id, format!("⚠️ {error}"))
+                            .reply_markup(profile_keyboard())
+                            .await?;
+                    }
+                }
+            }
+        }
         Some("/status") => {
             send_status(&bot, msg.chat.id, &pool).await?;
         }
@@ -374,6 +443,47 @@ async fn handle_authorized_callback(
         "identity:profile" => {
             send_profile(&bot, chat_id, &pool, &actor).await?;
         }
+        "identity:spaces" => {
+            sessions.clear_chat(chat_id.0);
+            location_sessions.clear_chat(chat_id.0);
+            container_sessions.clear_chat(chat_id.0);
+            photo_sessions.clear_chat(chat_id.0);
+            send_spaces(&bot, chat_id, &pool, &actor).await?;
+        }
+        _ if data.starts_with("identity:space:") => {
+            sessions.clear_chat(chat_id.0);
+            location_sessions.clear_chat(chat_id.0);
+            container_sessions.clear_chat(chat_id.0);
+            photo_sessions.clear_chat(chat_id.0);
+            let target = data
+                .strip_prefix("identity:space:")
+                .and_then(|value| value.parse::<i64>().ok());
+            match target {
+                Some(space_id) => {
+                    match identity::switch_active_space(&pool, &actor, space_id).await {
+                        Ok(space) => {
+                            bot.send_message(chat_id, format!("✅ Spazio attivo: {}", space.nome))
+                                .reply_markup(profile_keyboard())
+                                .await?;
+                        }
+                        Err(error) => {
+                            tracing::warn!(?error, space_id, "Cambio spazio non riuscito");
+                            bot.send_message(
+                                chat_id,
+                                "⚠️ Spazio non disponibile per questo account.",
+                            )
+                            .reply_markup(profile_keyboard())
+                            .await?;
+                        }
+                    }
+                }
+                None => {
+                    bot.send_message(chat_id, "Pulsante spazio non valido.")
+                        .reply_markup(profile_keyboard())
+                        .await?;
+                }
+            }
+        }
         "system:status" => {
             send_status(&bot, chat_id, &pool).await?;
         }
@@ -441,7 +551,7 @@ async fn handle_authorized_callback(
 async fn send_online_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
-        "🟢 Gestionale Casa è online.\n\n🏠 Menu principale\nScegli una sezione.\n\nComandi rapidi: /oggetti · /luoghi · /struttura · /contenitori · /storico · /profilo · /status · /ping",
+        "🟢 Gestionale Casa è online.\n\n🏠 Menu principale\nScegli una sezione.\n\nComandi rapidi: /oggetti · /luoghi · /struttura · /contenitori · /storico · /profilo · /spazi · /status · /ping",
     )
     .reply_markup(modules::oggetti::main_menu_keyboard())
     .await?;
@@ -451,7 +561,7 @@ async fn send_online_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
 async fn send_main_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
-        "🏠 Gestionale Casa\n\nScegli una sezione. I moduli non ancora disponibili sono indicati come prossimamente.\n\nComandi rapidi: /oggetti · /luoghi · /struttura · /contenitori · /storico · /profilo · /status · /ping",
+        "🏠 Gestionale Casa\n\nScegli una sezione. I moduli non ancora disponibili sono indicati come prossimamente.\n\nComandi rapidi: /oggetti · /luoghi · /struttura · /contenitori · /storico · /profilo · /spazi · /status · /ping",
     )
     .reply_markup(modules::oggetti::main_menu_keyboard())
     .await?;
@@ -467,13 +577,65 @@ async fn send_profile(
     match identity::profile_summary(pool, actor).await {
         Ok(summary) => {
             bot.send_message(chat_id, summary)
-                .reply_markup(status_keyboard())
+                .reply_markup(profile_keyboard())
                 .await?;
         }
         Err(error) => {
             tracing::error!(?error, "Errore lettura profilo Step 7");
             bot.send_message(chat_id, "⚠️ Non riesco a leggere il profilo corrente.")
-                .reply_markup(status_keyboard())
+                .reply_markup(profile_keyboard())
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+async fn send_spaces(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    actor: &identity::AuditActor,
+) -> ResponseResult<()> {
+    let Some(user_id) = actor.utente_id else {
+        bot.send_message(
+            chat_id,
+            "⚠️ Spazi non disponibili per un attore di sistema.",
+        )
+        .reply_markup(profile_keyboard())
+        .await?;
+        return Ok(());
+    };
+
+    match identity::list_user_spaces(pool, user_id).await {
+        Ok(spaces) => {
+            let summary = identity::spaces_summary(pool, actor)
+                .await
+                .unwrap_or_else(|_| "👥 Spazi".to_string());
+            let mut rows = Vec::new();
+            for space in spaces {
+                let marker = if space.attivo != 0 { "✅" } else { "○" };
+                rows.push(vec![InlineKeyboardButton::callback(
+                    format!("{marker} {}", space.nome),
+                    format!("identity:space:{}", space.id),
+                )]);
+            }
+            rows.push(vec![InlineKeyboardButton::callback(
+                "👤 Profilo".to_string(),
+                "identity:profile".to_string(),
+            )]);
+            rows.push(vec![InlineKeyboardButton::callback(
+                "🏠 Menu principale".to_string(),
+                "menu:main".to_string(),
+            )]);
+
+            bot.send_message(chat_id, summary)
+                .reply_markup(InlineKeyboardMarkup::new(rows))
+                .await?;
+        }
+        Err(error) => {
+            tracing::error!(?error, "Errore lettura spazi");
+            bot.send_message(chat_id, "⚠️ Non riesco a leggere gli spazi disponibili.")
+                .reply_markup(profile_keyboard())
                 .await?;
         }
     }
@@ -498,6 +660,11 @@ async fn send_status(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> ResponseR
             } else {
                 "❌"
             };
+            let operational = if status.operational_spaces_present {
+                "✅"
+            } else {
+                "❌"
+            };
             let message = format!(
                 "🏠 Gestionale Casa\n\n\
                  Bot Telegram: ✅\n\
@@ -505,7 +672,8 @@ async fn send_status(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> ResponseR
                  Foreign key: {fk}\n\
                  Migrazioni applicate: {}\n\
                  Schema core: {schema}\n\
-                 Fondazioni condivise Step 7: {shared}",
+                 Fondazioni condivise Step 7: {shared}\n\
+                 Isolamento multi-spazio: {operational}",
                 status.applied_migrations
             );
             bot.send_message(chat_id, message)
@@ -525,11 +693,29 @@ async fn send_status(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> ResponseR
     Ok(())
 }
 
+fn profile_keyboard() -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![
+        vec![InlineKeyboardButton::callback(
+            "👥 Spazi".to_string(),
+            "identity:spaces".to_string(),
+        )],
+        vec![InlineKeyboardButton::callback(
+            "🏠 Menu principale".to_string(),
+            "menu:main".to_string(),
+        )],
+    ])
+}
+
 fn status_keyboard() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
         "🏠 Menu principale".to_string(),
         "menu:main".to_string(),
     )]])
+}
+
+fn command_args(text: &str) -> &str {
+    text.split_once(char::is_whitespace)
+        .map_or("", |(_, args)| args.trim())
 }
 
 fn first_command(text: &str) -> Option<&str> {

@@ -29,7 +29,11 @@ Checkpoint documentale chiuso con `135dd33`, senza migration/codice funzionale.
 
 **Stato: IN SVILUPPO.**
 
-Prima implementazione tecnica già predisposta: migration fondazioni condivise, identità Telegram→utente interno, spazio bootstrap, `/profilo` e audit con autore/origine. Restano scoping completo delle query, permessi operativi, condivisione/copia e reminder trasversali.
+Il checkpoint `a650bc8` ha verificato fondazioni, identità Telegram→utente,
+spazio bootstrap, `/profilo` e audit autore. Il blocco corrente abilita lo
+spazio attivo come confine operativo, rimuove l'unicità globale legacy di
+case/tag e rende space-aware i moduli Step 6. Restano inviti/gestione membri,
+condivisione/copia e reminder trasversali prima di chiudere la macro-fase.
 
 - utenti interni;
 - account Telegram;

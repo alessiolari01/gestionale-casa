@@ -12,7 +12,8 @@ use anyhow::{bail, Context, Result};
 use sqlx::{SqlitePool, Transaction};
 use teloxide::types::User;
 
-const LEGACY_SPACE_ID: i64 = 1;
+pub(crate) const LEGACY_SPACE_ID: i64 = 1;
+#[cfg(test)]
 const LEGACY_SPACE_NAME: &str = "Spazio principale";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,6 +28,7 @@ pub(crate) struct AuditActor {
 }
 
 impl AuditActor {
+    #[cfg(test)]
     pub(crate) fn system() -> Self {
         Self {
             utente_id: None,
@@ -52,17 +54,33 @@ where
 }
 
 pub(crate) fn current_actor() -> AuditActor {
-    CURRENT_ACTOR
-        .try_with(Clone::clone)
-        .unwrap_or_else(|_| AuditActor::system())
+    match CURRENT_ACTOR.try_with(Clone::clone) {
+        Ok(actor) => actor,
+        Err(_) => missing_actor_context(),
+    }
+}
+
+#[cfg(test)]
+fn missing_actor_context() -> AuditActor {
+    // I test legacy dei moduli Step 6 eseguono molte primitive direttamente.
+    // In test manteniamo quindi il contesto bootstrap esplicito di compatibilita'.
+    AuditActor::system()
+}
+
+#[cfg(not(test))]
+fn missing_actor_context() -> AuditActor {
+    // In produzione un'operazione space-aware senza contesto attore e' un errore
+    // di programmazione: fallire e' piu' sicuro che ricadere silenziosamente
+    // nello spazio bootstrap #1 e rischiare una lettura/scrittura cross-space.
+    panic!("contesto attore mancante per operazione space-aware")
 }
 
 /// Risolve o crea l'utente interno collegato a un account Telegram.
 ///
-/// Durante la fase di compatibilità 7.1 ogni account Telegram autorizzato
-/// viene aggiunto allo spazio bootstrap #1. Il primo diventa proprietario; i
-/// successivi amministratori. Il flusso operativo di creazione/switch/invito
-/// degli spazi verrà esposto solo quando le query CRUD saranno space-aware.
+/// Il primo account Telegram autorizzato prende in carico lo spazio bootstrap
+/// che contiene i dati pre-Step 7. I nuovi account successivi ricevono invece
+/// uno spazio personale indipendente; eventuali spazi condivisi vengono poi
+/// gestiti esplicitamente tramite membership.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct TelegramIdentityInput {
     telegram_user_id: i64,
@@ -176,11 +194,13 @@ async fn resolve_telegram_profile(
         user_id
     };
 
-    ensure_legacy_membership(&mut tx, user_id).await?;
+    ensure_initial_space(&mut tx, user_id, display_name).await?;
 
     let (space_id, space_name): (i64, String) = sqlx::query_as(
         "SELECT s.id, s.nome \
          FROM preferenze_utente p \
+         JOIN membri_spazio ms \
+           ON ms.utente_id = p.utente_id AND ms.spazio_id = p.spazio_attivo_id \
          JOIN spazi s ON s.id = p.spazio_attivo_id \
          WHERE p.utente_id = ?",
     )
@@ -204,61 +224,363 @@ async fn resolve_telegram_profile(
     })
 }
 
-async fn ensure_legacy_membership(
+async fn ensure_initial_space(
     tx: &mut Transaction<'_, sqlx::Sqlite>,
     user_id: i64,
+    display_name: &str,
 ) -> Result<()> {
-    let membership_exists: i64 = sqlx::query_scalar(
-        "SELECT EXISTS(\
-            SELECT 1 FROM membri_spazio WHERE spazio_id = ? AND utente_id = ?\
-         )",
+    // Una preferenza e' valida solo se lo spazio attivo e' ancora una membership
+    // reale dell'utente. Questo ricontrollo rende il bootstrap auto-riparante
+    // anche su database creati prima dei trigger di coerenza definitivi.
+    let valid_active_space: Option<i64> = sqlx::query_scalar(
+        "SELECT p.spazio_attivo_id \
+         FROM preferenze_utente p \
+         JOIN membri_spazio ms \
+           ON ms.utente_id = p.utente_id AND ms.spazio_id = p.spazio_attivo_id \
+         WHERE p.utente_id = ?",
     )
-    .bind(LEGACY_SPACE_ID)
     .bind(user_id)
-    .fetch_one(&mut **tx)
+    .fetch_optional(&mut **tx)
     .await
-    .context("Impossibile verificare la membership bootstrap")?;
+    .context("Impossibile verificare la validita dello spazio attivo")?;
 
-    if membership_exists == 0 {
-        let members: i64 =
+    if valid_active_space.is_some() {
+        return Ok(());
+    }
+
+    let existing_membership: Option<i64> = sqlx::query_scalar(
+        "SELECT spazio_id FROM membri_spazio WHERE utente_id = ? ORDER BY aggiunto_il, spazio_id LIMIT 1",
+    )
+    .bind(user_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .context("Impossibile verificare le membership dell'utente")?;
+
+    let initial_space_id = if let Some(space_id) = existing_membership {
+        space_id
+    } else {
+        let bootstrap_members: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM membri_spazio WHERE spazio_id = ?")
                 .bind(LEGACY_SPACE_ID)
                 .fetch_one(&mut **tx)
                 .await
                 .context("Impossibile contare i membri dello spazio bootstrap")?;
 
-        let role = if members == 0 {
-            "proprietario"
+        if bootstrap_members == 0 {
+            sqlx::query(
+                "INSERT INTO membri_spazio (spazio_id, utente_id, ruolo) VALUES (?, ?, 'proprietario')",
+            )
+            .bind(LEGACY_SPACE_ID)
+            .bind(user_id)
+            .execute(&mut **tx)
+            .await
+            .context("Impossibile assegnare il proprietario allo spazio bootstrap")?;
+
+            sqlx::query(
+                "UPDATE spazi \
+                 SET creato_da_utente_id = COALESCE(creato_da_utente_id, ?), \
+                     aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
+                 WHERE id = ?",
+            )
+            .bind(user_id)
+            .bind(LEGACY_SPACE_ID)
+            .execute(&mut **tx)
+            .await
+            .context("Impossibile attribuire lo spazio bootstrap")?;
+
+            LEGACY_SPACE_ID
         } else {
-            "amministratore"
-        };
-
-        sqlx::query("INSERT INTO membri_spazio (spazio_id, utente_id, ruolo) VALUES (?, ?, ?)")
-            .bind(LEGACY_SPACE_ID)
+            let personal_name = format!("Spazio personale · {display_name}");
+            let result = sqlx::query(
+                "INSERT INTO spazi (nome, tipo, creato_da_utente_id) VALUES (?, 'personale', ?)",
+            )
+            .bind(&personal_name)
             .bind(user_id)
-            .bind(role)
             .execute(&mut **tx)
             .await
-            .context("Impossibile aggiungere l'utente allo spazio bootstrap")?;
-    }
+            .context("Impossibile creare lo spazio personale")?;
+            let space_id = result.last_insert_rowid();
 
-    let preference_exists: i64 =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM preferenze_utente WHERE utente_id = ?)")
+            sqlx::query(
+                "INSERT INTO membri_spazio (spazio_id, utente_id, ruolo) VALUES (?, ?, 'proprietario')",
+            )
+            .bind(space_id)
             .bind(user_id)
-            .fetch_one(&mut **tx)
-            .await
-            .context("Impossibile verificare le preferenze utente")?;
-
-    if preference_exists == 0 {
-        sqlx::query("INSERT INTO preferenze_utente (utente_id, spazio_attivo_id) VALUES (?, ?)")
-            .bind(user_id)
-            .bind(LEGACY_SPACE_ID)
             .execute(&mut **tx)
             .await
-            .context("Impossibile inizializzare lo spazio attivo")?;
-    }
+            .context("Impossibile assegnare lo spazio personale")?;
+            space_id
+        }
+    };
+
+    sqlx::query(
+        "INSERT INTO preferenze_utente (utente_id, spazio_attivo_id) VALUES (?, ?) \
+         ON CONFLICT(utente_id) DO UPDATE SET \
+             spazio_attivo_id = excluded.spazio_attivo_id, \
+             aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+    )
+    .bind(user_id)
+    .bind(initial_space_id)
+    .execute(&mut **tx)
+    .await
+    .context("Impossibile inizializzare o riparare lo spazio attivo")?;
 
     Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+pub(crate) struct SpaceMembership {
+    pub(crate) id: i64,
+    pub(crate) nome: String,
+    pub(crate) tipo: String,
+    pub(crate) ruolo: String,
+    pub(crate) attivo: i64,
+}
+
+pub(crate) fn current_space_id() -> i64 {
+    current_actor().spazio_id
+}
+
+pub(crate) async fn list_user_spaces(
+    pool: &SqlitePool,
+    user_id: i64,
+) -> Result<Vec<SpaceMembership>> {
+    sqlx::query_as::<_, SpaceMembership>(
+        "SELECT s.id, s.nome, s.tipo, ms.ruolo, \
+                CASE WHEN p.spazio_attivo_id = s.id THEN 1 ELSE 0 END AS attivo \
+         FROM membri_spazio ms \
+         JOIN spazi s ON s.id = ms.spazio_id \
+         JOIN preferenze_utente p ON p.utente_id = ms.utente_id \
+         WHERE ms.utente_id = ? \
+         ORDER BY attivo DESC, s.nome COLLATE NOCASE, s.id",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await
+    .context("Impossibile leggere gli spazi dell'utente")
+}
+
+pub(crate) async fn create_space(
+    pool: &SqlitePool,
+    actor: &AuditActor,
+    name: &str,
+    space_type: &str,
+) -> Result<SpaceMembership> {
+    let user_id = actor
+        .utente_id
+        .context("Un attore di sistema non può creare uno spazio")?;
+    let clean_name = name.trim();
+    if clean_name.is_empty() || clean_name.chars().count() > 80 {
+        bail!("Il nome dello spazio deve contenere da 1 a 80 caratteri");
+    }
+    if !matches!(space_type, "personale" | "famiglia" | "condiviso") {
+        bail!("Tipo spazio non valido");
+    }
+
+    let mut tx = pool.begin().await.context("Transazione creazione spazio")?;
+    let result =
+        sqlx::query("INSERT INTO spazi (nome, tipo, creato_da_utente_id) VALUES (?, ?, ?)")
+            .bind(clean_name)
+            .bind(space_type)
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await
+            .context("Impossibile creare lo spazio")?;
+    let space_id = result.last_insert_rowid();
+
+    sqlx::query(
+        "INSERT INTO membri_spazio (spazio_id, utente_id, ruolo) VALUES (?, ?, 'proprietario')",
+    )
+    .bind(space_id)
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await
+    .context("Impossibile assegnare il proprietario")?;
+
+    sqlx::query(
+        "UPDATE preferenze_utente \
+         SET spazio_attivo_id = ?, aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
+         WHERE utente_id = ?",
+    )
+    .bind(space_id)
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await
+    .context("Impossibile attivare il nuovo spazio")?;
+
+    tx.commit()
+        .await
+        .context("Impossibile salvare il nuovo spazio")?;
+
+    Ok(SpaceMembership {
+        id: space_id,
+        nome: clean_name.to_string(),
+        tipo: space_type.to_string(),
+        ruolo: "proprietario".to_string(),
+        attivo: 1,
+    })
+}
+
+pub(crate) async fn switch_active_space(
+    pool: &SqlitePool,
+    actor: &AuditActor,
+    space_id: i64,
+) -> Result<SpaceMembership> {
+    let user_id = actor
+        .utente_id
+        .context("Un attore di sistema non può cambiare spazio")?;
+
+    let membership = sqlx::query_as::<_, SpaceMembership>(
+        "SELECT s.id, s.nome, s.tipo, ms.ruolo, 1 AS attivo \
+         FROM membri_spazio ms \
+         JOIN spazi s ON s.id = ms.spazio_id \
+         WHERE ms.utente_id = ? AND s.id = ?",
+    )
+    .bind(user_id)
+    .bind(space_id)
+    .fetch_optional(pool)
+    .await
+    .context("Impossibile verificare lo spazio richiesto")?
+    .context("Spazio non disponibile per questo utente")?;
+
+    sqlx::query(
+        "UPDATE preferenze_utente \
+         SET spazio_attivo_id = ?, aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
+         WHERE utente_id = ?",
+    )
+    .bind(space_id)
+    .bind(user_id)
+    .execute(pool)
+    .await
+    .context("Impossibile cambiare lo spazio attivo")?;
+
+    Ok(membership)
+}
+
+pub(crate) async fn rename_active_space(
+    pool: &SqlitePool,
+    actor: &AuditActor,
+    name: &str,
+) -> Result<String> {
+    let user_id = actor
+        .utente_id
+        .context("Un attore di sistema non può rinominare uno spazio")?;
+    let clean_name = name.trim();
+    if clean_name.is_empty() || clean_name.chars().count() > 80 {
+        bail!("Il nome dello spazio deve contenere da 1 a 80 caratteri");
+    }
+
+    let role: Option<String> =
+        sqlx::query_scalar("SELECT ruolo FROM membri_spazio WHERE spazio_id = ? AND utente_id = ?")
+            .bind(actor.spazio_id)
+            .bind(user_id)
+            .fetch_optional(pool)
+            .await
+            .context("Impossibile leggere il ruolo corrente")?;
+
+    if !matches!(role.as_deref(), Some("proprietario" | "amministratore")) {
+        bail!("Solo proprietario o amministratore possono rinominare lo spazio");
+    }
+
+    let affected = sqlx::query(
+        "UPDATE spazi \
+         SET nome = ?, aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
+         WHERE id = ?",
+    )
+    .bind(clean_name)
+    .bind(actor.spazio_id)
+    .execute(pool)
+    .await
+    .context("Impossibile rinominare lo spazio")?
+    .rows_affected();
+
+    if affected != 1 {
+        bail!("Spazio attivo non trovato");
+    }
+    Ok(clean_name.to_string())
+}
+
+pub(crate) async fn ensure_can_write(pool: &SqlitePool) -> Result<()> {
+    let actor = current_actor();
+    let Some(user_id) = actor.utente_id else {
+        // Le operazioni di sistema interne già esistenti restano consentite.
+        return Ok(());
+    };
+
+    let role: Option<String> =
+        sqlx::query_scalar("SELECT ruolo FROM membri_spazio WHERE spazio_id = ? AND utente_id = ?")
+            .bind(actor.spazio_id)
+            .bind(user_id)
+            .fetch_optional(pool)
+            .await
+            .context("Impossibile verificare i permessi di scrittura")?;
+
+    match role.as_deref() {
+        Some("proprietario" | "amministratore" | "membro") => Ok(()),
+        Some("lettura") => bail!("Lo spazio è in sola lettura per questo utente"),
+        _ => bail!("L'utente non appartiene allo spazio attivo"),
+    }
+}
+
+pub(crate) async fn ensure_can_write_sqlx(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    let actor = current_actor();
+    let Some(user_id) = actor.utente_id else {
+        return Ok(());
+    };
+
+    let allowed: bool = sqlx::query_scalar(
+        "SELECT EXISTS(\
+            SELECT 1 FROM membri_spazio \
+            WHERE spazio_id = ? AND utente_id = ? \
+              AND ruolo IN ('proprietario', 'amministratore', 'membro')\
+         )",
+    )
+    .bind(actor.spazio_id)
+    .bind(user_id)
+    .fetch_one(pool)
+    .await?;
+
+    if allowed {
+        Ok(())
+    } else {
+        Err(sqlx::Error::RowNotFound)
+    }
+}
+
+pub(crate) async fn spaces_summary(pool: &SqlitePool, actor: &AuditActor) -> Result<String> {
+    let user_id = actor
+        .utente_id
+        .context("Spazi non disponibili per un attore di sistema")?;
+    let spaces = list_user_spaces(pool, user_id).await?;
+    let mut lines = vec![
+        "👥 Spazi".to_string(),
+        String::new(),
+        "Lo spazio attivo determina quali dati del gestionale sono visibili.".to_string(),
+        String::new(),
+    ];
+    for space in spaces {
+        let marker = if space.attivo != 0 { "●" } else { "○" };
+        lines.push(format!(
+            "{marker} {} · {} · {}",
+            space.nome,
+            space_type_label(&space.tipo),
+            role_label(&space.ruolo)
+        ));
+    }
+    lines.push(String::new());
+    lines.push("Comandi:".to_string());
+    lines.push("/spazio_nuovo <nome> — crea e attiva uno spazio condiviso".to_string());
+    lines.push("/spazio_rinomina <nome> — rinomina lo spazio attivo".to_string());
+    Ok(lines.join("\n"))
+}
+
+pub(crate) fn space_type_label(value: &str) -> &str {
+    match value {
+        "personale" => "Personale",
+        "famiglia" => "Famiglia",
+        "condiviso" => "Condiviso",
+        _ => value,
+    }
 }
 
 pub(crate) async fn profile_summary(pool: &SqlitePool, actor: &AuditActor) -> Result<String> {
@@ -284,13 +606,21 @@ pub(crate) async fn profile_summary(pool: &SqlitePool, actor: &AuditActor) -> Re
         .or_else(|| actor.telegram_user_id.map(|value| value.to_string()))
         .unwrap_or_else(|| "non collegato".to_string());
 
+    let space_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM membri_spazio WHERE utente_id = ?")
+            .bind(user_id)
+            .fetch_one(pool)
+            .await
+            .context("Impossibile contare gli spazi disponibili")?;
+
     Ok(format!(
-        "👤 Profilo\n\nNome: {}\nTelegram: {}\nSpazio attivo: {}\nRuolo: {}\nMembro dal: {}\n\nℹ️ Step 7.1: lo spazio principale è ancora il contesto runtime di compatibilità. Creazione, inviti e cambio spazio verranno abilitati quando tutte le query saranno isolate per spazio.",
+        "👤 Profilo\n\nNome: {}\nTelegram: {}\nSpazio attivo: {}\nRuolo: {}\nMembro dal: {}\nSpazi disponibili: {}\n\nUsa /spazi per vedere o cambiare spazio.",
         actor.nome_snapshot,
         telegram,
         actor.spazio_nome_snapshot,
         role_label(&role),
         member_since,
+        space_count,
     ))
 }
 
@@ -365,7 +695,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn secondo_account_bootstrap_diventa_amministratore_e_non_duplica_utenti() {
+    async fn secondo_account_riceve_uno_spazio_personale_e_non_duplica_utenti() {
         let pool = test_pool().await;
         let first = telegram_profile(1001, "Primo", None);
         let second = telegram_profile(1002, "Secondo", None);
@@ -378,24 +708,181 @@ mod tests {
             .expect("secondo");
         let mut second_again = second.clone();
         second_again.chat_id = 2002;
-        resolve_telegram_profile(&pool, &second_again)
+        let actor_again = resolve_telegram_profile(&pool, &second_again)
             .await
             .expect("secondo di nuovo");
 
-        let role: String = sqlx::query_scalar(
-            "SELECT ruolo FROM membri_spazio WHERE spazio_id = 1 AND utente_id = ?",
+        assert_ne!(actor.spazio_id, LEGACY_SPACE_ID);
+        assert_eq!(actor.spazio_id, actor_again.spazio_id);
+
+        let (role, kind): (String, String) = sqlx::query_as(
+            "SELECT ms.ruolo, s.tipo \
+             FROM membri_spazio ms JOIN spazi s ON s.id = ms.spazio_id \
+             WHERE ms.spazio_id = ? AND ms.utente_id = ?",
+        )
+        .bind(actor.spazio_id)
+        .bind(actor.utente_id)
+        .fetch_one(&pool)
+        .await
+        .expect("membership");
+        assert_eq!(role, "proprietario");
+        assert_eq!(kind, "personale");
+
+        let leaked: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM membri_spazio WHERE spazio_id = 1 AND utente_id = ?",
         )
         .bind(actor.utente_id)
         .fetch_one(&pool)
         .await
-        .expect("ruolo");
-        assert_eq!(role, "amministratore");
+        .expect("membership bootstrap");
+        assert_eq!(leaked, 0);
 
         let users: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM utenti")
             .fetch_one(&pool)
             .await
             .expect("utenti");
         assert_eq!(users, 2);
+    }
+
+    #[tokio::test]
+    async fn spazio_creato_diventa_attivo_e_switch_richiede_membership() {
+        let pool = test_pool().await;
+        let actor = resolve_telegram_profile(
+            &pool,
+            &telegram_profile(1001, "Alessio", Some("alessio_test")),
+        )
+        .await
+        .expect("actor");
+
+        let family = create_space(&pool, &actor, "Famiglia", "famiglia")
+            .await
+            .expect("spazio famiglia");
+        assert_eq!(family.ruolo, "proprietario");
+
+        let refreshed = resolve_telegram_profile(
+            &pool,
+            &telegram_profile(1001, "Alessio", Some("alessio_test")),
+        )
+        .await
+        .expect("actor aggiornato");
+        assert_eq!(refreshed.spazio_id, family.id);
+
+        let legacy = switch_active_space(&pool, &refreshed, LEGACY_SPACE_ID)
+            .await
+            .expect("ritorno bootstrap");
+        assert_eq!(legacy.id, LEGACY_SPACE_ID);
+
+        let missing = switch_active_space(&pool, &refreshed, 999_999).await;
+        assert!(missing.is_err());
+    }
+
+    #[tokio::test]
+    async fn ruolo_lettura_blocca_le_scritture() {
+        let pool = test_pool().await;
+        let actor = resolve_telegram_profile(
+            &pool,
+            &telegram_profile(1001, "Alessio", Some("alessio_test")),
+        )
+        .await
+        .expect("actor");
+        let user_id = actor.utente_id.expect("utente");
+
+        sqlx::query(
+            "UPDATE membri_spazio SET ruolo = 'lettura' WHERE spazio_id = ? AND utente_id = ?",
+        )
+        .bind(actor.spazio_id)
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("ruolo lettura");
+
+        let result = with_actor(actor, async { ensure_can_write(&pool).await }).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn eliminare_la_membership_attiva_fa_fallback_su_un_altro_spazio() {
+        let pool = test_pool().await;
+        let profile = telegram_profile(1001, "Alessio", Some("alessio_test"));
+        let actor = resolve_telegram_profile(&pool, &profile)
+            .await
+            .expect("actor");
+        let user_id = actor.utente_id.expect("utente");
+
+        let family = create_space(&pool, &actor, "Famiglia", "famiglia")
+            .await
+            .expect("spazio famiglia");
+        assert_ne!(family.id, LEGACY_SPACE_ID);
+
+        sqlx::query("DELETE FROM membri_spazio WHERE spazio_id = ? AND utente_id = ?")
+            .bind(family.id)
+            .bind(user_id)
+            .execute(&pool)
+            .await
+            .expect("rimozione membership attiva");
+
+        let active: i64 = sqlx::query_scalar(
+            "SELECT spazio_attivo_id FROM preferenze_utente WHERE utente_id = ?",
+        )
+        .bind(user_id)
+        .fetch_one(&pool)
+        .await
+        .expect("fallback spazio attivo");
+        assert_eq!(active, LEGACY_SPACE_ID);
+
+        let refreshed = resolve_telegram_profile(&pool, &profile)
+            .await
+            .expect("actor dopo fallback");
+        assert_eq!(refreshed.spazio_id, LEGACY_SPACE_ID);
+    }
+
+    #[tokio::test]
+    async fn bootstrap_ripara_una_preferenza_diventata_stale() {
+        let pool = test_pool().await;
+        let profile = telegram_profile(1001, "Alessio", Some("alessio_test"));
+        let actor = resolve_telegram_profile(&pool, &profile)
+            .await
+            .expect("actor");
+        let user_id = actor.utente_id.expect("utente");
+        let family = create_space(&pool, &actor, "Famiglia", "famiglia")
+            .await
+            .expect("spazio famiglia");
+
+        // Simula un database precedente al trigger definitivo dello Step 7.1:
+        // la membership attiva viene rimossa lasciando la preferenza orfana.
+        sqlx::query("DROP TRIGGER trg_membri_spazio_spazio_attivo_delete")
+            .execute(&pool)
+            .await
+            .expect("rimozione trigger solo nel test");
+        sqlx::query("DELETE FROM membri_spazio WHERE spazio_id = ? AND utente_id = ?")
+            .bind(family.id)
+            .bind(user_id)
+            .execute(&pool)
+            .await
+            .expect("membership rimossa");
+
+        let stale: i64 = sqlx::query_scalar(
+            "SELECT spazio_attivo_id FROM preferenze_utente WHERE utente_id = ?",
+        )
+        .bind(user_id)
+        .fetch_one(&pool)
+        .await
+        .expect("preferenza stale");
+        assert_eq!(stale, family.id);
+
+        let repaired = resolve_telegram_profile(&pool, &profile)
+            .await
+            .expect("actor riparato");
+        assert_eq!(repaired.spazio_id, LEGACY_SPACE_ID);
+
+        let active: i64 = sqlx::query_scalar(
+            "SELECT spazio_attivo_id FROM preferenze_utente WHERE utente_id = ?",
+        )
+        .bind(user_id)
+        .fetch_one(&pool)
+        .await
+        .expect("preferenza riparata");
+        assert_eq!(active, LEGACY_SPACE_ID);
     }
 
     #[tokio::test]

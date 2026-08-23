@@ -14,6 +14,8 @@ modifica, con nome `<timestamp>_<descrizione>.sql` compatibile con SQLx.
 - `20260817171600_contenitori.sql` — Step 6C.1: contenitori gerarchici e `item_luogo.contenitore_id`;
 - `20260820230000_storico_contenitori.sql` — Step 6C.4: snapshot storico del contenitore/percorso e backfill delle sole identità;
 - `20260823153000_fondazioni_condivise.sql` — Step 7.1: utenti, spazi, membership, account Telegram, inviti, confine di spazio e audit autore/origine.
+- `20260823174500_spazi_operativi.sql` — Step 7.1: unicità case/tag per spazio, rebuild SQLite e coerenza membership ↔ spazio attivo con fallback sicuro.
+  Il rebuild è compatibile con SQLx 0.8.6: resta nella transazione del driver, mantiene le foreign key attive e ricostruisce in sicurezza anche le tabelle figlie necessarie.
 
 Documentazione:
 
@@ -58,4 +60,7 @@ La migration esegue il backfill delle identità per elementi, abitazioni e stanz
 
 `20260823153000_fondazioni_condivise.sql` assegna i dati preesistenti allo spazio bootstrap `#1` senza creare utenti fittizi e senza inventare autori per gli eventi storici. I nuovi account interni vengono creati dal runtime alla prima interazione Telegram autorizzata.
 
-Durante il checkpoint iniziale 7.1, i default `spazio_id = 1` mantengono compatibilità con il CRUD Step 6. La UI multi-spazio resta disabilitata finché tutte le query non saranno rese space-aware.
+Nel checkpoint iniziale 7.1 i default `spazio_id = 1` mantengono compatibilità.
+Con `20260823174500_spazi_operativi.sql` la UI multi-spazio può essere attivata
+insieme allo scoping delle query: `abitazioni` e `tag` vengono ricostruite con
+unicità `(spazio_id, nome)` senza spostare i dati legacy.

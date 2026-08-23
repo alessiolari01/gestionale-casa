@@ -4,7 +4,9 @@
 
 **Branch di lavoro:** `step-7-alimentazione`.
 
-**Base Step 7:** `135dd33` sul branch `step-7-alimentazione` (7.0 documentale), derivata dal merge Step 6C `219caba`.
+**Checkpoint tecnico verificato:** `a650bc8` sul branch
+`step-7-alimentazione`, derivato dal 7.0 documentale `135dd33` e dal merge
+Step 6C `219caba`.
 
 Lo Step 7 nasce dopo la chiusura dello Step 6C e sostituisce la precedente
 idea di usare lo Step 7 per documenti/garanzie. La priorità attuale è costruire
@@ -32,23 +34,32 @@ obbligatoriamente branch o Pull Request separati.
 
 ## Checkpoint tecnico corrente — 7.1
 
-La prima implementazione della macro-fase 7.1 introduce:
+Il checkpoint `a650bc8` ha introdotto schema condiviso, identità Telegram,
+spazio bootstrap, `/profilo` e audit autore.
 
-- migration `20260823153000_fondazioni_condivise.sql`;
-- `utenti`, `account_telegram`, `spazi`, `membri_spazio`, `preferenze_utente`, `inviti_spazio`;
-- spazio bootstrap `#1` per i dati Step 6 esistenti;
-- `spazio_id` sulle entità radice già operative (`items`, `abitazioni`, `tag`, storico);
-- trigger contro collegamenti item/casa e item/tag cross-space;
-- risoluzione runtime Telegram → utente interno;
-- primo account autorizzato come proprietario dello spazio bootstrap e successivi come amministratori durante la fase di compatibilità;
-- `/profilo` e pulsante `👤 Profilo e spazio` per verificare identità, spazio e ruolo;
-- storico con autore, origine, snapshot dello spazio e distinzione degli effetti automatici.
+Il blocco corrente aggiunge:
 
-Gli eventi Step 6 già presenti restano con autore sconosciuto e origine `legacy`: non viene attribuito retroattivamente un autore inventato.
+- migration `20260823174500_spazi_operativi.sql`;
+- unicità `abitazioni(spazio_id, nome)` e `tag(spazio_id, nome)`;
+- `/spazi`, `/spazio_nuovo <nome>` e `/spazio_rinomina <nome>`;
+- cambio spazio tramite pulsanti inline;
+- spazio personale automatico per i nuovi utenti successivi al bootstrap;
+- scoping di oggetti, luoghi, contenitori, foto e storico;
+- blocco delle scritture principali per il ruolo `lettura`;
+- invalidazione delle sessioni temporanee al cambio spazio;
+- test espliciti contro letture e mutazioni cross-space tramite ID;
+- coerenza membership/spazio attivo con fallback automatico e autoriparazione legacy;
+- contesto `AuditActor` obbligatorio in produzione per le operazioni space-aware.
 
-### Limite transitorio intenzionale
+Gli eventi Step 6 già presenti restano nello spazio bootstrap con autore
+sconosciuto/origine `legacy`: non viene inventato nulla retroattivamente.
 
-La 7.1 **non abilita ancora la creazione/cambio di spazio nella UI** e non rende ancora tutte le query Step 6 space-aware. Per compatibilità, le nuove righe create dal codice Step 6 continuano a usare lo spazio `#1` tramite default. Questo evita di esporre un selettore di spazio prima che ogni query sia realmente isolata. Inviti e condivisione operativa verranno attivati solo dopo lo scoping completo.
+### Limite corrente intenzionale
+
+Gli spazi diventano operativi, ma **inviti e gestione completa dei membri non
+sono ancora esposti**. Creare uno spazio non trasferisce dati esistenti e non
+condivide automaticamente nulla. Uscita/eliminazione degli spazi verranno
+aggiunte solo dopo aver definito in modo sicuro proprietà e destino dei dati.
 
 ## Obiettivi architetturali
 

@@ -10,10 +10,11 @@ Lo Step 7 estende il progetto da gestionale personale a gestionale
 personale/condiviso mediante utenti interni, spazi, membership e audit con
 autore. Sopra queste fondamenta viene sviluppato il modulo Alimentazione.
 
-La prima migration 7.1 è `20260823153000_fondazioni_condivise.sql` e introduce
-utenti, spazi, membership, preferenze, inviti e contesto audit. La UI multi-spazio
-non viene ancora esposta: lo spazio #1 resta temporaneamente il contesto runtime
-finché tutte le query Step 6 non saranno isolate per spazio.
+La prima migration 7.1, `20260823153000_fondazioni_condivise.sql`, introduce
+utenti, spazi, membership, preferenze, inviti e audit. Il checkpoint successivo
+aggiunge `20260823174500_spazi_operativi.sql`: rimuove l'unicità globale legacy
+di case/tag, rende l'unicità per spazio e abilita lo **spazio attivo** come
+confine runtime per oggetti, luoghi, contenitori, foto e storico.
 
 Le decisioni correnti sono raccolte in `docs/step7/`.
 
@@ -258,6 +259,25 @@ riferimento di provenienza, senza sincronizzazione automatica.
 La regola è applicata solo alle entità per cui ha senso, per esempio ricette,
 modelli turno/routine e checklist. Account/credenziali non sono condivisibili o
 copiabili con questo meccanismo.
+
+### 2.10 Spazio attivo e isolamento operativo — Step 7.1
+
+Ogni update Telegram viene risolto in un `AuditActor` che contiene anche lo
+`spazio_id` attivo. Le query dei moduli Step 6 devono usare questo spazio come
+confine di lettura e scrittura; conoscere un ID appartenente a un altro spazio
+non deve permettere di leggerlo o modificarlo.
+
+Il cambio spazio invalida le sessioni temporanee di oggetti, luoghi,
+contenitori e foto, evitando che una bozza avviata nello spazio A venga
+completata nello spazio B. Case e tag sono unici **dentro lo spazio**, non
+nell'intera installazione.
+
+La preferenza dello spazio attivo è valida solo insieme alla relativa
+`membri_spazio`: se la membership attiva viene rimossa, il database sceglie un
+altro spazio dell'utente oppure elimina la preferenza se non ne restano. La
+risoluzione dell'identità ricontrolla comunque la membership e ripara eventuali
+stati legacy incoerenti. In produzione l'assenza del contesto `AuditActor` non
+può usare implicitamente lo spazio bootstrap: l'operazione fallisce chiusa.
 
 ### 2.11 Audit multiutente
 

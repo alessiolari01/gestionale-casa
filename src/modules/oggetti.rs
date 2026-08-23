@@ -264,7 +264,10 @@ struct ObjectLocationDisplay {
 pub fn main_menu_keyboard() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
         vec![button("📜 Storico", "history:global:0")],
-        vec![button("👤 Profilo e spazio", "identity:profile")],
+        vec![
+            button("👤 Profilo", "identity:profile"),
+            button("👥 Spazi", "identity:spaces"),
+        ],
         vec![button("🏷️ Oggetti", "oggetti:menu")],
         vec![button("🏠 Case, stanze e contenitori", "loc:menu")],
         vec![
@@ -2135,18 +2138,22 @@ async fn get_object_history_snapshot(
                 o.valore_stimato_centesimi AS estimated_value_cents, \
                 o.condizione AS condition, o.note AS notes \
          FROM items i JOIN oggetti o ON o.item_id = i.id \
-         WHERE i.id = ? AND i.tipo = 'oggetto'",
+         WHERE i.id = ? AND i.tipo = 'oggetto' AND i.spazio_id = ?",
     )
     .bind(id)
+    .bind(crate::identity::current_space_id())
     .fetch_optional(&mut **tx)
     .await
 }
 
 async fn create_object(pool: &SqlitePool, draft: &ObjectDraft) -> anyhow::Result<i64> {
+    crate::identity::ensure_can_write(pool).await?;
+    let space_id = crate::identity::current_space_id();
     let mut tx = pool.begin().await?;
     let item_result: SqliteQueryResult =
-        sqlx::query("INSERT INTO items (tipo, nome) VALUES ('oggetto', ?)")
+        sqlx::query("INSERT INTO items (tipo, nome, spazio_id) VALUES ('oggetto', ?, ?)")
             .bind(&draft.name)
+            .bind(space_id)
             .execute(&mut *tx)
             .await?;
     let id = item_result.last_insert_rowid();
@@ -2231,6 +2238,8 @@ async fn create_object(pool: &SqlitePool, draft: &ObjectDraft) -> anyhow::Result
 }
 
 async fn update_object(pool: &SqlitePool, id: i64, draft: &ObjectDraft) -> anyhow::Result<()> {
+    crate::identity::ensure_can_write(pool).await?;
+    let space_id = crate::identity::current_space_id();
     let mut tx = pool.begin().await?;
 
     let Some(before) = get_object_history_snapshot(&mut tx, id).await? else {
@@ -2247,10 +2256,11 @@ async fn update_object(pool: &SqlitePool, id: i64, draft: &ObjectDraft) -> anyho
         crate::modules::storico::ensure_entity(&mut tx, "oggetto", id, &before.name).await?;
 
     let item = sqlx::query(
-        "UPDATE items SET nome = ?, aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND tipo = 'oggetto'",
+        "UPDATE items SET nome = ?, aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND tipo = 'oggetto' AND spazio_id = ?",
     )
     .bind(&draft.name)
     .bind(id)
+    .bind(space_id)
     .execute(&mut *tx)
     .await?;
 
@@ -2315,6 +2325,8 @@ async fn update_object(pool: &SqlitePool, id: i64, draft: &ObjectDraft) -> anyho
 }
 
 async fn delete_object(pool: &SqlitePool, id: i64) -> anyhow::Result<bool> {
+    crate::identity::ensure_can_write(pool).await?;
+    let space_id = crate::identity::current_space_id();
     let mut tx = pool.begin().await?;
 
     let Some(before) = get_object_history_snapshot(&mut tx, id).await? else {
@@ -2347,10 +2359,12 @@ async fn delete_object(pool: &SqlitePool, id: i64) -> anyhow::Result<bool> {
     crate::modules::storico::record_field_changes(&mut tx, event_id, &deletion_changes).await?;
     crate::modules::storico::mark_entity_deleted(&mut tx, storico_id).await?;
 
-    let result = sqlx::query("DELETE FROM items WHERE id = ? AND tipo = 'oggetto'")
-        .bind(id)
-        .execute(&mut *tx)
-        .await?;
+    let result =
+        sqlx::query("DELETE FROM items WHERE id = ? AND tipo = 'oggetto' AND spazio_id = ?")
+            .bind(id)
+            .bind(space_id)
+            .execute(&mut *tx)
+            .await?;
     tx.commit().await?;
     Ok(result.rows_affected() == 1)
 }
@@ -2401,9 +2415,10 @@ async fn get_object(pool: &SqlitePool, id: i64) -> Result<Option<ObjectRecord>, 
          LEFT JOIN item_luogo il ON il.item_id = i.id \
          LEFT JOIN abitazioni a ON a.id = il.abitazione_id \
          LEFT JOIN stanze s ON s.id = il.stanza_id \
-         WHERE i.id = ? AND i.tipo = 'oggetto'",
+         WHERE i.id = ? AND i.tipo = 'oggetto' AND i.spazio_id = ?",
     )
     .bind(id)
+    .bind(crate::identity::current_space_id())
     .fetch_optional(pool)
     .await
 }
@@ -2418,8 +2433,9 @@ async fn list_objects(
         "SELECT COUNT(*) \
          FROM items i \
          JOIN oggetti o ON o.item_id = i.id \
-         WHERE i.tipo = 'oggetto'",
+         WHERE i.tipo = 'oggetto' AND i.spazio_id = ?",
     )
+    .bind(crate::identity::current_space_id())
     .fetch_one(pool)
     .await?;
     let objects = sqlx::query_as::<_, ObjectSummary>(
@@ -2431,10 +2447,11 @@ async fn list_objects(
          LEFT JOIN item_luogo il ON il.item_id = i.id \
          LEFT JOIN abitazioni a ON a.id = il.abitazione_id \
          LEFT JOIN stanze s ON s.id = il.stanza_id \
-         WHERE i.tipo = 'oggetto' \
+         WHERE i.tipo = 'oggetto' AND i.spazio_id = ? \
          ORDER BY i.nome COLLATE NOCASE, i.id \
          LIMIT ? OFFSET ?",
     )
+    .bind(crate::identity::current_space_id())
     .bind(page_size)
     .bind(offset)
     .fetch_all(pool)
@@ -2458,7 +2475,7 @@ async fn search_objects(
          LEFT JOIN abitazioni a ON a.id = il.abitazione_id \
          LEFT JOIN stanze s ON s.id = il.stanza_id \
          LEFT JOIN contenitori c ON c.id = il.contenitore_id \
-         WHERE i.tipo = 'oggetto' AND (\
+         WHERE i.tipo = 'oggetto' AND i.spazio_id = ? AND (\
             i.nome LIKE ? COLLATE NOCASE OR \
             o.marca LIKE ? COLLATE NOCASE OR \
             o.modello LIKE ? COLLATE NOCASE OR \
@@ -2474,6 +2491,7 @@ async fn search_objects(
          ORDER BY i.nome COLLATE NOCASE, i.id \
          LIMIT ?",
     )
+    .bind(crate::identity::current_space_id())
     .bind(&pattern)
     .bind(&pattern)
     .bind(&pattern)
@@ -3294,10 +3312,11 @@ mod tests {
         assert_eq!(search.len(), 1);
         assert_eq!(search[0].id, id);
 
-        let home = sqlx::query("INSERT INTO abitazioni (nome) VALUES ('Casa principale')")
-            .execute(&pool)
-            .await
-            .expect("casa");
+        let home =
+            sqlx::query("INSERT INTO abitazioni (nome, spazio_id) VALUES ('Casa principale', 1)")
+                .execute(&pool)
+                .await
+                .expect("casa");
         let home_id = home.last_insert_rowid();
         let room = sqlx::query("INSERT INTO stanze (abitazione_id, nome) VALUES (?, 'Officina')")
             .bind(home_id)
@@ -3428,10 +3447,11 @@ mod tests {
     #[tokio::test]
     async fn nuovo_oggetto_salva_casa_stanza_e_dettaglio_nella_stessa_creazione() {
         let pool = test_pool().await;
-        let home = sqlx::query("INSERT INTO abitazioni (nome) VALUES ('Casa principale')")
-            .execute(&pool)
-            .await
-            .expect("casa");
+        let home =
+            sqlx::query("INSERT INTO abitazioni (nome, spazio_id) VALUES ('Casa principale', 1)")
+                .execute(&pool)
+                .await
+                .expect("casa");
         let home_id = home.last_insert_rowid();
         let room = sqlx::query("INSERT INTO stanze (abitazione_id, nome) VALUES (?, 'Garage')")
             .bind(home_id)
@@ -3495,10 +3515,11 @@ mod tests {
     async fn storico_oggetto_conserva_contesto_luogo_e_non_registra_noop() {
         let pool = test_pool().await;
 
-        let home = sqlx::query("INSERT INTO abitazioni (nome) VALUES ('Casa storico')")
-            .execute(&pool)
-            .await
-            .expect("casa");
+        let home =
+            sqlx::query("INSERT INTO abitazioni (nome, spazio_id) VALUES ('Casa storico', 1)")
+                .execute(&pool)
+                .await
+                .expect("casa");
         let home_id = home.last_insert_rowid();
 
         let room =
@@ -3623,11 +3644,12 @@ mod tests {
     #[tokio::test]
     async fn nuovo_oggetto_puo_nascere_direttamente_in_un_contenitore() {
         let pool = test_pool().await;
-        let home_id = sqlx::query("INSERT INTO abitazioni (nome) VALUES ('Casa principale')")
-            .execute(&pool)
-            .await
-            .expect("casa")
-            .last_insert_rowid();
+        let home_id =
+            sqlx::query("INSERT INTO abitazioni (nome, spazio_id) VALUES ('Casa principale', 1)")
+                .execute(&pool)
+                .await
+                .expect("casa")
+                .last_insert_rowid();
         let room_id = sqlx::query("INSERT INTO stanze (abitazione_id, nome) VALUES (?, 'Garage')")
             .bind(home_id)
             .execute(&pool)
@@ -3698,5 +3720,156 @@ mod tests {
         draft.object_id = Some(10);
         draft.return_to = DraftReturnTarget::Object(10);
         assert!(format_draft(&draft).contains("Dettaglio posizione legacy"));
+    }
+    #[tokio::test]
+    async fn oggetti_sono_isolati_dallo_spazio_attivo() {
+        let pool = test_pool().await;
+        let space_two =
+            sqlx::query("INSERT INTO spazi (nome, tipo) VALUES ('Spazio due', 'personale')")
+                .execute(&pool)
+                .await
+                .expect("spazio due")
+                .last_insert_rowid();
+
+        let actor_two = crate::identity::AuditActor {
+            utente_id: None,
+            nome_snapshot: "Sistema test".to_string(),
+            spazio_id: space_two,
+            spazio_nome_snapshot: "Spazio due".to_string(),
+            origine: "sistema",
+            telegram_user_id: None,
+            telegram_username: None,
+        };
+        let actor_one = crate::identity::AuditActor::system();
+
+        let second_id = crate::identity::with_actor(actor_two.clone(), async {
+            create_object(
+                &pool,
+                &ObjectDraft::new("Oggetto stesso nome").expect("bozza spazio due"),
+            )
+            .await
+            .expect("oggetto spazio due")
+        })
+        .await;
+
+        let first_id = crate::identity::with_actor(actor_one.clone(), async {
+            create_object(
+                &pool,
+                &ObjectDraft::new("Oggetto stesso nome").expect("bozza spazio uno"),
+            )
+            .await
+            .expect("oggetto spazio uno")
+        })
+        .await;
+
+        crate::identity::with_actor(actor_one, async {
+            assert!(get_object(&pool, second_id)
+                .await
+                .expect("lettura cross-space")
+                .is_none());
+            assert!(get_object(&pool, first_id)
+                .await
+                .expect("lettura spazio corrente")
+                .is_some());
+
+            let (objects, total) = list_objects(&pool, 0, PAGE_SIZE).await.expect("elenco");
+            assert_eq!(total, 1);
+            assert_eq!(objects.len(), 1);
+            assert_eq!(objects[0].id, first_id);
+
+            let results = search_objects(&pool, "Oggetto stesso nome", 10)
+                .await
+                .expect("ricerca");
+            assert_eq!(results.len(), 1);
+            assert_eq!(results[0].id, first_id);
+
+            let cross_update = update_object(
+                &pool,
+                second_id,
+                &ObjectDraft::new("Tentativo cross-space").expect("bozza cross-space"),
+            )
+            .await;
+            assert!(cross_update.is_err());
+            assert!(!delete_object(&pool, second_id)
+                .await
+                .expect("delete cross-space deve essere un no-op"));
+        })
+        .await;
+
+        crate::identity::with_actor(actor_two, async {
+            assert!(get_object(&pool, first_id)
+                .await
+                .expect("lettura cross-space inversa")
+                .is_none());
+            let own = get_object(&pool, second_id)
+                .await
+                .expect("oggetto spazio due")
+                .expect("oggetto ancora presente");
+            assert_eq!(own.name, "Oggetto stesso nome");
+            let (_, total) = list_objects(&pool, 0, PAGE_SIZE).await.expect("elenco");
+            assert_eq!(total, 1);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn ruolo_lettura_blocca_crud_reale_degli_oggetti() {
+        let pool = test_pool().await;
+        let existing_id = create_object(
+            &pool,
+            &ObjectDraft::new("Oggetto protetto").expect("bozza iniziale"),
+        )
+        .await
+        .expect("oggetto iniziale");
+
+        let user_id = sqlx::query("INSERT INTO utenti (nome_visualizzato) VALUES ('Lettore')")
+            .execute(&pool)
+            .await
+            .expect("utente")
+            .last_insert_rowid();
+        sqlx::query(
+            "INSERT INTO membri_spazio (spazio_id, utente_id, ruolo) VALUES (1, ?, 'lettura')",
+        )
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("membership lettura");
+        sqlx::query("INSERT INTO preferenze_utente (utente_id, spazio_attivo_id) VALUES (?, 1)")
+            .bind(user_id)
+            .execute(&pool)
+            .await
+            .expect("preferenza");
+
+        let actor = crate::identity::AuditActor {
+            utente_id: Some(user_id),
+            nome_snapshot: "Lettore".to_string(),
+            spazio_id: 1,
+            spazio_nome_snapshot: "Spazio principale".to_string(),
+            origine: "telegram",
+            telegram_user_id: Some(9001),
+            telegram_username: None,
+        };
+
+        crate::identity::with_actor(actor, async {
+            assert!(create_object(
+                &pool,
+                &ObjectDraft::new("Nuovo vietato").expect("bozza create"),
+            )
+            .await
+            .is_err());
+            assert!(update_object(
+                &pool,
+                existing_id,
+                &ObjectDraft::new("Modifica vietata").expect("bozza update"),
+            )
+            .await
+            .is_err());
+            assert!(delete_object(&pool, existing_id).await.is_err());
+            assert!(get_object(&pool, existing_id)
+                .await
+                .expect("lettura consentita")
+                .is_some());
+        })
+        .await;
     }
 }
