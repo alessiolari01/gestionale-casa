@@ -1,21 +1,43 @@
 # Documentazione dei moduli
 
-Un file per ciascun modulo, mantenuto insieme all'implementazione, con:
+Ogni modulo mantiene una documentazione vicina all'implementazione o alla
+specifica approvata. I documenti devono distinguere chiaramente fra
+**PREVISTO**, **IN SVILUPPO**, **IMPLEMENTATO**, **VERIFICATO** e **RIMANDATO**.
 
-- schema dati (tabelle, campi, relazioni con lo schema core);
-- pulsanti e comandi Telegram previsti;
-- casi d'uso principali e limiti dello step corrente;
-- test automatici e verifiche runtime richieste.
+Per ogni area vanno descritti, quando applicabili:
 
-## Moduli
+- schema dati e relazioni;
+- regole di dominio e casi limite;
+- UI/comandi Telegram;
+- proprietà, condivisione e permessi;
+- storico/audit;
+- comportamento di modifica/eliminazione;
+- test automatici e verifiche runtime;
+- sviluppi futuri già approvati.
 
-- `oggetti.md` — presente dallo Step 5A e integrato con luoghi/contenitori fino allo Step 6C;
-- `foto.md` — gestione foto introdotta nello Step 5B;
-- `modifica-eliminazione.md` — CRUD persistito dello Step 5C;
-- `luoghi.md` — case, stanze e posizione strutturata dello Step 6A, base del 6C;
-- `vestiti.md` — futuro;
-- `veicoli.md` — futuro;
-- `ricette.md` — futuro.
-- [Storico](storico.md) — storico trasversale, prima/dopo, luoghi e filtri.
-- [Navigazione dei luoghi](navigazione-luoghi.md) — gerarchia, albero, azioni contestuali e regole UI.
-- [Contenitori](contenitori.md) — modello, annidamento, spostamenti e promozione sicura.
+## Moduli implementati/verificati
+
+- [Oggetti](oggetti.md)
+- [Foto](foto.md)
+- [Modifica ed eliminazione](modifica-eliminazione.md)
+- [Luoghi](luoghi.md)
+- [Navigazione dei luoghi](navigazione-luoghi.md)
+- [Contenitori](contenitori.md)
+- [Storico](storico.md)
+
+## Step 7 — in progettazione/implementazione
+
+- [Alimentazione](alimentazione/README.md) — modulo principale dello Step 7;
+- [Ricette](ricette.md) — rimando di compatibilità alla nuova documentazione
+  Alimentazione.
+
+## Moduli futuri già specificati
+
+- [Acquisti e prezzi](acquisti/README.md) — RIMANDATO;
+- [Viaggi](viaggi/README.md) — RIMANDATO;
+- [Spese](spese/README.md) — RIMANDATO;
+- Vestiti — futuro;
+- Veicoli — futuro.
+
+Le fondamenta condivise dello Step 7 sono documentate in
+[`docs/step7/README.md`](../step7/README.md).

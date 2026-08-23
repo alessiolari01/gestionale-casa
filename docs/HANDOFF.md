@@ -1,22 +1,31 @@
 # Handoff — Gestionale Casa
 
-## Handoff corrente — Step 6C.5 / branch pronto per PR
+## Handoff corrente — Step 7.0 / specifica architetturale
 
-Branch: `step-6c-test`. Checkpoint funzionale: `fd4cbea`.
+Baseline ufficiale: `main @ 219caba` (merge dello Step 6C).
 
-Lo **Step 6C è funzionalmente completo e verificato**. Stato da preservare:
+Branch di sviluppo: `step-7-alimentazione`, creato da `219caba` e tracciato su
+`origin/step-7-alimentazione`.
 
-- 6C.1 backend contenitori gerarchici — `cc3ba4c`;
-- 6C.2 UI Telegram contenitori — `4c64798`;
-- 6C.3A navigazione unificata — `413605e`;
-- 6C.3B UX/posizione completa — `24944ac`;
-- 6C.3C spostamento oggetti fino ai contenitori — `658e455`;
-- 6C.4 storico container-aware — `fd4cbea`.
+Il working tree era pulito all'avvio dello Step 7. Il primo checkpoint è
+**docs-only**: consolida fondazioni multiutente, Alimentazione e specifiche
+future Acquisti/Viaggi/Spese. Non deve introdurre migration o comportamento
+Telegram.
 
-Verifica finale 6C.4 su Galaxy S9: **69/69 test**, `cargo check --locked`, Clippy `-D warnings`, `git diff --check`, migration reale e runtime Telegram superati. Il linker dell'S9 può richiedere `CARGO_BUILD_JOBS=1`, `CARGO_INCREMENTAL=0` e `-Wl,--threads=1` per limiti di memoria; non è un errore applicativo.
+Il vecchio `gestionale_step7_prototipo_bundle` è superato e non va usato.
 
-Il 6C.5 deve restare **docs-only**: nessuna nuova migration, nessun reset del database e nessuna modifica funzionale. Prossima operazione: verifica del diff, commit 6C.5, push, Pull Request, CI verde e merge in `main`; poi riallineare PC e S9 a `main` e aprire lo Step 7A.
+Documenti da leggere prima di implementare 7.1:
 
+1. `docs/step7/README.md`;
+2. `docs/step7/decisioni-architetturali.md`;
+3. `docs/step7/modello-condivisione.md`;
+4. `docs/step7/storico-e-audit.md`;
+5. `docs/step7/database-e-migrazioni.md`;
+6. `docs/moduli/alimentazione/README.md`.
+
+Prossimo passo dopo approvazione/commit della documentazione: progettare la
+prima migration reale **7.1 — Fondazioni condivise** e provarla sia su DB vuoto
+sia su una copia del DB di test Step 6C.
 
 ## Archivio handoff Step 6C.4 — storico contenitori/percorso
 
@@ -248,40 +257,23 @@ uno step modifica comportamento, dipendenze native, startup o integrazioni.
 
 Completati e verificati:
 
-- Step 1 — scheletro;
-- Step 2 — schema dati core;
-- Step 3 — backend Telegram + whitelist;
-- Step 3.1 — handoff, workflow Git, CI e Dependabot;
-- Step 4 — SQLite operativo, migration automatiche e `/status`;
-- Step 5A — oggetti generici;
-- Step 5B — foto degli oggetti;
-- Step 5C — modifica/eliminazione sicura, mergiato su `main` con CI verde;
-- Step 6A — case, stanze e posizione strutturata;
-- Step 6B — storico globale + individuale, mergiato su `main`;
-- Step 6C — contenitori e sotto-posizioni, implementazione/runtime verificati su `step-6c-test`.
+- Step 1→6C, confluiti in `main`;
+- baseline `219caba` dopo merge PR Step 6C;
+- storico container-aware con 69 test nella baseline conclusiva del 6C.
 
 Step corrente:
 
-- **Step 6C.5 — chiusura docs, PR/CI/merge**.
+- **Step 7.0 — specifica e organizzazione**, branch `step-7-alimentazione`.
 
-Sequenza successiva approvata:
+Macro-sequenza:
 
-- Step 7A — documenti e garanzie;
-- Step 7B — promemoria e scadenze;
-- Step 7C — tag e ricerca globale;
-- Step 8 — primo nuovo modulo applicativo (Veicoli o Vestiti).
+- 7.1 — fondazioni utenti/spazi/condivisione/audit;
+- 7.2 — Alimentazione completa;
+- 7.3 — integrazioni e condivisione operativa.
 
-Ulteriori direzioni approvate: manutenzioni, costi/valore, prestiti, QR code,
-archivio degli elementi non più attivi, registro acquisti e dashboard.
-Dettagli in `docs/ROADMAP.md`.
-
-Verifiche storiche importanti sul Galaxy S9:
-
-- `/start`, `/ping`, `/status` e whitelist end-to-end;
-- SQLx/SQLite senza `openssl-sys`;
-- foto salvate localmente e persistenti;
-- modifica/eliminazione oggetti con cascade e pulizia media;
-- CI GitHub Actions verde sugli step chiusi.
+Acquisti/prezzi, Viaggi e Spese sono già documentati come RIMANDATI per evitare
+incompatibilità architetturali. Documenti/garanzie, ricerca globale, Veicoli,
+Vestiti e le altre funzioni storiche restano in roadmap.
 
 Non reintrodurre `native-tls` senza una ragione esplicita e documentata.
 
@@ -401,12 +393,12 @@ sono:
 - niente cancellazione degli oggetti quando si elimina un luogo.
 
 Le funzioni future devono seguire il principio di riuso: foto, documenti, tag,
-promemoria, luogo e storico non vanno duplicati per ogni modulo se possono
-essere collegati in modo condiviso alle entità.
+reminder, luogo, storico, condivisione e audit non vanno duplicati per ogni
+modulo quando possono essere servizi trasversali.
 
-Lo storico dello Step 6B dovrà conservare eventi strutturati con data/ora,
-modulo, entità, casa/stanza e valori prima/dopo; dovrà essere consultabile sia
-dalla singola entità sia globalmente con filtri.
+Lo storico Step 6B/6C è già operativo; lo Step 7 deve estenderlo con spazio,
+autore e origine dell'azione, mantenendo gli effetti automatici distinguibili e
+collegati agli eventi padre.
 
 Per la roadmap completa usare `docs/ROADMAP.md` come fonte aggiornata.
 
@@ -573,27 +565,36 @@ supportato ufficialmente su Linux e macOS open-source, non su Android. Per
 l'S9 il progetto prevede quindi Tailscale come rete privata + OpenSSH di
 Termux come servizio SSH, non il server Tailscale SSH integrato.
 
-## 13. Step corrente — chiusura Step 6C
+## 13. Step corrente — Step 7.0
 
-Il branch `step-6c-test` è verificato fino a `fd4cbea`. Il 6C.5 non deve introdurre nuove funzionalità: serve a rendere coerenti documentazione e stato del progetto prima della PR.
+Il branch `step-7-alimentazione` parte da `219caba` e il primo checkpoint deve
+restare documentale.
 
-Prima del merge:
-1. verificare working tree e diff documentale;
-2. eseguire l'ultimo controllo locale concordato;
-3. commit/push del 6C.5;
-4. aprire PR `step-6c-test -> main`;
-5. attendere CI GitHub verde;
-6. mergiare e riallineare PC/S9 a `main`.
+Obiettivi del 7.0:
+
+1. rendere il README centrale sintetico e collegato ai README dei moduli;
+2. documentare utenti/spazi/membership/ruoli;
+3. fissare condivisione vs copia e provenienza;
+4. documentare storico con autore;
+5. consolidare Alimentazione;
+6. specificare Acquisti, Viaggi e Spese come moduli futuri;
+7. fissare la politica del DB di sviluppo e delle migration.
 
 Decisioni da preservare:
-- niente reset/cancellazione globale DB;
-- migration già applicate non vanno riscritte;
-- `item_luogo` resta il collegamento condiviso per la posizione;
-- contenitori annidabili senza cicli;
-- eliminazioni di luoghi/contenitori non cancellano gli oggetti;
-- storico dei percorsi basato su snapshot immutabili;
-- eventi figli collegati tramite `evento_padre_id` per effetti automatici;
-- `🏷️` oggetti e `📦` contenitori restano distinti nella UI.
+
+- database centrale, non file SQLite condiviso;
+- account Telegram/Google separati dall'utente interno;
+- profili alimentari separati dagli account;
+- reminder Step 7 solo Telegram/email;
+- prezzi futuri: base persistente modificabile + confronto temporaneo volantini;
+- Viaggi: checklist generiche modificabili, quantità extra opzionale, più oggetti
+  reali collegabili, stato `in viaggio` temporaneo;
+- Spese: personali/condivise con ospiti e saldi;
+- nessun reset globale nel bot;
+- vecchio prototipo Step 7 da ignorare.
+
+Dopo il commit del 7.0 si passa alla progettazione della migration 7.1, senza
+modificare le migration Step 2→6C già applicate.
 
 ### Regola UX tastiere inline (6C.3B)
 

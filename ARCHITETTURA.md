@@ -1,10 +1,17 @@
 # Architettura
 
-## Stato architetturale dopo Step 6C
+## Stato architetturale corrente — Step 7
 
-Il branch `step-6c-test` ha completato e verificato l'estensione dei luoghi fino ai contenitori gerarchici. Il checkpoint funzionale è `fd4cbea` (6C.4): **69/69 test**, Clippy `-D warnings` e runtime Telegram verificati su Galaxy S9. Il 6C.5 è solo chiusura documentale/PR e non cambia schema o codice applicativo.
+Gli Step 1→6C sono chiusi e la baseline ufficiale è il merge `219caba` in `main`.
+Il branch corrente `step-7-alimentazione` introduce prima una specifica
+architetturale completa e solo successivamente le migration 7.1.
 
-La posizione corrente resta relazionale (`abitazioni` + `stanze` + `contenitori` + `item_luogo`); lo storico conserva invece snapshot immutabili del percorso per non riscrivere il passato quando la gerarchia cambia.
+Lo Step 7 estende il progetto da gestionale personale a gestionale
+personale/condiviso mediante utenti interni, spazi, membership e audit con
+autore. Sopra queste fondamenta viene sviluppato il modulo Alimentazione.
+
+Il checkpoint 7.0 è docs-only: nessun nuovo schema e nessun cambiamento runtime.
+Le decisioni correnti sono raccolte in `docs/step7/`.
 
 ## Snapshot storico dei contenitori — Step 6C.4
 
@@ -79,8 +86,9 @@ mano.
 
 ## 1. Obiettivo del progetto
 
-Un gestionale personale per tenere traccia delle cose di casa: vestiti,
-veicoli, ricette e oggetti generici. L'interfaccia è un bot Telegram, così
+Un gestionale personale e condivisibile per tenere traccia di beni, luoghi,
+alimentazione e altre attività quotidiane. Gli oggetti generici, i vestiti, i
+veicoli e le future aree applicative riusano servizi trasversali comuni. L'interfaccia è un bot Telegram, così
 chi lo usa (anche senza competenze informatiche) interagisce scrivendo
 messaggi normali, e l'accesso da fuori casa è gratuito dal punto di vista
 della rete: nessuna porta da aprire, nessun dominio da configurare.
@@ -224,6 +232,56 @@ Il file `build.rs` fa osservare a Cargo la cartella `migrations/`, cosi' nuove
 migration vengono incorporate anche con Rust stable. Il comando `/status`
 interroga lo stato reale del database senza modificare dati applicativi.
 
+
+### 2.9 Utenti interni e spazi condivisi — Step 7
+
+**Scelta approvata, non ancora implementata nel 7.0**: introdurre un'identità
+utente interna separata da Telegram/Google e usare gli **spazi** come confine
+dei dati personali/familiari/condivisi.
+
+SQLite rimane centrale sul backend: non si sincronizza il file DB fra utenti.
+Un utente può appartenere a più spazi. I ruoli iniziali previsti sono
+proprietario, amministratore, membro e sola lettura.
+
+Dettagli in `docs/step7/modello-condivisione.md`.
+
+### 2.10 Condivisione, copia e provenienza
+
+**Scelta**: condividere significa usare la stessa entità; copiare significa
+creare un'entità nuova e indipendente. Dove utile la copia può conservare un
+riferimento di provenienza, senza sincronizzazione automatica.
+
+La regola è applicata solo alle entità per cui ha senso, per esempio ricette,
+modelli turno/routine e checklist. Account/credenziali non sono condivisibili o
+copiabili con questo meccanismo.
+
+### 2.11 Audit multiutente
+
+Lo storico Step 6B/6C viene esteso con l'autore. Una modifica condivisa deve
+rendere chiaro chi ha cambiato cosa. Gli effetti automatici restano collegati
+all'evento principale tramite il modello padre/figlio già esistente e devono
+essere riconoscibili come automatici.
+
+Dettagli in `docs/step7/storico-e-audit.md`.
+
+### 2.12 Alimentazione come dominio, non semplice file ricette
+
+Il vecchio placeholder `ricette` evolve concettualmente in un dominio più ampio:
+alimenti, unità, ricette, profili/porzioni, turni/routine, pianificazione,
+lista della spesa, reminder ed export.
+
+Alimento, prodotto acquistabile, scorta e oggetto posseduto restano concetti
+differenti. La specifica è in `docs/moduli/alimentazione/README.md`.
+
+### 2.13 Reminder trasversali
+
+Lo Step 7 progetta i reminder come servizio riutilizzabile. I canali previsti
+sono Telegram ed email. Gli SMS sono esclusi dalla specifica corrente.
+
+Il vecchio `promemoria` core non va eliminato o riscritto finché la nuova
+migration non definisce esplicitamente compatibilità e migrazione.
+
+
 ## 3. Flusso dei dati
 
 ```mermaid
@@ -271,6 +329,7 @@ gestionale-casa/
 ├── docs/
 │   ├── HANDOFF.md             # consegna e workflow operativo
 │   ├── schema-core.md
+│   ├── step7/                 # specifica architetturale dello step corrente
 │   └── moduli/                # documentazione dei moduli funzionali
 └── data/                      # database e file personali, NON su Git
 ```
@@ -361,31 +420,26 @@ Dettagli in `docs/moduli/luoghi.md`.
 
 ## 6. Roadmap di sviluppo
 
-- ~~**Step 1 — Scheletro iniziale**~~ — chiuso.
-- ~~**Step 2 — Schema dati core**~~ — chiuso.
-- ~~**Step 3 — Backend Telegram + whitelist**~~ — chiuso e verificato.
-- ~~**Step 3.1 — Handoff, Git e CI**~~ — chiuso e verificato.
-- ~~**Step 4 — SQLite runtime + migration + `/status`**~~ — chiuso e verificato.
-- ~~**Step 5A — Oggetti generici**~~ — chiuso e verificato.
-- ~~**Step 5B — Foto oggetti**~~ — chiuso e verificato.
-- ~~**Step 5C — Modifica/eliminazione**~~ — chiuso, mergiato su `main` con CI verde.
-- ~~**Step 6A — Case, stanze e posizione strutturata**~~ — chiuso e verificato.
-- ~~**Step 6B — Storico globale + individuale**~~ — chiuso, verificato e mergiato su `main`.
-- **Step 6C — Contenitori e sotto-posizioni** — implementazione e runtime verificati; PR/CI/merge finale in corso.
-- **Step 7A — Documenti e garanzie**.
-- **Step 7B — Promemoria e scadenze**.
-- **Step 7C — Tag e ricerca globale**.
-- **Step 8 — Primo nuovo modulo applicativo**, da scegliere fra Veicoli e
-  Vestiti; Ricette resta pianificato successivamente.
+- ~~Step 1→6C~~ — chiusi e confluiti in `main` (`219caba`).
+- **Step 7.0 — Specifica e organizzazione** — corrente, docs-only.
+- **Step 7.1 — Fondazioni condivise** — utenti, spazi, ruoli, inviti, audit,
+  condivisione/copia e reminder trasversali.
+- **Step 7.2 — Alimentazione completa** — alimenti, ricette, profili, turni,
+  planner, lista della spesa ed export.
+- **Step 7.3 — Integrazioni** — condivisione operativa, Google Calendar ed
+  email.
 
-Funzioni già approvate come direzioni future: manutenzioni, costi/valore,
-prestiti, QR code, archivio degli elementi non più attivi, registro acquisti e
-dashboard/statistiche. La specifica e l'ordine aggiornato sono mantenuti in
-`docs/ROADMAP.md`.
+Acquisti/prezzi, Viaggi e Spese sono già specificati per garantire compatibilità
+architetturale, ma sono RIMANDATI a dopo lo Step 7. Documenti/garanzie, ricerca
+globale, Veicoli, Vestiti e le altre funzioni storiche restano in roadmap senza
+un numero definitivo finché Step 7 non è stabilizzato.
 
-Principio da preservare: foto, documenti, tag, promemoria, luoghi e storico
-vanno progettati come servizi trasversali quando possibile, senza creare una
-versione separata della stessa funzione per ogni modulo.
+La sequenza aggiornata è in `docs/ROADMAP.md`; la roadmap interna dello Step 7 è
+in `docs/step7/roadmap.md`.
+
+Principio da preservare: foto, documenti, tag, reminder, luoghi, storico,
+condivisione e audit vanno progettati come servizi trasversali quando possibile,
+senza creare una versione separata della stessa funzione per ogni modulo.
 
 ## 7. Estensioni future (non nel perimetro attuale)
 

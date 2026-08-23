@@ -1,5 +1,57 @@
 # Diario di sviluppo
 
+## Step 7.0 — specifica e organizzazione — 2026-08-23
+
+### Stato precedente
+
+- Step 6C chiuso e mergiato in `main` con baseline `219caba`;
+- branch `step-7-alimentazione` pulito e allineato a `origin/step-7-alimentazione`;
+- schema runtime ancora quello Step 6C;
+- esiste un DB di sviluppo con dati di prova utile per verificare le future migration;
+- un precedente `gestionale_step7_prototipo_bundle` viene dichiarato superato.
+
+### Decisioni consolidate
+
+- Step 7 ridefinito come **Fondazioni condivise + Alimentazione**;
+- tre macro-fasi 7.1/7.2/7.3, precedute dal checkpoint docs-only 7.0;
+- utenti interni separati da Telegram/Google;
+- spazi personali/familiari/condivisi;
+- condivisione distinta dalla copia indipendente;
+- storico multiutente con autore e distinzione degli effetti automatici;
+- Alimentazione strutturata: alimenti, unità, ricette, profili/porzioni,
+  turni/routine, planner, spesa, reminder ed export;
+- reminder Step 7 via Telegram/email, SMS esclusi;
+- Acquisti/prezzi specificato come modulo futuro con prezzo base modificabile,
+  prezzo confezione + normalizzato e volantini solo per confronto;
+- Viaggi specificato con bagagli reali, checklist generiche modificabili,
+  quantità extra opzionale, più oggetti reali per voce, stato temporaneo
+  `in viaggio` e controllo rientro;
+- Spese specificato come modulo generale personale/condiviso con ospiti,
+  divisioni personalizzate, saldi e rimborsi;
+- nessun reset globale nel bot; il DB di sviluppo può essere azzerato
+  manualmente solo prima del go-live dopo backup.
+
+### Modifiche documentali
+
+- creato `docs/step7/` come indice e specifica architetturale dello step;
+- creato `docs/moduli/alimentazione/` con documentazione dettagliata;
+- create specifiche future `docs/moduli/acquisti/`, `viaggi/` e `spese/`;
+- aggiornati README centrale, Architettura, Roadmap, Handoff e indice moduli;
+- il README centrale rimanda esplicitamente al README Alimentazione invece di
+  duplicarne tutti i dettagli.
+
+### Verifiche previste per chiudere 7.0
+
+- `git diff --check`;
+- revisione del diff documentale;
+- nessun file Rust/migration modificato;
+- commit/push sul branch `step-7-alimentazione`.
+
+### Prossimo passo
+
+**Step 7.1 — Fondazioni condivise**: progettare e implementare la prima migration
+utenti/spazi/audit, testandola da zero e su una copia del DB Step 6C.
+
 ## Step 6C.5 — chiusura documentale e preparazione PR — 2026-08-22
 
 - checkpoint di partenza: `fd4cbea` (`Step 6C.4: integra contenitori nello storico`);
