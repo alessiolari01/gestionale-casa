@@ -264,6 +264,7 @@ struct ObjectLocationDisplay {
 pub fn main_menu_keyboard() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
         vec![button("📜 Storico", "history:global:0")],
+        vec![button("👤 Profilo e spazio", "identity:profile")],
         vec![button("🏷️ Oggetti", "oggetti:menu")],
         vec![button("🏠 Case, stanze e contenitori", "loc:menu")],
         vec![

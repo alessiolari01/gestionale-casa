@@ -2,9 +2,9 @@
 
 ## Stato
 
-**PREVISTO.** Il checkpoint 7.0 non introduce migration.
+**IN SVILUPPO.** Il checkpoint 7.0 è stato chiuso con `135dd33`; il primo pacchetto tecnico 7.1 introduce la migration `20260823153000_fondazioni_condivise.sql`.
 
-Base Git: `219caba`.
+Base tecnica del pacchetto: `135dd33`.
 
 Lo schema applicativo corrente è quello prodotto dalle migration Step 2→6C.
 Le migration già applicate non devono essere riscritte.
@@ -83,3 +83,34 @@ Regole preferite:
 - Clippy `-D warnings`;
 - `git diff --check`;
 - runtime su Galaxy S9 per gli step che cambiano il comportamento Telegram.
+
+## Migration `20260823153000_fondazioni_condivise.sql`
+
+Introduce:
+
+- `utenti`;
+- `spazi`;
+- `membri_spazio`;
+- `account_telegram`;
+- `preferenze_utente`;
+- `inviti_spazio`;
+- `spazio_id` sulle principali entità radice già esistenti;
+- audit autore/origine/spazio su `storico_eventi`;
+- trigger di coerenza cross-space per i collegamenti Step 6 più sensibili.
+
+### Scelta SQLite transitoria
+
+`items`, `abitazioni`, `tag`, `storico_entita` e `storico_eventi` ricevono `spazio_id INTEGER NOT NULL DEFAULT 1`. Con `ALTER TABLE`, SQLite non permette in modo portabile di aggiungere nello stesso passaggio una colonna `REFERENCES NOT NULL` con default non nullo. Fino al futuro rebuild space-aware, l'esistenza dello spazio viene quindi protetta da trigger.
+
+I vincoli `UNIQUE` globali legacy di `abitazioni.nome` e `tag.nome` non vengono ricostruiti in questa prima migration. Non viene ancora esposta la creazione di spazi multipli in UI, quindi il limite non è visibile all'utente. La loro conversione a unicità per-spazio avverrà insieme allo scoping completo delle query, evitando un rebuild anticipato di tabelle già referenziate da luoghi/contenitori/storico.
+
+### Bootstrap runtime
+
+La migration non inventa utenti o Telegram ID. Alla prima interazione di una chat presente in `ALLOWED_CHAT_IDS`, `src/identity.rs` crea/aggiorna l'utente interno e l'account Telegram e lo aggiunge allo spazio bootstrap.
+
+Durante lo sviluppo:
+
+- primo account → `proprietario`;
+- account autorizzati successivi → `amministratore`.
+
+Questa è una regola di bootstrap transitoria, non il flusso definitivo di invito famiglia.

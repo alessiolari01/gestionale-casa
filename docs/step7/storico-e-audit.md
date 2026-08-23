@@ -1,6 +1,6 @@
 # Storico e audit multiutente
 
-**Stato: PREVISTO — estensione dello storico Step 6B/6C nel 7.1.**
+**Stato: IN SVILUPPO — audit autore/origine implementato nel primo checkpoint tecnico 7.1; filtri multi-spazio/autore ancora previsti.**
 
 Lo storico attuale registra già eventi, cambiamenti prima/dopo, cambi di luogo,
 percorsi container-aware ed eventi padre/figlio. Lo Step 7 deve aggiungere il
@@ -114,9 +114,14 @@ Viaggio: Corfù
 48,00 € -> 52,00 €
 ```
 
-## Migration
+## Migration 7.1
 
-La migration 7.1 non deve inventare autori per gli eventi storici già presenti.
-Per i record pre-Step 7 va usata una strategia esplicita e documentata, per
-esempio autore sconosciuto/legacy oppure collegamento al bootstrap solo se la
-semantica è certa. La scelta verrà fissata prima di scrivere la migration.
+La migration `20260823153000_fondazioni_condivise.sql` applica la strategia definitiva:
+
+- eventi pre-Step 7: `attore_utente_id = NULL`;
+- `origine_azione = legacy`;
+- spazio snapshot = `Spazio principale`;
+- `automatico = 1` per gli eventi che avevano già `evento_padre_id`;
+- nessun evento nuovo viene creato per simulare il passato.
+
+I nuovi eventi Telegram ricevono automaticamente l'utente interno e lo snapshot del nome tramite il contesto task-local installato nel dispatcher. Questo evita di dover propagare manualmente l'autore attraverso tutte le funzioni Step 6.

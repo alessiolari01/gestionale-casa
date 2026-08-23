@@ -1,8 +1,8 @@
-//! Infrastruttura trasversale dello storico - Step 6B.
+//! Infrastruttura trasversale dello storico - Step 6B/6C + audit Step 7.1.
 //!
-//! In questo sotto-step sono presenti le primitive di SCRITTURA realmente
-//! usate da oggetti, foto e luoghi. Le API di lettura/paginazione verranno
-//! aggiunte insieme alla UI Telegram dello storico, evitando codice morto.
+//! Oltre ai cambiamenti strutturati e ai percorsi, ogni nuovo evento registra
+//! spazio, autore e origine dell'azione. Gli eventi precedenti allo Step 7
+//! restano esplicitamente `legacy` senza autore inventato.
 
 use sqlx::{FromRow, QueryBuilder, Sqlite, SqliteConnection, SqlitePool};
 use teloxide::{
@@ -48,13 +48,16 @@ pub(crate) async fn ensure_entity(
     id_origine: i64,
     nome: &str,
 ) -> Result<i64, sqlx::Error> {
+    let actor = crate::identity::current_actor();
     if let Some(id) = sqlx::query_scalar::<_, i64>(
         "SELECT id FROM storico_entita \
-         WHERE tipo_entita = ? AND id_origine = ? AND eliminato_il IS NULL \
+         WHERE tipo_entita = ? AND id_origine = ? AND spazio_id = ? \
+           AND eliminato_il IS NULL \
          ORDER BY id DESC LIMIT 1",
     )
     .bind(tipo_entita)
     .bind(id_origine)
+    .bind(actor.spazio_id)
     .fetch_optional(&mut *conn)
     .await?
     {
@@ -71,12 +74,13 @@ pub(crate) async fn ensure_entity(
     }
 
     let result = sqlx::query(
-        "INSERT INTO storico_entita (tipo_entita, id_origine, nome_ultimo) \
-         VALUES (?, ?, ?)",
+        "INSERT INTO storico_entita (tipo_entita, id_origine, nome_ultimo, spazio_id) \
+         VALUES (?, ?, ?, ?)",
     )
     .bind(tipo_entita)
     .bind(id_origine)
     .bind(nome)
+    .bind(actor.spazio_id)
     .execute(&mut *conn)
     .await?;
 
@@ -119,13 +123,18 @@ pub(crate) async fn record_event(
     conn: &mut SqliteConnection,
     event: &NewHistoryEvent<'_>,
 ) -> Result<i64, sqlx::Error> {
+    let actor = crate::identity::current_actor();
+    let automatico = i64::from(event.evento_padre_id.is_some());
+    let actor_name = actor.utente_id.map(|_| actor.nome_snapshot.as_str());
     let result = sqlx::query(
         "INSERT INTO storico_eventi (\
             entita_storico_id, modulo, componente, operazione, \
             nome_entita_snapshot, \
             abitazione_storico_id, abitazione_nome_snapshot, \
-            stanza_storico_id, stanza_nome_snapshot, evento_padre_id\
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            stanza_storico_id, stanza_nome_snapshot, evento_padre_id, \
+            spazio_id, spazio_nome_snapshot, attore_utente_id, \
+            attore_nome_snapshot, origine_azione, automatico\
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(event.entita_storico_id)
     .bind(event.modulo)
@@ -137,6 +146,12 @@ pub(crate) async fn record_event(
     .bind(event.stanza_storico_id)
     .bind(event.stanza_nome_snapshot)
     .bind(event.evento_padre_id)
+    .bind(actor.spazio_id)
+    .bind(&actor.spazio_nome_snapshot)
+    .bind(actor.utente_id)
+    .bind(actor_name)
+    .bind(actor.origine)
+    .bind(automatico)
     .execute(&mut *conn)
     .await?;
 
@@ -240,6 +255,9 @@ struct HistoryListRow {
     abitazione_nome_snapshot: Option<String>,
     stanza_nome_snapshot: Option<String>,
     contenitore_percorso_snapshot: Option<String>,
+    attore_nome_snapshot: Option<String>,
+    origine_azione: String,
+    automatico: i64,
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -255,6 +273,10 @@ struct HistoryEventDetail {
     stanza_nome_snapshot: Option<String>,
     contenitore_percorso_snapshot: Option<String>,
     evento_padre_id: Option<i64>,
+    attore_nome_snapshot: Option<String>,
+    spazio_nome_snapshot: Option<String>,
+    origine_azione: String,
+    automatico: i64,
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -667,7 +689,8 @@ async fn load_filtered_global_history_page(
                 strftime('%d/%m/%Y %H:%M', e.avvenuto_il, 'localtime') AS when_local, \
                 e.operazione, e.nome_entita_snapshot, \
                 e.abitazione_nome_snapshot, e.stanza_nome_snapshot, \
-                e.contenitore_percorso_snapshot \
+                e.contenitore_percorso_snapshot, e.attore_nome_snapshot, \
+                e.origine_azione, e.automatico \
          FROM storico_eventi e \
          JOIN storico_entita se ON se.id = e.entita_storico_id \
          WHERE 1 = 1",
@@ -1526,7 +1549,8 @@ async fn load_entity_history_page(
                 strftime('%d/%m/%Y %H:%M', e.avvenuto_il, 'localtime') AS when_local, \
                 e.operazione, e.nome_entita_snapshot, \
                 e.abitazione_nome_snapshot, e.stanza_nome_snapshot, \
-                e.contenitore_percorso_snapshot \
+                e.contenitore_percorso_snapshot, e.attore_nome_snapshot, \
+                e.origine_azione, e.automatico \
          FROM storico_eventi e \
          JOIN storico_entita se ON se.id = e.entita_storico_id \
          WHERE e.entita_storico_id = ? \
@@ -1558,7 +1582,9 @@ async fn load_event_detail(
                 strftime('%d/%m/%Y %H:%M', e.avvenuto_il, 'localtime') AS when_local, \
                 e.modulo, e.componente, e.operazione, e.nome_entita_snapshot, \
                 e.abitazione_nome_snapshot, e.stanza_nome_snapshot, \
-                e.contenitore_percorso_snapshot, e.evento_padre_id \
+                e.contenitore_percorso_snapshot, e.evento_padre_id, \
+                e.attore_nome_snapshot, e.spazio_nome_snapshot, \
+                e.origine_azione, e.automatico \
          FROM storico_eventi e \
          JOIN storico_entita se ON se.id = e.entita_storico_id \
          WHERE e.id = ?",
@@ -1618,6 +1644,12 @@ fn format_history_list(title: &str, events: &[HistoryListRow], page: i64, total:
             entity_icon(&event.tipo_entita),
             event.nome_entita_snapshot,
         ));
+        message.push('\n');
+        message.push_str(&format_history_actor_line(
+            event.attore_nome_snapshot.as_deref(),
+            &event.origine_azione,
+            event.automatico != 0,
+        ));
 
         if let Some(location) = event_context(event) {
             message.push_str("\n📍 ");
@@ -1645,6 +1677,26 @@ fn format_event_detail(
         event.componente,
         event.id,
     );
+
+    if event.automatico != 0 {
+        message.push_str("\n⚙️ Effetto automatico");
+    }
+    message.push('\n');
+    message.push_str(&format_history_actor_line(
+        event.attore_nome_snapshot.as_deref(),
+        &event.origine_azione,
+        event.automatico != 0,
+    ));
+    if should_show_origin(&event.origine_azione) {
+        message.push_str(&format!(
+            "
+Origine: {}",
+            origin_label(&event.origine_azione)
+        ));
+    }
+    if let Some(space) = event.spazio_nome_snapshot.as_deref() {
+        message.push_str(&format!("\n👥 Spazio: {space}"));
+    }
 
     if let Some(parent) = event.evento_padre_id {
         message.push_str(&format!("\nCollegato all'evento #{parent}"));
@@ -1689,6 +1741,31 @@ fn format_event_detail(
     }
 
     message
+}
+
+fn format_history_actor_line(actor: Option<&str>, origin: &str, automatic: bool) -> String {
+    match (actor, origin, automatic) {
+        (Some(name), _, true) => format!("👤 Originato da: {name}"),
+        (Some(name), _, false) => format!("👤 Autore: {name}"),
+        (None, "legacy", _) => "👤 Autore: non disponibile (evento pre-Step 7)".to_string(),
+        (None, _, true) => "🤖 Effetto automatico di sistema".to_string(),
+        (None, _, false) => "🤖 Sistema".to_string(),
+    }
+}
+
+fn should_show_origin(origin: &str) -> bool {
+    origin != "telegram"
+}
+
+fn origin_label(origin: &str) -> &str {
+    match origin {
+        "telegram" => "Telegram",
+        "sistema" => "Sistema",
+        "google" => "Google",
+        "automazione" => "Automazione",
+        "legacy" => "Pre-Step 7 / non disponibile",
+        _ => origin,
+    }
 }
 
 fn history_list_keyboard(
@@ -2317,5 +2394,127 @@ mod tests {
             .await
             .expect("filtro casa");
         assert_eq!(total, 1);
+    }
+    #[tokio::test]
+    async fn nuovi_eventi_registrano_autore_e_distinguono_effetti_automatici() {
+        let pool = test_pool().await;
+
+        let user_id = sqlx::query("INSERT INTO utenti (nome_visualizzato) VALUES ('Alessio Test')")
+            .execute(&pool)
+            .await
+            .expect("utente")
+            .last_insert_rowid();
+        sqlx::query(
+            "INSERT INTO membri_spazio (spazio_id, utente_id, ruolo) \
+             VALUES (1, ?, 'proprietario')",
+        )
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("membership");
+
+        let actor = crate::identity::AuditActor {
+            utente_id: Some(user_id),
+            nome_snapshot: "Alessio Test".to_string(),
+            spazio_id: 1,
+            spazio_nome_snapshot: "Spazio principale".to_string(),
+            origine: "telegram",
+            telegram_user_id: Some(123),
+            telegram_username: Some("alessio_test".to_string()),
+        };
+
+        let (root_id, child_id) = crate::identity::with_actor(actor, async {
+            let mut conn = pool.acquire().await.expect("connessione");
+            let entity_id = ensure_entity(&mut conn, "oggetto", 800, "Trapano audit")
+                .await
+                .expect("entita");
+
+            let root_id = record_event(
+                &mut conn,
+                &NewHistoryEvent {
+                    entita_storico_id: entity_id,
+                    modulo: "oggetti",
+                    componente: "anagrafica",
+                    operazione: "modifica",
+                    nome_entita_snapshot: "Trapano audit",
+                    abitazione_storico_id: None,
+                    abitazione_nome_snapshot: None,
+                    stanza_storico_id: None,
+                    stanza_nome_snapshot: None,
+                    evento_padre_id: None,
+                },
+            )
+            .await
+            .expect("evento principale");
+
+            let child_id = record_event(
+                &mut conn,
+                &NewHistoryEvent {
+                    entita_storico_id: entity_id,
+                    modulo: "oggetti",
+                    componente: "luoghi",
+                    operazione: "spostamento",
+                    nome_entita_snapshot: "Trapano audit",
+                    abitazione_storico_id: None,
+                    abitazione_nome_snapshot: None,
+                    stanza_storico_id: None,
+                    stanza_nome_snapshot: None,
+                    evento_padre_id: Some(root_id),
+                },
+            )
+            .await
+            .expect("evento automatico");
+
+            (root_id, child_id)
+        })
+        .await;
+
+        let root: (
+            Option<i64>,
+            Option<String>,
+            String,
+            i64,
+            i64,
+            Option<String>,
+        ) = sqlx::query_as(
+            "SELECT attore_utente_id, attore_nome_snapshot, origine_azione, automatico, \
+                        spazio_id, spazio_nome_snapshot \
+                 FROM storico_eventi WHERE id = ?",
+        )
+        .bind(root_id)
+        .fetch_one(&pool)
+        .await
+        .expect("audit root");
+        assert_eq!(root.0, Some(user_id));
+        assert_eq!(root.1.as_deref(), Some("Alessio Test"));
+        assert_eq!(root.2, "telegram");
+        assert_eq!(root.3, 0);
+        assert_eq!(root.4, 1);
+        assert_eq!(root.5.as_deref(), Some("Spazio principale"));
+
+        let child: (Option<i64>, i64, Option<i64>) = sqlx::query_as(
+            "SELECT attore_utente_id, automatico, evento_padre_id \
+             FROM storico_eventi WHERE id = ?",
+        )
+        .bind(child_id)
+        .fetch_one(&pool)
+        .await
+        .expect("audit child");
+        assert_eq!(child.0, Some(user_id));
+        assert_eq!(child.1, 1);
+        assert_eq!(child.2, Some(root_id));
+    }
+
+    #[test]
+    fn storico_legacy_rende_esplicito_che_l_autore_non_e_disponibile() {
+        assert_eq!(
+            format_history_actor_line(None, "legacy", false),
+            "👤 Autore: non disponibile (evento pre-Step 7)"
+        );
+        assert_eq!(origin_label("telegram"), "Telegram");
+        assert!(!should_show_origin("telegram"));
+        assert!(should_show_origin("google"));
+        assert!(should_show_origin("sistema"));
+        assert!(should_show_origin("legacy"));
     }
 }

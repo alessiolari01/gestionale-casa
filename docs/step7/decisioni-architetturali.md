@@ -197,3 +197,9 @@ Dopo il go-live le migration dovranno preservare i dati reali.
 
 `gestionale_step7_prototipo_bundle` non va applicato. È stato creato prima delle
 ultime decisioni e non rappresenta la specifica corrente.
+
+## D23 — Multi-spazio non esposto prima dello scoping completo
+
+Lo schema utenti/spazi può essere introdotto prima della UI multi-spazio, ma il bot non deve permettere di creare o cambiare spazio finché tutte le query CRUD dei moduli Step 6 non filtrano esplicitamente lo spazio attivo.
+
+Durante questa transizione lo spazio `#1` è il contesto di compatibilità e i default DB mantengono il comportamento precedente. È preferibile una fase single-space chiaramente documentata a una UI multiutente che possa mostrare o modificare dati dello spazio sbagliato.

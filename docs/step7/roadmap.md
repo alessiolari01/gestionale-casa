@@ -2,7 +2,7 @@
 
 ## 7.0 — Specifica e organizzazione
 
-**Stato: IN SVILUPPO**
+**Stato: VERIFICATO**
 
 Obiettivi:
 
@@ -29,9 +29,9 @@ Prima di iniziare 7.1 devono essere chiari:
 
 ## 7.1 — Fondazioni condivise
 
-**Stato: PREVISTO**
+**Stato: IN SVILUPPO**
 
-Perimetro previsto:
+Perimetro della macro-fase:
 
 - `utenti` interni;
 - account Telegram collegati agli utenti;
@@ -46,6 +46,27 @@ Perimetro previsto:
 - infrastruttura reminder riusabile.
 
 La prima migration reale dello Step 7 nasce qui, non nel checkpoint 7.0.
+
+### Implementazione tecnica corrente
+
+Già introdotto nel primo pacchetto 7.1:
+
+- schema utenti/spazi/membership/preferenze/inviti;
+- spazio bootstrap per compatibilità con i dati Step 6;
+- collegamento Telegram → utente interno;
+- audit autore/origine/spazio sui nuovi eventi;
+- eventi figli marcati come automatici;
+- `/profilo`;
+- vincoli DB minimi contro cross-space item/casa e item/tag.
+
+Resta dentro la macro-fase 7.1 prima di dichiararla chiusa:
+
+- rendere CRUD e query completamente space-aware;
+- eliminare i vincoli globali legacy sui nomi dove devono diventare per-spazio;
+- autorizzazioni applicative effettive per ruolo;
+- condivisione/copia operativa dei modelli che la supportano;
+- infrastruttura reminder trasversale riusabile;
+- filtri storico per spazio/autore quando il multi-spazio operativo sarà attivo.
 
 ### Verifiche minime 7.1
 

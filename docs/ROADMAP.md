@@ -14,9 +14,9 @@ restano approvate ma vengono riposizionate dopo la nuova fondazione condivisa.
 
 ### 7.0 — Specifica e organizzazione
 
-**Stato: IN SVILUPPO.**
+**Stato: VERIFICATO.**
 
-Checkpoint documentale senza migration/codice funzionale.
+Checkpoint documentale chiuso con `135dd33`, senza migration/codice funzionale.
 
 - consolidamento requisiti;
 - utenti/spazi/condivisione;
@@ -27,7 +27,9 @@ Checkpoint documentale senza migration/codice funzionale.
 
 ### 7.1 — Fondazioni condivise
 
-**Stato: PREVISTO.**
+**Stato: IN SVILUPPO.**
+
+Prima implementazione tecnica già predisposta: migration fondazioni condivise, identità Telegram→utente interno, spazio bootstrap, `/profilo` e audit con autore/origine. Restano scoping completo delle query, permessi operativi, condivisione/copia e reminder trasversali.
 
 - utenti interni;
 - account Telegram;

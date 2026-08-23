@@ -14,18 +14,20 @@ Lo sviluppo corrente avviene sul branch:
 step-7-alimentazione
 ```
 
-Lo **Step 7 — Fondazioni condivise e Alimentazione** è iniziato con un
-checkpoint documentale: prima di creare nuove migration vengono fissati modello
-multiutente, condivisione/copia, audit con autore e struttura del modulo
-Alimentazione.
+Lo **Step 7 — Fondazioni condivise e Alimentazione** ha chiuso il checkpoint
+documentale 7.0 con `135dd33` ed è entrato nella macro-fase tecnica 7.1.
+Il primo pacchetto 7.1 introduce utenti/spazi/membership, collegamento Telegram
+all'utente interno e audit con autore, mantenendo temporaneamente lo spazio #1
+come contesto runtime di compatibilità finché tutte le query non saranno
+space-aware.
 
 Il vecchio `gestionale_step7_prototipo_bundle` è superato e non va usato come
 base di sviluppo.
 
 ### Macro-fasi Step 7
 
-- [ ] **7.0 — Specifica e organizzazione** — documentazione e decisioni;
-- [ ] **7.1 — Fondazioni condivise** — utenti, spazi, ruoli, inviti, audit e reminder;
+- [x] **7.0 — Specifica e organizzazione** — documentazione e decisioni;
+- [ ] **7.1 — Fondazioni condivise** — **IN SVILUPPO**: utenti, spazi, ruoli, inviti, audit e reminder;
 - [ ] **7.2 — Alimentazione completa** — alimenti, ricette, profili, turni, planner e spesa;
 - [ ] **7.3 — Integrazioni** — condivisione operativa, Google Calendar ed email.
 
@@ -45,7 +47,7 @@ qui:
 ## Moduli futuri già specificati
 
 Alcune funzioni sono state documentate ora perché influenzano le fondamenta
-condivise, ma non fanno parte dell'implementazione immediata del 7.0:
+condivise, ma non fanno parte dell'implementazione immediata della macro-fase Alimentazione:
 
 - [Acquisti e prezzi](docs/moduli/acquisti/README.md) — prezzi base,
   confezioni e confronto volantini;
@@ -80,9 +82,9 @@ Prima di modificare il progetto, leggere nell'ordine:
 - [x] Step 6C — Contenitori, navigazione gerarchica e storico container-aware
 - [ ] Step 7 — Fondazioni condivise + Alimentazione
 
-L'ultimo baseline verificato dello Step 6C comprende **69 test** e storico con
-snapshot dei percorsi dei contenitori. Il branch Step 7 parte dal merge
-`219caba`.
+L'ultimo baseline runtime verificato resta lo Step 6C con **69 test**. Il
+checkpoint documentale Step 7.0 è `135dd33`; la 7.1 deve ancora superare i test
+Rust/Clippy e il runtime Telegram sull'S9 prima di essere dichiarata verificata.
 
 ## Fonte ufficiale e workflow corrente
 
@@ -271,9 +273,9 @@ docs/
     └── spese/
 ```
 
-Il codice applicativo rimane sotto `src/modules/`. Le nuove directory di codice
-verranno create solo quando l'implementazione lo richiederà: il 7.0 non aggiunge
-moduli Rust fittizi.
+Il codice applicativo rimane sotto `src/modules/`. La 7.1 aggiunge
+`src/identity.rs` come infrastruttura trasversale di identità/audit; i moduli
+dominio vengono creati solo quando l'implementazione reale li richiede.
 
 ## Regola per gli step futuri
 

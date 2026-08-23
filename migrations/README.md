@@ -12,7 +12,8 @@ modifica, con nome `<timestamp>_<descrizione>.sql` compatibile con SQLx.
   indici e trigger di coerenza casa/stanza;
 - `20260815215400_storico.sql` — Step 6B: infrastruttura dello storico trasversale;
 - `20260817171600_contenitori.sql` — Step 6C.1: contenitori gerarchici e `item_luogo.contenitore_id`;
-- `20260820230000_storico_contenitori.sql` — Step 6C.4: snapshot storico del contenitore/percorso e backfill delle sole identità.
+- `20260820230000_storico_contenitori.sql` — Step 6C.4: snapshot storico del contenitore/percorso e backfill delle sole identità;
+- `20260823153000_fondazioni_condivise.sql` — Step 7.1: utenti, spazi, membership, account Telegram, inviti, confine di spazio e audit autore/origine.
 
 Documentazione:
 
@@ -52,3 +53,9 @@ La migration esegue il backfill delle identità per elementi, abitazioni e stanz
 ## Step 6C.4 — storico contenitori
 
 `20260820230000_storico_contenitori.sql` aggiunge campi nullable alle tabelle dello storico esistenti e registra in `storico_entita` i contenitori già presenti. Non modifica le migration precedenti e **non crea eventi retroattivi**.
+
+## Step 7.1 — fondazioni condivise
+
+`20260823153000_fondazioni_condivise.sql` assegna i dati preesistenti allo spazio bootstrap `#1` senza creare utenti fittizi e senza inventare autori per gli eventi storici. I nuovi account interni vengono creati dal runtime alla prima interazione Telegram autorizzata.
+
+Durante il checkpoint iniziale 7.1, i default `spazio_id = 1` mantengono compatibilità con il CRUD Step 6. La UI multi-spazio resta disabilitata finché tutte le query non saranno rese space-aware.

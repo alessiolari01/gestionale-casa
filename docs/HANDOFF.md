@@ -1,16 +1,17 @@
 # Handoff — Gestionale Casa
 
-## Handoff corrente — Step 7.0 / specifica architetturale
+## Handoff corrente — Step 7.1 / fondazioni condivise
 
-Baseline ufficiale: `main @ 219caba` (merge dello Step 6C).
+Baseline `main`: `219caba` (merge dello Step 6C). Checkpoint Step 7.0 sul branch: `135dd33`.
 
-Branch di sviluppo: `step-7-alimentazione`, creato da `219caba` e tracciato su
-`origin/step-7-alimentazione`.
+Branch di sviluppo: `step-7-alimentazione`, tracciato su
+`origin/step-7-alimentazione`. Il 7.0 documentale è già stato pushato come
+`135dd33`.
 
-Il working tree era pulito all'avvio dello Step 7. Il primo checkpoint è
-**docs-only**: consolida fondazioni multiutente, Alimentazione e specifiche
-future Acquisti/Viaggi/Spese. Non deve introdurre migration o comportamento
-Telegram.
+Il checkpoint docs-only 7.0 è chiuso. Il lavoro corrente è il primo checkpoint
+tecnico della macro-fase 7.1 e introduce migration, identità Telegram→utente
+interno, spazio bootstrap e audit autore. Non esporre ancora creazione/cambio
+spazio finché tutte le query Step 6 non sono space-aware.
 
 Il vecchio `gestionale_step7_prototipo_bundle` è superato e non va usato.
 
@@ -23,9 +24,9 @@ Documenti da leggere prima di implementare 7.1:
 5. `docs/step7/database-e-migrazioni.md`;
 6. `docs/moduli/alimentazione/README.md`.
 
-Prossimo passo dopo approvazione/commit della documentazione: progettare la
-prima migration reale **7.1 — Fondazioni condivise** e provarla sia su DB vuoto
-sia su una copia del DB di test Step 6C.
+Il pacchetto 7.1 corrente va prima applicato e verificato localmente. Solo dopo
+`fmt`, `check`, test, Clippy, migration su copia DB e runtime Telegram si potrà
+creare un commit intermedio della macro-fase 7.1.
 
 ## Archivio handoff Step 6C.4 — storico contenitori/percorso
 
@@ -565,20 +566,21 @@ supportato ufficialmente su Linux e macOS open-source, non su Android. Per
 l'S9 il progetto prevede quindi Tailscale come rete privata + OpenSSH di
 Termux come servizio SSH, non il server Tailscale SSH integrato.
 
-## 13. Step corrente — Step 7.0
+## 13. Step corrente — Step 7.1
 
-Il branch `step-7-alimentazione` parte da `219caba` e il primo checkpoint deve
-restare documentale.
+Il branch `step-7-alimentazione` contiene `135dd33` come checkpoint 7.0 già
+chiuso. La 7.1 introduce le fondazioni condivise senza esporre prematuramente
+una UI multi-spazio non ancora isolata.
 
-Obiettivi del 7.0:
+Obiettivi del checkpoint tecnico 7.1 corrente:
 
-1. rendere il README centrale sintetico e collegato ai README dei moduli;
-2. documentare utenti/spazi/membership/ruoli;
-3. fissare condivisione vs copia e provenienza;
-4. documentare storico con autore;
-5. consolidare Alimentazione;
-6. specificare Acquisti, Viaggi e Spese come moduli futuri;
-7. fissare la politica del DB di sviluppo e delle migration.
+1. introdurre `utenti`, `spazi`, `membri_spazio`, `account_telegram`, preferenze e inviti;
+2. associare i dati Step 6 allo spazio bootstrap `#1` senza perdita dati;
+3. risolvere ogni update Telegram autorizzato in un utente interno;
+4. attribuire i nuovi eventi storici ad autore/origine/spazio;
+5. distinguere gli eventi automatici tramite `evento_padre_id` + flag `automatico`;
+6. esporre `/profilo` come controllo visibile di identità/spazio/ruolo;
+7. mantenere la UI multi-spazio disabilitata finché il CRUD non è completamente space-aware.
 
 Decisioni da preservare:
 
@@ -593,8 +595,9 @@ Decisioni da preservare:
 - nessun reset globale nel bot;
 - vecchio prototipo Step 7 da ignorare.
 
-Dopo il commit del 7.0 si passa alla progettazione della migration 7.1, senza
-modificare le migration Step 2→6C già applicate.
+La migration 7.1 va aggiunta come nuovo file senza modificare le migration
+Step 2→6C già applicate. Il DB di sviluppo esistente deve essere migrato solo
+dopo backup e test sulla copia fornita.
 
 ### Regola UX tastiere inline (6C.3B)
 

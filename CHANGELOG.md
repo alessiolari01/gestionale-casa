@@ -1,5 +1,48 @@
 # Diario di sviluppo
 
+## Step 7.1 — fondazioni condivise, primo checkpoint tecnico — 2026-08-23
+
+### Stato precedente
+
+- Step 7.0 documentale chiuso e pushato come `135dd33`;
+- branch `step-7-alimentazione` pulito e allineato al remoto;
+- runtime e schema ancora Step 6C;
+- DB di sviluppo Step 6C disponibile come banco di prova.
+
+### Implementazione predisposta
+
+- nuova migration `20260823153000_fondazioni_condivise.sql`;
+- tabelle `utenti`, `spazi`, `membri_spazio`, `account_telegram`, `preferenze_utente`, `inviti_spazio`;
+- spazio bootstrap `#1` per preservare tutti i dati esistenti;
+- `spazio_id` su `items`, `abitazioni`, `tag`, `storico_entita`, `storico_eventi`;
+- trigger di validazione spazio e blocco cross-space item/casa e item/tag;
+- `src/identity.rs` per risolvere Telegram → utente interno e installare il contesto audit task-local;
+- primo account autorizzato proprietario del bootstrap, successivi amministratori durante la fase di compatibilità;
+- `/profilo` e pulsante `👤 Profilo e spazio`;
+- storico esteso con autore, origine, spazio e flag automatico;
+- eventi legacy senza autore inventato;
+- `/status` esteso con verifica delle fondazioni condivise.
+
+### Verifiche già effettuate fuori dal runtime Rust
+
+- migration SQL applicata da zero su SQLite: `integrity_check = ok`, `foreign_key_check = 0`;
+- migration applicata su copia di `gestionale_step7_base.db`: dati Step 6 conservati, 45 eventi storici conservati, tutti assegnati allo spazio #1, nessun autore retroattivo inventato;
+- trigger cross-space verificati sul modello SQL.
+
+### Verifiche ancora necessarie prima del commit
+
+- `cargo fmt --all`;
+- `cargo fmt --all -- --check`;
+- `cargo check --locked`;
+- `cargo test --locked` con profilo low-memory sull'S9;
+- `cargo clippy --all-targets --locked -- -D warnings`;
+- `git diff --check`;
+- runtime Telegram: `/profilo`, creazione/modifica/spostamento oggetto e controllo autore nello storico.
+
+### Limite transitorio intenzionale
+
+La UI non consente ancora di creare/cambiare spazio. Le query Step 6 non sono ancora tutte space-aware e continuano a operare nello spazio #1. Questo evita di esporre multi-spazio prima dell'isolamento completo.
+
 ## Step 7.0 — specifica e organizzazione — 2026-08-23
 
 ### Stato precedente

@@ -2,15 +2,19 @@
 
 ## Stato architetturale corrente — Step 7
 
-Gli Step 1→6C sono chiusi e la baseline ufficiale è il merge `219caba` in `main`.
-Il branch corrente `step-7-alimentazione` introduce prima una specifica
-architetturale completa e solo successivamente le migration 7.1.
+Gli Step 1→6C sono chiusi e la baseline `main` resta il merge `219caba`.
+Il branch corrente `step-7-alimentazione` ha chiuso il checkpoint documentale
+7.0 con `135dd33` e sta implementando le fondazioni tecniche 7.1.
 
 Lo Step 7 estende il progetto da gestionale personale a gestionale
 personale/condiviso mediante utenti interni, spazi, membership e audit con
 autore. Sopra queste fondamenta viene sviluppato il modulo Alimentazione.
 
-Il checkpoint 7.0 è docs-only: nessun nuovo schema e nessun cambiamento runtime.
+La prima migration 7.1 è `20260823153000_fondazioni_condivise.sql` e introduce
+utenti, spazi, membership, preferenze, inviti e contesto audit. La UI multi-spazio
+non viene ancora esposta: lo spazio #1 resta temporaneamente il contesto runtime
+finché tutte le query Step 6 non saranno isolate per spazio.
+
 Le decisioni correnti sono raccolte in `docs/step7/`.
 
 ## Snapshot storico dei contenitori — Step 6C.4
@@ -235,9 +239,9 @@ interroga lo stato reale del database senza modificare dati applicativi.
 
 ### 2.9 Utenti interni e spazi condivisi — Step 7
 
-**Scelta approvata, non ancora implementata nel 7.0**: introdurre un'identità
-utente interna separata da Telegram/Google e usare gli **spazi** come confine
-dei dati personali/familiari/condivisi.
+**Implementazione iniziata nel 7.1**: l'identità utente interna è separata da
+Telegram/Google e gli **spazi** sono il confine logico dei dati
+personali/familiari/condivisi.
 
 SQLite rimane centrale sul backend: non si sincronizza il file DB fra utenti.
 Un utente può appartenere a più spazi. I ruoli iniziali previsti sono
@@ -257,10 +261,11 @@ copiabili con questo meccanismo.
 
 ### 2.11 Audit multiutente
 
-Lo storico Step 6B/6C viene esteso con l'autore. Una modifica condivisa deve
-rendere chiaro chi ha cambiato cosa. Gli effetti automatici restano collegati
-all'evento principale tramite il modello padre/figlio già esistente e devono
-essere riconoscibili come automatici.
+Lo storico Step 6B/6C è esteso nel 7.1 con autore, origine dell'azione e
+snapshot dello spazio. Una modifica deve rendere chiaro chi ha cambiato cosa.
+Gli effetti automatici restano collegati all'evento principale tramite il
+modello padre/figlio già esistente e vengono marcati esplicitamente come
+automatici. Gli eventi pre-Step 7 restano senza autore inventato.
 
 Dettagli in `docs/step7/storico-e-audit.md`.
 
@@ -421,8 +426,8 @@ Dettagli in `docs/moduli/luoghi.md`.
 ## 6. Roadmap di sviluppo
 
 - ~~Step 1→6C~~ — chiusi e confluiti in `main` (`219caba`).
-- **Step 7.0 — Specifica e organizzazione** — corrente, docs-only.
-- **Step 7.1 — Fondazioni condivise** — utenti, spazi, ruoli, inviti, audit,
+- **Step 7.0 — Specifica e organizzazione** — chiuso (`135dd33`), docs-only.
+- **Step 7.1 — Fondazioni condivise** — **in sviluppo**: utenti, spazi, ruoli, inviti, audit,
   condivisione/copia e reminder trasversali.
 - **Step 7.2 — Alimentazione completa** — alimenti, ricette, profili, turni,
   planner, lista della spesa ed export.

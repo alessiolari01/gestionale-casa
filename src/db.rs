@@ -21,6 +21,7 @@ pub struct DatabaseStatus {
     pub foreign_keys_enabled: bool,
     pub applied_migrations: i64,
     pub schema_core_present: bool,
+    pub shared_foundations_present: bool,
 }
 
 /// Apre SQLite, crea il file se necessario e applica tutte le migration.
@@ -78,10 +79,20 @@ pub async fn status(pool: &SqlitePool) -> Result<DatabaseStatus> {
     .await
     .context("Impossibile verificare la presenza dello schema core")?;
 
+    let shared_tables: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sqlite_master \
+         WHERE type = 'table' \
+         AND name IN ('utenti', 'spazi', 'membri_spazio', 'account_telegram', 'preferenze_utente', 'inviti_spazio')",
+    )
+    .fetch_one(pool)
+    .await
+    .context("Impossibile verificare le fondazioni condivise Step 7")?;
+
     Ok(DatabaseStatus {
         foreign_keys_enabled: foreign_keys == 1,
         applied_migrations,
         schema_core_present: core_tables == 5,
+        shared_foundations_present: shared_tables == 6,
     })
 }
 

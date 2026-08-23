@@ -1,11 +1,11 @@
 //! Punto di ingresso del Gestionale Casa.
 //!
-//! Step corrente: Step 6C.4, integrazione dei contenitori e dei percorsi
-//! gerarchici nello storico trasversale.
+//! Step corrente: Step 7.1, fondazioni condivise e audit con autore.
 
 mod auth;
 mod config;
 mod db;
+mod identity;
 mod modules;
 
 use std::sync::Arc;
@@ -41,6 +41,7 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(
         applied_migrations = database_status.applied_migrations,
         schema_core = database_status.schema_core_present,
+        shared_foundations = database_status.shared_foundations_present,
         "Database SQLite pronto"
     );
 
@@ -124,6 +125,58 @@ async fn handle_message(
         return respond(());
     }
 
+    let Some(sender) = msg.from.as_ref() else {
+        tracing::warn!(chat_id, "Messaggio autorizzato senza autore Telegram");
+        bot.send_message(
+            msg.chat.id,
+            "⚠️ Non riesco a identificare l'autore Telegram di questo messaggio.",
+        )
+        .await?;
+        return respond(());
+    };
+
+    let actor = match identity::resolve_telegram_actor(&pool, chat_id, sender).await {
+        Ok(actor) => actor,
+        Err(error) => {
+            tracing::error!(chat_id, ?error, "Errore risoluzione identità Telegram");
+            bot.send_message(
+                msg.chat.id,
+                "⚠️ Non riesco a collegare il tuo account Telegram al profilo del gestionale.",
+            )
+            .await?;
+            return respond(());
+        }
+    };
+
+    identity::with_actor(
+        actor.clone(),
+        handle_authorized_message(
+            bot,
+            msg,
+            pool,
+            sessions,
+            location_sessions,
+            container_sessions,
+            photo_sessions,
+            actor,
+        ),
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn handle_authorized_message(
+    bot: Bot,
+    msg: Message,
+    pool: SqlitePool,
+    sessions: SessionStore,
+    location_sessions: LocationSessionStore,
+    container_sessions: ContainerSessionStore,
+    photo_sessions: PhotoSessionStore,
+    actor: identity::AuditActor,
+) -> ResponseResult<()> {
+    let chat_id = msg.chat.id.0;
+
     // Se si entra esplicitamente nel flusso foto da comando, chiudiamo una
     // eventuale bozza oggetto rimasta aperta per evitare stati concorrenti.
     if matches!(
@@ -197,6 +250,13 @@ async fn handle_message(
             photo_sessions.clear_chat(chat_id);
             modules::storico::show_global_history(&bot, msg.chat.id, &pool, 0).await?;
         }
+        Some("/profilo") => {
+            sessions.clear_chat(chat_id);
+            location_sessions.clear_chat(chat_id);
+            container_sessions.clear_chat(chat_id);
+            photo_sessions.clear_chat(chat_id);
+            send_profile(&bot, msg.chat.id, &pool, &actor).await?;
+        }
         Some("/status") => {
             send_status(&bot, msg.chat.id, &pool).await?;
         }
@@ -244,9 +304,57 @@ async fn handle_callback(
         return respond(());
     }
 
-    let Some(data) = q.data.as_deref() else {
+    let actor = match identity::resolve_telegram_actor(&pool, chat_id.0, &q.from).await {
+        Ok(actor) => actor,
+        Err(error) => {
+            tracing::error!(
+                chat_id = chat_id.0,
+                ?error,
+                "Errore risoluzione identità callback"
+            );
+            bot.send_message(
+                chat_id,
+                "⚠️ Non riesco a collegare il tuo account Telegram al profilo del gestionale.",
+            )
+            .await?;
+            return respond(());
+        }
+    };
+
+    let Some(data) = q.data.clone() else {
         return respond(());
     };
+
+    identity::with_actor(
+        actor.clone(),
+        handle_authorized_callback(
+            bot,
+            chat_id,
+            pool,
+            sessions,
+            location_sessions,
+            container_sessions,
+            photo_sessions,
+            actor,
+            data,
+        ),
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn handle_authorized_callback(
+    bot: Bot,
+    chat_id: ChatId,
+    pool: SqlitePool,
+    sessions: SessionStore,
+    location_sessions: LocationSessionStore,
+    container_sessions: ContainerSessionStore,
+    photo_sessions: PhotoSessionStore,
+    actor: identity::AuditActor,
+    data: String,
+) -> ResponseResult<()> {
+    let data = data.as_str();
 
     match data {
         "menu:main" => {
@@ -262,6 +370,9 @@ async fn handle_callback(
                 "Questo modulo non è ancora implementato. Per ora sono disponibili 🏷️ Oggetti e 🏠 Case, stanze e contenitori.",
             )
             .await?;
+        }
+        "identity:profile" => {
+            send_profile(&bot, chat_id, &pool, &actor).await?;
         }
         "system:status" => {
             send_status(&bot, chat_id, &pool).await?;
@@ -330,7 +441,7 @@ async fn handle_callback(
 async fn send_online_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
-        "🟢 Gestionale Casa è online.\n\n🏠 Menu principale\nScegli una sezione.\n\nComandi rapidi: /oggetti · /luoghi · /struttura · /contenitori · /storico · /status · /ping",
+        "🟢 Gestionale Casa è online.\n\n🏠 Menu principale\nScegli una sezione.\n\nComandi rapidi: /oggetti · /luoghi · /struttura · /contenitori · /storico · /profilo · /status · /ping",
     )
     .reply_markup(modules::oggetti::main_menu_keyboard())
     .await?;
@@ -340,10 +451,32 @@ async fn send_online_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
 async fn send_main_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
-        "🏠 Gestionale Casa\n\nScegli una sezione. I moduli non ancora disponibili sono indicati come prossimamente.\n\nComandi rapidi: /oggetti · /luoghi · /struttura · /contenitori · /storico · /status · /ping",
+        "🏠 Gestionale Casa\n\nScegli una sezione. I moduli non ancora disponibili sono indicati come prossimamente.\n\nComandi rapidi: /oggetti · /luoghi · /struttura · /contenitori · /storico · /profilo · /status · /ping",
     )
     .reply_markup(modules::oggetti::main_menu_keyboard())
     .await?;
+    Ok(())
+}
+
+async fn send_profile(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    actor: &identity::AuditActor,
+) -> ResponseResult<()> {
+    match identity::profile_summary(pool, actor).await {
+        Ok(summary) => {
+            bot.send_message(chat_id, summary)
+                .reply_markup(status_keyboard())
+                .await?;
+        }
+        Err(error) => {
+            tracing::error!(?error, "Errore lettura profilo Step 7");
+            bot.send_message(chat_id, "⚠️ Non riesco a leggere il profilo corrente.")
+                .reply_markup(status_keyboard())
+                .await?;
+        }
+    }
     Ok(())
 }
 
@@ -360,13 +493,19 @@ async fn send_status(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> ResponseR
             } else {
                 "❌"
             };
+            let shared = if status.shared_foundations_present {
+                "✅"
+            } else {
+                "❌"
+            };
             let message = format!(
                 "🏠 Gestionale Casa\n\n\
                  Bot Telegram: ✅\n\
                  Database SQLite: ✅\n\
                  Foreign key: {fk}\n\
                  Migrazioni applicate: {}\n\
-                 Schema core: {schema}",
+                 Schema core: {schema}\n\
+                 Fondazioni condivise Step 7: {shared}",
                 status.applied_migrations
             );
             bot.send_message(chat_id, message)
