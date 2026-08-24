@@ -107,6 +107,52 @@ struct LocationTreeNode {
     children: Vec<LocationTreeNode>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FriendlyLocationTarget {
+    Home(i64),
+    Room(i64),
+    Container(i64),
+}
+
+#[derive(Debug, Clone)]
+struct FriendlyLocationCommand {
+    command: String,
+    target: FriendlyLocationTarget,
+}
+
+#[derive(Debug, Clone)]
+struct FriendlyCommandSeed {
+    prefix: &'static str,
+    primary: String,
+    contexts: Vec<String>,
+    target: FriendlyLocationTarget,
+    sort_id: i64,
+}
+
+#[derive(Debug, Clone, FromRow)]
+struct FriendlyHomeRecord {
+    id: i64,
+    name: String,
+    space_name: String,
+}
+
+#[derive(Debug, Clone, FromRow)]
+struct FriendlyRoomRecord {
+    id: i64,
+    name: String,
+    home_name: String,
+    space_name: String,
+}
+
+#[derive(Debug, Clone, FromRow)]
+struct FriendlyContainerRecord {
+    id: i64,
+    name: String,
+    home_name: String,
+    room_name: Option<String>,
+    space_name: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct HomeChoice {
     pub(crate) id: i64,
@@ -198,6 +244,42 @@ pub async fn handle_message(
             return Ok(true);
         }
 
+        if is_friendly_location_command(command) {
+            sessions.clear_chat(chat_id);
+            match resolve_friendly_location_command(pool, command).await {
+                Ok(Some(FriendlyLocationTarget::Home(id))) => {
+                    show_home_detail(bot, msg.chat.id, pool, id).await?
+                }
+                Ok(Some(FriendlyLocationTarget::Room(id))) => {
+                    show_room_detail(bot, msg.chat.id, pool, id).await?
+                }
+                Ok(Some(FriendlyLocationTarget::Container(id))) => {
+                    crate::modules::contenitori::show_container_detail(bot, msg.chat.id, pool, id)
+                        .await?
+                }
+                Ok(None) => {
+                    bot.send_message(
+                        msg.chat.id,
+                        "⚠️ Questo comando non corrisponde più a un luogo visibile. Apri /struttura per vedere i comandi aggiornati.",
+                    )
+                    .await?;
+                }
+                Err(error) => {
+                    tracing::error!(
+                        ?error,
+                        command,
+                        "Errore risoluzione comando luogo leggibile"
+                    );
+                    bot.send_message(
+                        msg.chat.id,
+                        "⚠️ Non riesco a risolvere questo comando luogo. Riprova da /struttura.",
+                    )
+                    .await?;
+                }
+            }
+            return Ok(true);
+        }
+
         match command {
             "/luoghi" | "/case" => {
                 sessions.clear_chat(chat_id);
@@ -239,7 +321,7 @@ pub async fn handle_message(
                 if let Some(id) = parse_positive_id(args) {
                     show_home_detail(bot, msg.chat.id, pool, id).await?;
                 } else {
-                    bot.send_message(msg.chat.id, "Uso: /casa <id>\nEsempio: /casa 1")
+                    bot.send_message(msg.chat.id, "Apri /luoghi e scegli la casa dall'elenco.")
                         .await?;
                 }
                 return Ok(true);
@@ -247,7 +329,7 @@ pub async fn handle_message(
             "/casa_rinomina" => {
                 if let Some((id, new_name)) = split_id_and_rest(args) {
                     if !home_exists(pool, id).await.unwrap_or(false) {
-                        bot.send_message(msg.chat.id, format!("Casa #{id} non trovata."))
+                        bot.send_message(msg.chat.id, "Casa non trovata.")
                             .reply_markup(locations_menu_keyboard())
                             .await?;
                     } else if new_name.is_empty() {
@@ -266,7 +348,7 @@ pub async fn handle_message(
                 } else {
                     bot.send_message(
                         msg.chat.id,
-                        "Uso: /casa_rinomina <id> [nuovo nome]\nEsempio: /casa_rinomina 1 Casa principale",
+                        "Apri la casa da /luoghi e usa ⚙️ Gestisci → ✏️ Rinomina.",
                     )
                     .await?;
                 }
@@ -279,7 +361,7 @@ pub async fn handle_message(
                 } else {
                     bot.send_message(
                         msg.chat.id,
-                        "Uso: /casa_elimina <id>\nEsempio: /casa_elimina 1",
+                        "Apri la casa da /luoghi e usa ⚙️ Gestisci → 🗑 Elimina.",
                     )
                     .await?;
                 }
@@ -288,7 +370,7 @@ pub async fn handle_message(
             "/stanza_nuova" => {
                 if let Some((home_id, room_name)) = split_id_and_rest(args) {
                     if !home_exists(pool, home_id).await.unwrap_or(false) {
-                        bot.send_message(msg.chat.id, format!("Casa #{home_id} non trovata."))
+                        bot.send_message(msg.chat.id, "Casa non trovata.")
                             .reply_markup(locations_menu_keyboard())
                             .await?;
                     } else if room_name.is_empty() {
@@ -313,11 +395,8 @@ pub async fn handle_message(
                         .await?;
                     }
                 } else {
-                    bot.send_message(
-                        msg.chat.id,
-                        "Uso: /stanza_nuova <casa_id> [nome]\nEsempio: /stanza_nuova 1 Garage",
-                    )
-                    .await?;
+                    bot.send_message(msg.chat.id, "Apri la casa da /luoghi e usa ➕🚪 Stanza.")
+                        .await?;
                 }
                 return Ok(true);
             }
@@ -326,7 +405,7 @@ pub async fn handle_message(
                 if let Some(id) = parse_positive_id(args) {
                     show_room_detail(bot, msg.chat.id, pool, id).await?;
                 } else {
-                    bot.send_message(msg.chat.id, "Uso: /stanza <id>\nEsempio: /stanza 3")
+                    bot.send_message(msg.chat.id, "Apri /luoghi e scegli la stanza dall'elenco.")
                         .await?;
                 }
                 return Ok(true);
@@ -357,7 +436,7 @@ pub async fn handle_message(
                             .await?;
                         }
                         Ok(None) => {
-                            bot.send_message(msg.chat.id, format!("Stanza #{id} non trovata."))
+                            bot.send_message(msg.chat.id, "Stanza non trovata.")
                                 .reply_markup(locations_menu_keyboard())
                                 .await?;
                         }
@@ -370,7 +449,7 @@ pub async fn handle_message(
                 } else {
                     bot.send_message(
                         msg.chat.id,
-                        "Uso: /stanza_rinomina <id> [nuovo nome]\nEsempio: /stanza_rinomina 3 Garage grande",
+                        "Apri la stanza da /luoghi e usa ⚙️ Gestisci → ✏️ Rinomina.",
                     )
                     .await?;
                 }
@@ -383,7 +462,7 @@ pub async fn handle_message(
                 } else {
                     bot.send_message(
                         msg.chat.id,
-                        "Uso: /stanza_elimina <id>\nEsempio: /stanza_elimina 3",
+                        "Apri la stanza da /luoghi e usa ⚙️ Gestisci → 🗑 Elimina.",
                     )
                     .await?;
                 }
@@ -396,7 +475,7 @@ pub async fn handle_message(
                 } else {
                     bot.send_message(
                         msg.chat.id,
-                        "Uso: /oggetto_luogo <id>\nEsempio: /oggetto_luogo 12",
+                        "Apri l'oggetto da /oggetti e usa il pulsante per assegnare o spostare il luogo.",
                     )
                     .await?;
                 }
@@ -449,7 +528,7 @@ pub async fn handle_message(
             }
             Ok(None) => {
                 sessions.clear_chat(chat_id);
-                bot.send_message(msg.chat.id, format!("Stanza #{id} non trovata."))
+                bot.send_message(msg.chat.id, "Stanza non trovata.")
                     .reply_markup(locations_menu_keyboard())
                     .await?;
             }
@@ -526,7 +605,7 @@ pub async fn handle_callback(
                     );
                     ask_home_name(bot, chat_id, true).await?;
                 } else {
-                    bot.send_message(chat_id, format!("Casa #{id} non trovata."))
+                    bot.send_message(chat_id, "Casa non trovata.")
                         .reply_markup(locations_menu_keyboard())
                         .await?;
                 }
@@ -555,7 +634,7 @@ pub async fn handle_callback(
                     );
                     ask_room_name(bot, chat_id, false).await?;
                 } else {
-                    bot.send_message(chat_id, format!("Casa #{home_id} non trovata."))
+                    bot.send_message(chat_id, "Casa non trovata.")
                         .reply_markup(locations_menu_keyboard())
                         .await?;
                 }
@@ -582,7 +661,7 @@ pub async fn handle_callback(
                         ask_room_name(bot, chat_id, true).await?;
                     }
                     Ok(None) => {
-                        bot.send_message(chat_id, format!("Stanza #{id} non trovata."))
+                        bot.send_message(chat_id, "Stanza non trovata.")
                             .reply_markup(locations_menu_keyboard())
                             .await?;
                     }
@@ -788,10 +867,35 @@ async fn send_location_tree(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> Re
         .await
         .unwrap_or_default();
 
+    let friendly_commands = match friendly_location_commands(pool).await {
+        Ok(commands) => commands,
+        Err(error) => {
+            tracing::error!(?error, "Errore generazione comandi leggibili dei luoghi");
+            Vec::new()
+        }
+    };
+    let home_commands = friendly_command_map(&friendly_commands, 'h');
+    let room_commands = friendly_command_map(&friendly_commands, 'r');
+    let container_commands = friendly_command_map(&friendly_commands, 'c');
+
     let mut text = "🌳 Struttura completa dei luoghi\n\n".to_string();
     for home in &homes {
-        text.push_str(&format!("🏠 {}  /luogo_h{}\n", home.name, home.id));
-        let nodes = build_home_nodes(home.id, &rooms, &containers);
+        let command = home_commands
+            .get(&home.id)
+            .map(String::as_str)
+            .unwrap_or("");
+        if command.is_empty() {
+            text.push_str(&format!("🏠 {}\n", home.name));
+        } else {
+            text.push_str(&format!("🏠 {} · {}\n", home.name, command));
+        }
+        let nodes = build_home_nodes(
+            home.id,
+            &rooms,
+            &containers,
+            &room_commands,
+            &container_commands,
+        );
         render_tree_nodes(&nodes, "", &mut text, 0);
         text.push('\n');
         if text.chars().count() > 3500 {
@@ -799,7 +903,6 @@ async fn send_location_tree(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> Re
             break;
         }
     }
-    text.push_str("Tocca un comando /luogo_… per aprire direttamente quel luogo.");
 
     bot.send_message(chat_id, text)
         .reply_markup(location_navigation_keyboard())
@@ -807,21 +910,52 @@ async fn send_location_tree(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> Re
     Ok(())
 }
 
+fn friendly_command_map(commands: &[FriendlyLocationCommand], kind: char) -> HashMap<i64, String> {
+    commands
+        .iter()
+        .filter_map(|entry| {
+            let id = match (kind, entry.target) {
+                ('h', FriendlyLocationTarget::Home(id))
+                | ('r', FriendlyLocationTarget::Room(id))
+                | ('c', FriendlyLocationTarget::Container(id)) => id,
+                _ => return None,
+            };
+            Some((id, entry.command.clone()))
+        })
+        .collect()
+}
+
 fn build_home_nodes(
     home_id: i64,
     rooms: &[RoomRecord],
     containers: &[TreeContainerRecord],
+    room_commands: &HashMap<i64, String>,
+    container_commands: &HashMap<i64, String>,
 ) -> Vec<LocationTreeNode> {
     let mut nodes = Vec::new();
     for room in rooms.iter().filter(|room| room.home_id == home_id) {
-        let children = build_container_nodes(containers, home_id, Some(room.id), None, 0);
+        let children = build_container_nodes(
+            containers,
+            home_id,
+            Some(room.id),
+            None,
+            0,
+            container_commands,
+        );
         nodes.push(LocationTreeNode {
             label: format!("🚪 {}", room.name),
-            command: format!("/luogo_r{}", room.id),
+            command: room_commands.get(&room.id).cloned().unwrap_or_default(),
             children,
         });
     }
-    nodes.extend(build_container_nodes(containers, home_id, None, None, 0));
+    nodes.extend(build_container_nodes(
+        containers,
+        home_id,
+        None,
+        None,
+        0,
+        container_commands,
+    ));
     nodes
 }
 
@@ -831,6 +965,7 @@ fn build_container_nodes(
     room_id: Option<i64>,
     parent_id: Option<i64>,
     depth: usize,
+    container_commands: &HashMap<i64, String>,
 ) -> Vec<LocationTreeNode> {
     if depth >= 20 {
         return Vec::new();
@@ -844,13 +979,17 @@ fn build_container_nodes(
         })
         .map(|container| LocationTreeNode {
             label: format!("📦 {}", container.name),
-            command: format!("/luogo_c{}", container.id),
+            command: container_commands
+                .get(&container.id)
+                .cloned()
+                .unwrap_or_default(),
             children: build_container_nodes(
                 containers,
                 home_id,
                 room_id,
                 Some(container.id),
                 depth + 1,
+                container_commands,
             ),
         })
         .collect()
@@ -863,16 +1002,241 @@ fn render_tree_nodes(nodes: &[LocationTreeNode], prefix: &str, text: &mut String
     for (index, node) in nodes.iter().enumerate() {
         let last = index + 1 == nodes.len();
         let branch = if last { "└── " } else { "├── " };
-        text.push_str(&format!(
-            "{prefix}{branch}{}  {}\n",
-            node.label, node.command
-        ));
+        if node.command.is_empty() {
+            text.push_str(&format!("{prefix}{branch}{}\n", node.label));
+        } else {
+            text.push_str(&format!(
+                "{prefix}{branch}{} · {}\n",
+                node.label, node.command
+            ));
+        }
         let child_prefix = format!("{prefix}{}", if last { "    " } else { "│   " });
         render_tree_nodes(&node.children, &child_prefix, text, depth + 1);
         if text.chars().count() > 3500 {
             break;
         }
     }
+}
+
+async fn resolve_friendly_location_command(
+    pool: &SqlitePool,
+    command: &str,
+) -> Result<Option<FriendlyLocationTarget>, sqlx::Error> {
+    Ok(friendly_location_commands(pool)
+        .await?
+        .into_iter()
+        .find(|entry| entry.command == command)
+        .map(|entry| entry.target))
+}
+
+async fn friendly_location_commands(
+    pool: &SqlitePool,
+) -> Result<Vec<FriendlyLocationCommand>, sqlx::Error> {
+    let home_sql = format!(
+        "SELECT a.id, a.nome AS name, sp.nome AS space_name \
+         FROM abitazioni a JOIN spazi sp ON sp.id = a.spazio_id \
+         WHERE {} ORDER BY sp.nome COLLATE NOCASE, a.nome COLLATE NOCASE, a.id",
+        crate::identity::visible_space_sql("a")
+    );
+    let homes = sqlx::query_as::<_, FriendlyHomeRecord>(&home_sql)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_all(pool)
+        .await?;
+
+    let room_sql = format!(
+        "SELECT s.id, s.nome AS name, a.nome AS home_name, sp.nome AS space_name \
+         FROM stanze s \
+         JOIN abitazioni a ON a.id = s.abitazione_id \
+         JOIN spazi sp ON sp.id = a.spazio_id \
+         WHERE {} ORDER BY sp.nome COLLATE NOCASE, a.nome COLLATE NOCASE, s.nome COLLATE NOCASE, s.id",
+        crate::identity::visible_space_sql("a")
+    );
+    let rooms = sqlx::query_as::<_, FriendlyRoomRecord>(&room_sql)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_all(pool)
+        .await?;
+
+    let container_sql = format!(
+        "SELECT c.id, c.nome AS name, a.nome AS home_name, s.nome AS room_name, sp.nome AS space_name \
+         FROM contenitori c \
+         JOIN abitazioni a ON a.id = c.abitazione_id \
+         JOIN spazi sp ON sp.id = a.spazio_id \
+         LEFT JOIN stanze s ON s.id = c.stanza_id \
+         WHERE {} ORDER BY sp.nome COLLATE NOCASE, a.nome COLLATE NOCASE, s.nome COLLATE NOCASE, c.nome COLLATE NOCASE, c.id",
+        crate::identity::visible_space_sql("a")
+    );
+    let containers = sqlx::query_as::<_, FriendlyContainerRecord>(&container_sql)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_all(pool)
+        .await?;
+
+    let mut seeds = Vec::with_capacity(homes.len() + rooms.len() + containers.len());
+    seeds.extend(homes.into_iter().map(|home| FriendlyCommandSeed {
+        prefix: "/casa_",
+        primary: home.name,
+        contexts: vec![home.space_name],
+        target: FriendlyLocationTarget::Home(home.id),
+        sort_id: home.id,
+    }));
+    seeds.extend(rooms.into_iter().map(|room| FriendlyCommandSeed {
+        prefix: "/stanza_",
+        primary: room.name,
+        contexts: vec![room.home_name, room.space_name],
+        target: FriendlyLocationTarget::Room(room.id),
+        sort_id: room.id,
+    }));
+    seeds.extend(containers.into_iter().map(|container| {
+        let mut contexts = Vec::new();
+        if let Some(room_name) = container.room_name {
+            contexts.push(room_name);
+        }
+        contexts.push(container.home_name);
+        contexts.push(container.space_name);
+        FriendlyCommandSeed {
+            prefix: "/contenitore_",
+            primary: container.name,
+            contexts,
+            target: FriendlyLocationTarget::Container(container.id),
+            sort_id: container.id,
+        }
+    }));
+
+    Ok(build_unique_friendly_commands(&seeds))
+}
+
+fn build_unique_friendly_commands(seeds: &[FriendlyCommandSeed]) -> Vec<FriendlyLocationCommand> {
+    let mut context_counts = vec![0_usize; seeds.len()];
+
+    loop {
+        let commands = seeds
+            .iter()
+            .enumerate()
+            .map(|(index, seed)| compose_friendly_command(seed, context_counts[index], None))
+            .collect::<Vec<_>>();
+        let mut groups: HashMap<String, Vec<usize>> = HashMap::new();
+        for (index, command) in commands.iter().enumerate() {
+            groups.entry(command.clone()).or_default().push(index);
+        }
+
+        let mut changed = false;
+        for (command, indexes) in groups {
+            let collides = indexes.len() > 1 || is_reserved_location_command(&command);
+            if !collides {
+                continue;
+            }
+            for index in indexes {
+                if context_counts[index] < seeds[index].contexts.len() {
+                    context_counts[index] += 1;
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+
+    let base_commands = seeds
+        .iter()
+        .enumerate()
+        .map(|(index, seed)| compose_friendly_command(seed, context_counts[index], None))
+        .collect::<Vec<_>>();
+    let mut groups: HashMap<String, Vec<usize>> = HashMap::new();
+    for (index, command) in base_commands.iter().enumerate() {
+        groups.entry(command.clone()).or_default().push(index);
+    }
+
+    let mut final_commands = base_commands;
+    for (command, mut indexes) in groups {
+        if indexes.len() == 1 && !is_reserved_location_command(&command) {
+            continue;
+        }
+        indexes.sort_by_key(|index| seeds[*index].sort_id);
+        for (position, index) in indexes.into_iter().enumerate() {
+            final_commands[index] =
+                compose_friendly_command(&seeds[index], context_counts[index], Some(position + 1));
+        }
+    }
+
+    seeds
+        .iter()
+        .zip(final_commands)
+        .map(|(seed, command)| FriendlyLocationCommand {
+            command,
+            target: seed.target,
+        })
+        .collect()
+}
+
+fn compose_friendly_command(
+    seed: &FriendlyCommandSeed,
+    context_count: usize,
+    ordinal: Option<usize>,
+) -> String {
+    let mut parts = vec![slugify_command_component(&seed.primary)];
+    parts.extend(
+        seed.contexts
+            .iter()
+            .take(context_count)
+            .map(|value| slugify_command_component(value)),
+    );
+    let mut command = format!("{}{}", seed.prefix, parts.join("_"));
+    if let Some(ordinal) = ordinal {
+        command.push('_');
+        command.push_str(&ordinal.to_string());
+    }
+    command
+}
+
+fn slugify_command_component(value: &str) -> String {
+    let mut slug = String::new();
+    let mut pending_separator = false;
+    for ch in value.trim().chars().flat_map(char::to_lowercase) {
+        let replacement = match ch {
+            'à' | 'á' | 'â' | 'ä' | 'ã' | 'å' => Some('a'),
+            'è' | 'é' | 'ê' | 'ë' => Some('e'),
+            'ì' | 'í' | 'î' | 'ï' => Some('i'),
+            'ò' | 'ó' | 'ô' | 'ö' | 'õ' => Some('o'),
+            'ù' | 'ú' | 'û' | 'ü' => Some('u'),
+            'ç' => Some('c'),
+            'ñ' => Some('n'),
+            value if value.is_ascii_alphanumeric() => Some(value),
+            _ => None,
+        };
+        if let Some(value) = replacement {
+            if pending_separator && !slug.is_empty() {
+                slug.push('_');
+            }
+            slug.push(value);
+            pending_separator = false;
+        } else if !slug.is_empty() {
+            pending_separator = true;
+        }
+    }
+    if slug.is_empty() {
+        "luogo".to_string()
+    } else {
+        slug
+    }
+}
+
+fn is_friendly_location_command(command: &str) -> bool {
+    !is_reserved_location_command(command)
+        && (command.starts_with("/casa_")
+            || command.starts_with("/stanza_")
+            || command.starts_with("/contenitore_"))
+}
+
+fn is_reserved_location_command(command: &str) -> bool {
+    matches!(
+        command,
+        "/casa_nuova"
+            | "/casa_rinomina"
+            | "/casa_elimina"
+            | "/stanza_nuova"
+            | "/stanza_rinomina"
+            | "/stanza_elimina"
+    )
 }
 
 fn parse_location_command(command: &str) -> Option<(char, i64)> {
@@ -971,7 +1335,7 @@ async fn rename_home_from_input(
         }
         Ok(false) => {
             sessions.clear_chat(chat_id.0);
-            bot.send_message(chat_id, format!("Casa #{id} non trovata."))
+            bot.send_message(chat_id, "Casa non trovata.")
                 .reply_markup(locations_menu_keyboard())
                 .await?;
         }
@@ -1049,7 +1413,7 @@ async fn rename_room_from_input(
         }
         Ok(false) => {
             sessions.clear_chat(chat_id.0);
-            bot.send_message(chat_id, format!("Stanza #{} non trovata.", room.id))
+            bot.send_message(chat_id, "Stanza non trovata.")
                 .reply_markup(home_detail_keyboard(room.home_id, &[]))
                 .await?;
         }
@@ -1078,10 +1442,7 @@ async fn send_home_list(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> Respon
         Ok(homes) => {
             let mut text = "🏠 Case registrate\n\n".to_string();
             for home in &homes {
-                text.push_str(&format!(
-                    "#{} · {}\n/luogo_h{}\n\n",
-                    home.id, home.name, home.id
-                ));
+                text.push_str(&format!("{}\n\n", home.name));
             }
             bot.send_message(chat_id, text)
                 .reply_markup(home_list_keyboard(&homes))
@@ -1125,12 +1486,9 @@ async fn send_room_list(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> Respon
             let mut text = "🚪 Elenco stanze\n\n".to_string();
             let mut rows = Vec::new();
             for room in rooms.iter().take(50) {
-                text.push_str(&format!(
-                    "#{} · {}\n📍 {}\n/luogo_r{}\n\n",
-                    room.id, room.name, room.home_name, room.id
-                ));
+                text.push_str(&format!("{}\n📍 {}\n\n", room.name, room.home_name));
                 rows.push(vec![button(
-                    &format!("🚪 #{} · {}", room.id, truncate_chars(&room.name, 32)),
+                    &format!("🚪 {}", truncate_chars(&room.name, 40)),
                     &format!("loc:room:{}", room.id),
                 )]);
                 if text.chars().count() > 3200 {
@@ -1225,9 +1583,8 @@ pub(crate) async fn show_home_detail(
             let rooms = list_rooms_for_home(pool, id).await.unwrap_or_default();
             let item_count = count_items_for_home(pool, id).await.unwrap_or(0);
             let mut text = format!(
-                "🏠 {}\n#{}\n\n🚪 Stanze: {}\n📦 Elementi assegnati: {}",
+                "🏠 {}\n\n🚪 Stanze: {}\n📦 Elementi assegnati: {}",
                 home.name,
-                home.id,
                 rooms.len(),
                 item_count
             );
@@ -1242,7 +1599,7 @@ pub(crate) async fn show_home_detail(
                 .await?;
         }
         Ok(None) => {
-            bot.send_message(chat_id, format!("Casa #{id} non trovata."))
+            bot.send_message(chat_id, "Casa non trovata.")
                 .reply_markup(locations_menu_keyboard())
                 .await?;
         }
@@ -1267,15 +1624,15 @@ pub(crate) async fn show_room_detail(
             bot.send_message(
                 chat_id,
                 format!(
-                    "🚪 {}\n#{}\n\n🏠 Casa: {}\n📦 Elementi assegnati: {}",
-                    room.name, room.id, room.home_name, item_count
+                    "🚪 {}\n\n🏠 Casa: {}\n📦 Elementi assegnati: {}",
+                    room.name, room.home_name, item_count
                 ),
             )
             .reply_markup(room_detail_keyboard(&room))
             .await?;
         }
         Ok(None) => {
-            bot.send_message(chat_id, format!("Stanza #{id} non trovata."))
+            bot.send_message(chat_id, "Stanza non trovata.")
                 .reply_markup(locations_menu_keyboard())
                 .await?;
         }
@@ -1295,28 +1652,25 @@ async fn show_home_manage(
     id: i64,
 ) -> ResponseResult<()> {
     let Some(home) = get_home(pool, id).await.unwrap_or(None) else {
-        bot.send_message(chat_id, format!("Casa #{id} non trovata."))
+        bot.send_message(chat_id, "Casa non trovata.")
             .reply_markup(locations_menu_keyboard())
             .await?;
         return Ok(());
     };
 
-    bot.send_message(
-        chat_id,
-        format!("⚙️ Gestisci casa\n\n🏠 #{} · {}", home.id, home.name),
-    )
-    .reply_markup(InlineKeyboardMarkup::new(vec![
-        vec![button("✏️ Rinomina", &format!("loc:home:rename:{id}"))],
-        vec![button(
-            "🗑 Elimina casa",
-            &format!("loc:home:delete:ask:{id}"),
-        )],
-        vec![
-            button("↩️ Torna alla casa", &format!("loc:home:{id}")),
-            button("🏠 Menu principale", "menu:main"),
-        ],
-    ]))
-    .await?;
+    bot.send_message(chat_id, format!("⚙️ Gestisci casa\n\n🏠 {}", home.name))
+        .reply_markup(InlineKeyboardMarkup::new(vec![
+            vec![button("✏️ Rinomina", &format!("loc:home:rename:{id}"))],
+            vec![button(
+                "🗑 Elimina casa",
+                &format!("loc:home:delete:ask:{id}"),
+            )],
+            vec![
+                button("↩️ Torna alla casa", &format!("loc:home:{id}")),
+                button("🏠 Menu principale", "menu:main"),
+            ],
+        ]))
+        .await?;
     Ok(())
 }
 
@@ -1327,7 +1681,7 @@ async fn show_room_manage(
     id: i64,
 ) -> ResponseResult<()> {
     let Some(room) = get_room(pool, id).await.unwrap_or(None) else {
-        bot.send_message(chat_id, format!("Stanza #{id} non trovata."))
+        bot.send_message(chat_id, "Stanza non trovata.")
             .reply_markup(locations_menu_keyboard())
             .await?;
         return Ok(());
@@ -1336,8 +1690,8 @@ async fn show_room_manage(
     bot.send_message(
         chat_id,
         format!(
-            "⚙️ Gestisci stanza\n\n🚪 #{} · {}\n🏠 {}",
-            room.id, room.name, room.home_name
+            "⚙️ Gestisci stanza\n\n🚪 {}\n🏠 {}",
+            room.name, room.home_name
         ),
     )
     .reply_markup(InlineKeyboardMarkup::new(vec![
@@ -1368,15 +1722,15 @@ async fn send_home_delete_confirmation(
             bot.send_message(
                 chat_id,
                 format!(
-                    "⚠️ Eliminare la casa?\n\n🏠 {}\n#{}\n\nVerranno eliminate anche {} stanze. I {} elementi collegati NON verranno eliminati: resteranno nel gestionale senza luogo strutturato.\n\nL'operazione sulla casa non può essere annullata.",
-                    home.name, home.id, room_count, item_count
+                    "⚠️ Eliminare la casa?\n\n🏠 {}\n\nVerranno eliminate anche {} stanze. I {} elementi collegati NON verranno eliminati: resteranno nel gestionale senza luogo strutturato.\n\nL'operazione sulla casa non può essere annullata.",
+                    home.name, room_count, item_count
                 ),
             )
             .reply_markup(home_delete_keyboard(id))
             .await?;
         }
         Ok(None) => {
-            bot.send_message(chat_id, format!("Casa #{id} non trovata."))
+            bot.send_message(chat_id, "Casa non trovata.")
                 .reply_markup(locations_menu_keyboard())
                 .await?;
         }
@@ -1399,13 +1753,13 @@ async fn delete_home_and_report(
         Ok(true) => {
             bot.send_message(
                 chat_id,
-                format!("🗑 Casa #{id} eliminata. Gli oggetti sono rimasti nel gestionale."),
+                "🗑 Casa eliminata. Gli oggetti sono rimasti nel gestionale.",
             )
             .reply_markup(locations_menu_keyboard())
             .await?;
         }
         Ok(false) => {
-            bot.send_message(chat_id, format!("Casa #{id} non trovata."))
+            bot.send_message(chat_id, "Casa non trovata.")
                 .reply_markup(locations_menu_keyboard())
                 .await?;
         }
@@ -1431,15 +1785,15 @@ async fn send_room_delete_confirmation(
             bot.send_message(
                 chat_id,
                 format!(
-                    "⚠️ Eliminare la stanza?\n\n🚪 {}\n🏠 {}\n#{}\n\nI {} elementi collegati NON verranno eliminati: resteranno associati alla casa, ma senza stanza.\nI {} contenitori della stanza verranno mantenuti e promossi direttamente nella casa, conservando la loro gerarchia.\n\nL'operazione sulla stanza non può essere annullata.",
-                    room.name, room.home_name, room.id, item_count, container_count
+                    "⚠️ Eliminare la stanza?\n\n🚪 {}\n🏠 {}\n\nI {} elementi collegati NON verranno eliminati: resteranno associati alla casa, ma senza stanza.\nI {} contenitori della stanza verranno mantenuti e promossi direttamente nella casa, conservando la loro gerarchia.\n\nL'operazione sulla stanza non può essere annullata.",
+                    room.name, room.home_name, item_count, container_count
                 ),
             )
             .reply_markup(room_delete_keyboard(&room))
             .await?;
         }
         Ok(None) => {
-            bot.send_message(chat_id, format!("Stanza #{id} non trovata."))
+            bot.send_message(chat_id, "Stanza non trovata.")
                 .reply_markup(locations_menu_keyboard())
                 .await?;
         }
@@ -1461,7 +1815,7 @@ async fn delete_room_and_report(
     let room = match get_room(pool, id).await {
         Ok(Some(room)) => room,
         Ok(None) => {
-            bot.send_message(chat_id, format!("Stanza #{id} non trovata."))
+            bot.send_message(chat_id, "Stanza non trovata.")
                 .reply_markup(locations_menu_keyboard())
                 .await?;
             return Ok(());
@@ -1478,14 +1832,14 @@ async fn delete_room_and_report(
         Ok(true) => {
             bot.send_message(
                 chat_id,
-                format!("🗑 Stanza #{id} eliminata. Gli oggetti restano associati alla casa."),
+                "🗑 Stanza eliminata. Gli oggetti restano associati alla casa.",
             )
             .reply_markup(home_detail_keyboard(room.home_id, &[]))
             .await?;
             show_home_detail(bot, chat_id, pool, room.home_id).await?;
         }
         Ok(false) => {
-            bot.send_message(chat_id, format!("Stanza #{id} non trovata."))
+            bot.send_message(chat_id, "Stanza non trovata.")
                 .reply_markup(locations_menu_keyboard())
                 .await?;
         }
@@ -1505,8 +1859,7 @@ async fn show_item_location_picker(
     item_id: i64,
 ) -> ResponseResult<()> {
     if !object_exists(pool, item_id).await.unwrap_or(false) {
-        bot.send_message(chat_id, format!("Oggetto #{item_id} non trovato."))
-            .await?;
+        bot.send_message(chat_id, "Oggetto non trovato.").await?;
         return Ok(());
     }
 
@@ -1526,20 +1879,20 @@ async fn show_item_location_picker(
     let text = if homes.is_empty() {
         if is_move {
             format!(
-                "🚚 Sposta oggetto #{item_id}\n\nPosizione attuale: {current}\n\nNon ci sono altre case disponibili. Creane una dalla sezione 🏠 Case e stanze."
+                "🚚 Sposta oggetto\n\nPosizione attuale: {current}\n\nNon ci sono altre case disponibili. Creane una dalla sezione 🏠 Case e stanze."
             )
         } else {
             format!(
-                "🏠 Assegna luogo all'oggetto #{item_id}\n\nPosizione attuale: {current}\n\nNon ci sono ancora case. Creane una dalla sezione 🏠 Case e stanze."
+                "🏠 Assegna luogo all'oggetto\n\nPosizione attuale: {current}\n\nNon ci sono ancora case. Creane una dalla sezione 🏠 Case e stanze."
             )
         }
     } else if is_move {
         format!(
-            "🚚 Sposta oggetto #{item_id}\n\nPosizione attuale: {current}\n\nScegli la nuova casa. Nei passaggi successivi potrai scegliere anche una stanza o un contenitore."
+            "🚚 Sposta oggetto\n\nPosizione attuale: {current}\n\nScegli la nuova casa. Nei passaggi successivi potrai scegliere anche una stanza o un contenitore."
         )
     } else {
         format!(
-            "🏠 Assegna luogo all'oggetto #{item_id}\n\nPosizione attuale: {current}\n\nScegli la casa. Nei passaggi successivi potrai scegliere anche una stanza o un contenitore."
+            "🏠 Assegna luogo all'oggetto\n\nPosizione attuale: {current}\n\nScegli la casa. Nei passaggi successivi potrai scegliere anche una stanza o un contenitore."
         )
     };
 
@@ -1557,7 +1910,7 @@ async fn show_home_destination_picker(
     home_id: i64,
 ) -> ResponseResult<()> {
     let Some(home) = get_home(pool, home_id).await.unwrap_or(None) else {
-        bot.send_message(chat_id, format!("Casa #{home_id} non trovata."))
+        bot.send_message(chat_id, "Casa non trovata.")
             .reply_markup(locations_menu_keyboard())
             .await?;
         return Ok(());
@@ -1630,7 +1983,7 @@ async fn show_home_destination_picker(
     bot.send_message(
         chat_id,
         format!(
-            "{action} #{item_id}\n\nPosizione attuale: {current}\nDestinazione scelta: 🏠 {}\n\nPuoi spostare l'oggetto direttamente nella casa, entrare in una stanza oppure scegliere un contenitore direttamente nella casa.",
+            "{action}\n\nPosizione attuale: {current}\nDestinazione scelta: 🏠 {}\n\nPuoi spostare l'oggetto direttamente nella casa, entrare in una stanza oppure scegliere un contenitore direttamente nella casa.",
             home.name
         ),
     )
@@ -1647,7 +2000,7 @@ async fn show_room_destination_picker(
     room_id: i64,
 ) -> ResponseResult<()> {
     let Some(room) = get_room(pool, room_id).await.unwrap_or(None) else {
-        bot.send_message(chat_id, format!("Stanza #{room_id} non trovata."))
+        bot.send_message(chat_id, "Stanza non trovata.")
             .reply_markup(locations_menu_keyboard())
             .await?;
         return Ok(());
@@ -1713,7 +2066,7 @@ async fn show_room_destination_picker(
     bot.send_message(
         chat_id,
         format!(
-            "{action} #{item_id}\n\nPosizione attuale: {current}\nDestinazione scelta: 🏠 {} / 🚪 {}\n\nPuoi fermarti nella stanza oppure entrare in uno dei suoi contenitori.",
+            "{action}\n\nPosizione attuale: {current}\nDestinazione scelta: 🏠 {} / 🚪 {}\n\nPuoi fermarti nella stanza oppure entrare in uno dei suoi contenitori.",
             room.home_name, room.name
         ),
     )
@@ -1734,7 +2087,7 @@ async fn show_container_destination_picker(
         .ok()
         .flatten()
     else {
-        bot.send_message(chat_id, format!("Contenitore #{container_id} non trovato."))
+        bot.send_message(chat_id, "Contenitore non trovato.")
             .reply_markup(locations_menu_keyboard())
             .await?;
         return Ok(());
@@ -1814,7 +2167,7 @@ async fn show_container_destination_picker(
     bot.send_message(
         chat_id,
         format!(
-            "{action} #{item_id}\n\nPosizione attuale: {current}\nDestinazione scelta: 📦 {}\n\nPuoi spostare qui l'oggetto oppure entrare in un sottocontenitore.",
+            "{action}\n\nPosizione attuale: {current}\nDestinazione scelta: 📦 {}\n\nPuoi spostare qui l'oggetto oppure entrare in un sottocontenitore.",
             crate::modules::contenitori::format_path_for_ui(&path)
         ),
     )
@@ -1830,7 +2183,7 @@ async fn send_objects_for_home(
     home_id: i64,
 ) -> ResponseResult<()> {
     let Some(home) = get_home(pool, home_id).await.unwrap_or(None) else {
-        bot.send_message(chat_id, format!("Casa #{home_id} non trovata."))
+        bot.send_message(chat_id, "Casa non trovata.")
             .reply_markup(locations_menu_keyboard())
             .await?;
         return Ok(());
@@ -1858,7 +2211,7 @@ async fn send_objects_for_room(
     room_id: i64,
 ) -> ResponseResult<()> {
     let Some(room) = get_room(pool, room_id).await.unwrap_or(None) else {
-        bot.send_message(chat_id, format!("Stanza #{room_id} non trovata."))
+        bot.send_message(chat_id, "Stanza non trovata.")
             .reply_markup(locations_menu_keyboard())
             .await?;
         return Ok(());
@@ -1900,9 +2253,9 @@ async fn send_filtered_objects(
 
     let mut text = format!("🏷️ Oggetti in:\n{title}\n\n");
     for object in objects {
-        text.push_str(&format!("#{} · {}", object.id, object.name));
-        if let Some((location, command)) = summary_location(pool, object).await {
-            text.push_str(&format!("\n📍 {location}\n{command}"));
+        text.push_str(&object.name);
+        if let Some(location) = summary_location(pool, object).await {
+            text.push_str(&format!("\n📍 {location}"));
         }
         text.push_str("\n\n");
     }
@@ -2043,29 +2396,23 @@ fn location_change_message(
     }
 }
 
-async fn summary_location(
-    pool: &SqlitePool,
-    object: &LocatedObjectSummary,
-) -> Option<(String, String)> {
+async fn summary_location(pool: &SqlitePool, object: &LocatedObjectSummary) -> Option<String> {
     if let Some(container_id) = object.container_id {
         if let Ok(Some(path)) =
             crate::modules::contenitori::container_path(pool, container_id).await
         {
-            return Some((
-                crate::modules::contenitori::format_path_for_ui(&path),
-                format!("/luogo_c{container_id}"),
-            ));
+            return Some(crate::modules::contenitori::format_path_for_ui(&path));
         }
     }
-    if let (Some(room_id), Some(home), Some(room)) = (
+    if let (Some(_), Some(home), Some(room)) = (
         object.room_id,
         object.home_name.as_deref(),
         object.room_name.as_deref(),
     ) {
-        return Some((format!("{home} / {room}"), format!("/luogo_r{room_id}")));
+        return Some(format!("{home} / {room}"));
     }
-    if let (Some(home_id), Some(home)) = (object.home_id, object.home_name.as_deref()) {
-        return Some((home.to_string(), format!("/luogo_h{home_id}")));
+    if let (Some(_), Some(home)) = (object.home_id, object.home_name.as_deref()) {
+        return Some(home.to_string());
     }
     None
 }
@@ -3379,7 +3726,7 @@ fn home_list_keyboard(homes: &[HomeRecord]) -> InlineKeyboardMarkup {
         .iter()
         .map(|home| {
             vec![button(
-                &format!("🏠 #{} · {}", home.id, truncate_chars(&home.name, 38)),
+                &format!("🏠 {}", truncate_chars(&home.name, 44)),
                 &format!("loc:home:{}", home.id),
             )]
         })
@@ -3536,7 +3883,7 @@ fn filtered_objects_keyboard(
         .iter()
         .map(|object| {
             vec![button(
-                &format!("🏷️ #{} · {}", object.id, truncate_chars(&object.name, 36)),
+                &format!("🏷️ {}", truncate_chars(&object.name, 42)),
                 &format!("oggetti:view:{}", object.id),
             )]
         })
@@ -4226,6 +4573,32 @@ mod tests {
     }
 
     #[test]
+    fn comandi_luogo_legibili_normalizzano_accenti_e_collisioni() {
+        assert_eq!(slugify_command_component("Città Ospiti"), "citta_ospiti");
+        assert!(!is_friendly_location_command("/casa_nuova"));
+        assert!(is_friendly_location_command("/stanza_camera"));
+        let seeds = vec![
+            FriendlyCommandSeed {
+                prefix: "/stanza_",
+                primary: "Camera".to_string(),
+                contexts: vec!["Casa principale".to_string(), "Personale".to_string()],
+                target: FriendlyLocationTarget::Room(10),
+                sort_id: 10,
+            },
+            FriendlyCommandSeed {
+                prefix: "/stanza_",
+                primary: "Camera".to_string(),
+                contexts: vec!["Casa Livorno".to_string(), "Personale".to_string()],
+                target: FriendlyLocationTarget::Room(11),
+                sort_id: 11,
+            },
+        ];
+        let commands = build_unique_friendly_commands(&seeds);
+        assert_eq!(commands[0].command, "/stanza_camera_casa_principale");
+        assert_eq!(commands[1].command, "/stanza_camera_casa_livorno");
+    }
+
+    #[test]
     fn albero_luoghi_mantiene_gerarchia_stanza_e_contenitori() {
         let rooms = vec![RoomRecord {
             id: 2,
@@ -4250,11 +4623,18 @@ mod tests {
             },
         ];
 
-        let nodes = build_home_nodes(1, &rooms, &containers);
+        let room_commands = HashMap::from([(2, "/stanza_garage".to_string())]);
+        let container_commands = HashMap::from([
+            (10, "/contenitore_armadio".to_string()),
+            (11, "/contenitore_ripiano".to_string()),
+        ]);
+        let nodes = build_home_nodes(1, &rooms, &containers, &room_commands, &container_commands);
         assert_eq!(nodes.len(), 1);
-        assert_eq!(nodes[0].command, "/luogo_r2");
-        assert_eq!(nodes[0].children[0].command, "/luogo_c10");
-        assert_eq!(nodes[0].children[0].children[0].command, "/luogo_c11");
+        assert_eq!(nodes[0].label, "🚪 Garage");
+        assert_eq!(nodes[0].command, "/stanza_garage");
+        assert_eq!(nodes[0].children[0].label, "📦 Armadio");
+        assert_eq!(nodes[0].children[0].command, "/contenitore_armadio");
+        assert_eq!(nodes[0].children[0].children[0].label, "📦 Ripiano");
     }
 
     #[test]

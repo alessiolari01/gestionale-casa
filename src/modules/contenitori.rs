@@ -609,7 +609,7 @@ pub async fn move_container(
     crate::identity::ensure_can_write_space(pool, target_space).await?;
     ensure!(
         current_space == target_space,
-        "un contenitore non puo' essere trasferito tra spazi diversi; sposta i singoli oggetti"
+        "un contenitore non può essere trasferito tra spazi diversi; sposta i singoli oggetti"
     );
     let mut tx = pool.begin().await?;
     let Some(current) = get_container_conn(&mut tx, id).await? else {
@@ -1042,7 +1042,7 @@ async fn show_container_return_target(
 pub async fn show_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
-        "📦 Contenitori\n\nGestisci armadi, scatole, ripiani e altre sotto-posizioni annidabili.\n\nPuoi creare un oggetto direttamente dal luogo corrente; la gestione completa degli spostamenti oggetto ↔ contenitore continua nel 6C.3.",
+        "📦 Contenitori\n\nGestisci armadi, scatole, ripiani e altre sotto-posizioni annidabili.\n\nPuoi creare oggetti direttamente dal luogo corrente e spostarli tra casa, stanza e contenitore.",
     )
     .reply_markup(containers_menu_keyboard())
     .await?;
@@ -1072,7 +1072,7 @@ pub async fn handle_message(
                 } else {
                     bot.send_message(
                         msg.chat.id,
-                        "Uso: /contenitore <id>\nEsempio: /contenitore 3",
+                        "Apri /contenitori e scegli il contenitore dai pulsanti.",
                     )
                     .reply_markup(containers_menu_keyboard())
                     .await?;
@@ -1250,7 +1250,7 @@ pub async fn handle_callback(
                 ask_container_name(bot, chat_id, Some(&parent.name)).await?;
             }
             Ok(None) => {
-                bot.send_message(chat_id, format!("Contenitore #{parent_id} non trovato."))
+                bot.send_message(chat_id, "Contenitore non trovato.")
                     .reply_markup(containers_menu_keyboard())
                     .await?;
             }
@@ -1304,7 +1304,7 @@ pub async fn handle_callback(
                 .await?;
             }
             Ok(None) => {
-                bot.send_message(chat_id, format!("Contenitore #{id} non trovato."))
+                bot.send_message(chat_id, "Contenitore non trovato.")
                     .reply_markup(containers_menu_keyboard())
                     .await?;
             }
@@ -1440,7 +1440,7 @@ async fn show_scope_picker_for_new(
     home_id: i64,
 ) -> ResponseResult<()> {
     let Some(home) = read_ui_home(pool, home_id).await.unwrap_or(None) else {
-        bot.send_message(chat_id, format!("Casa #{home_id} non trovata."))
+        bot.send_message(chat_id, "Casa non trovata.")
             .reply_markup(containers_menu_keyboard())
             .await?;
         return Ok(());
@@ -1561,7 +1561,7 @@ async fn rename_container_from_input(
         Ok(Some(container)) => container,
         Ok(None) => {
             sessions.clear_chat(chat_id.0);
-            bot.send_message(chat_id, format!("Contenitore #{id} non trovato."))
+            bot.send_message(chat_id, "Contenitore non trovato.")
                 .reply_markup(containers_menu_keyboard())
                 .await?;
             return Ok(());
@@ -1637,16 +1637,9 @@ async fn show_all_containers(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> R
             .flatten()
             .map(|path| format_container_path(&path))
             .unwrap_or_else(|| "Percorso non disponibile".to_string());
-        text.push_str(&format!(
-            "#{} · {}\n📍 {}\n/luogo_c{}\n\n",
-            container.id, container.name, path, container.id
-        ));
+        text.push_str(&format!("{}\n📍 {}\n\n", container.name, path));
         rows.push(vec![button(
-            &format!(
-                "📦 #{} · {}",
-                container.id,
-                truncate_chars(&container.name, 32)
-            ),
+            &format!("📦 {}", truncate_chars(&container.name, 40)),
             &format!("c:v:{}", encode_id(container.id)),
         )]);
         if text.chars().count() > 3200 {
@@ -1674,7 +1667,7 @@ async fn show_home_scope(
     home_id: i64,
 ) -> ResponseResult<()> {
     let Some(home) = read_ui_home(pool, home_id).await.unwrap_or(None) else {
-        bot.send_message(chat_id, format!("Casa #{home_id} non trovata."))
+        bot.send_message(chat_id, "Casa non trovata.")
             .reply_markup(containers_menu_keyboard())
             .await?;
         return Ok(());
@@ -1699,11 +1692,7 @@ async fn show_home_scope(
 
     for container in roots.iter().take(20) {
         rows.push(vec![button(
-            &format!(
-                "📦 #{} · {}",
-                container.id,
-                truncate_chars(&container.name, 34)
-            ),
+            &format!("📦 {}", truncate_chars(&container.name, 42)),
             &format!("c:v:{}", encode_id(container.id)),
         )]);
     }
@@ -1741,7 +1730,7 @@ async fn show_room_scope(
     room_id: i64,
 ) -> ResponseResult<()> {
     let Some(room) = read_ui_room(pool, room_id).await.unwrap_or(None) else {
-        bot.send_message(chat_id, format!("Stanza #{room_id} non trovata."))
+        bot.send_message(chat_id, "Stanza non trovata.")
             .reply_markup(containers_menu_keyboard())
             .await?;
         return Ok(());
@@ -1755,11 +1744,7 @@ async fn show_room_scope(
         .take(30)
         .map(|container| {
             vec![button(
-                &format!(
-                    "📦 #{} · {}",
-                    container.id,
-                    truncate_chars(&container.name, 34)
-                ),
+                &format!("📦 {}", truncate_chars(&container.name, 42)),
                 &format!("c:v:{}", encode_id(container.id)),
             )]
         })
@@ -1806,7 +1791,7 @@ pub(crate) async fn show_container_detail(
     let container = match get_container(pool, id).await {
         Ok(Some(container)) => container,
         Ok(None) => {
-            bot.send_message(chat_id, format!("Contenitore #{id} non trovato."))
+            bot.send_message(chat_id, "Contenitore non trovato.")
                 .reply_markup(containers_menu_keyboard())
                 .await?;
             return Ok(());
@@ -1822,7 +1807,7 @@ pub(crate) async fn show_container_detail(
     let path = match container_path(pool, id).await {
         Ok(Some(path)) => path,
         Ok(None) => {
-            bot.send_message(chat_id, format!("Contenitore #{id} non trovato."))
+            bot.send_message(chat_id, "Contenitore non trovato.")
                 .await?;
             return Ok(());
         }
@@ -1895,8 +1880,7 @@ pub(crate) async fn show_container_detail(
     bot.send_message(
         chat_id,
         format!(
-            "📦 #{} · {}\n\n📍 {}\n\nContiene direttamente:\n📦 {} sottocontenitori\n🏷️ {} oggetti{}",
-            container.id,
+            "📦 {}\n\n📍 {}\n\nContiene direttamente:\n📦 {} sottocontenitori\n🏷️ {} oggetti{}",
             container.name,
             path_text,
             children.len(),
@@ -1916,7 +1900,7 @@ async fn show_container_manage(
     id: i64,
 ) -> ResponseResult<()> {
     let Some(container) = get_container(pool, id).await.unwrap_or(None) else {
-        bot.send_message(chat_id, format!("Contenitore #{id} non trovato."))
+        bot.send_message(chat_id, "Contenitore non trovato.")
             .reply_markup(containers_menu_keyboard())
             .await?;
         return Ok(());
@@ -1924,10 +1908,7 @@ async fn show_container_manage(
 
     bot.send_message(
         chat_id,
-        format!(
-            "⚙️ Gestisci contenitore\n\n📦 #{} · {}",
-            container.id, container.name
-        ),
+        format!("⚙️ Gestisci contenitore\n\n📦 {}", container.name),
     )
     .reply_markup(InlineKeyboardMarkup::new(vec![
         vec![
@@ -1951,7 +1932,7 @@ async fn show_container_objects(
     id: i64,
 ) -> ResponseResult<()> {
     let Some(container) = get_container(pool, id).await.unwrap_or(None) else {
-        bot.send_message(chat_id, format!("Contenitore #{id} non trovato."))
+        bot.send_message(chat_id, "Contenitore non trovato.")
             .reply_markup(containers_menu_keyboard())
             .await?;
         return Ok(());
@@ -1970,7 +1951,7 @@ async fn show_container_objects(
         .iter()
         .map(|object| {
             vec![button(
-                &format!("🏷️ #{} · {}", object.id, truncate_chars(&object.name, 36)),
+                &format!("🏷️ {}", truncate_chars(&object.name, 42)),
                 &format!("oggetti:view:{}", object.id),
             )]
         })
@@ -1981,11 +1962,11 @@ async fn show_container_objects(
     ]);
 
     let text = if objects.is_empty() {
-        format!("📋 Oggetti in questo contenitore\n\n📍 {path}\n/luogo_c{id}\n\nNessun oggetto direttamente in questo contenitore.")
+        format!("📋 Oggetti in questo contenitore\n\n📍 {path}\n\nNessun oggetto direttamente in questo contenitore.")
     } else {
-        let mut text = format!("📋 Oggetti in questo contenitore\n\n📍 {path}\n/luogo_c{id}\n\n");
+        let mut text = format!("📋 Oggetti in questo contenitore\n\n📍 {path}\n\n");
         for object in &objects {
-            text.push_str(&format!("#{} · {}\n", object.id, object.name));
+            text.push_str(&format!("{}\n", object.name));
         }
         text
     };
@@ -2003,7 +1984,7 @@ async fn show_delete_confirmation(
     id: i64,
 ) -> ResponseResult<()> {
     let Some(container) = get_container(pool, id).await.unwrap_or(None) else {
-        bot.send_message(chat_id, format!("Contenitore #{id} non trovato."))
+        bot.send_message(chat_id, "Contenitore non trovato.")
             .reply_markup(containers_menu_keyboard())
             .await?;
         return Ok(());
@@ -2048,7 +2029,7 @@ async fn delete_container_and_report(
     id: i64,
 ) -> ResponseResult<()> {
     let Some(before) = get_container(pool, id).await.unwrap_or(None) else {
-        bot.send_message(chat_id, format!("Contenitore #{id} non trovato."))
+        bot.send_message(chat_id, "Contenitore non trovato.")
             .reply_markup(containers_menu_keyboard())
             .await?;
         return Ok(());
@@ -2073,7 +2054,7 @@ async fn delete_container_and_report(
             }
         }
         Ok(false) => {
-            bot.send_message(chat_id, format!("Contenitore #{id} non trovato."))
+            bot.send_message(chat_id, "Contenitore non trovato.")
                 .reply_markup(containers_menu_keyboard())
                 .await?;
         }
@@ -2103,7 +2084,7 @@ async fn show_move_home_picker(
     id: i64,
 ) -> ResponseResult<()> {
     let Some(container) = get_container(pool, id).await.unwrap_or(None) else {
-        bot.send_message(chat_id, format!("Contenitore #{id} non trovato."))
+        bot.send_message(chat_id, "Contenitore non trovato.")
             .reply_markup(containers_menu_keyboard())
             .await?;
         return Ok(());
@@ -2144,13 +2125,13 @@ async fn show_move_scope_picker(
     home_id: i64,
 ) -> ResponseResult<()> {
     if get_container(pool, id).await.unwrap_or(None).is_none() {
-        bot.send_message(chat_id, format!("Contenitore #{id} non trovato."))
+        bot.send_message(chat_id, "Contenitore non trovato.")
             .reply_markup(containers_menu_keyboard())
             .await?;
         return Ok(());
     }
     let Some(home) = read_ui_home(pool, home_id).await.unwrap_or(None) else {
-        bot.send_message(chat_id, format!("Casa #{home_id} non trovata."))
+        bot.send_message(chat_id, "Casa non trovata.")
             .reply_markup(containers_menu_keyboard())
             .await?;
         return Ok(());
@@ -2199,7 +2180,7 @@ async fn show_move_parent_picker(
     room_id: Option<i64>,
 ) -> ResponseResult<()> {
     let Some(container) = get_container(pool, id).await.unwrap_or(None) else {
-        bot.send_message(chat_id, format!("Contenitore #{id} non trovato."))
+        bot.send_message(chat_id, "Contenitore non trovato.")
             .reply_markup(containers_menu_keyboard())
             .await?;
         return Ok(());
@@ -2223,11 +2204,7 @@ async fn show_move_parent_picker(
     )]];
     for candidate in candidates.iter().take(30) {
         rows.push(vec![button(
-            &format!(
-                "📦 #{} · {}",
-                candidate.id,
-                truncate_chars(&candidate.name, 34)
-            ),
+            &format!("📦 {}", truncate_chars(&candidate.name, 42)),
             &move_target_callback(id, home_id, room_id, Some(candidate.id)),
         )]);
     }
@@ -2499,7 +2476,7 @@ async fn scope_label(pool: &SqlitePool, home_id: i64, room_id: Option<i64>) -> S
     if let Ok(Some(home)) = read_ui_home(pool, home_id).await {
         return format!("🏠 {}", home.name);
     }
-    format!("casa #{home_id}")
+    "casa non disponibile".to_string()
 }
 
 fn format_container_path(path: &ContainerPath) -> String {

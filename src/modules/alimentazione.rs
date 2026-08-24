@@ -8,7 +8,7 @@
 //!   centrale e quindi si sincronizzano senza creare copie.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
 };
 
@@ -35,16 +35,32 @@ enum FoodConversationState {
     Unit {
         name: String,
     },
+    PendingCategory {
+        name: String,
+        unit_id: Option<i64>,
+    },
     Visibility {
         name: String,
         unit_id: Option<i64>,
+        category_id: i64,
     },
     Spaces {
         name: String,
         unit_id: Option<i64>,
+        category_id: i64,
         selected: Vec<i64>,
     },
     Search,
+    FilterCategories {
+        selected: Vec<i64>,
+    },
+    EditFoodName {
+        food_id: i64,
+    },
+    EditFoodSpaces {
+        food_id: i64,
+        selected: Vec<i64>,
+    },
 }
 
 impl FoodSessionStore {
@@ -96,6 +112,13 @@ struct SpaceRecord {
 }
 
 #[derive(Debug, Clone, FromRow)]
+struct CategoryRecord {
+    id: i64,
+    name: String,
+    emoji: String,
+}
+
+#[derive(Debug, Clone, FromRow)]
 struct FoodRecord {
     id: i64,
     name: String,
@@ -115,9 +138,9 @@ pub async fn show_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
          renderli visibili.\n\n\
          Gli alimenti condivisi da altre persone negli spazi comuni vengono \
          letti direttamente dal catalogo centrale: usa 🔄 Aggiorna alimenti \
-         per rileggere subito le novita'.\n\n\
+         per rileggere subito le novità.\n\n\
          Comandi: /alimenti · /alimento_nuovo · /alimenti_lista · \
-         /alimento_cerca · /alimento <id>",
+         /alimento_cerca",
     )
     .reply_markup(food_menu_keyboard())
     .await?;
@@ -184,9 +207,12 @@ pub async fn handle_message(
                 if let Some(id) = parse_positive_id(args) {
                     send_food_detail(bot, msg.chat.id, pool, id).await?;
                 } else {
-                    bot.send_message(msg.chat.id, "Uso: /alimento <id>\nEsempio: /alimento 4")
-                        .reply_markup(food_menu_keyboard())
-                        .await?;
+                    bot.send_message(
+                        msg.chat.id,
+                        "Apri un alimento da 📋 Elenco alimenti oppure usa 🔎 Cerca.",
+                    )
+                    .reply_markup(food_menu_keyboard())
+                    .await?;
                 }
                 return Ok(true);
             }
@@ -195,7 +221,7 @@ pub async fn handle_message(
                     sessions.clear_chat(chat_id);
                     bot.send_message(
                         msg.chat.id,
-                        "❌ Operazione annullata. Nessuna bozza e nessun nuovo alimento sono stati salvati.",
+                        "❌ Operazione annullata. Nessuna modifica pendente è stata salvata.",
                     )
                     .await?;
                     show_menu(bot, msg.chat.id).await?;
@@ -220,10 +246,11 @@ pub async fn handle_message(
         Some(FoodConversationState::Unit { name }) => {
             match find_unit_by_text(pool, text).await {
                 Ok(Some(unit)) => {
-                    start_visibility_choice(
+                    start_category_choice(
                         bot,
                         msg.chat.id,
                         chat_id,
+                        pool,
                         sessions,
                         name,
                         Some(unit.id),
@@ -233,10 +260,10 @@ pub async fn handle_message(
                 Ok(None) => {
                     bot.send_message(
                         msg.chat.id,
-                        "⚠️ Unita' non riconosciuta.\n\n\
+                        "⚠️ Unità non riconosciuta.\n\n\
                          Scrivi uno tra: g, kg, ml, l, pz, cucchiaio, \
                          cucchiaino, qb.\n\
-                         Scegli un'unita' per continuare.",
+                         Scegli un'unità per continuare.",
                     )
                     .reply_markup(
                         unit_keyboard_from_db(pool)
@@ -246,20 +273,53 @@ pub async fn handle_message(
                     .await?;
                 }
                 Err(error) => {
-                    tracing::error!(?error, "Errore ricerca unita' alimento");
-                    bot.send_message(msg.chat.id, "⚠️ Non riesco a leggere le unita' di misura.")
+                    tracing::error!(?error, "Errore ricerca unità alimento");
+                    bot.send_message(msg.chat.id, "⚠️ Non riesco a leggere le unità di misura.")
                         .reply_markup(cancel_keyboard())
                         .await?;
                 }
             }
             Ok(true)
         }
-        Some(FoodConversationState::Visibility { .. })
-        | Some(FoodConversationState::Spaces { .. }) => {
+        Some(FoodConversationState::PendingCategory { .. }) => {
             bot.send_message(
                 msg.chat.id,
-                "Usa i pulsanti per scegliere dove rendere visibile l'alimento, \
-                 oppure /annulla.",
+                "Usa i pulsanti per scegliere la categoria dell'alimento, oppure /annulla.",
+            )
+            .await?;
+            Ok(true)
+        }
+        Some(FoodConversationState::Visibility { .. })
+        | Some(FoodConversationState::Spaces { .. })
+        | Some(FoodConversationState::EditFoodSpaces { .. }) => {
+            bot.send_message(
+                msg.chat.id,
+                "Usa i pulsanti della schermata corrente oppure /annulla.",
+            )
+            .await?;
+            Ok(true)
+        }
+        Some(FoodConversationState::EditFoodName { food_id }) => {
+            sessions.clear_chat(chat_id);
+            match update_food_name(pool, food_id, text).await {
+                Ok(()) => {
+                    bot.send_message(msg.chat.id, "✅ Nome alimento aggiornato.")
+                        .await?;
+                    send_food_detail(bot, msg.chat.id, pool, food_id).await?;
+                }
+                Err(error) => {
+                    tracing::warn!(?error, food_id, "Modifica nome alimento non riuscita");
+                    bot.send_message(msg.chat.id, format!("⚠️ {error}"))
+                        .reply_markup(food_menu_keyboard())
+                        .await?;
+                }
+            }
+            Ok(true)
+        }
+        Some(FoodConversationState::FilterCategories { .. }) => {
+            bot.send_message(
+                msg.chat.id,
+                "Usa i pulsanti per selezionare una o più categorie e poi premi ✅ Applica.",
             )
             .await?;
             Ok(true)
@@ -321,13 +381,553 @@ pub async fn handle_callback(
             .await?;
             Ok(true)
         }
+        "food:search:list" => {
+            sessions.set(chat_id.0, FoodConversationState::Search);
+            bot.send_message(
+                chat_id,
+                "🔎 Cerca alimento\n\nScrivi il nome o un alias da cercare.\n\nUsa /annulla per uscire.",
+            )
+            .reply_markup(search_from_list_keyboard())
+            .await?;
+            Ok(true)
+        }
+        "food:filter" => {
+            let selected = match sessions.get(chat_id.0) {
+                Some(FoodConversationState::FilterCategories { selected }) => selected,
+                _ => Vec::new(),
+            };
+            sessions.set(
+                chat_id.0,
+                FoodConversationState::FilterCategories {
+                    selected: selected.clone(),
+                },
+            );
+            send_food_filter_menu(bot, chat_id, pool, &selected).await?;
+            Ok(true)
+        }
+        "food:filter:all" => {
+            sessions.clear_chat(chat_id.0);
+            send_food_list(bot, chat_id, pool, false).await?;
+            Ok(true)
+        }
+        "food:filter:clear" => {
+            sessions.set(
+                chat_id.0,
+                FoodConversationState::FilterCategories {
+                    selected: Vec::new(),
+                },
+            );
+            send_food_filter_menu(bot, chat_id, pool, &[]).await?;
+            Ok(true)
+        }
+        "food:filter:apply" | "food:filter:refresh" => {
+            let selected = match sessions.get(chat_id.0) {
+                Some(FoodConversationState::FilterCategories { selected }) => selected,
+                _ => Vec::new(),
+            };
+
+            if selected.is_empty() {
+                sessions.clear_chat(chat_id.0);
+                send_food_list(bot, chat_id, pool, false).await?;
+            } else {
+                send_filtered_food_list(bot, chat_id, pool, &selected).await?;
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:filter:toggle:") => {
+            let category_id = data
+                .strip_prefix("food:filter:toggle:")
+                .and_then(|raw| raw.parse::<i64>().ok())
+                .filter(|id| *id > 0);
+
+            let Some(category_id) = category_id else {
+                bot.send_message(chat_id, "Filtro categoria non valido.")
+                    .reply_markup(food_menu_keyboard())
+                    .await?;
+                return Ok(true);
+            };
+
+            match list_categories(pool).await {
+                Ok(categories) if categories.iter().any(|category| category.id == category_id) => {
+                    let mut selected = match sessions.get(chat_id.0) {
+                        Some(FoodConversationState::FilterCategories { selected }) => selected,
+                        _ => Vec::new(),
+                    };
+
+                    if let Some(index) = selected.iter().position(|id| *id == category_id) {
+                        selected.remove(index);
+                    } else {
+                        selected.push(category_id);
+                        selected.sort_unstable();
+                        selected.dedup();
+                    }
+
+                    sessions.set(
+                        chat_id.0,
+                        FoodConversationState::FilterCategories {
+                            selected: selected.clone(),
+                        },
+                    );
+                    send_food_filter_menu(bot, chat_id, pool, &selected).await?;
+                }
+                Ok(_) => {
+                    bot.send_message(chat_id, "Categoria non disponibile.")
+                        .reply_markup(food_menu_keyboard())
+                        .await?;
+                }
+                Err(error) => {
+                    tracing::error!(?error, "Errore verifica categoria filtro multiplo");
+                    bot.send_message(chat_id, "⚠️ Non riesco a leggere le categorie.")
+                        .reply_markup(food_menu_keyboard())
+                        .await?;
+                }
+            }
+            Ok(true)
+        }
+
+        _ if data.starts_with("food:new:category:") => {
+            let category_id = data
+                .strip_prefix("food:new:category:")
+                .and_then(parse_positive_id);
+            let Some(category_id) = category_id else {
+                bot.send_message(chat_id, "Categoria non valida.").await?;
+                return Ok(true);
+            };
+            let Some(FoodConversationState::PendingCategory { name, unit_id }) =
+                sessions.get(chat_id.0)
+            else {
+                expired_creation(bot, chat_id).await?;
+                return Ok(true);
+            };
+            let valid = list_categories(pool)
+                .await
+                .map(|categories| categories.iter().any(|category| category.id == category_id))
+                .unwrap_or(false);
+            if !valid {
+                bot.send_message(chat_id, "Categoria non disponibile.")
+                    .await?;
+                return Ok(true);
+            }
+            start_visibility_choice(
+                bot,
+                chat_id,
+                chat_id.0,
+                sessions,
+                name,
+                unit_id,
+                category_id,
+            )
+            .await?;
+            Ok(true)
+        }
+        _ if data.starts_with("food:edit:menu:") => {
+            let food_id = data
+                .strip_prefix("food:edit:menu:")
+                .and_then(parse_positive_id);
+            if let Some(food_id) = food_id {
+                sessions.clear_chat(chat_id.0);
+                send_food_edit_menu(bot, chat_id, pool, food_id).await?;
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:edit:name:") => {
+            let food_id = data
+                .strip_prefix("food:edit:name:")
+                .and_then(parse_positive_id);
+            if let Some(food_id) = food_id {
+                if can_edit_food_current(pool, food_id).await.unwrap_or(false) {
+                    sessions.set(chat_id.0, FoodConversationState::EditFoodName { food_id });
+                    bot.send_message(
+                        chat_id,
+                        "📝 Nuovo nome\n\nScrivi il nuovo nome dell'alimento.",
+                    )
+                    .reply_markup(edit_text_keyboard(food_id))
+                    .await?;
+                } else {
+                    bot.send_message(
+                        chat_id,
+                        "⚠️ Non hai il permesso di modificare questo alimento.",
+                    )
+                    .reply_markup(food_menu_keyboard())
+                    .await?;
+                }
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:edit:unit:") => {
+            let food_id = data
+                .strip_prefix("food:edit:unit:")
+                .and_then(parse_positive_id);
+            if let Some(food_id) = food_id {
+                send_edit_unit_menu(bot, chat_id, pool, food_id).await?;
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:edit:setunit:") => {
+            let ids = data
+                .strip_prefix("food:edit:setunit:")
+                .and_then(parse_two_positive_ids);
+            if let Some((food_id, unit_id)) = ids {
+                match update_food_unit(pool, food_id, unit_id).await {
+                    Ok(()) => {
+                        bot.send_message(chat_id, "✅ Unità alimento aggiornata.")
+                            .await?;
+                        send_food_detail(bot, chat_id, pool, food_id).await?;
+                    }
+                    Err(error) => {
+                        bot.send_message(chat_id, format!("⚠️ {error}"))
+                            .reply_markup(food_menu_keyboard())
+                            .await?;
+                    }
+                }
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:edit:visibility:") => {
+            let food_id = data
+                .strip_prefix("food:edit:visibility:")
+                .and_then(parse_positive_id);
+            if let Some(food_id) = food_id {
+                send_edit_visibility_menu(bot, chat_id, pool, food_id).await?;
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:edit:vis:private:") => {
+            let food_id = data
+                .strip_prefix("food:edit:vis:private:")
+                .and_then(parse_positive_id);
+            if let Some(food_id) = food_id {
+                match replace_food_shares(pool, food_id, &[]).await {
+                    Ok(()) => send_food_detail(bot, chat_id, pool, food_id).await?,
+                    Err(error) => {
+                        bot.send_message(chat_id, format!("⚠️ {error}")).await?;
+                    }
+                }
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:edit:vis:default:") => {
+            let food_id = data
+                .strip_prefix("food:edit:vis:default:")
+                .and_then(parse_positive_id);
+            if let Some(food_id) = food_id {
+                let actor = identity::current_actor();
+                match replace_food_shares(pool, food_id, &[actor.spazio_id]).await {
+                    Ok(()) => send_food_detail(bot, chat_id, pool, food_id).await?,
+                    Err(error) => {
+                        bot.send_message(chat_id, format!("⚠️ {error}")).await?;
+                    }
+                }
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:edit:vis:all:") => {
+            let food_id = data
+                .strip_prefix("food:edit:vis:all:")
+                .and_then(parse_positive_id);
+            if let Some(food_id) = food_id {
+                match list_shareable_spaces(pool).await {
+                    Ok(spaces) => {
+                        let ids: Vec<i64> = spaces.iter().map(|space| space.id).collect();
+                        match replace_food_shares(pool, food_id, &ids).await {
+                            Ok(()) => send_food_detail(bot, chat_id, pool, food_id).await?,
+                            Err(error) => {
+                                bot.send_message(chat_id, format!("⚠️ {error}")).await?;
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        bot.send_message(chat_id, format!("⚠️ {error}")).await?;
+                    }
+                }
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:edit:vis:choose:") => {
+            let food_id = data
+                .strip_prefix("food:edit:vis:choose:")
+                .and_then(parse_positive_id);
+            if let Some(food_id) = food_id {
+                if !can_manage_food_current(pool, food_id)
+                    .await
+                    .unwrap_or(false)
+                {
+                    bot.send_message(chat_id, "⚠️ Non hai il permesso di gestire la visibilità.")
+                        .await?;
+                    return Ok(true);
+                }
+                match (
+                    list_shareable_spaces(pool).await,
+                    current_food_share_ids(pool, food_id).await,
+                ) {
+                    (Ok(spaces), Ok(selected)) => {
+                        sessions.set(
+                            chat_id.0,
+                            FoodConversationState::EditFoodSpaces {
+                                food_id,
+                                selected: selected.clone(),
+                            },
+                        );
+                        bot.send_message(
+                            chat_id,
+                            "🎛 Visibilità alimento\n\nSeleziona gli spazi e premi ✅ Salva.",
+                        )
+                        .reply_markup(edit_space_selection_keyboard(food_id, &spaces, &selected))
+                        .await?;
+                    }
+                    _ => {
+                        bot.send_message(chat_id, "⚠️ Non riesco a leggere gli spazi.")
+                            .await?;
+                    }
+                }
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:edit:space:") => {
+            let ids = data
+                .strip_prefix("food:edit:space:")
+                .and_then(parse_two_positive_ids);
+            if let Some((food_id, space_id)) = ids {
+                let Some(FoodConversationState::EditFoodSpaces {
+                    food_id: state_food_id,
+                    mut selected,
+                }) = sessions.get(chat_id.0)
+                else {
+                    bot.send_message(chat_id, "Selezione spazi scaduta.")
+                        .await?;
+                    return Ok(true);
+                };
+                if state_food_id != food_id {
+                    bot.send_message(chat_id, "Selezione spazi non valida.")
+                        .await?;
+                    return Ok(true);
+                }
+                match list_shareable_spaces(pool).await {
+                    Ok(spaces) if spaces.iter().any(|space| space.id == space_id) => {
+                        if let Some(index) = selected.iter().position(|id| *id == space_id) {
+                            selected.remove(index);
+                        } else {
+                            selected.push(space_id);
+                            selected.sort_unstable();
+                            selected.dedup();
+                        }
+                        sessions.set(
+                            chat_id.0,
+                            FoodConversationState::EditFoodSpaces {
+                                food_id,
+                                selected: selected.clone(),
+                            },
+                        );
+                        bot.send_message(chat_id, "🎛 Selezione aggiornata.")
+                            .reply_markup(edit_space_selection_keyboard(
+                                food_id, &spaces, &selected,
+                            ))
+                            .await?;
+                    }
+                    _ => {
+                        bot.send_message(chat_id, "Spazio non disponibile.").await?;
+                    }
+                }
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:edit:spaces:save:") => {
+            let food_id = data
+                .strip_prefix("food:edit:spaces:save:")
+                .and_then(parse_positive_id);
+            if let Some(food_id) = food_id {
+                let Some(FoodConversationState::EditFoodSpaces {
+                    food_id: state_food_id,
+                    selected,
+                }) = sessions.get(chat_id.0)
+                else {
+                    bot.send_message(chat_id, "Selezione spazi scaduta.")
+                        .await?;
+                    return Ok(true);
+                };
+                if state_food_id != food_id {
+                    bot.send_message(chat_id, "Selezione spazi non valida.")
+                        .await?;
+                    return Ok(true);
+                }
+                sessions.clear_chat(chat_id.0);
+                match replace_food_shares(pool, food_id, &selected).await {
+                    Ok(()) => send_food_detail(bot, chat_id, pool, food_id).await?,
+                    Err(error) => {
+                        bot.send_message(chat_id, format!("⚠️ {error}")).await?;
+                    }
+                }
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:edit:cancel:") => {
+            let food_id = data
+                .strip_prefix("food:edit:cancel:")
+                .and_then(parse_positive_id);
+            sessions.clear_chat(chat_id.0);
+            if let Some(food_id) = food_id {
+                bot.send_message(chat_id, "Modifica annullata.").await?;
+                send_food_detail(bot, chat_id, pool, food_id).await?;
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:permissions:") => {
+            let food_id = data
+                .strip_prefix("food:permissions:")
+                .and_then(parse_positive_id);
+            if let Some(food_id) = food_id {
+                send_food_permissions_menu(bot, chat_id, pool, food_id).await?;
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:perm:choose:") => {
+            let ids = data
+                .strip_prefix("food:perm:choose:")
+                .and_then(parse_two_positive_ids);
+            if let Some((food_id, user_id)) = ids {
+                send_permission_level_menu(bot, chat_id, pool, food_id, user_id).await?;
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:perm:send:") => {
+            let raw = data.strip_prefix("food:perm:send:").unwrap_or_default();
+            let parts: Vec<&str> = raw.split(':').collect();
+            if parts.len() == 3 {
+                let food_id = parts[0].parse::<i64>().ok().filter(|id| *id > 0);
+                let user_id = parts[1].parse::<i64>().ok().filter(|id| *id > 0);
+                let permission = match parts[2] {
+                    "manage" => Some(crate::resource_permissions::ResourcePermission::Manage),
+                    "edit" => Some(crate::resource_permissions::ResourcePermission::Edit),
+                    _ => None,
+                };
+                if let (Some(food_id), Some(user_id), Some(permission)) =
+                    (food_id, user_id, permission)
+                {
+                    match create_and_send_food_invite(bot, pool, food_id, user_id, permission).await
+                    {
+                        Ok(()) => {
+                            bot.send_message(chat_id, "✅ Invito inviato.").await?;
+                            send_food_permissions_menu(bot, chat_id, pool, food_id).await?;
+                        }
+                        Err(error) => {
+                            bot.send_message(chat_id, format!("⚠️ {error}")).await?;
+                        }
+                    }
+                }
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:perm:revoke:") => {
+            let ids = data
+                .strip_prefix("food:perm:revoke:")
+                .and_then(parse_two_positive_ids);
+            if let Some((food_id, user_id)) = ids {
+                match revoke_food_permission(pool, food_id, user_id).await {
+                    Ok(()) => {
+                        bot.send_message(chat_id, "✅ Permesso revocato.").await?;
+                        send_food_permissions_menu(bot, chat_id, pool, food_id).await?;
+                    }
+                    Err(error) => {
+                        bot.send_message(chat_id, format!("⚠️ {error}")).await?;
+                    }
+                }
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:invite:accept:") => {
+            let invite_id = data
+                .strip_prefix("food:invite:accept:")
+                .and_then(parse_positive_id);
+            let actor = identity::current_actor();
+            if let (Some(invite_id), Some(user_id)) = (invite_id, actor.utente_id) {
+                match crate::resource_permissions::accept_invite(pool, invite_id, user_id).await {
+                    Ok(invite) if invite.resource_type == "alimento" => {
+                        bot.send_message(chat_id, "✅ Invito accettato.").await?;
+                        send_food_detail(bot, chat_id, pool, invite.resource_id).await?;
+                    }
+                    Ok(_) => {
+                        bot.send_message(chat_id, "✅ Invito accettato.").await?;
+                    }
+                    Err(error) => {
+                        bot.send_message(chat_id, format!("⚠️ {error}")).await?;
+                    }
+                }
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:invite:decline:") => {
+            let invite_id = data
+                .strip_prefix("food:invite:decline:")
+                .and_then(parse_positive_id);
+            let actor = identity::current_actor();
+            if let (Some(invite_id), Some(user_id)) = (invite_id, actor.utente_id) {
+                match crate::resource_permissions::decline_invite(pool, invite_id, user_id).await {
+                    Ok(()) => {
+                        bot.send_message(chat_id, "Invito rifiutato.")
+                            .reply_markup(food_menu_keyboard())
+                            .await?;
+                    }
+                    Err(error) => {
+                        bot.send_message(chat_id, format!("⚠️ {error}")).await?;
+                    }
+                }
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:category:") => {
+            let food_id = data
+                .strip_prefix("food:category:")
+                .and_then(|raw| raw.parse::<i64>().ok())
+                .filter(|id| *id > 0);
+
+            if let Some(food_id) = food_id {
+                sessions.clear_chat(chat_id.0);
+                send_food_category_menu(bot, chat_id, pool, food_id).await?;
+            } else {
+                bot.send_message(chat_id, "Alimento non valido.")
+                    .reply_markup(food_menu_keyboard())
+                    .await?;
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:setcat:") => {
+            let ids = data
+                .strip_prefix("food:setcat:")
+                .and_then(parse_two_positive_ids);
+
+            if let Some((food_id, category_id)) = ids {
+                match set_food_category(pool, food_id, category_id).await {
+                    Ok(()) => {
+                        bot.send_message(chat_id, "✅ Categoria alimento aggiornata.")
+                            .await?;
+                        send_food_detail(bot, chat_id, pool, food_id).await?;
+                    }
+                    Err(error) => {
+                        tracing::warn!(
+                            ?error,
+                            food_id,
+                            category_id,
+                            "Cambio categoria alimento non riuscito"
+                        );
+                        bot.send_message(chat_id, format!("⚠️ {error}"))
+                            .reply_markup(food_menu_keyboard())
+                            .await?;
+                    }
+                }
+            } else {
+                bot.send_message(chat_id, "Categoria alimento non valida.")
+                    .reply_markup(food_menu_keyboard())
+                    .await?;
+            }
+            Ok(true)
+        }
         "food:cancel" => {
             let had_active_operation = sessions.has_active(chat_id.0);
             sessions.clear_chat(chat_id.0);
             if had_active_operation {
                 bot.send_message(
                     chat_id,
-                    "❌ Operazione annullata. Nessuna bozza e nessun nuovo alimento sono stati salvati.",
+                    "❌ Operazione annullata. Nessuna modifica pendente è stata salvata.",
                 )
                 .await?;
             }
@@ -339,7 +939,7 @@ pub async fn handle_callback(
                 sessions.clear_chat(chat_id.0);
                 bot.send_message(
                     chat_id,
-                    "❌ Operazione Alimentazione annullata. Nessuna bozza e nessun nuovo alimento sono stati salvati.",
+                    "❌ Operazione Alimentazione annullata. Nessuna modifica pendente è stata salvata.",
                 )
                 .await?;
             }
@@ -361,7 +961,7 @@ pub async fn handle_callback(
             Ok(true)
         }
         "food:new:back:unit" => {
-            let Some(FoodConversationState::Visibility { name, .. }) = sessions.get(chat_id.0)
+            let Some(FoodConversationState::PendingCategory { name, .. }) = sessions.get(chat_id.0)
             else {
                 expired_creation(bot, chat_id).await?;
                 return Ok(true);
@@ -375,22 +975,37 @@ pub async fn handle_callback(
                     );
                     bot.send_message(
                         chat_id,
-                        format!("🥕 {name}\n\nScegli di nuovo l'unita' predefinita."),
+                        format!("🥕 {name}\n\nScegli di nuovo l'unità predefinita."),
                     )
                     .reply_markup(keyboard)
                     .await?;
                 }
                 Err(error) => {
-                    tracing::error!(?error, "Errore ritorno scelta unita'");
-                    bot.send_message(chat_id, "⚠️ Non riesco a leggere le unita' di misura.")
-                        .reply_markup(visibility_keyboard())
+                    tracing::error!(?error, "Errore ritorno scelta unità");
+                    bot.send_message(chat_id, "⚠️ Non riesco a leggere le unità di misura.")
+                        .reply_markup(food_menu_keyboard())
                         .await?;
                 }
             }
             Ok(true)
         }
+        "food:new:back:category" => {
+            let Some(FoodConversationState::Visibility { name, unit_id, .. }) =
+                sessions.get(chat_id.0)
+            else {
+                expired_creation(bot, chat_id).await?;
+                return Ok(true);
+            };
+            start_category_choice(bot, chat_id, chat_id.0, pool, sessions, name, unit_id).await?;
+            Ok(true)
+        }
         "food:new:back:visibility" => {
-            let Some(FoodConversationState::Spaces { name, unit_id, .. }) = sessions.get(chat_id.0)
+            let Some(FoodConversationState::Spaces {
+                name,
+                unit_id,
+                category_id,
+                ..
+            }) = sessions.get(chat_id.0)
             else {
                 expired_creation(bot, chat_id).await?;
                 return Ok(true);
@@ -401,12 +1016,13 @@ pub async fn handle_callback(
                 FoodConversationState::Visibility {
                     name: name.clone(),
                     unit_id,
+                    category_id,
                 },
             );
             bot.send_message(
                 chat_id,
                 format!(
-                    "👁 Visibilita' di {name}\n\nL'alimento restera' sempre di tua proprieta'.\nScegli dove renderlo visibile:"
+                    "👁 Visibilità di {name}\n\nL'alimento resterà sempre di tua proprietà.\nScegli dove renderlo visibile:"
                 ),
             )
             .reply_markup(visibility_keyboard())
@@ -414,16 +1030,35 @@ pub async fn handle_callback(
             Ok(true)
         }
         "food:new:visibility:private" => {
-            let Some(FoodConversationState::Visibility { name, unit_id }) = sessions.get(chat_id.0)
+            let Some(FoodConversationState::Visibility {
+                name,
+                unit_id,
+                category_id,
+            }) = sessions.get(chat_id.0)
             else {
                 expired_creation(bot, chat_id).await?;
                 return Ok(true);
             };
-            finish_creation(bot, chat_id, chat_id.0, pool, sessions, &name, unit_id, &[]).await?;
+            finish_creation(
+                bot,
+                chat_id,
+                chat_id.0,
+                pool,
+                sessions,
+                &name,
+                unit_id,
+                category_id,
+                &[],
+            )
+            .await?;
             Ok(true)
         }
         "food:new:visibility:default" => {
-            let Some(FoodConversationState::Visibility { name, unit_id }) = sessions.get(chat_id.0)
+            let Some(FoodConversationState::Visibility {
+                name,
+                unit_id,
+                category_id,
+            }) = sessions.get(chat_id.0)
             else {
                 expired_creation(bot, chat_id).await?;
                 return Ok(true);
@@ -439,6 +1074,7 @@ pub async fn handle_callback(
                         sessions,
                         &name,
                         unit_id,
+                        category_id,
                         &[actor.spazio_id],
                     )
                     .await?;
@@ -462,7 +1098,11 @@ pub async fn handle_callback(
             Ok(true)
         }
         "food:new:visibility:all" => {
-            let Some(FoodConversationState::Visibility { name, unit_id }) = sessions.get(chat_id.0)
+            let Some(FoodConversationState::Visibility {
+                name,
+                unit_id,
+                category_id,
+            }) = sessions.get(chat_id.0)
             else {
                 expired_creation(bot, chat_id).await?;
                 return Ok(true);
@@ -471,7 +1111,15 @@ pub async fn handle_callback(
                 Ok(spaces) => {
                     let ids: Vec<i64> = spaces.iter().map(|space| space.id).collect();
                     finish_creation(
-                        bot, chat_id, chat_id.0, pool, sessions, &name, unit_id, &ids,
+                        bot,
+                        chat_id,
+                        chat_id.0,
+                        pool,
+                        sessions,
+                        &name,
+                        unit_id,
+                        category_id,
+                        &ids,
                     )
                     .await?;
                 }
@@ -485,7 +1133,11 @@ pub async fn handle_callback(
             Ok(true)
         }
         "food:new:visibility:choose" => {
-            let Some(FoodConversationState::Visibility { name, unit_id }) = sessions.get(chat_id.0)
+            let Some(FoodConversationState::Visibility {
+                name,
+                unit_id,
+                category_id,
+            }) = sessions.get(chat_id.0)
             else {
                 expired_creation(bot, chat_id).await?;
                 return Ok(true);
@@ -507,6 +1159,7 @@ pub async fn handle_callback(
                         FoodConversationState::Spaces {
                             name,
                             unit_id,
+                            category_id,
                             selected: Vec::new(),
                         },
                     );
@@ -532,6 +1185,7 @@ pub async fn handle_callback(
             let Some(FoodConversationState::Spaces {
                 name,
                 unit_id,
+                category_id,
                 selected,
             }) = sessions.get(chat_id.0)
             else {
@@ -540,7 +1194,15 @@ pub async fn handle_callback(
             };
 
             finish_creation(
-                bot, chat_id, chat_id.0, pool, sessions, &name, unit_id, &selected,
+                bot,
+                chat_id,
+                chat_id.0,
+                pool,
+                sessions,
+                &name,
+                unit_id,
+                category_id,
+                &selected,
             )
             .await?;
             Ok(true)
@@ -559,6 +1221,7 @@ pub async fn handle_callback(
             let Some(FoodConversationState::Spaces {
                 name,
                 unit_id,
+                category_id,
                 mut selected,
             }) = sessions.get(chat_id.0)
             else {
@@ -581,6 +1244,7 @@ pub async fn handle_callback(
                         FoodConversationState::Spaces {
                             name,
                             unit_id,
+                            category_id,
                             selected: selected.clone(),
                         },
                     );
@@ -615,7 +1279,7 @@ pub async fn handle_callback(
                 .filter(|id| *id > 0);
 
             let Some(unit_id) = unit_id else {
-                bot.send_message(chat_id, "Pulsante unita' non valido.")
+                bot.send_message(chat_id, "Pulsante unità non valido.")
                     .reply_markup(food_menu_keyboard())
                     .await?;
                 return Ok(true);
@@ -626,7 +1290,8 @@ pub async fn handle_callback(
                 return Ok(true);
             };
 
-            start_visibility_choice(bot, chat_id, chat_id.0, sessions, name, Some(unit_id)).await?;
+            start_category_choice(bot, chat_id, chat_id.0, pool, sessions, name, Some(unit_id))
+                .await?;
             Ok(true)
         }
         _ if data.starts_with("food:view:") => {
@@ -649,7 +1314,7 @@ pub async fn handle_callback(
 }
 
 async fn expired_creation(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
-    bot.send_message(chat_id, "La creazione alimento non e' piu' attiva.")
+    bot.send_message(chat_id, "La creazione alimento non è più attiva.")
         .reply_markup(food_menu_keyboard())
         .await?;
     Ok(())
@@ -680,8 +1345,8 @@ async fn start_unit_choice(
     let keyboard = match unit_keyboard_from_db(pool).await {
         Ok(keyboard) => keyboard,
         Err(error) => {
-            tracing::error!(?error, "Errore caricamento unita' alimento");
-            bot.send_message(chat_id, "⚠️ Non riesco a leggere le unita' di misura.")
+            tracing::error!(?error, "Errore caricamento unità alimento");
+            bot.send_message(chat_id, "⚠️ Non riesco a leggere le unità di misura.")
                 .reply_markup(food_menu_keyboard())
                 .await?;
             return Ok(());
@@ -696,14 +1361,54 @@ async fn start_unit_choice(
         chat_id,
         format!(
             "🥕 {name}\n\n\
-             Scegli l'unita' predefinita.\n\
+             Scegli l'unità predefinita.\n\
              Puoi anche scrivere g, kg, ml, l, pz, cucchiaio, \
              cucchiaino o qb.\n\
-             L'unita' e' obbligatoria per salvare l'alimento."
+             L'unità è obbligatoria per salvare l'alimento."
         ),
     )
     .reply_markup(keyboard)
     .await?;
+    Ok(())
+}
+
+async fn start_category_choice(
+    bot: &Bot,
+    chat_id: ChatId,
+    raw_chat_id: i64,
+    pool: &SqlitePool,
+    sessions: &FoodSessionStore,
+    name: String,
+    unit_id: Option<i64>,
+) -> ResponseResult<()> {
+    match list_categories(pool).await {
+        Ok(categories) if !categories.is_empty() => {
+            sessions.set(
+                raw_chat_id,
+                FoodConversationState::PendingCategory {
+                    name: name.clone(),
+                    unit_id,
+                },
+            );
+            bot.send_message(
+                chat_id,
+                format!("🏷 Categoria di {name}\n\nScegli la categoria prima di continuare."),
+            )
+            .reply_markup(category_before_save_keyboard(&categories))
+            .await?;
+        }
+        Ok(_) => {
+            bot.send_message(chat_id, "⚠️ Nessuna categoria alimentare disponibile.")
+                .reply_markup(food_menu_keyboard())
+                .await?;
+        }
+        Err(error) => {
+            tracing::error!(?error, "Errore categorie durante la creazione alimento");
+            bot.send_message(chat_id, "⚠️ Non riesco a leggere le categorie.")
+                .reply_markup(food_menu_keyboard())
+                .await?;
+        }
+    }
     Ok(())
 }
 
@@ -714,20 +1419,22 @@ async fn start_visibility_choice(
     sessions: &FoodSessionStore,
     name: String,
     unit_id: Option<i64>,
+    category_id: i64,
 ) -> ResponseResult<()> {
     sessions.set(
         raw_chat_id,
         FoodConversationState::Visibility {
             name: name.clone(),
             unit_id,
+            category_id,
         },
     );
 
     bot.send_message(
         chat_id,
         format!(
-            "👁 Visibilita' di {name}\n\n\
-             L'alimento restera' sempre di tua proprieta'.\n\
+            "👁 Visibilità di {name}\n\n\
+             L'alimento resterà sempre di tua proprietà.\n\
              Scegli dove renderlo visibile:"
         ),
     )
@@ -745,9 +1452,10 @@ async fn finish_creation(
     sessions: &FoodSessionStore,
     name: &str,
     unit_id: Option<i64>,
+    category_id: i64,
     shared_spaces: &[i64],
 ) -> ResponseResult<()> {
-    match create_food(pool, name, unit_id, shared_spaces).await {
+    match create_food_with_category(pool, name, unit_id, Some(category_id), shared_spaces).await {
         Ok(id) => {
             sessions.clear_chat(raw_chat_id);
             let visibility = if shared_spaces.is_empty() {
@@ -776,7 +1484,7 @@ async fn send_food_list(
     pool: &SqlitePool,
     refreshed: bool,
 ) -> ResponseResult<()> {
-    match list_foods(pool, None, LIST_LIMIT).await {
+    match list_foods(pool, None, None, LIST_LIMIT).await {
         Ok(foods) if foods.is_empty() => {
             let title = if refreshed {
                 "🔄 Alimenti aggiornati"
@@ -830,7 +1538,7 @@ async fn send_search_results(
         return Ok(());
     }
 
-    match list_foods(pool, Some(&normalized), LIST_LIMIT).await {
+    match list_foods(pool, Some(&normalized), None, LIST_LIMIT).await {
         Ok(foods) if foods.is_empty() => {
             bot.send_message(
                 chat_id,
@@ -860,6 +1568,819 @@ async fn send_search_results(
     Ok(())
 }
 
+async fn send_food_filter_menu(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    selected: &[i64],
+) -> ResponseResult<()> {
+    match list_categories(pool).await {
+        Ok(categories) => {
+            let selected_count = selected.len();
+            bot.send_message(
+                chat_id,
+                format!(
+                    "🏷 Filtra alimenti per categoria\n\n\
+                     Seleziona una o più categorie e poi premi ✅ Applica.\n\
+                     Con più categorie il filtro è inclusivo: ad esempio \
+                     🥩 Carne + 🥬 Verdure mostra gli alimenti che appartengono \
+                     ad almeno una delle due categorie.\n\n\
+                     Selezionate: {selected_count}"
+                ),
+            )
+            .reply_markup(category_filter_keyboard(&categories, selected))
+            .await?;
+        }
+        Err(error) => {
+            tracing::error!(?error, "Errore elenco categorie alimenti");
+            bot.send_message(chat_id, "⚠️ Non riesco a leggere le categorie.")
+                .reply_markup(food_menu_keyboard())
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+async fn send_filtered_food_list(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    category_ids: &[i64],
+) -> ResponseResult<()> {
+    if category_ids.is_empty() {
+        send_food_list(bot, chat_id, pool, false).await?;
+        return Ok(());
+    }
+
+    let categories = match list_categories(pool).await {
+        Ok(categories) => categories,
+        Err(error) => {
+            tracing::error!(?error, "Errore categorie filtro multiplo");
+            bot.send_message(chat_id, "⚠️ Non riesco a leggere le categorie.")
+                .reply_markup(food_menu_keyboard())
+                .await?;
+            return Ok(());
+        }
+    };
+
+    let selected_categories: Vec<&CategoryRecord> = categories
+        .iter()
+        .filter(|category| category_ids.contains(&category.id))
+        .collect();
+
+    if selected_categories.is_empty() {
+        bot.send_message(chat_id, "Nessuna categoria selezionata è disponibile.")
+            .reply_markup(food_menu_keyboard())
+            .await?;
+        return Ok(());
+    }
+
+    let labels = selected_categories
+        .iter()
+        .map(|category| format!("{} {}", category.emoji, category.name))
+        .collect::<Vec<_>>()
+        .join(" + ");
+
+    match list_foods_multi_categories(pool, category_ids, LIST_LIMIT).await {
+        Ok(foods) if foods.is_empty() => {
+            bot.send_message(
+                chat_id,
+                format!("{labels}\n\nNessun alimento nella vista corrente."),
+            )
+            .reply_markup(empty_filtered_keyboard())
+            .await?;
+        }
+        Ok(foods) => {
+            let current_user = identity::current_actor().utente_id;
+            let mut text = format!("{labels} · primi {}\n\n", foods.len());
+            for food in &foods {
+                text.push_str(&food_summary_line(food, current_user));
+                text.push('\n');
+            }
+            bot.send_message(chat_id, text)
+                .reply_markup(food_filtered_results_keyboard(&foods))
+                .await?;
+        }
+        Err(error) => {
+            tracing::error!(
+                ?error,
+                ?category_ids,
+                "Errore filtro multi-categoria alimenti"
+            );
+            bot.send_message(chat_id, "⚠️ Non riesco a filtrare gli alimenti.")
+                .reply_markup(food_menu_keyboard())
+                .await?;
+        }
+    }
+
+    Ok(())
+}
+
+async fn list_foods_multi_categories(
+    pool: &SqlitePool,
+    category_ids: &[i64],
+    limit: i64,
+) -> Result<Vec<FoodRecord>> {
+    let mut seen = HashSet::new();
+    let mut foods = Vec::new();
+
+    for category_id in category_ids {
+        for food in list_foods(pool, None, Some(*category_id), limit).await? {
+            if seen.insert(food.id) {
+                foods.push(food);
+            }
+        }
+    }
+
+    foods.sort_by(|left, right| {
+        left.name
+            .to_lowercase()
+            .cmp(&right.name.to_lowercase())
+            .then_with(|| left.id.cmp(&right.id))
+    });
+
+    foods.truncate(limit.max(0) as usize);
+    Ok(foods)
+}
+
+async fn food_visible_to_user(pool: &SqlitePool, food_id: i64, user_id: i64) -> Result<bool> {
+    let visible: bool = sqlx::query_scalar(
+        "SELECT EXISTS(\
+            SELECT 1 FROM alimenti a \
+            WHERE a.id = ? AND a.archiviato = 0 \
+              AND (\
+                    a.proprietario_utente_id = ? \
+                    OR EXISTS (\
+                        SELECT 1 \
+                        FROM alimento_spazi asp \
+                        JOIN membri_spazio ms ON ms.spazio_id = asp.spazio_id \
+                        WHERE asp.alimento_id = a.id \
+                          AND ms.utente_id = ?\
+                    )\
+              )\
+         )",
+    )
+    .bind(food_id)
+    .bind(user_id)
+    .bind(user_id)
+    .fetch_one(pool)
+    .await
+    .context("Impossibile verificare la visibilità alimento")?;
+    Ok(visible)
+}
+
+async fn can_edit_food(pool: &SqlitePool, food_id: i64, user_id: i64) -> Result<bool> {
+    let owner: bool = sqlx::query_scalar(
+        "SELECT EXISTS(\
+            SELECT 1 FROM alimenti \
+            WHERE id = ? AND archiviato = 0 \
+              AND proprietario_utente_id = ?\
+         )",
+    )
+    .bind(food_id)
+    .bind(user_id)
+    .fetch_one(pool)
+    .await
+    .context("Impossibile verificare il proprietario alimento")?;
+
+    if owner {
+        return Ok(true);
+    }
+    if !food_visible_to_user(pool, food_id, user_id).await? {
+        return Ok(false);
+    }
+    crate::resource_permissions::has_edit_permission(pool, "alimento", food_id, user_id).await
+}
+
+async fn can_manage_food(pool: &SqlitePool, food_id: i64, user_id: i64) -> Result<bool> {
+    let owner: bool = sqlx::query_scalar(
+        "SELECT EXISTS(\
+            SELECT 1 FROM alimenti \
+            WHERE id = ? AND archiviato = 0 \
+              AND proprietario_utente_id = ?\
+         )",
+    )
+    .bind(food_id)
+    .bind(user_id)
+    .fetch_one(pool)
+    .await
+    .context("Impossibile verificare il proprietario alimento")?;
+    if owner {
+        return Ok(true);
+    }
+    if !food_visible_to_user(pool, food_id, user_id).await? {
+        return Ok(false);
+    }
+    crate::resource_permissions::has_manage_permission(pool, "alimento", food_id, user_id).await
+}
+
+async fn can_edit_food_current(pool: &SqlitePool, food_id: i64) -> Result<bool> {
+    let user_id = identity::current_actor()
+        .utente_id
+        .context("Identità utente non disponibile")?;
+    can_edit_food(pool, food_id, user_id).await
+}
+
+async fn can_manage_food_current(pool: &SqlitePool, food_id: i64) -> Result<bool> {
+    let user_id = identity::current_actor()
+        .utente_id
+        .context("Identità utente non disponibile")?;
+    can_manage_food(pool, food_id, user_id).await
+}
+
+async fn ensure_food_edit(pool: &SqlitePool, food_id: i64) -> Result<i64> {
+    let user_id = identity::current_actor()
+        .utente_id
+        .context("Identità utente non disponibile")?;
+    if !can_edit_food(pool, food_id, user_id).await? {
+        bail!("Non hai il permesso di modificare questo alimento");
+    }
+    Ok(user_id)
+}
+
+async fn ensure_food_manage(pool: &SqlitePool, food_id: i64) -> Result<i64> {
+    let user_id = identity::current_actor()
+        .utente_id
+        .context("Identità utente non disponibile")?;
+    if !can_manage_food(pool, food_id, user_id).await? {
+        bail!("Non hai il permesso di gestire visibilità e collaboratori di questo alimento");
+    }
+    Ok(user_id)
+}
+
+async fn update_food_name(pool: &SqlitePool, food_id: i64, raw_name: &str) -> Result<()> {
+    ensure_food_edit(pool, food_id).await?;
+    let name = clean_food_name(raw_name).context("Il nome dell'alimento non è valido")?;
+    let normalized = normalize_name(&name);
+
+    let duplicate: bool = sqlx::query_scalar(
+        "SELECT EXISTS(\
+            SELECT 1 FROM alimenti other \
+            JOIN alimenti current ON current.id = ? \
+            WHERE other.id <> current.id \
+              AND other.archiviato = 0 \
+              AND other.nome_normalizzato = ? \
+              AND (\
+                    other.catalogo_globale = 1 \
+                    OR (current.proprietario_utente_id IS NOT NULL \
+                        AND other.proprietario_utente_id = current.proprietario_utente_id) \
+                    OR EXISTS (\
+                        SELECT 1 \
+                        FROM alimento_spazi mine \
+                        JOIN alimento_spazi theirs ON theirs.spazio_id = mine.spazio_id \
+                        WHERE mine.alimento_id = current.id \
+                          AND theirs.alimento_id = other.id\
+                    )\
+              )\
+         )",
+    )
+    .bind(food_id)
+    .bind(&normalized)
+    .fetch_one(pool)
+    .await
+    .context("Impossibile verificare i nomi alimento")?;
+    if duplicate {
+        bail!("Esiste già un alimento con questo nome nel catalogo coinvolto");
+    }
+
+    sqlx::query("UPDATE alimenti SET nome = ?, nome_normalizzato = ? WHERE id = ?")
+        .bind(name)
+        .bind(normalized)
+        .bind(food_id)
+        .execute(pool)
+        .await
+        .context("Impossibile aggiornare il nome alimento")?;
+    Ok(())
+}
+
+async fn update_food_unit(pool: &SqlitePool, food_id: i64, unit_id: i64) -> Result<()> {
+    ensure_food_edit(pool, food_id).await?;
+    let valid: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM unita_misura WHERE id = ? AND attiva = 1)")
+            .bind(unit_id)
+            .fetch_one(pool)
+            .await?;
+    if !valid {
+        bail!("Unità di misura non disponibile");
+    }
+    sqlx::query("UPDATE alimenti SET unita_predefinita_id = ? WHERE id = ?")
+        .bind(unit_id)
+        .bind(food_id)
+        .execute(pool)
+        .await
+        .context("Impossibile aggiornare l'unità alimento")?;
+    Ok(())
+}
+
+async fn current_food_share_ids(pool: &SqlitePool, food_id: i64) -> Result<Vec<i64>> {
+    sqlx::query_scalar::<_, i64>(
+        "SELECT spazio_id FROM alimento_spazi WHERE alimento_id = ? ORDER BY spazio_id",
+    )
+    .bind(food_id)
+    .fetch_all(pool)
+    .await
+    .context("Impossibile leggere gli spazi alimento")
+}
+
+async fn replace_food_shares(pool: &SqlitePool, food_id: i64, spaces: &[i64]) -> Result<()> {
+    let user_id = ensure_food_manage(pool, food_id).await?;
+    let mut selected = spaces.to_vec();
+    selected.sort_unstable();
+    selected.dedup();
+
+    for space_id in &selected {
+        if !user_can_share_to_space(pool, user_id, *space_id).await? {
+            bail!("Non hai diritto di condividere l'alimento in uno degli spazi selezionati");
+        }
+    }
+
+    let normalized: String = sqlx::query_scalar(
+        "SELECT nome_normalizzato FROM alimenti WHERE id = ? AND archiviato = 0",
+    )
+    .bind(food_id)
+    .fetch_optional(pool)
+    .await?
+    .context("Alimento non disponibile")?;
+
+    for space_id in &selected {
+        let duplicate: bool = sqlx::query_scalar(
+            "SELECT EXISTS(\
+                SELECT 1 FROM alimento_spazi asp \
+                JOIN alimenti a ON a.id = asp.alimento_id \
+                WHERE asp.spazio_id = ? AND asp.alimento_id <> ? \
+                  AND a.archiviato = 0 AND a.nome_normalizzato = ?\
+             )",
+        )
+        .bind(space_id)
+        .bind(food_id)
+        .bind(&normalized)
+        .fetch_one(pool)
+        .await?;
+        if duplicate {
+            bail!("Uno degli spazi selezionati possiede già un alimento con questo nome");
+        }
+    }
+
+    let mut tx = pool.begin().await?;
+    sqlx::query("DELETE FROM alimento_spazi WHERE alimento_id = ?")
+        .bind(food_id)
+        .execute(&mut *tx)
+        .await?;
+    for space_id in selected {
+        sqlx::query(
+            "INSERT INTO alimento_spazi (alimento_id, spazio_id, condiviso_da_utente_id) VALUES (?, ?, ?)",
+        )
+        .bind(food_id)
+        .bind(space_id)
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
+async fn send_food_edit_menu(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    food_id: i64,
+) -> ResponseResult<()> {
+    let food = match get_food(pool, food_id).await {
+        Ok(Some(food)) => food,
+        _ => {
+            bot.send_message(chat_id, "Alimento non disponibile.")
+                .reply_markup(food_menu_keyboard())
+                .await?;
+            return Ok(());
+        }
+    };
+    if !can_edit_food_current(pool, food_id).await.unwrap_or(false) {
+        bot.send_message(
+            chat_id,
+            "⚠️ Non hai il permesso di modificare questo alimento.",
+        )
+        .reply_markup(food_menu_keyboard())
+        .await?;
+        return Ok(());
+    }
+    let can_manage = can_manage_food_current(pool, food_id)
+        .await
+        .unwrap_or(false);
+    bot.send_message(chat_id, format!("✏️ Modifica {}", food.name))
+        .reply_markup(food_edit_keyboard(food_id, can_manage))
+        .await?;
+    Ok(())
+}
+
+async fn send_edit_unit_menu(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    food_id: i64,
+) -> ResponseResult<()> {
+    if !can_edit_food_current(pool, food_id).await.unwrap_or(false) {
+        bot.send_message(
+            chat_id,
+            "⚠️ Non hai il permesso di modificare questo alimento.",
+        )
+        .await?;
+        return Ok(());
+    }
+    match list_units(pool).await {
+        Ok(units) => {
+            bot.send_message(chat_id, "📏 Scegli la nuova unità predefinita.")
+                .reply_markup(edit_unit_keyboard(food_id, &units))
+                .await?;
+        }
+        Err(error) => {
+            bot.send_message(chat_id, format!("⚠️ {error}")).await?;
+        }
+    }
+    Ok(())
+}
+
+async fn send_edit_visibility_menu(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    food_id: i64,
+) -> ResponseResult<()> {
+    if !can_manage_food_current(pool, food_id)
+        .await
+        .unwrap_or(false)
+    {
+        bot.send_message(chat_id, "⚠️ Non hai il permesso di gestire la visibilità.")
+            .await?;
+        return Ok(());
+    }
+    bot.send_message(
+        chat_id,
+        "👥 Visibilità alimento\n\nScegli dove rendere visibile lo stesso alimento, senza crearne copie.",
+    )
+    .reply_markup(edit_visibility_keyboard(food_id))
+    .await?;
+    Ok(())
+}
+
+#[derive(Debug, Clone, FromRow)]
+struct PermissionGrantRecord {
+    user_id: i64,
+    name: String,
+    can_edit: i64,
+    can_manage: i64,
+}
+
+#[derive(Debug, Clone, FromRow)]
+struct PermissionCandidateRecord {
+    user_id: i64,
+    name: String,
+}
+
+#[derive(Debug, Clone, FromRow)]
+struct PendingInviteRecord {
+    name: String,
+    can_manage: i64,
+}
+
+async fn send_food_permissions_menu(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    food_id: i64,
+) -> ResponseResult<()> {
+    if !can_manage_food_current(pool, food_id)
+        .await
+        .unwrap_or(false)
+    {
+        bot.send_message(
+            chat_id,
+            "⚠️ Non hai il permesso di gestire i collaboratori.",
+        )
+        .await?;
+        return Ok(());
+    }
+
+    let grants = sqlx::query_as::<_, PermissionGrantRecord>(
+        "SELECT pr.utente_id AS user_id, u.nome_visualizzato AS name, \
+                pr.puo_modificare AS can_edit, pr.puo_gestire_permessi AS can_manage \
+         FROM permessi_risorsa pr \
+         JOIN utenti u ON u.id = pr.utente_id \
+         WHERE pr.tipo_risorsa = 'alimento' AND pr.risorsa_id = ? \
+         ORDER BY u.nome_visualizzato COLLATE NOCASE",
+    )
+    .bind(food_id)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+
+    let pending = sqlx::query_as::<_, PendingInviteRecord>(
+        "SELECT u.nome_visualizzato AS name, ir.puo_gestire_permessi AS can_manage \
+         FROM inviti_risorsa ir \
+         JOIN utenti u ON u.id = ir.invitato_utente_id \
+         WHERE ir.tipo_risorsa = 'alimento' AND ir.risorsa_id = ? AND ir.stato = 'pendente' \
+         ORDER BY u.nome_visualizzato COLLATE NOCASE",
+    )
+    .bind(food_id)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+
+    let candidates = sqlx::query_as::<_, PermissionCandidateRecord>(
+        "SELECT DISTINCT u.id AS user_id, u.nome_visualizzato AS name \
+         FROM utenti u \
+         JOIN account_telegram at ON at.utente_id = u.id \
+         JOIN membri_spazio ms ON ms.utente_id = u.id \
+         JOIN alimento_spazi asp ON asp.spazio_id = ms.spazio_id AND asp.alimento_id = ? \
+         JOIN alimenti a ON a.id = asp.alimento_id \
+         WHERE u.stato = 'attivo' \
+           AND u.id <> a.proprietario_utente_id \
+           AND NOT EXISTS (\
+                SELECT 1 FROM permessi_risorsa pr \
+                WHERE pr.tipo_risorsa = 'alimento' AND pr.risorsa_id = ? AND pr.utente_id = u.id\
+           ) \
+           AND NOT EXISTS (\
+                SELECT 1 FROM inviti_risorsa ir \
+                WHERE ir.tipo_risorsa = 'alimento' AND ir.risorsa_id = ? \
+                  AND ir.invitato_utente_id = u.id AND ir.stato = 'pendente'\
+           ) \
+         ORDER BY u.nome_visualizzato COLLATE NOCASE",
+    )
+    .bind(food_id)
+    .bind(food_id)
+    .bind(food_id)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+
+    let mut text = String::from(
+        "🔐 Collaboratori alimento\n\nLa visibilità non concede automaticamente la modifica.",
+    );
+    if !grants.is_empty() {
+        text.push_str("\n\nPermessi attivi:");
+        for grant in &grants {
+            let level = if grant.can_manage == 1 {
+                "🛡 modifica + gestione"
+            } else if grant.can_edit == 1 {
+                "✏️ modifica"
+            } else {
+                "👁 sola visibilità"
+            };
+            text.push_str(&format!("\n• {} · {level}", grant.name));
+        }
+    }
+    if !pending.is_empty() {
+        text.push_str("\n\nInviti in attesa:");
+        for invite in &pending {
+            let level = if invite.can_manage == 1 {
+                "🛡 gestione"
+            } else {
+                "✏️ modifica"
+            };
+            text.push_str(&format!("\n• {} · {level}", invite.name));
+        }
+    }
+    if candidates.is_empty() {
+        text.push_str("\n\nNessun nuovo utente invitabile. Per invitare qualcuno, l'alimento deve essere visibile in almeno uno spazio che condividete.");
+    }
+
+    bot.send_message(chat_id, text)
+        .reply_markup(food_permissions_keyboard(food_id, &grants, &candidates))
+        .await?;
+    Ok(())
+}
+
+async fn send_permission_level_menu(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    food_id: i64,
+    user_id: i64,
+) -> ResponseResult<()> {
+    if !can_manage_food_current(pool, food_id)
+        .await
+        .unwrap_or(false)
+    {
+        bot.send_message(chat_id, "⚠️ Non hai il permesso di invitare collaboratori.")
+            .await?;
+        return Ok(());
+    }
+    let name: Option<String> = sqlx::query_scalar(
+        "SELECT nome_visualizzato FROM utenti WHERE id = ? AND stato = 'attivo'",
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await
+    .unwrap_or(None);
+    let Some(name) = name else {
+        bot.send_message(chat_id, "Utente non disponibile.").await?;
+        return Ok(());
+    };
+    bot.send_message(
+        chat_id,
+        format!("Invita {name}\n\nScegli il livello di permesso."),
+    )
+    .reply_markup(permission_level_keyboard(food_id, user_id))
+    .await?;
+    Ok(())
+}
+
+async fn create_and_send_food_invite(
+    bot: &Bot,
+    pool: &SqlitePool,
+    food_id: i64,
+    target_user_id: i64,
+    permission: crate::resource_permissions::ResourcePermission,
+) -> Result<()> {
+    let creator_id = ensure_food_manage(pool, food_id).await?;
+    let chats: Vec<i64> =
+        sqlx::query_scalar("SELECT DISTINCT chat_id FROM account_telegram WHERE utente_id = ?")
+            .bind(target_user_id)
+            .fetch_all(pool)
+            .await?;
+    if chats.is_empty() {
+        bail!("Il destinatario non ha un account Telegram collegato");
+    }
+
+    let food_name: String = sqlx::query_scalar("SELECT nome FROM alimenti WHERE id = ?")
+        .bind(food_id)
+        .fetch_one(pool)
+        .await?;
+    let creator_name: String =
+        sqlx::query_scalar("SELECT nome_visualizzato FROM utenti WHERE id = ?")
+            .bind(creator_id)
+            .fetch_one(pool)
+            .await?;
+    let invite_id = crate::resource_permissions::create_invite(
+        pool,
+        "alimento",
+        food_id,
+        target_user_id,
+        creator_id,
+        permission,
+    )
+    .await?;
+
+    let level = match permission {
+        crate::resource_permissions::ResourcePermission::Edit => "✏️ può modificare",
+        crate::resource_permissions::ResourcePermission::Manage => {
+            "🛡 può modificare e gestire i permessi"
+        }
+    };
+    for raw_chat_id in chats {
+        bot.send_message(
+            ChatId(raw_chat_id),
+            format!(
+                "🔐 Invito collaborazione alimento\n\n{creator_name} ti invita a collaborare su «{food_name}».\nPermesso: {level}."
+            ),
+        )
+        .reply_markup(permission_invite_keyboard(invite_id))
+        .await
+        .context("Invio invito Telegram fallito")?;
+    }
+    Ok(())
+}
+
+async fn revoke_food_permission(pool: &SqlitePool, food_id: i64, user_id: i64) -> Result<()> {
+    ensure_food_manage(pool, food_id).await?;
+    crate::resource_permissions::revoke_permission(pool, "alimento", food_id, user_id).await
+}
+
+async fn send_food_category_menu(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    food_id: i64,
+) -> ResponseResult<()> {
+    let actor = identity::current_actor();
+    let food = match get_food(pool, food_id).await {
+        Ok(Some(food)) => food,
+        Ok(None) => {
+            bot.send_message(chat_id, "Alimento non disponibile.")
+                .reply_markup(food_menu_keyboard())
+                .await?;
+            return Ok(());
+        }
+        Err(error) => {
+            tracing::error!(?error, food_id, "Errore alimento per categoria");
+            bot.send_message(chat_id, "Non riesco a leggere l'alimento.")
+                .reply_markup(food_menu_keyboard())
+                .await?;
+            return Ok(());
+        }
+    };
+
+    let can_edit = match actor.utente_id {
+        Some(user_id) => can_edit_food(pool, food_id, user_id).await.unwrap_or(false),
+        None => false,
+    };
+    if !can_edit {
+        bot.send_message(
+            chat_id,
+            "Non hai il permesso di modificare la categoria di questo alimento.",
+        )
+        .reply_markup(food_detail_keyboard(food_id, false, false))
+        .await?;
+        return Ok(());
+    }
+
+    match list_categories(pool).await {
+        Ok(categories) => {
+            bot.send_message(
+                chat_id,
+                format!(
+                    "Categoria di {}\n\nScegli la categoria principale.",
+                    food.name
+                ),
+            )
+            .reply_markup(category_assignment_keyboard(food_id, &categories))
+            .await?;
+        }
+        Err(error) => {
+            tracing::error!(?error, "Errore categorie per alimento");
+            bot.send_message(chat_id, "Non riesco a leggere le categorie.")
+                .reply_markup(food_detail_keyboard(food_id, true, false))
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+async fn list_categories(pool: &SqlitePool) -> Result<Vec<CategoryRecord>> {
+    sqlx::query_as::<_, CategoryRecord>(
+        "SELECT id, nome AS name, emoji \
+         FROM categorie_alimento \
+         WHERE attiva = 1 \
+         ORDER BY ordinamento, id",
+    )
+    .fetch_all(pool)
+    .await
+    .context("Impossibile leggere le categorie alimentari")
+}
+
+async fn food_category_names(pool: &SqlitePool, food_id: i64) -> Result<Vec<String>> {
+    sqlx::query_scalar::<_, String>(
+        "SELECT c.emoji || ' ' || c.nome \
+         FROM alimento_categorie ac \
+         JOIN categorie_alimento c ON c.id = ac.categoria_id \
+         WHERE ac.alimento_id = ? AND c.attiva = 1 \
+         ORDER BY c.ordinamento, c.id",
+    )
+    .bind(food_id)
+    .fetch_all(pool)
+    .await
+    .context("Impossibile leggere le categorie dell'alimento")
+}
+
+async fn set_food_category(pool: &SqlitePool, food_id: i64, category_id: i64) -> Result<()> {
+    let user_id = identity::current_actor()
+        .utente_id
+        .context("Identità utente non disponibile")?;
+
+    if !can_edit_food(pool, food_id, user_id).await? {
+        bail!("Non hai il permesso di modificare questo alimento");
+    }
+
+    let category_valid: bool = sqlx::query_scalar(
+        "SELECT EXISTS(\
+            SELECT 1 FROM categorie_alimento \
+            WHERE id = ? AND attiva = 1\
+         )",
+    )
+    .bind(category_id)
+    .fetch_one(pool)
+    .await
+    .context("Impossibile verificare la categoria")?;
+    if !category_valid {
+        bail!("Categoria non disponibile");
+    }
+
+    let mut tx = pool
+        .begin()
+        .await
+        .context("Impossibile iniziare il cambio categoria")?;
+    sqlx::query("DELETE FROM alimento_categorie WHERE alimento_id = ?")
+        .bind(food_id)
+        .execute(&mut *tx)
+        .await
+        .context("Impossibile rimuovere la categoria precedente")?;
+    sqlx::query(
+        "INSERT INTO alimento_categorie (\
+            alimento_id, categoria_id, assegnata_da_utente_id\
+         ) VALUES (?, ?, ?)",
+    )
+    .bind(food_id)
+    .bind(category_id)
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await
+    .context("Impossibile assegnare la nuova categoria")?;
+    tx.commit()
+        .await
+        .context("Impossibile completare il cambio categoria")?;
+    Ok(())
+}
+
 async fn send_food_detail(
     bot: &Bot,
     chat_id: ChatId,
@@ -870,24 +2391,47 @@ async fn send_food_detail(
         Ok(Some(food)) => {
             let actor = identity::current_actor();
             let is_owner = actor.utente_id == food.owner_user_id;
+            let can_edit = match actor.utente_id {
+                Some(user_id) => can_edit_food(pool, food.id, user_id).await.unwrap_or(false),
+                None => false,
+            };
+            let can_manage = match actor.utente_id {
+                Some(user_id) => can_manage_food(pool, food.id, user_id)
+                    .await
+                    .unwrap_or(false),
+                None => false,
+            };
             let mut lines = vec![
                 format!("🥕 {}", food.name),
-                format!("ID: #{}", food.id),
                 String::new(),
                 ownership_label(&food, actor.utente_id),
             ];
 
             if let Some(symbol) = food.unit_symbol.as_deref() {
-                let code = food.unit_code.as_deref().unwrap_or(symbol);
-                lines.push(format!("⚖️ Unita' predefinita: {symbol} ({code})"));
+                let name_or_code = food.unit_code.as_deref().unwrap_or(symbol);
+                lines.push(format!(
+                    "⚖️ Unità predefinita: {}",
+                    unit_display_label(name_or_code, symbol)
+                ));
             } else {
-                lines.push("⚖️ Unita' predefinita: non impostata".to_string());
+                lines.push("⚖️ Unità predefinita: non impostata".to_string());
             }
 
+            match food_category_names(pool, food.id).await {
+                Ok(categories) if categories.is_empty() => {
+                    lines.push("🏷 Categoria: non assegnata".to_string());
+                }
+                Ok(categories) => {
+                    lines.push(format!("🏷 Categoria: {}", categories.join(", ")));
+                }
+                Err(error) => {
+                    tracing::error!(?error, food_id = food.id, "Errore categoria alimento");
+                }
+            }
             if food.global_catalog == 0 {
                 match visible_share_names(pool, food.id, actor.utente_id, is_owner).await {
                     Ok(names) if names.is_empty() => {
-                        lines.push("🔒 Visibilita': solo personale".to_string());
+                        lines.push("🔒 Visibilità: solo personale".to_string());
                     }
                     Ok(names) => {
                         lines.push(format!("👥 Visibile in: {}", names.join(", ")));
@@ -903,13 +2447,13 @@ async fn send_food_detail(
             }
 
             bot.send_message(chat_id, lines.join("\n"))
-                .reply_markup(food_detail_keyboard())
+                .reply_markup(food_detail_keyboard(food.id, can_edit, can_manage))
                 .await?;
         }
         Ok(None) => {
             bot.send_message(
                 chat_id,
-                format!("Alimento #{id} non disponibile nella vista corrente."),
+                "Alimento non disponibile nella vista corrente.".to_string(),
             )
             .reply_markup(food_menu_keyboard())
             .await?;
@@ -924,30 +2468,52 @@ async fn send_food_detail(
     Ok(())
 }
 
+#[cfg(test)]
 async fn create_food(
     pool: &SqlitePool,
     raw_name: &str,
     unit_id: Option<i64>,
     shared_spaces: &[i64],
 ) -> Result<i64> {
-    let actor = identity::current_actor();
-    let owner_user_id = actor
-        .utente_id
-        .context("Identita' utente non disponibile")?;
+    create_food_with_category(pool, raw_name, unit_id, None, shared_spaces).await
+}
 
-    let name = clean_food_name(raw_name).context("Il nome dell'alimento non e' valido")?;
+async fn create_food_with_category(
+    pool: &SqlitePool,
+    raw_name: &str,
+    unit_id: Option<i64>,
+    category_id: Option<i64>,
+    shared_spaces: &[i64],
+) -> Result<i64> {
+    let actor = identity::current_actor();
+    let owner_user_id = actor.utente_id.context("Identità utente non disponibile")?;
+
+    let name = clean_food_name(raw_name).context("Il nome dell'alimento non è valido")?;
     let normalized = normalize_name(&name);
 
-    let unit_id = unit_id.context("Scegli un'unita' di misura prima di salvare")?;
+    let unit_id = unit_id.context("Scegli un'unità di misura prima di salvare")?;
 
     let valid: bool =
         sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM unita_misura WHERE id = ? AND attiva = 1)")
             .bind(unit_id)
             .fetch_one(pool)
             .await
-            .context("Impossibile verificare l'unita' di misura")?;
+            .context("Impossibile verificare l'unità di misura")?;
     if !valid {
-        bail!("Unita' di misura non disponibile");
+        bail!("Unità di misura non disponibile");
+    }
+
+    if let Some(category_id) = category_id {
+        let category_valid: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM categorie_alimento WHERE id = ? AND attiva = 1)",
+        )
+        .bind(category_id)
+        .fetch_one(pool)
+        .await
+        .context("Impossibile verificare la categoria alimento")?;
+        if !category_valid {
+            bail!("Categoria alimento non disponibile");
+        }
     }
 
     let global_duplicate: bool = sqlx::query_scalar(
@@ -963,7 +2529,7 @@ async fn create_food(
     .await
     .context("Impossibile verificare il catalogo globale")?;
     if global_duplicate {
-        bail!("Esiste gia' un alimento con questo nome nel catalogo globale");
+        bail!("Esiste già un alimento con questo nome nel catalogo globale");
     }
 
     let owner_duplicate: bool = sqlx::query_scalar(
@@ -980,7 +2546,7 @@ async fn create_food(
     .await
     .context("Impossibile verificare il catalogo personale")?;
     if owner_duplicate {
-        bail!("Hai gia' un alimento con questo nome");
+        bail!("Hai già un alimento con questo nome");
     }
 
     let mut unique_spaces = shared_spaces.to_vec();
@@ -989,7 +2555,7 @@ async fn create_food(
 
     for space_id in &unique_spaces {
         if !user_can_share_to_space(pool, owner_user_id, *space_id).await? {
-            bail!("Non hai diritto di condividere alimenti nello spazio #{space_id}");
+            bail!("Non hai diritto di condividere alimenti in uno degli spazi selezionati");
         }
 
         let duplicate_in_space: bool = sqlx::query_scalar(
@@ -1009,7 +2575,7 @@ async fn create_food(
         .context("Impossibile verificare gli alimenti condivisi")?;
 
         if duplicate_in_space {
-            bail!("Uno degli spazi selezionati possiede gia' un alimento con questo nome");
+            bail!("Uno degli spazi selezionati possiede già un alimento con questo nome");
         }
     }
 
@@ -1034,6 +2600,25 @@ async fn create_food(
     .context("Impossibile salvare l'alimento")?;
 
     let food_id = result.last_insert_rowid();
+
+    if let Some(category_id) = category_id {
+        sqlx::query("DELETE FROM alimento_categorie WHERE alimento_id = ?")
+            .bind(food_id)
+            .execute(&mut *tx)
+            .await
+            .context("Impossibile sostituire la categoria automatica")?;
+        sqlx::query(
+            "INSERT INTO alimento_categorie (\
+                alimento_id, categoria_id, assegnata_da_utente_id\
+             ) VALUES (?, ?, ?)",
+        )
+        .bind(food_id)
+        .bind(category_id)
+        .bind(owner_user_id)
+        .execute(&mut *tx)
+        .await
+        .context("Impossibile assegnare la categoria scelta")?;
+    }
 
     for space_id in unique_spaces {
         sqlx::query(
@@ -1083,9 +2668,7 @@ async fn ensure_shareable_space(pool: &SqlitePool, space_id: i64) -> Result<bool
 
 async fn list_shareable_spaces(pool: &SqlitePool) -> Result<Vec<SpaceRecord>> {
     let actor = identity::current_actor();
-    let user_id = actor
-        .utente_id
-        .context("Identita' utente non disponibile")?;
+    let user_id = actor.utente_id.context("Identità utente non disponibile")?;
 
     sqlx::query_as::<_, SpaceRecord>(
         "SELECT s.id, s.nome AS name \
@@ -1106,6 +2689,7 @@ async fn list_shareable_spaces(pool: &SqlitePool) -> Result<Vec<SpaceRecord>> {
 async fn list_foods(
     pool: &SqlitePool,
     normalized_search: Option<&str>,
+    category_id: Option<i64>,
     limit: i64,
 ) -> Result<Vec<FoodRecord>> {
     let actor = identity::current_actor();
@@ -1152,6 +2736,14 @@ async fn list_foods(
                               AND instr(aa.alias_normalizzato, ?) > 0\
                         )\
                    ) \
+                   AND (\
+                        ? IS NULL \
+                        OR EXISTS (\
+                            SELECT 1 FROM alimento_categorie ac \
+                            WHERE ac.alimento_id = a.id \
+                              AND ac.categoria_id = ?\
+                        )\
+                   ) \
                  ORDER BY CASE \
                             WHEN a.catalogo_globale = 1 THEN 2 \
                             WHEN a.proprietario_utente_id = ? THEN 0 \
@@ -1166,6 +2758,8 @@ async fn list_foods(
                 .bind(search.as_deref())
                 .bind(search.as_deref())
                 .bind(search.as_deref())
+                .bind(category_id)
+                .bind(category_id)
                 .bind(user_id)
                 .bind(limit)
                 .fetch_all(pool)
@@ -1192,6 +2786,14 @@ async fn list_foods(
                               AND instr(aa.alias_normalizzato, ?) > 0\
                         )\
                    ) \
+                   AND (\
+                        ? IS NULL \
+                        OR EXISTS (\
+                            SELECT 1 FROM alimento_categorie ac \
+                            WHERE ac.alimento_id = a.id \
+                              AND ac.categoria_id = ?\
+                        )\
+                   ) \
                  ORDER BY CASE \
                             WHEN a.catalogo_globale = 1 THEN 2 \
                             WHEN a.proprietario_utente_id = ? THEN 0 \
@@ -1206,6 +2808,8 @@ async fn list_foods(
                 .bind(search.as_deref())
                 .bind(search.as_deref())
                 .bind(search.as_deref())
+                .bind(category_id)
+                .bind(category_id)
                 .bind(user_id)
                 .bind(limit)
                 .fetch_all(pool)
@@ -1225,6 +2829,14 @@ async fn list_foods(
                           AND instr(aa.alias_normalizzato, ?) > 0\
                     )\
                ) \
+               AND (\
+                    ? IS NULL \
+                    OR EXISTS (\
+                        SELECT 1 FROM alimento_categorie ac \
+                        WHERE ac.alimento_id = a.id \
+                          AND ac.categoria_id = ?\
+                    )\
+               ) \
              ORDER BY a.nome COLLATE NOCASE, a.id \
              LIMIT ?"
         );
@@ -1232,6 +2844,8 @@ async fn list_foods(
             .bind(search.as_deref())
             .bind(search.as_deref())
             .bind(search.as_deref())
+            .bind(category_id)
+            .bind(category_id)
             .bind(limit)
             .fetch_all(pool)
             .await
@@ -1362,7 +2976,7 @@ async fn list_units(pool: &SqlitePool) -> Result<Vec<UnitRecord>> {
     )
     .fetch_all(pool)
     .await
-    .context("Impossibile leggere le unita' di misura")
+    .context("Impossibile leggere le unità di misura")
 }
 
 async fn find_unit_by_text(pool: &SqlitePool, raw: &str) -> Result<Option<UnitRecord>> {
@@ -1391,7 +3005,7 @@ async fn find_unit_by_text(pool: &SqlitePool, raw: &str) -> Result<Option<UnitRe
     .bind(&clean)
     .fetch_optional(pool)
     .await
-    .context("Impossibile cercare l'unita' di misura")
+    .context("Impossibile cercare l'unità di misura")
 }
 
 async fn unit_keyboard_from_db(pool: &SqlitePool) -> Result<InlineKeyboardMarkup> {
@@ -1402,7 +3016,7 @@ async fn unit_keyboard_from_db(pool: &SqlitePool) -> Result<InlineKeyboardMarkup
             pair.iter()
                 .map(|unit| {
                     InlineKeyboardButton::callback(
-                        format!("{} · {}", unit.simbolo, unit.nome),
+                        unit_display_label(&unit.nome, &unit.simbolo),
                         format!("food:new:unit:{}", unit.id),
                     )
                 })
@@ -1417,6 +3031,21 @@ async fn unit_keyboard_from_db(pool: &SqlitePool) -> Result<InlineKeyboardMarkup
     Ok(InlineKeyboardMarkup::new(rows))
 }
 
+fn unit_display_label(name_or_code: &str, symbol: &str) -> String {
+    match symbol {
+        "g" => "grammi (g)".to_string(),
+        "kg" => "chilogrammi (kg)".to_string(),
+        "ml" => "millilitri (ml)".to_string(),
+        "l" => "litri (l)".to_string(),
+        "pz" => "pezzi (pz)".to_string(),
+        "cucchiaio" => "cucchiaio".to_string(),
+        "cucchiaino" => "cucchiaino".to_string(),
+        "q.b." => "quanto basta (q.b.)".to_string(),
+        _ if name_or_code.eq_ignore_ascii_case(symbol) => name_or_code.to_string(),
+        _ => format!("{name_or_code} ({symbol})"),
+    }
+}
+
 fn visibility_keyboard() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
         vec![button("🔒 Solo mio", "food:new:visibility:private")],
@@ -1427,7 +3056,7 @@ fn visibility_keyboard() -> InlineKeyboardMarkup {
         vec![button("🌐 Tutti i miei spazi", "food:new:visibility:all")],
         vec![button("🎛 Scegli spazi", "food:new:visibility:choose")],
         vec![
-            button("⬅️ Indietro", "food:new:back:unit"),
+            button("⬅️ Indietro", "food:new:back:category"),
             button("❌ Annulla", "food:cancel"),
             button("🏠 Menu principale", "menu:main"),
         ],
@@ -1468,14 +3097,16 @@ fn food_menu_keyboard() -> InlineKeyboardMarkup {
 fn food_results_keyboard(foods: &[FoodRecord]) -> InlineKeyboardMarkup {
     let mut rows: Vec<Vec<InlineKeyboardButton>> = foods
         .iter()
-        .map(|food| {
-            vec![button(
-                format!("#{} · {}", food.id, food.name),
-                format!("food:view:{}", food.id),
-            )]
-        })
+        .map(|food| vec![button(food.name.clone(), format!("food:view:{}", food.id))])
         .collect();
-    rows.push(vec![button("🔄 Aggiorna alimenti", "food:refresh")]);
+    rows.push(vec![
+        button("➕ Nuovo alimento", "food:new"),
+        button("🔎 Cerca", "food:search:list"),
+    ]);
+    rows.push(vec![
+        button("🏷 Filtra", "food:filter"),
+        button("🔄 Aggiorna", "food:refresh"),
+    ]);
     rows.push(vec![
         button("⬅️ Indietro", "food:back"),
         button("🏠 Menu principale", "menu:main"),
@@ -1486,6 +3117,10 @@ fn food_results_keyboard(foods: &[FoodRecord]) -> InlineKeyboardMarkup {
 fn food_created_keyboard(id: i64) -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
         vec![button("🥕 Apri alimento", format!("food:view:{id}"))],
+        vec![button(
+            "✏️ Modifica alimento",
+            format!("food:edit:menu:{id}"),
+        )],
         vec![button("➕ Altro alimento", "food:new")],
         vec![
             button("⬅️ Indietro", "food:back"),
@@ -1494,15 +3129,311 @@ fn food_created_keyboard(id: i64) -> InlineKeyboardMarkup {
     ])
 }
 
-fn food_detail_keyboard() -> InlineKeyboardMarkup {
+fn food_detail_keyboard(id: i64, can_edit: bool, can_manage: bool) -> InlineKeyboardMarkup {
+    let mut rows = Vec::new();
+    if can_edit {
+        rows.push(vec![button(
+            "✏️ Modifica alimento",
+            format!("food:edit:menu:{id}"),
+        )]);
+    }
+    if can_manage && !can_edit {
+        rows.push(vec![button(
+            "🔐 Collaboratori",
+            format!("food:permissions:{id}"),
+        )]);
+    }
+    rows.push(vec![
+        button("🔎 Cerca", "food:search:list"),
+        button("🏷 Filtra", "food:filter"),
+    ]);
+    rows.push(vec![button("📋 Elenco alimenti", "food:list")]);
+    rows.push(vec![
+        button("⬅️ Indietro", "food:list"),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
+    InlineKeyboardMarkup::new(rows)
+}
+
+fn category_filter_keyboard(
+    categories: &[CategoryRecord],
+    selected: &[i64],
+) -> InlineKeyboardMarkup {
+    let mut rows = Vec::new();
+
+    for pair in categories.chunks(2) {
+        rows.push(
+            pair.iter()
+                .map(|category| {
+                    let checked = selected.contains(&category.id);
+                    button(
+                        format!(
+                            "{} {} {}",
+                            if checked { "☑️" } else { "⬜" },
+                            category.emoji,
+                            category.name
+                        ),
+                        format!("food:filter:toggle:{}", category.id),
+                    )
+                })
+                .collect(),
+        );
+    }
+
+    rows.push(vec![
+        button("✅ Applica", "food:filter:apply"),
+        button("🧹 Azzera", "food:filter:clear"),
+    ]);
+    rows.push(vec![button("📋 Tutti", "food:filter:all")]);
+    rows.push(vec![
+        button("⬅️ Indietro", "food:list"),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
+    InlineKeyboardMarkup::new(rows)
+}
+
+fn food_filtered_results_keyboard(foods: &[FoodRecord]) -> InlineKeyboardMarkup {
+    let mut rows: Vec<Vec<InlineKeyboardButton>> = foods
+        .iter()
+        .map(|food| vec![button(food.name.clone(), format!("food:view:{}", food.id))])
+        .collect();
+
+    rows.push(vec![
+        button("➕ Nuovo alimento", "food:new"),
+        button("🔎 Cerca", "food:search:list"),
+    ]);
+    rows.push(vec![
+        button("🏷 Cambia filtro", "food:filter"),
+        button("🔄 Aggiorna", "food:filter:refresh"),
+    ]);
+    rows.push(vec![
+        button("⬅️ Indietro", "food:list"),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
+    InlineKeyboardMarkup::new(rows)
+}
+
+fn category_before_save_keyboard(categories: &[CategoryRecord]) -> InlineKeyboardMarkup {
+    let mut rows = Vec::new();
+    for pair in categories.chunks(2) {
+        rows.push(
+            pair.iter()
+                .map(|category| {
+                    button(
+                        format!("{} {}", category.emoji, category.name),
+                        format!("food:new:category:{}", category.id),
+                    )
+                })
+                .collect(),
+        );
+    }
+    rows.push(vec![
+        button("⬅️ Indietro", "food:new:back:unit"),
+        button("❌ Annulla", "food:cancel"),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
+    InlineKeyboardMarkup::new(rows)
+}
+
+fn category_assignment_keyboard(
+    food_id: i64,
+    categories: &[CategoryRecord],
+) -> InlineKeyboardMarkup {
+    let mut rows = Vec::new();
+    for pair in categories.chunks(2) {
+        rows.push(
+            pair.iter()
+                .map(|category| {
+                    button(
+                        format!("{} {}", category.emoji, category.name),
+                        format!("food:setcat:{food_id}:{}", category.id),
+                    )
+                })
+                .collect(),
+        );
+    }
+    rows.push(vec![
+        button("⬅️ Indietro", format!("food:view:{food_id}")),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
+    InlineKeyboardMarkup::new(rows)
+}
+
+fn empty_filtered_keyboard() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
-        vec![button("🔄 Aggiorna alimenti", "food:refresh")],
-        vec![button("📋 Elenco alimenti", "food:list")],
+        vec![
+            button("➕ Nuovo alimento", "food:new"),
+            button("🔎 Cerca", "food:search:list"),
+        ],
+        vec![
+            button("🏷 Cambia filtro", "food:filter"),
+            button("🔄 Aggiorna", "food:filter:refresh"),
+        ],
         vec![
             button("⬅️ Indietro", "food:list"),
             button("🏠 Menu principale", "menu:main"),
         ],
     ])
+}
+
+fn food_edit_keyboard(food_id: i64, can_manage: bool) -> InlineKeyboardMarkup {
+    let mut rows = vec![
+        vec![
+            button("📝 Nome", format!("food:edit:name:{food_id}")),
+            button("📏 Unità", format!("food:edit:unit:{food_id}")),
+        ],
+        vec![button("🏷 Categoria", format!("food:category:{food_id}"))],
+    ];
+    if can_manage {
+        rows.push(vec![
+            button("👥 Visibilità", format!("food:edit:visibility:{food_id}")),
+            button("🔐 Collaboratori", format!("food:permissions:{food_id}")),
+        ]);
+    }
+    rows.push(vec![
+        button("⬅️ Indietro", format!("food:view:{food_id}")),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
+    InlineKeyboardMarkup::new(rows)
+}
+
+fn edit_text_keyboard(food_id: i64) -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![vec![
+        button("⬅️ Indietro", format!("food:edit:menu:{food_id}")),
+        button("❌ Annulla", format!("food:edit:cancel:{food_id}")),
+        button("🏠 Menu principale", "menu:main"),
+    ]])
+}
+
+fn edit_unit_keyboard(food_id: i64, units: &[UnitRecord]) -> InlineKeyboardMarkup {
+    let mut rows = Vec::new();
+    for pair in units.chunks(2) {
+        rows.push(
+            pair.iter()
+                .map(|unit| {
+                    button(
+                        unit_display_label(&unit.nome, &unit.simbolo),
+                        format!("food:edit:setunit:{food_id}:{}", unit.id),
+                    )
+                })
+                .collect(),
+        );
+    }
+    rows.push(vec![
+        button("⬅️ Indietro", format!("food:edit:menu:{food_id}")),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
+    InlineKeyboardMarkup::new(rows)
+}
+
+fn edit_visibility_keyboard(food_id: i64) -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![
+        vec![button(
+            "🔒 Solo mio",
+            format!("food:edit:vis:private:{food_id}"),
+        )],
+        vec![button(
+            "🎯 Spazio predefinito",
+            format!("food:edit:vis:default:{food_id}"),
+        )],
+        vec![button(
+            "🌐 Tutti i miei spazi",
+            format!("food:edit:vis:all:{food_id}"),
+        )],
+        vec![button(
+            "🎛 Scegli spazi",
+            format!("food:edit:vis:choose:{food_id}"),
+        )],
+        vec![
+            button("⬅️ Indietro", format!("food:edit:menu:{food_id}")),
+            button("🏠 Menu principale", "menu:main"),
+        ],
+    ])
+}
+
+fn edit_space_selection_keyboard(
+    food_id: i64,
+    spaces: &[SpaceRecord],
+    selected: &[i64],
+) -> InlineKeyboardMarkup {
+    let mut rows = Vec::new();
+    for space in spaces {
+        let checked = selected.contains(&space.id);
+        rows.push(vec![button(
+            format!("{} {}", if checked { "☑️" } else { "⬜" }, space.name),
+            format!("food:edit:space:{food_id}:{}", space.id),
+        )]);
+    }
+    rows.push(vec![button(
+        "✅ Salva",
+        format!("food:edit:spaces:save:{food_id}"),
+    )]);
+    rows.push(vec![
+        button("⬅️ Indietro", format!("food:edit:visibility:{food_id}")),
+        button("❌ Annulla", format!("food:edit:cancel:{food_id}")),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
+    InlineKeyboardMarkup::new(rows)
+}
+
+fn food_permissions_keyboard(
+    food_id: i64,
+    grants: &[PermissionGrantRecord],
+    candidates: &[PermissionCandidateRecord],
+) -> InlineKeyboardMarkup {
+    let mut rows = Vec::new();
+    for grant in grants {
+        rows.push(vec![button(
+            format!("❌ Revoca · {}", grant.name),
+            format!("food:perm:revoke:{food_id}:{}", grant.user_id),
+        )]);
+    }
+    for candidate in candidates {
+        rows.push(vec![button(
+            format!("➕ Invita · {}", candidate.name),
+            format!("food:perm:choose:{food_id}:{}", candidate.user_id),
+        )]);
+    }
+    rows.push(vec![
+        button("⬅️ Indietro", format!("food:edit:menu:{food_id}")),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
+    InlineKeyboardMarkup::new(rows)
+}
+
+fn permission_level_keyboard(food_id: i64, user_id: i64) -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![
+        vec![button(
+            "✏️ Può modificare",
+            format!("food:perm:send:{food_id}:{user_id}:edit"),
+        )],
+        vec![button(
+            "🛡 Modifica + gestisce permessi",
+            format!("food:perm:send:{food_id}:{user_id}:manage"),
+        )],
+        vec![
+            button("⬅️ Indietro", format!("food:permissions:{food_id}")),
+            button("🏠 Menu principale", "menu:main"),
+        ],
+    ])
+}
+
+fn permission_invite_keyboard(invite_id: i64) -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![
+        vec![
+            button("✅ Accetta", format!("food:invite:accept:{invite_id}")),
+            button("❌ Rifiuta", format!("food:invite:decline:{invite_id}")),
+        ],
+        vec![button("🏠 Menu principale", "menu:main")],
+    ])
+}
+
+fn search_from_list_keyboard() -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![vec![
+        button("⬅️ Indietro", "food:list"),
+        button("❌ Annulla", "food:cancel"),
+        button("🏠 Menu principale", "menu:main"),
+    ]])
 }
 
 fn cancel_keyboard() -> InlineKeyboardMarkup {
@@ -1518,19 +3449,7 @@ fn button(text: impl Into<String>, callback: impl Into<String>) -> InlineKeyboar
 }
 
 fn food_summary_line(food: &FoodRecord, current_user: Option<i64>) -> String {
-    let unit = food
-        .unit_symbol
-        .as_deref()
-        .map(|symbol| format!(" · {symbol}"))
-        .unwrap_or_default();
-
-    format!(
-        "#{} · {}{}\n{}",
-        food.id,
-        food.name,
-        unit,
-        ownership_label(food, current_user)
-    )
+    format!("{}\n{}", food.name, ownership_label(food, current_user))
 }
 
 fn ownership_label(food: &FoodRecord, current_user: Option<i64>) -> String {
@@ -1575,6 +3494,16 @@ fn parse_command(text: &str) -> Option<(&str, &str)> {
     let args = trimmed[split_at..].trim();
     let command = token.split('@').next().unwrap_or(token);
     Some((command, args))
+}
+
+fn parse_two_positive_ids(raw: &str) -> Option<(i64, i64)> {
+    let mut parts = raw.split(':');
+    let first = parts.next()?.parse::<i64>().ok()?;
+    let second = parts.next()?.parse::<i64>().ok()?;
+    if parts.next().is_some() || first <= 0 || second <= 0 {
+        return None;
+    }
+    Some((first, second))
 }
 
 fn parse_positive_id(raw: &str) -> Option<i64> {
@@ -1668,7 +3597,9 @@ mod tests {
         .await;
 
         let foods = identity::with_actor(actor(user_id, 1, false, "Tester"), async {
-            list_foods(&pool, None, 20).await.expect("elenco alimenti")
+            list_foods(&pool, None, None, 20)
+                .await
+                .expect("elenco alimenti")
         })
         .await;
 
@@ -1678,7 +3609,7 @@ mod tests {
         assert_eq!(foods[0].unit_code.as_deref(), Some("g"));
 
         let found = identity::with_actor(actor(user_id, 1, false, "Tester"), async {
-            list_foods(&pool, Some("POLLO"), 20)
+            list_foods(&pool, Some("POLLO"), None, 20)
                 .await
                 .expect("ricerca alimenti")
         })
@@ -1700,13 +3631,47 @@ mod tests {
         assert!(result.is_err());
 
         let count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM alimenti WHERE nome_normalizzato = 'senza unita'",
+            "SELECT COUNT(*) FROM alimenti WHERE nome_normalizzato = 'senza unità'",
         )
         .fetch_one(&pool)
         .await
         .expect("conteggio alimento senza unita");
 
         assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn categorie_alimenti_sono_predisposte_e_default_altro() {
+        let pool = test_pool().await;
+        let user_id = create_user(&pool, "Tester").await;
+        add_membership(&pool, 1, user_id, "proprietario").await;
+
+        let category_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM categorie_alimento WHERE attiva = 1")
+                .fetch_one(&pool)
+                .await
+                .expect("conteggio categorie");
+        assert_eq!(category_count, 12);
+
+        let food_id = identity::with_actor(actor(user_id, 1, false, "Tester"), async {
+            create_food(&pool, "Alimento categoria test", Some(1), &[])
+                .await
+                .expect("creazione alimento")
+        })
+        .await;
+
+        let category_code: String = sqlx::query_scalar(
+            "SELECT c.codice \
+             FROM alimento_categorie ac \
+             JOIN categorie_alimento c ON c.id = ac.categoria_id \
+             WHERE ac.alimento_id = ?",
+        )
+        .bind(food_id)
+        .fetch_one(&pool)
+        .await
+        .expect("categoria alimento");
+
+        assert_eq!(category_code, "altro");
     }
 
     #[tokio::test]
@@ -1786,7 +3751,7 @@ mod tests {
             .expect("rimozione membership");
 
         let foods = identity::with_actor(actor(user_id, 1, false, "Tester"), async {
-            list_foods(&pool, None, 20)
+            list_foods(&pool, None, None, 20)
                 .await
                 .expect("catalogo personale")
         })
@@ -1821,7 +3786,9 @@ mod tests {
         .await;
 
         let visible = identity::with_actor(actor(guest_id, shared_space, true, "Guest"), async {
-            list_foods(&pool, None, 20).await.expect("catalogo guest")
+            list_foods(&pool, None, None, 20)
+                .await
+                .expect("catalogo guest")
         })
         .await;
         assert!(visible.iter().any(|food| food.id == food_id));
@@ -1834,12 +3801,425 @@ mod tests {
             .expect("rimozione guest");
 
         let hidden = identity::with_actor(actor(guest_id, 1, true, "Guest"), async {
-            list_foods(&pool, None, 20)
+            list_foods(&pool, None, None, 20)
                 .await
                 .expect("catalogo guest dopo rimozione")
         })
         .await;
         assert!(!hidden.iter().any(|food| food.id == food_id));
+    }
+
+    #[tokio::test]
+    async fn filtro_categoria_restituisce_solo_alimenti_assegnati() {
+        let pool = test_pool().await;
+        let user_id = create_user(&pool, "Tester").await;
+        add_membership(&pool, 1, user_id, "proprietario").await;
+
+        let bistecca_id = identity::with_actor(actor(user_id, 1, false, "Tester"), async {
+            create_food(&pool, "Bistecca filtro", Some(1), &[])
+                .await
+                .expect("bistecca")
+        })
+        .await;
+
+        let zucchina_id = identity::with_actor(actor(user_id, 1, false, "Tester"), async {
+            create_food(&pool, "Zucchina filtro", Some(1), &[])
+                .await
+                .expect("zucchina")
+        })
+        .await;
+
+        let carne_id: i64 =
+            sqlx::query_scalar("SELECT id FROM categorie_alimento WHERE codice = 'carne'")
+                .fetch_one(&pool)
+                .await
+                .expect("carne");
+        let verdura_id: i64 =
+            sqlx::query_scalar("SELECT id FROM categorie_alimento WHERE codice = 'verdura'")
+                .fetch_one(&pool)
+                .await
+                .expect("verdura");
+
+        identity::with_actor(actor(user_id, 1, false, "Tester"), async {
+            set_food_category(&pool, bistecca_id, carne_id)
+                .await
+                .expect("categoria carne");
+            set_food_category(&pool, zucchina_id, verdura_id)
+                .await
+                .expect("categoria verdura");
+        })
+        .await;
+
+        let carne = identity::with_actor(actor(user_id, 1, false, "Tester"), async {
+            list_foods(&pool, None, Some(carne_id), 20)
+                .await
+                .expect("filtro carne")
+        })
+        .await;
+
+        assert!(carne.iter().any(|food| food.id == bistecca_id));
+        assert!(!carne.iter().any(|food| food.id == zucchina_id));
+    }
+
+    #[tokio::test]
+    async fn filtro_multi_categoria_unisce_risultati_senza_duplicati() {
+        let pool = test_pool().await;
+        let user_id = create_user(&pool, "Tester multi").await;
+        add_membership(&pool, 1, user_id, "proprietario").await;
+
+        let bistecca_id = identity::with_actor(actor(user_id, 1, false, "Tester multi"), async {
+            create_food(&pool, "Bistecca multi", Some(1), &[])
+                .await
+                .expect("bistecca")
+        })
+        .await;
+
+        let zucchina_id = identity::with_actor(actor(user_id, 1, false, "Tester multi"), async {
+            create_food(&pool, "Zucchina multi", Some(1), &[])
+                .await
+                .expect("zucchina")
+        })
+        .await;
+
+        let riso_id = identity::with_actor(actor(user_id, 1, false, "Tester multi"), async {
+            create_food(&pool, "Riso multi", Some(1), &[])
+                .await
+                .expect("riso")
+        })
+        .await;
+
+        let carne_id: i64 =
+            sqlx::query_scalar("SELECT id FROM categorie_alimento WHERE codice = 'carne'")
+                .fetch_one(&pool)
+                .await
+                .expect("carne");
+        let verdura_id: i64 =
+            sqlx::query_scalar("SELECT id FROM categorie_alimento WHERE codice = 'verdura'")
+                .fetch_one(&pool)
+                .await
+                .expect("verdura");
+        let cereali_id: i64 =
+            sqlx::query_scalar("SELECT id FROM categorie_alimento WHERE codice = 'cereali'")
+                .fetch_one(&pool)
+                .await
+                .expect("cereali");
+
+        identity::with_actor(actor(user_id, 1, false, "Tester multi"), async {
+            set_food_category(&pool, bistecca_id, carne_id)
+                .await
+                .expect("categoria carne");
+            set_food_category(&pool, zucchina_id, verdura_id)
+                .await
+                .expect("categoria verdura");
+            set_food_category(&pool, riso_id, cereali_id)
+                .await
+                .expect("categoria cereali");
+        })
+        .await;
+
+        sqlx::query(
+            "INSERT INTO alimento_categorie (\
+                alimento_id, categoria_id, assegnata_da_utente_id\
+             ) VALUES (?, ?, ?)",
+        )
+        .bind(bistecca_id)
+        .bind(verdura_id)
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("seconda categoria test");
+
+        let foods = identity::with_actor(actor(user_id, 1, false, "Tester multi"), async {
+            list_foods_multi_categories(&pool, &[carne_id, verdura_id], 20)
+                .await
+                .expect("filtro multi")
+        })
+        .await;
+
+        assert!(foods.iter().any(|food| food.id == bistecca_id));
+        assert!(foods.iter().any(|food| food.id == zucchina_id));
+        assert!(!foods.iter().any(|food| food.id == riso_id));
+        assert_eq!(
+            foods.iter().filter(|food| food.id == bistecca_id).count(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn solo_proprietario_puo_modificare_categoria_alimento() {
+        let pool = test_pool().await;
+        let owner_id = create_user(&pool, "Owner").await;
+        let other_id = create_user(&pool, "Other").await;
+        add_membership(&pool, 1, owner_id, "proprietario").await;
+        add_membership(&pool, 1, other_id, "membro").await;
+
+        let food_id = identity::with_actor(actor(owner_id, 1, false, "Owner"), async {
+            create_food(&pool, "Pollo categoria owner", Some(1), &[1])
+                .await
+                .expect("alimento owner")
+        })
+        .await;
+
+        let carne_id: i64 =
+            sqlx::query_scalar("SELECT id FROM categorie_alimento WHERE codice = 'carne'")
+                .fetch_one(&pool)
+                .await
+                .expect("carne");
+
+        let result = identity::with_actor(actor(other_id, 1, false, "Other"), async {
+            set_food_category(&pool, food_id, carne_id).await
+        })
+        .await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn visibilita_alimento_non_concede_modifica() {
+        let pool = test_pool().await;
+        let owner_id = create_user(&pool, "Owner visibilita").await;
+        let other_id = create_user(&pool, "Other visibilita").await;
+        add_membership(&pool, 1, owner_id, "proprietario").await;
+        add_membership(&pool, 1, other_id, "membro").await;
+
+        let food_id = identity::with_actor(actor(owner_id, 1, false, "Owner visibilita"), async {
+            create_food(&pool, "Alimento solo visibile", Some(1), &[1])
+                .await
+                .expect("food")
+        })
+        .await;
+
+        assert!(food_visible_to_user(&pool, food_id, other_id)
+            .await
+            .expect("visible"));
+        assert!(!can_edit_food(&pool, food_id, other_id).await.expect("edit"));
+    }
+
+    #[tokio::test]
+    async fn permesso_esplicito_consente_modifica_categoria() {
+        let pool = test_pool().await;
+        let owner_id = create_user(&pool, "Owner permesso").await;
+        let other_id = create_user(&pool, "Other permesso").await;
+        add_membership(&pool, 1, owner_id, "proprietario").await;
+        add_membership(&pool, 1, other_id, "membro").await;
+
+        let food_id = identity::with_actor(actor(owner_id, 1, false, "Owner permesso"), async {
+            create_food(&pool, "Alimento collaborativo", Some(1), &[1])
+                .await
+                .expect("food")
+        })
+        .await;
+
+        sqlx::query(
+            "INSERT INTO permessi_risorsa (\
+                tipo_risorsa, risorsa_id, utente_id, puo_modificare, \
+                puo_gestire_permessi, concesso_da_utente_id\
+             ) VALUES ('alimento', ?, ?, 1, 0, ?)",
+        )
+        .bind(food_id)
+        .bind(other_id)
+        .bind(owner_id)
+        .execute(&pool)
+        .await
+        .expect("permesso");
+
+        let carne_id: i64 =
+            sqlx::query_scalar("SELECT id FROM categorie_alimento WHERE codice = 'carne'")
+                .fetch_one(&pool)
+                .await
+                .expect("carne");
+
+        identity::with_actor(actor(other_id, 1, false, "Other permesso"), async {
+            set_food_category(&pool, food_id, carne_id)
+                .await
+                .expect("categoria da collaboratore");
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn perdita_visibilita_disattiva_permesso_alimento() {
+        let pool = test_pool().await;
+        let owner_id = create_user(&pool, "Owner perdita").await;
+        let other_id = create_user(&pool, "Other perdita").await;
+        add_membership(&pool, 1, owner_id, "proprietario").await;
+        add_membership(&pool, 1, other_id, "membro").await;
+
+        let food_id = identity::with_actor(actor(owner_id, 1, false, "Owner perdita"), async {
+            create_food(&pool, "Alimento perdita visibilita", Some(1), &[1])
+                .await
+                .expect("food")
+        })
+        .await;
+
+        sqlx::query(
+            "INSERT INTO permessi_risorsa (\
+                tipo_risorsa, risorsa_id, utente_id, puo_modificare, \
+                puo_gestire_permessi, concesso_da_utente_id\
+             ) VALUES ('alimento', ?, ?, 1, 0, ?)",
+        )
+        .bind(food_id)
+        .bind(other_id)
+        .bind(owner_id)
+        .execute(&pool)
+        .await
+        .expect("permesso");
+
+        assert!(can_edit_food(&pool, food_id, other_id)
+            .await
+            .expect("edit before"));
+        sqlx::query("DELETE FROM membri_spazio WHERE spazio_id = 1 AND utente_id = ?")
+            .bind(other_id)
+            .execute(&pool)
+            .await
+            .expect("remove membership");
+        assert!(!can_edit_food(&pool, food_id, other_id)
+            .await
+            .expect("edit after"));
+    }
+
+    #[tokio::test]
+    async fn creazione_categoria_esplicita_sostituisce_altro() {
+        let pool = test_pool().await;
+        let user_id = create_user(&pool, "Create category").await;
+        add_membership(&pool, 1, user_id, "proprietario").await;
+        let carne_id: i64 =
+            sqlx::query_scalar("SELECT id FROM categorie_alimento WHERE codice = 'carne'")
+                .fetch_one(&pool)
+                .await
+                .expect("carne");
+        let food_id = identity::with_actor(actor(user_id, 1, false, "Create category"), async {
+            create_food_with_category(&pool, "Bistecca esplicita", Some(1), Some(carne_id), &[])
+                .await
+                .expect("food")
+        })
+        .await;
+        let categories: Vec<i64> =
+            sqlx::query_scalar("SELECT categoria_id FROM alimento_categorie WHERE alimento_id = ?")
+                .bind(food_id)
+                .fetch_all(&pool)
+                .await
+                .expect("categories");
+        assert_eq!(categories, vec![carne_id]);
+    }
+
+    #[tokio::test]
+    async fn proprietario_puo_modificare_nome_e_unita() {
+        let pool = test_pool().await;
+        let owner_id = create_user(&pool, "Owner edit").await;
+        add_membership(&pool, 1, owner_id, "proprietario").await;
+        let food_id = identity::with_actor(actor(owner_id, 1, false, "Owner edit"), async {
+            create_food(&pool, "Nome prima", Some(1), &[])
+                .await
+                .expect("food")
+        })
+        .await;
+        identity::with_actor(actor(owner_id, 1, false, "Owner edit"), async {
+            update_food_name(&pool, food_id, "Nome dopo")
+                .await
+                .expect("name");
+            update_food_unit(&pool, food_id, 2).await.expect("unit");
+        })
+        .await;
+        let row: (String, i64) =
+            sqlx::query_as("SELECT nome, unita_predefinita_id FROM alimenti WHERE id = ?")
+                .bind(food_id)
+                .fetch_one(&pool)
+                .await
+                .expect("row");
+        assert_eq!(row.0, "Nome dopo");
+        assert_eq!(row.1, 2);
+    }
+
+    #[tokio::test]
+    async fn permesso_modifica_non_concede_gestione_visibilita() {
+        let pool = test_pool().await;
+        let owner_id = create_user(&pool, "Owner edit only").await;
+        let other_id = create_user(&pool, "Editor only").await;
+        add_membership(&pool, 1, owner_id, "proprietario").await;
+        add_membership(&pool, 1, other_id, "membro").await;
+        let food_id = identity::with_actor(actor(owner_id, 1, false, "Owner edit only"), async {
+            create_food(&pool, "Edit only food", Some(1), &[1])
+                .await
+                .expect("food")
+        })
+        .await;
+        sqlx::query(
+            "INSERT INTO permessi_risorsa (tipo_risorsa, risorsa_id, utente_id, puo_modificare, puo_gestire_permessi, concesso_da_utente_id) \
+             VALUES ('alimento', ?, ?, 1, 0, ?)",
+        )
+        .bind(food_id).bind(other_id).bind(owner_id)
+        .execute(&pool).await.expect("grant");
+        assert!(can_edit_food(&pool, food_id, other_id).await.expect("edit"));
+        assert!(!can_manage_food(&pool, food_id, other_id)
+            .await
+            .expect("manage"));
+    }
+
+    #[tokio::test]
+    async fn permesso_gestione_consente_modifica_visibilita() {
+        let pool = test_pool().await;
+        let owner_id = create_user(&pool, "Owner manage").await;
+        let other_id = create_user(&pool, "Manager").await;
+        add_membership(&pool, 1, owner_id, "proprietario").await;
+        add_membership(&pool, 1, other_id, "membro").await;
+        let food_id = identity::with_actor(actor(owner_id, 1, false, "Owner manage"), async {
+            create_food(&pool, "Manage food", Some(1), &[1])
+                .await
+                .expect("food")
+        })
+        .await;
+        sqlx::query(
+            "INSERT INTO permessi_risorsa (tipo_risorsa, risorsa_id, utente_id, puo_modificare, puo_gestire_permessi, concesso_da_utente_id) \
+             VALUES ('alimento', ?, ?, 1, 1, ?)",
+        )
+        .bind(food_id).bind(other_id).bind(owner_id)
+        .execute(&pool).await.expect("grant");
+        assert!(can_manage_food(&pool, food_id, other_id)
+            .await
+            .expect("manage"));
+        identity::with_actor(actor(other_id, 1, false, "Manager"), async {
+            replace_food_shares(&pool, food_id, &[])
+                .await
+                .expect("private");
+        })
+        .await;
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM alimento_spazi WHERE alimento_id = ?")
+                .bind(food_id)
+                .fetch_one(&pool)
+                .await
+                .expect("count");
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn invito_accettato_attiva_permesso_modifica() {
+        let pool = test_pool().await;
+        let owner_id = create_user(&pool, "Owner invite flow").await;
+        let other_id = create_user(&pool, "Invited flow").await;
+        add_membership(&pool, 1, owner_id, "proprietario").await;
+        add_membership(&pool, 1, other_id, "membro").await;
+        let food_id = identity::with_actor(actor(owner_id, 1, false, "Owner invite flow"), async {
+            create_food(&pool, "Invite flow food", Some(1), &[1])
+                .await
+                .expect("food")
+        })
+        .await;
+        let invite_id = crate::resource_permissions::create_invite(
+            &pool,
+            "alimento",
+            food_id,
+            other_id,
+            owner_id,
+            crate::resource_permissions::ResourcePermission::Edit,
+        )
+        .await
+        .expect("invite");
+        crate::resource_permissions::accept_invite(&pool, invite_id, other_id)
+            .await
+            .expect("accept");
+        assert!(can_edit_food(&pool, food_id, other_id).await.expect("edit"));
     }
 
     #[tokio::test]

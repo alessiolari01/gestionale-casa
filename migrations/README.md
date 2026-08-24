@@ -81,3 +81,22 @@ famiglie massa (`g`/`kg`) e volume (`ml`/`l`). Il dettaglio architetturale è in
 personale dell'alimento dalla sua visibilità negli spazi e introduce
 `alimento_spazi`. La perdita di una membership non cancella gli alimenti
 posseduti dall'utente.
+
+## Step 7.2B — categorie alimenti
+
+`20260824173500_categorie_alimenti.sql` introduce `categorie_alimento` e la
+relazione molti-a-molti `alimento_categorie`; gli alimenti esistenti e nuovi
+partono dalla categoria `Altro`.
+
+## Step 7.2B — fondazione permessi risorse
+
+`20260824201500_permessi_risorse_condivise.sql` introduce `inviti_risorsa` e
+`permessi_risorsa`. La struttura e trasversale e verra riusata da Ricette e
+dalle future entita condivisibili.
+
+## Step 7.2C — fondazioni Ricette
+
+`20260824222000_ricette_fondazioni.sql` introduce `ricette`, `ricetta_spazi`
+e `ricetta_ingredienti`. Gli ingredienti referenziano gli alimenti esistenti.
+La struttura è indicizzata per la ricerca OR su più ingredienti e per il
+ranking in base al numero di ingredienti richiesti presenti nella ricetta.

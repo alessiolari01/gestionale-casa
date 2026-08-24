@@ -13,6 +13,7 @@ use sqlx::{SqlitePool, Transaction};
 use teloxide::types::User;
 
 pub(crate) const LEGACY_SPACE_ID: i64 = 1;
+pub(crate) const SYSTEM_ROLE_ADMIN: &str = "admin";
 #[cfg(test)]
 const LEGACY_SPACE_NAME: &str = "Spazio principale";
 
@@ -197,6 +198,7 @@ async fn resolve_telegram_profile(
     };
 
     ensure_initial_space(&mut tx, user_id, display_name).await?;
+    ensure_system_admin_exists(&mut tx).await?;
 
     let (space_id, space_name, view_mode): (i64, String, String) = sqlx::query_as(
         "SELECT s.id, s.nome, p.vista_spazi \
@@ -225,6 +227,24 @@ async fn resolve_telegram_profile(
         telegram_user_id: Some(telegram_user_id),
         telegram_username: profile.username.clone(),
     })
+}
+
+async fn ensure_system_admin_exists(tx: &mut Transaction<'_, sqlx::Sqlite>) -> Result<()> {
+    sqlx::query(
+        "UPDATE utenti \
+         SET ruolo_sistema = 'admin', \
+             aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
+         WHERE id = COALESCE(\
+             (SELECT creato_da_utente_id FROM spazi \
+              WHERE bootstrap_legacy = 1 AND creato_da_utente_id IS NOT NULL LIMIT 1),\
+             (SELECT id FROM utenti ORDER BY creato_il, id LIMIT 1)\
+         ) \
+           AND NOT EXISTS (SELECT 1 FROM utenti WHERE ruolo_sistema = 'admin')",
+    )
+    .execute(&mut **tx)
+    .await
+    .context("Impossibile inizializzare il ruolo amministratore")?;
+    Ok(())
 }
 
 async fn ensure_initial_space(
@@ -332,6 +352,61 @@ async fn ensure_initial_space(
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+pub(crate) struct SystemUserSummary {
+    pub(crate) nome: String,
+    pub(crate) ruolo_sistema: String,
+    pub(crate) stato: String,
+    pub(crate) telegram_username: Option<String>,
+    pub(crate) numero_spazi: i64,
+}
+
+pub(crate) async fn is_system_admin(pool: &SqlitePool, actor: &AuditActor) -> Result<bool> {
+    let Some(user_id) = actor.utente_id else {
+        return Ok(false);
+    };
+    sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(\
+            SELECT 1 FROM utenti \
+            WHERE id = ? AND stato = 'attivo' AND ruolo_sistema = 'admin'\
+         )",
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await
+    .context("Impossibile verificare il ruolo di sistema")
+}
+
+pub(crate) async fn list_system_admin_chat_ids(pool: &SqlitePool) -> Result<Vec<i64>> {
+    sqlx::query_scalar(
+        "SELECT DISTINCT at.chat_id \
+         FROM account_telegram at \
+         JOIN utenti u ON u.id = at.utente_id \
+         WHERE u.stato = 'attivo' AND u.ruolo_sistema = 'admin' \
+         ORDER BY at.chat_id",
+    )
+    .fetch_all(pool)
+    .await
+    .context("Impossibile leggere le chat degli amministratori")
+}
+
+pub(crate) async fn list_system_users(pool: &SqlitePool) -> Result<Vec<SystemUserSummary>> {
+    sqlx::query_as::<_, SystemUserSummary>(
+        "SELECT u.nome_visualizzato AS nome, \
+                u.ruolo_sistema, u.stato, at.username_snapshot AS telegram_username, \
+                COUNT(DISTINCT ms.spazio_id) AS numero_spazi \
+         FROM utenti u \
+         LEFT JOIN account_telegram at ON at.utente_id = u.id \
+         LEFT JOIN membri_spazio ms ON ms.utente_id = u.id \
+         GROUP BY u.id, u.nome_visualizzato, u.ruolo_sistema, u.stato, at.username_snapshot \
+         ORDER BY CASE u.ruolo_sistema WHEN 'admin' THEN 0 ELSE 1 END, \
+                  u.nome_visualizzato COLLATE NOCASE, u.id",
+    )
+    .fetch_all(pool)
+    .await
+    .context("Impossibile leggere gli utenti del gestionale")
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
 pub(crate) struct SpaceMembership {
     pub(crate) id: i64,
     pub(crate) nome: String,
@@ -395,7 +470,7 @@ pub(crate) async fn ensure_can_write_space(pool: &SqlitePool, space_id: i64) -> 
     if can_write_space(pool, space_id).await? {
         Ok(())
     } else {
-        bail!("Lo spazio di destinazione o proprietario non e' modificabile da questo utente")
+        bail!("Lo spazio di destinazione o proprietario non è modificabile da questo utente")
     }
 }
 
@@ -728,13 +803,20 @@ pub(crate) async fn profile_summary(pool: &SqlitePool, actor: &AuditActor) -> Re
             .await
             .context("Impossibile contare gli spazi disponibili")?;
 
+    let system_role = if is_system_admin(pool, actor).await? {
+        "\nRuolo sistema: Amministratore"
+    } else {
+        ""
+    };
+
     Ok(format!(
-        "👤 Profilo\n\nNome: {}\nTelegram: {}\nSpazio predefinito: {}\nVista: {}\nRuolo: {}\nMembro dal: {}\nSpazi disponibili: {}\n\nUsa /spazi per cambiare spazio predefinito o modalità di visualizzazione.",
+        "👤 Profilo\n\nNome: {}\nTelegram: {}\nSpazio predefinito: {}\nVista: {}\nRuolo nello spazio: {}{}\nMembro dal: {}\nSpazi disponibili: {}\n\nUsa /spazi per cambiare spazio predefinito o modalità di visualizzazione.",
         actor.nome_snapshot,
         telegram,
         actor.spazio_nome_snapshot,
         if actor.view_all { "Tutti i miei spazi" } else { "Solo spazio predefinito" },
         role_label(&role),
+        system_role,
         member_since,
         space_count,
     ))
@@ -799,6 +881,7 @@ mod tests {
         assert_eq!(actor.nome_snapshot, "Alessio");
         assert_eq!(actor.spazio_id, LEGACY_SPACE_ID);
         assert_eq!(actor.origine, "telegram");
+        assert!(is_system_admin(&pool, &actor).await.expect("ruolo sistema"));
 
         let role: String = sqlx::query_scalar(
             "SELECT ruolo FROM membri_spazio WHERE spazio_id = 1 AND utente_id = ?",
@@ -830,6 +913,9 @@ mod tests {
 
         assert_ne!(actor.spazio_id, LEGACY_SPACE_ID);
         assert_eq!(actor.spazio_id, actor_again.spazio_id);
+        assert!(!is_system_admin(&pool, &actor)
+            .await
+            .expect("ruolo sistema secondo"));
 
         let (role, kind): (String, String) = sqlx::query_as(
             "SELECT ms.ruolo, s.tipo \

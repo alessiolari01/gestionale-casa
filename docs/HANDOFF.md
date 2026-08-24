@@ -1,5 +1,39 @@
 # Handoff — Gestionale Casa
 
+## Handoff corrente — Step 7.2C verificato
+
+Branch: `step-7-alimentazione`. Baseline precedente: `45ba2f7`.
+
+Il checkpoint successivo a Step 7.2B è stato verificato completamente sul
+Samsung Galaxy S9.
+
+Stato verificato:
+
+- Alimentazione operativa con categorie, modifica, visibilità e collaboratori;
+- permessi generici sulle risorse;
+- fondazioni Ricette installate;
+- unità e accenti UI corretti;
+- ID tecnici rimossi dalle principali schermate utente;
+- comandi human-friendly per case, stanze e contenitori;
+- ruoli di sistema `utente/admin` separati dai permessi su spazi e risorse;
+- area `🛠️ Amministrazione` riservata agli admin;
+- protezione backend di `/admin`, `/status` e callback amministrative;
+- notifiche online/offline riservate agli amministratori;
+- **109/109 test**;
+- smoke test Telegram completato;
+- integrità SQLite OK e nessuna foreign key violata;
+- migration `20260825003000` applicata con successo;
+- utente bootstrap verificato come `admin`.
+
+Il prossimo sviluppo è **Step 7.2D — Ricette operative su Telegram**.
+
+Requisito approvato ma NON ancora implementato: qualsiasi account Telegram
+dovrà in futuro poter contattare il bot e richiedere l'accesso. Solo
+l'amministratore principale potrà accettare o rifiutare la richiesta; un
+account accettato nascerà come normale utente e non riceverà automaticamente
+accesso a spazi o risorse. La whitelist statica potrà restare come bootstrap o
+meccanismo di emergenza, non come modello applicativo ordinario.
+
 ## Handoff corrente — Step 7.1 / spazi operativi
 
 Baseline `main`: `219caba` (merge dello Step 6C).

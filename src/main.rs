@@ -7,6 +7,7 @@ mod config;
 mod db;
 mod identity;
 mod modules;
+mod resource_permissions;
 
 use std::{
     collections::HashMap,
@@ -86,6 +87,7 @@ async fn main() -> anyhow::Result<()> {
         shared_foundations = database_status.shared_foundations_present,
         operational_spaces = database_status.operational_spaces_present,
         multi_space_view = database_status.multi_space_view_present,
+        system_roles = database_status.system_roles_present,
         "Database SQLite pronto"
     );
 
@@ -96,14 +98,25 @@ async fn main() -> anyhow::Result<()> {
         .context("Impossibile collegarsi al bot Telegram")?;
     tracing::info!(bot_username = ?me.username(), "Gestionale Casa online");
 
-    // Il messaggio di avvio rende subito evidente che il backend e' tornato
-    // online e offre direttamente il menu principale senza richiedere /start.
-    for chat_id in config.allowed_chat_ids.iter().copied() {
+    // Le notifiche tecniche di avvio sono riservate agli amministratori del
+    // gestionale. Gli utenti normali non devono ricevere messaggi operativi
+    // legati al runtime del bot.
+    let admin_chat_ids = match identity::list_system_admin_chat_ids(&pool).await {
+        Ok(chat_ids) => chat_ids
+            .into_iter()
+            .filter(|chat_id| auth::is_authorized(*chat_id, &config.allowed_chat_ids))
+            .collect::<Vec<_>>(),
+        Err(error) => {
+            tracing::warn!(?error, "Impossibile leggere gli amministratori all'avvio");
+            Vec::new()
+        }
+    };
+    for chat_id in admin_chat_ids {
         if let Err(error) = send_online_menu(&bot, ChatId(chat_id)).await {
             tracing::warn!(
                 chat_id,
                 ?error,
-                "Impossibile inviare la notifica di avvio alla chat autorizzata"
+                "Impossibile inviare la notifica di avvio all'amministratore"
             );
         }
     }
@@ -118,10 +131,11 @@ async fn main() -> anyhow::Result<()> {
         .branch(Update::filter_message().endpoint(handle_message))
         .branch(Update::filter_callback_query().endpoint(handle_callback));
 
-    // Il dispatcher prende possesso di bot/config. Conserviamo solo cio' che
-    // serve per notificare uno shutdown controllato (Ctrl+C compreso).
+    // Il dispatcher prende possesso di bot/config. Conserviamo cio' che serve
+    // per notificare uno shutdown controllato ai soli amministratori.
     let shutdown_bot = bot.clone();
-    let shutdown_chat_ids = config.allowed_chat_ids.clone();
+    let shutdown_pool = pool.clone();
+    let shutdown_allowed_chat_ids = config.allowed_chat_ids.clone();
 
     Dispatcher::builder(bot, handler)
         .dependencies(dptree::deps![
@@ -139,6 +153,19 @@ async fn main() -> anyhow::Result<()> {
         .dispatch()
         .await;
 
+    let shutdown_chat_ids = match identity::list_system_admin_chat_ids(&shutdown_pool).await {
+        Ok(chat_ids) => chat_ids
+            .into_iter()
+            .filter(|chat_id| auth::is_authorized(*chat_id, &shutdown_allowed_chat_ids))
+            .collect::<Vec<_>>(),
+        Err(error) => {
+            tracing::warn!(
+                ?error,
+                "Impossibile leggere gli amministratori allo spegnimento"
+            );
+            Vec::new()
+        }
+    };
     for chat_id in shutdown_chat_ids {
         if let Err(error) = shutdown_bot
             .send_message(ChatId(chat_id), "🔴 Gestionale Casa è offline.")
@@ -147,7 +174,7 @@ async fn main() -> anyhow::Result<()> {
             tracing::warn!(
                 chat_id,
                 ?error,
-                "Impossibile inviare la notifica di spegnimento alla chat autorizzata"
+                "Impossibile inviare la notifica di spegnimento all'amministratore"
             );
         }
     }
@@ -352,7 +379,7 @@ async fn handle_authorized_message(
             location_sessions.clear_chat(chat_id);
             container_sessions.clear_chat(chat_id);
             photo_sessions.clear_chat(chat_id);
-            send_main_menu(&bot, msg.chat.id).await?;
+            send_main_menu(&bot, msg.chat.id, &pool, &actor).await?;
         }
         Some("/ping") => {
             bot.send_message(msg.chat.id, "Pong! Gestionale Casa è online.")
@@ -472,8 +499,11 @@ async fn handle_authorized_message(
                     .await?;
             }
         },
+        Some("/admin") => {
+            send_admin_menu(&bot, msg.chat.id, &pool, &actor).await?;
+        }
         Some("/status") => {
-            send_status(&bot, msg.chat.id, &pool).await?;
+            send_status(&bot, msg.chat.id, &pool, &actor).await?;
         }
         Some(_) => {
             bot.send_message(
@@ -599,7 +629,7 @@ async fn handle_authorized_callback(
             container_sessions.clear_chat(chat_id.0);
             photo_sessions.clear_chat(chat_id.0);
             food_sessions.clear_chat(chat_id.0);
-            send_main_menu(&bot, chat_id).await?;
+            send_main_menu(&bot, chat_id, &pool, &actor).await?;
         }
         "menu:soon" => {
             bot.send_message(
@@ -694,8 +724,17 @@ async fn handle_authorized_callback(
                 }
             }
         }
-        "system:status" => {
-            send_status(&bot, chat_id, &pool).await?;
+        "admin:menu" => {
+            send_admin_menu(&bot, chat_id, &pool, &actor).await?;
+        }
+        "admin:overview" => {
+            send_admin_overview(&bot, chat_id, &pool, &actor).await?;
+        }
+        "admin:users" => {
+            send_admin_users(&bot, chat_id, &pool, &actor).await?;
+        }
+        "admin:status" | "system:status" => {
+            send_status(&bot, chat_id, &pool, &actor).await?;
         }
         _ if data.starts_with("history:") || data.starts_with("h:") => {
             sessions.clear_chat(chat_id.0);
@@ -761,19 +800,34 @@ async fn handle_authorized_callback(
 async fn send_online_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
-        "🟢 Gestionale Casa è online.\n\n🏠 Menu principale\nScegli una sezione.\n\nComandi rapidi: /alimenti · /oggetti · /luoghi · /struttura · /contenitori · /storico · /profilo · /spazi · /vista_tutti · /vista_spazio · /status · /ping",
+        "🟢 Gestionale Casa è online.\n\n🏠 Menu principale\nScegli una sezione.",
     )
-    .reply_markup(modules::oggetti::main_menu_keyboard())
+    .reply_markup(modules::oggetti::main_menu_keyboard(true))
     .await?;
     Ok(())
 }
 
-async fn send_main_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
+async fn send_main_menu(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    actor: &identity::AuditActor,
+) -> ResponseResult<()> {
+    let is_admin = match identity::is_system_admin(pool, actor).await {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(
+                ?error,
+                "Errore verifica ruolo amministratore nel menu principale"
+            );
+            false
+        }
+    };
     bot.send_message(
         chat_id,
-        "🏠 Gestionale Casa\n\nScegli una sezione. I moduli non ancora disponibili sono indicati come prossimamente.\n\nComandi rapidi: /alimenti · /oggetti · /luoghi · /struttura · /contenitori · /storico · /profilo · /spazi · /vista_tutti · /vista_spazio · /status · /ping",
+        "🏠 Gestionale Casa\n\nScegli una sezione. I moduli non ancora disponibili sono indicati come prossimamente.",
     )
-    .reply_markup(modules::oggetti::main_menu_keyboard())
+    .reply_markup(modules::oggetti::main_menu_keyboard(is_admin))
     .await?;
     Ok(())
 }
@@ -882,7 +936,170 @@ async fn send_spaces(
     Ok(())
 }
 
-async fn send_status(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> ResponseResult<()> {
+async fn ensure_admin_access(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    actor: &identity::AuditActor,
+) -> ResponseResult<bool> {
+    match identity::is_system_admin(pool, actor).await {
+        Ok(true) => Ok(true),
+        Ok(false) => {
+            bot.send_message(chat_id, "⚠️ Comando non disponibile.")
+                .await?;
+            Ok(false)
+        }
+        Err(error) => {
+            tracing::error!(?error, "Errore verifica ruolo amministratore");
+            bot.send_message(chat_id, "⚠️ Comando non disponibile.")
+                .await?;
+            Ok(false)
+        }
+    }
+}
+
+async fn send_admin_menu(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    actor: &identity::AuditActor,
+) -> ResponseResult<()> {
+    if !ensure_admin_access(bot, chat_id, pool, actor).await? {
+        return Ok(());
+    }
+    bot.send_message(
+        chat_id,
+        "🛠️ Amministrazione\n\nArea riservata per monitorare il gestionale. I ruoli di sistema sono separati dai permessi negli spazi e sulle singole risorse.",
+    )
+    .reply_markup(admin_menu_keyboard())
+    .await?;
+    Ok(())
+}
+
+async fn send_admin_overview(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    actor: &identity::AuditActor,
+) -> ResponseResult<()> {
+    if !ensure_admin_access(bot, chat_id, pool, actor).await? {
+        return Ok(());
+    }
+
+    let counts = async {
+        let users: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM utenti WHERE stato = 'attivo'")
+            .fetch_one(pool)
+            .await?;
+        let spaces: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM spazi")
+            .fetch_one(pool)
+            .await?;
+        let homes: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM abitazioni")
+            .fetch_one(pool)
+            .await?;
+        let items: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM items")
+            .fetch_one(pool)
+            .await?;
+        let foods: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM alimenti WHERE archiviato = 0")
+            .fetch_one(pool)
+            .await?;
+        let recipes: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ricette WHERE archiviata = 0")
+            .fetch_one(pool)
+            .await?;
+        let history: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM storico_eventi")
+            .fetch_one(pool)
+            .await?;
+        Ok::<_, sqlx::Error>((users, spaces, homes, items, foods, recipes, history))
+    }
+    .await;
+
+    match counts {
+        Ok((users, spaces, homes, items, foods, recipes, history)) => {
+            bot.send_message(
+                chat_id,
+                format!(
+                    "🧭 Panoramica gestionale\n\n👥 Utenti attivi: {users}\n🌐 Spazi: {spaces}\n🏠 Case: {homes}\n🏷️ Oggetti: {items}\n🥕 Alimenti: {foods}\n🍳 Ricette: {recipes}\n📜 Eventi nello storico: {history}"
+                ),
+            )
+            .reply_markup(admin_back_keyboard())
+            .await?;
+        }
+        Err(error) => {
+            tracing::error!(?error, "Errore panoramica amministrativa");
+            bot.send_message(
+                chat_id,
+                "⚠️ Non riesco a leggere la panoramica del gestionale.",
+            )
+            .reply_markup(admin_back_keyboard())
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+async fn send_admin_users(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    actor: &identity::AuditActor,
+) -> ResponseResult<()> {
+    if !ensure_admin_access(bot, chat_id, pool, actor).await? {
+        return Ok(());
+    }
+
+    match identity::list_system_users(pool).await {
+        Ok(users) => {
+            let mut lines = vec!["👥 Utenti del gestionale".to_string(), String::new()];
+            for user in users {
+                let icon = if user.ruolo_sistema == identity::SYSTEM_ROLE_ADMIN {
+                    "🛡️"
+                } else {
+                    "👤"
+                };
+                let role = if user.ruolo_sistema == identity::SYSTEM_ROLE_ADMIN {
+                    "Amministratore"
+                } else {
+                    "Utente"
+                };
+                let telegram = user
+                    .telegram_username
+                    .as_deref()
+                    .map(|value| format!("@{value}"))
+                    .unwrap_or_else(|| "account Telegram collegato".to_string());
+                lines.push(format!(
+                    "{icon} {}\n   Ruolo sistema: {role}\n   Stato: {}\n   Telegram: {telegram}\n   Spazi: {}",
+                    user.nome,
+                    if user.stato == "attivo" { "Attivo" } else { "Disabilitato" },
+                    user.numero_spazi
+                ));
+                lines.push(String::new());
+            }
+            bot.send_message(chat_id, lines.join("\n"))
+                .reply_markup(admin_back_keyboard())
+                .await?;
+        }
+        Err(error) => {
+            tracing::error!(?error, "Errore elenco utenti amministrativo");
+            bot.send_message(
+                chat_id,
+                "⚠️ Non riesco a leggere gli utenti del gestionale.",
+            )
+            .reply_markup(admin_back_keyboard())
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+async fn send_status(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    actor: &identity::AuditActor,
+) -> ResponseResult<()> {
+    if !ensure_admin_access(bot, chat_id, pool, actor).await? {
+        return Ok(());
+    }
+
     match db::status(pool).await {
         Ok(status) => {
             let fk = if status.foreign_keys_enabled {
@@ -910,8 +1127,13 @@ async fn send_status(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> ResponseR
             } else {
                 "❌"
             };
+            let system_roles = if status.system_roles_present {
+                "✅"
+            } else {
+                "❌"
+            };
             let message = format!(
-                "🏠 Gestionale Casa\n\n\
+                "📊 Stato sistema\n\n\
                  Bot Telegram: ✅\n\
                  Database SQLite: ✅\n\
                  Foreign key: {fk}\n\
@@ -919,11 +1141,12 @@ async fn send_status(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> ResponseR
                  Schema core: {schema}\n\
                  Fondazioni condivise Step 7: {shared}\n\
                  Isolamento multi-spazio: {operational}\n\
-                 Vista multi-spazio Step 7.1B: {multi_view}",
+                 Vista multi-spazio Step 7.1B: {multi_view}\n\
+                 Ruoli di sistema: {system_roles}",
                 status.applied_migrations
             );
             bot.send_message(chat_id, message)
-                .reply_markup(status_keyboard())
+                .reply_markup(admin_back_keyboard())
                 .await?;
         }
         Err(error) => {
@@ -932,11 +1155,41 @@ async fn send_status(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> ResponseR
                 chat_id,
                 "⚠️ Il bot è online, ma non riesco a leggere lo stato del database.",
             )
-            .reply_markup(status_keyboard())
+            .reply_markup(admin_back_keyboard())
             .await?;
         }
     }
     Ok(())
+}
+
+fn admin_menu_keyboard() -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![
+        vec![
+            InlineKeyboardButton::callback(
+                "🧭 Panoramica".to_string(),
+                "admin:overview".to_string(),
+            ),
+            InlineKeyboardButton::callback(
+                "📊 Stato sistema".to_string(),
+                "admin:status".to_string(),
+            ),
+        ],
+        vec![InlineKeyboardButton::callback(
+            "👥 Utenti".to_string(),
+            "admin:users".to_string(),
+        )],
+        vec![InlineKeyboardButton::callback(
+            "🏠 Menu principale".to_string(),
+            "menu:main".to_string(),
+        )],
+    ])
+}
+
+fn admin_back_keyboard() -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![vec![
+        InlineKeyboardButton::callback("⬅️ Amministrazione".to_string(), "admin:menu".to_string()),
+        InlineKeyboardButton::callback("🏠 Menu principale".to_string(), "menu:main".to_string()),
+    ]])
 }
 
 fn profile_keyboard() -> InlineKeyboardMarkup {
@@ -967,13 +1220,6 @@ fn space_flow_keyboard() -> InlineKeyboardMarkup {
             "menu:main".to_string(),
         )],
     ])
-}
-
-fn status_keyboard() -> InlineKeyboardMarkup {
-    InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
-        "🏠 Menu principale".to_string(),
-        "menu:main".to_string(),
-    )]])
 }
 
 fn command_args(text: &str) -> &str {

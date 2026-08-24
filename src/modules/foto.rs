@@ -93,7 +93,7 @@ pub async fn handle_message(
                     if let Some(item_id) = parse_id(args) {
                         show_photo_menu(bot, msg.chat.id, pool, item_id).await?;
                     } else {
-                        bot.send_message(msg.chat.id, "Uso: /foto <id>\nEsempio: /foto 12")
+                        bot.send_message(msg.chat.id, "Apri l'oggetto da /oggetti e usa 📷 Foto.")
                             .await?;
                     }
                     return Ok(true);
@@ -104,7 +104,7 @@ pub async fn handle_message(
                     } else {
                         bot.send_message(
                             msg.chat.id,
-                            "Uso: /foto_aggiungi <id>\nEsempio: /foto_aggiungi 12",
+                            "Apri l'oggetto da /oggetti, entra in 📷 Foto e scegli ➕ Aggiungi foto.",
                         )
                         .await?;
                     }

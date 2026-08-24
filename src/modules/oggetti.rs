@@ -263,7 +263,6 @@ struct ObjectSummary {
 #[derive(Debug, Clone)]
 struct ObjectLocationDisplay {
     label: String,
-    command: String,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -277,8 +276,8 @@ struct ObjectLocationInput<'a> {
     container_id: Option<i64>,
 }
 
-pub fn main_menu_keyboard() -> InlineKeyboardMarkup {
-    InlineKeyboardMarkup::new(vec![
+pub fn main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup {
+    let mut rows = vec![
         vec![button("📜 Storico", "history:global:0")],
         vec![
             button("👤 Profilo", "identity:profile"),
@@ -291,8 +290,11 @@ pub fn main_menu_keyboard() -> InlineKeyboardMarkup {
             button("🚗 Veicoli · prossimamente", "menu:soon"),
         ],
         vec![button("🍽️ Alimentazione", "food:menu")],
-        vec![button("📊 Stato sistema", "system:status")],
-    ])
+    ];
+    if is_admin {
+        rows.push(vec![button("🛠️ Amministrazione", "admin:menu")]);
+    }
+    InlineKeyboardMarkup::new(rows)
 }
 
 pub async fn show_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
@@ -349,8 +351,11 @@ pub async fn handle_message(
                 if let Some(id) = parse_positive_id(args) {
                     send_object_detail(bot, msg.chat.id, pool, id).await?;
                 } else {
-                    bot.send_message(msg.chat.id, "Uso: /oggetto <id>\nEsempio: /oggetto 12")
-                        .await?;
+                    bot.send_message(
+                        msg.chat.id,
+                        "Apri l'elenco con /oggetti e scegli l'oggetto dai pulsanti.",
+                    )
+                    .await?;
                 }
                 return Ok(true);
             }
@@ -361,7 +366,7 @@ pub async fn handle_message(
                 } else {
                     bot.send_message(
                         msg.chat.id,
-                        "Uso: /oggetto_modifica <id>\nEsempio: /oggetto_modifica 12",
+                        "Apri l'oggetto dall'elenco e usa ⚙️ Gestisci → ✏️ Modifica dati.",
                     )
                     .await?;
                 }
@@ -374,7 +379,7 @@ pub async fn handle_message(
                 } else {
                     bot.send_message(
                         msg.chat.id,
-                        "Uso: /oggetto_elimina <id>\nEsempio: /oggetto_elimina 12",
+                        "Apri l'oggetto dall'elenco e usa ⚙️ Gestisci → 🗑 Elimina oggetto.",
                     )
                     .await?;
                 }
@@ -978,7 +983,7 @@ async fn start_edit_object(
             send_draft_panel(bot, telegram_chat_id, &draft).await?;
         }
         Ok(None) => {
-            bot.send_message(telegram_chat_id, format!("Oggetto #{id} non trovato."))
+            bot.send_message(telegram_chat_id, "Oggetto non trovato.")
                 .reply_markup(objects_menu_keyboard())
                 .await?;
         }
@@ -1548,9 +1553,9 @@ async fn save_current_draft(
             let return_to = draft.return_to.clone();
             sessions.clear_chat(raw_chat_id);
             let message = if was_update {
-                format!("✅ Modifiche salvate per l'oggetto #{id}.")
+                format!("✅ Modifiche salvate: {}.", draft.name)
             } else {
-                format!("✅ Oggetto salvato con ID #{id}.")
+                format!("✅ Oggetto salvato: {}.", draft.name)
             };
             bot.send_message(chat_id, message).await?;
             if was_update {
@@ -1604,10 +1609,7 @@ async fn send_object_list(
             let total_pages = ((total + PAGE_SIZE - 1) / PAGE_SIZE).max(1);
             let mut text = format!("📋 Oggetti · pagina {}/{}\n\n", page + 1, total_pages);
             for object in &objects {
-                text.push_str(&format!(
-                    "#{} · {}\n👥 {}",
-                    object.id, object.name, object.owner_space_name
-                ));
+                text.push_str(&format!("{}\n👥 {}", object.name, object.owner_space_name));
                 push_summary_location(&mut text, pool, object).await;
                 text.push_str("\n\n");
             }
@@ -1640,10 +1642,7 @@ async fn send_search_results(
         Ok(objects) => {
             let mut text = format!("🔎 Risultati per: {query}\n\n");
             for object in &objects {
-                text.push_str(&format!(
-                    "#{} · {}\n👥 {}",
-                    object.id, object.name, object.owner_space_name
-                ));
+                text.push_str(&format!("{}\n👥 {}", object.name, object.owner_space_name));
                 push_summary_location(&mut text, pool, object).await;
                 text.push_str("\n\n");
             }
@@ -1670,7 +1669,7 @@ async fn send_object_manage(
         Ok(Some(object)) => {
             bot.send_message(
                 chat_id,
-                format!("⚙️ Gestisci oggetto\n\n🏷️ #{} · {}", object.id, object.name),
+                format!("⚙️ Gestisci oggetto\n\n🏷️ {}", object.name),
             )
             .reply_markup(InlineKeyboardMarkup::new(vec![
                 vec![button("✏️ Modifica dati", &format!("oggetti:edit:{id}"))],
@@ -1686,7 +1685,7 @@ async fn send_object_manage(
             .await?;
         }
         Ok(None) => {
-            bot.send_message(chat_id, format!("Oggetto #{id} non trovato."))
+            bot.send_message(chat_id, "Oggetto non trovato.")
                 .reply_markup(objects_menu_keyboard())
                 .await?;
         }
@@ -1743,7 +1742,7 @@ async fn send_object_detail_with_return(
                 .await?;
         }
         Ok(None) => {
-            bot.send_message(chat_id, format!("Oggetto #{id} non trovato."))
+            bot.send_message(chat_id, "Oggetto non trovato.")
                 .reply_markup(objects_menu_keyboard())
                 .await?;
         }
@@ -1810,17 +1809,16 @@ async fn send_delete_confirmation(
                     "⚠️ Eliminare definitivamente?
 
 🏷️ {}
-#{}
 
 Verranno eliminati anche i dati collegati nel database e le foto locali dell'oggetto. Questa operazione non può essere annullata.",
-                    object.name, object.id
+                    object.name
                 ),
             )
             .reply_markup(delete_confirmation_keyboard(id))
             .await?;
         }
         Ok(None) => {
-            bot.send_message(chat_id, format!("Oggetto #{id} non trovato."))
+            bot.send_message(chat_id, "Oggetto non trovato.")
                 .reply_markup(objects_menu_keyboard())
                 .await?;
         }
@@ -1846,12 +1844,9 @@ async fn delete_object_and_media(
     match delete_object(pool, id).await {
         Ok(true) => match crate::modules::foto::remove_object_media(id).await {
             Ok(()) => {
-                bot.send_message(
-                    chat_id,
-                    format!("🗑 Oggetto #{id} eliminato definitivamente."),
-                )
-                .reply_markup(objects_menu_keyboard())
-                .await?;
+                bot.send_message(chat_id, "🗑 Oggetto eliminato definitivamente.")
+                    .reply_markup(objects_menu_keyboard())
+                    .await?;
             }
             Err(error) => {
                 tracing::warn!(
@@ -1861,17 +1856,15 @@ async fn delete_object_and_media(
                 );
                 bot.send_message(
                     chat_id,
-                    format!(
-                        "🗑 Oggetto #{id} eliminato dal database.
-⚠️ Non sono riuscito a rimuovere tutti i file locali: controlla data/media/oggetti/{id}."
-                    ),
+                    "🗑 Oggetto eliminato dal database.
+⚠️ Non sono riuscito a rimuovere tutti i file locali dell'oggetto: controlla i log del backend.",
                 )
                 .reply_markup(objects_menu_keyboard())
                 .await?;
             }
         },
         Ok(false) => {
-            bot.send_message(chat_id, format!("Oggetto #{id} non trovato."))
+            bot.send_message(chat_id, "Oggetto non trovato.")
                 .reply_markup(objects_menu_keyboard())
                 .await?;
         }
@@ -2550,10 +2543,11 @@ async fn search_objects(
 }
 
 fn format_draft(draft: &ObjectDraft) -> String {
-    let title = draft.object_id.map_or_else(
-        || "🏷️ Nuovo oggetto".to_string(),
-        |id| format!("✏️ Modifica oggetto #{id}"),
-    );
+    let title = if draft.object_id.is_some() {
+        "✏️ Modifica oggetto".to_string()
+    } else {
+        "🏷️ Nuovo oggetto".to_string()
+    };
     let mut lines = vec![title, String::new(), format!("Nome: {}", draft.name)];
 
     push_optional_line(&mut lines, "Marca", draft.brand.as_deref());
@@ -2600,7 +2594,6 @@ fn format_draft(draft: &ObjectDraft) -> String {
 fn format_object(object: &ObjectRecord, location: Option<&ObjectLocationDisplay>) -> String {
     let mut lines = vec![
         format!("🏷️ {}", object.name),
-        format!("#{}", object.id),
         format!("👥 Proprietà: {}", object.owner_space_name),
     ];
 
@@ -2614,7 +2607,6 @@ fn format_object(object: &ObjectRecord, location: Option<&ObjectLocationDisplay>
     }
     if let Some(location) = location {
         lines.push(format!("📍 Posizione: {}", location.label));
-        lines.push(location.command.clone());
     }
     if let Some(position) = &object.position {
         lines.push(format!("📌 Posizione legacy: {position}"));
@@ -2929,7 +2921,7 @@ async fn push_summary_location(text: &mut String, pool: &SqlitePool, object: &Ob
     )
     .await
     {
-        text.push_str(&format!("\n📍 {}\n{}", location.label, location.command));
+        text.push_str(&format!("\n📍 {}", location.label));
     }
 }
 
@@ -2950,23 +2942,20 @@ async fn resolve_object_location(
                 label: crate::modules::contenitori::format_path_for_ui_with_space(
                     &path, show_space,
                 ),
-                command: format!("/luogo_c{container_id}"),
             });
         }
     }
-    if let (Some(room_id), Some(home), Some(room)) =
+    if let (Some(_), Some(home), Some(room)) =
         (location.room_id, location.home_name, location.room_name)
     {
         let home = object_location_home_label(home, location.location_space_name, show_space);
         return Some(ObjectLocationDisplay {
             label: format!("{home} / {room}"),
-            command: format!("/luogo_r{room_id}"),
         });
     }
-    if let (Some(home_id), Some(home)) = (location.home_id, location.home_name) {
+    if let (Some(_), Some(home)) = (location.home_id, location.home_name) {
         return Some(ObjectLocationDisplay {
             label: object_location_home_label(home, location.location_space_name, show_space),
-            command: format!("/luogo_h{home_id}"),
         });
     }
     None
@@ -2987,7 +2976,7 @@ fn object_location_home_label(
 
 fn object_button_label(object: &ObjectSummary) -> String {
     let short_name = truncate_chars(&object.name, 42);
-    format!("🏷️ #{} · {short_name}", object.id)
+    format!("🏷️ {short_name}")
 }
 
 fn truncate_chars(value: &str, max_chars: usize) -> String {
@@ -3199,6 +3188,16 @@ fn push_optional_line(lines: &mut Vec<String>, label: &str, value: Option<&str>)
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn menu_principale_mostra_amministrazione_solo_agli_admin() {
+        let normal = main_menu_keyboard(false);
+        let admin = main_menu_keyboard(true);
+        let normal_text = format!("{normal:?}");
+        let admin_text = format!("{admin:?}");
+        assert!(!normal_text.contains("Amministrazione"));
+        assert!(admin_text.contains("Amministrazione"));
+    }
+
     use super::*;
     use sqlx::sqlite::SqlitePoolOptions;
 

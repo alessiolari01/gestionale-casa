@@ -1,81 +1,87 @@
 # Ricette
 
-**Stato: PREVISTO.**
+**Stato: STEP 7.2C — fondazioni operative.**
 
-## Radice condivisa `items`
+## Decisione architetturale
 
-La scelta architetturale esistente viene preservata: una ricetta è un'entità
-gestita dal gestionale e deve riusare la radice comune `items` se la migration
-7.2 conferma la compatibilità con il nuovo scoping per spazio. Questo consente
-di riusare foto, tag, storico e altre funzioni trasversali senza duplicarle.
+Le ricette seguono lo stesso modello introdotto per gli alimenti:
 
-La tabella specifica ricetta conterrà solo i dati di dominio che non appartengono
-al core comune.
+- proprietà personale separata dalla visibilità;
+- una sola ricetta centrale, condivisibile in zero, uno o più spazi;
+- nessuna duplicazione automatica quando una ricetta viene condivisa;
+- permessi espliciti di modifica/gestione separati dalla semplice visibilità;
+- backend fail-closed.
 
-## Struttura
+La precedente ipotesi di riusare direttamente la radice `items` non viene
+adottata per la ricetta centrale, perché lo scoping storico di `items` non
+rappresenta bene il modello «un proprietario + più spazi visibili» consolidato
+nello Step 7.1/7.2. Foto, storico e altre funzioni trasversali verranno
+collegate con integrazioni dedicate, senza duplicare la ricetta.
 
-Una ricetta deve avere almeno:
+## Tabelle Step 7.2C
 
-- nome;
-- descrizione/nota opzionale;
-- categorie;
-- tag;
-- ingredienti strutturati;
-- quantità e unità;
-- procedimento ordinato in passaggi;
-- foto riusando l'infrastruttura condivisa quando possibile;
-- numero/scala di riferimento delle porzioni.
+La migration introduce:
 
-## Ingredienti
+- `ricette` — dati principali e proprietario;
+- `ricetta_spazi` — visibilità della stessa ricetta nei diversi spazi;
+- `ricetta_ingredienti` — ingredienti strutturati che referenziano gli
+  `alimenti` esistenti.
 
-Ogni ingrediente deve riferirsi a un alimento strutturato. Il testo libero può
-rimanere come nota, non come unica sorgente della quantità.
+Ogni ingrediente conserva:
 
-Questo abilita:
+- alimento;
+- quantità;
+- unità di misura;
+- nota opzionale;
+- flag opzionale;
+- ordinamento.
 
-- filtro per ingrediente;
-- aggregazione lista della spesa;
-- porzioni personalizzate;
-- futura dispensa;
-- future sostituzioni.
+L'alimento non viene copiato dentro la ricetta: `alimento_id` resta il
+riferimento centrale.
 
-## Categorie e tag
+## Ricerca per ingredienti
 
-Le categorie descrivono il tipo di piatto; i tag caratteristiche trasversali.
+La struttura è predisposta per selezionare più alimenti e cercare le ricette
+che ne contengono **almeno uno**.
 
-Esempi categorie:
+Esempio, con ingredienti richiesti `Pollo + Riso + Zucchine`:
 
-- colazione;
-- primo;
-- secondo;
-- contorno;
-- piatto unico;
-- dolce;
-- snack;
-- altro.
+1. ricetta con Pollo + Riso + Zucchine → 3 corrispondenze;
+2. ricetta con Pollo + Riso → 2 corrispondenze;
+3. ricetta con Zucchine → 1 corrispondenza.
 
-Esempi tag:
+L'ordinamento principale è quindi il numero di ingredienti richiesti presenti,
+dal maggiore al minore. A parità viene usato il nome della ricetta come
+criterio stabile e leggibile.
 
-- veloce;
-- economica;
-- meal prep;
-- preferita.
+L'indice `idx_ricetta_ingredienti_ricerca (alimento_id, ricetta_id)` è pensato
+proprio per questa query con `COUNT(DISTINCT alimento_id)`.
 
-La tassonomia definitiva resta modificabile e non va irrigidita inutilmente.
+## Dosi e porzioni
 
-## Condivisione e copia
+La ricetta salva `porzioni_base`. Gli ingredienti hanno quantità e unità
+strutturate, così il passo successivo potrà scalare le dosi senza interpretare
+testo libero.
 
-Una ricetta può essere:
+## Condivisione e permessi
 
-- personale nello spazio personale;
-- condivisa nello spazio famiglia;
-- copiata in modo indipendente;
-- inviata come copia ad un altro utente quando la funzione sarà implementata.
+`inviti_risorsa` e `permessi_risorsa` vengono riusati con
+`tipo_risorsa = 'ricetta'`.
 
-Una copia può conservare la provenienza informativa dall'originale ma non viene
-sincronizzata automaticamente.
+La sola visibilità in uno spazio non concede automaticamente il diritto di
+modifica. Proprietario e collaboratori autorizzati seguiranno gli stessi
+livelli già definiti per gli alimenti:
 
-## Storico
+- può modificare;
+- può modificare e gestire i permessi.
 
-Creazione, modifica ingredienti/procedimento, condivisione e altre operazioni
-significative devono essere attribuite all'autore.
+## Passo successivo
+
+Il backend Telegram dovrà aggiungere:
+
+- creazione ricetta;
+- aggiunta/rimozione ingredienti;
+- procedimento;
+- modifica;
+- condivisione e collaboratori;
+- ricerca per più ingredienti con ranking delle corrispondenze.

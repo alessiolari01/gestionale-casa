@@ -48,7 +48,7 @@ condivisione/copia e reminder trasversali prima di chiudere la macro-fase.
 
 ### 7.2 — Alimentazione completa
 
-**Stato: PREVISTO.**
+**Stato: IN SVILUPPO.**
 
 - alimenti globali e personalizzati;
 - unità strutturate;
@@ -67,10 +67,41 @@ condivisione/copia e reminder trasversali prima di chiudere la macro-fase.
 
 Specifica: `docs/moduli/alimentazione/README.md`.
 
+### 7.2C — Alimenti operativi, fondazioni Ricette e amministrazione
+
+**Stato: VERIFICATO SU S9.**
+
+- catalogo alimenti operativo;
+- categorie e filtri OR;
+- modifica alimenti;
+- proprietà, visibilità e collaboratori;
+- permessi generici sulle risorse;
+- fondazioni database Ricette;
+- pulizia accenti/unità e rimozione ID tecnici dalla UI;
+- comandi leggibili per Luoghi;
+- ruoli globali `utente/admin` e area amministrativa protetta lato backend;
+- 109/109 test e smoke Telegram verificato.
+
+### 7.2D — Ricette operative Telegram
+
+**Stato: PROSSIMO.**
+
+- creazione e modifica ricetta;
+- proprietario e visibilità sugli spazi;
+- collaboratori tramite il sistema generico dei permessi;
+- ingredienti collegati direttamente agli alimenti;
+- quantità e unità;
+- procedimento;
+- elenco, dettaglio e ricerca;
+- ricerca per più ingredienti con semantica OR e ordinamento per numero di
+  corrispondenze;
+- test backend e smoke Telegram.
+
 ### 7.3 — Condivisione operativa e integrazioni
 
 **Stato: PREVISTO.**
 
+- accesso Telegram tramite richiesta approvata dall’amministratore principale;
 - inviti e gestione membri completi;
 - condivisione/copia dei modelli supportati;
 - Google Calendar;

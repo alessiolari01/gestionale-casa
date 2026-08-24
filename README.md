@@ -14,12 +14,12 @@ Lo sviluppo corrente avviene sul branch:
 step-7-alimentazione
 ```
 
-Lo **Step 7 — Fondazioni condivise e Alimentazione** ha chiuso il checkpoint
-documentale 7.0 con `135dd33` ed è entrato nella macro-fase tecnica 7.1.
-Il primo checkpoint tecnico 7.1 (`a650bc8`) ha introdotto utenti, spazi,
-membership, collegamento Telegram e audit con autore. Il checkpoint successivo
-rende gli **spazi operativi**: lo spazio attivo isola oggetti, luoghi,
-contenitori, foto e storico; il bot può creare, rinominare e cambiare spazio.
+Lo **Step 7 — Fondazioni condivise e Alimentazione** ha completato le
+fondazioni operative di utenti/spazi e sta sviluppando la macro-fase 7.2.
+Il checkpoint corrente completa il catalogo Alimenti, categorie e permessi
+riutilizzabili, prepara le fondazioni Ricette, pulisce la UI dagli ID tecnici e
+introduce i ruoli di sistema `utente/admin` con area amministrativa protetta.
+Il prossimo blocco è **Step 7.2D — Ricette operative su Telegram**.
 
 Il vecchio `gestionale_step7_prototipo_bundle` è superato e non va usato come
 base di sviluppo.
@@ -82,10 +82,9 @@ Prima di modificare il progetto, leggere nell'ordine:
 - [x] Step 6C — Contenitori, navigazione gerarchica e storico container-aware
 - [ ] Step 7 — Fondazioni condivise + Alimentazione
 
-Il checkpoint `a650bc8` della 7.1 è stato verificato sull'S9 con **74/74 test**,
-Clippy `-D warnings`, migration reale, `/profilo`, `/status` e audit autore.
-Il blocco multi-spazio operativo va nuovamente verificato sull'S9 prima del
-commit.
+Il checkpoint corrente è stato verificato sull'S9 con **109/109 test**,
+Clippy `-D warnings`, smoke Telegram, migration reale dei ruoli di sistema,
+`PRAGMA integrity_check = ok` e nessuna violazione delle foreign key.
 
 ## Fonte ufficiale e workflow corrente
 

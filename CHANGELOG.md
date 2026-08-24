@@ -1,4 +1,92 @@
+## Step 7.2C — alimenti operativi, fondazioni Ricette e amministrazione — 2026-08-25
 
+### Stato
+
+Checkpoint verificato sul Samsung Galaxy S9 e pronto per il commit.
+
+### Alimentazione
+
+- catalogo alimenti operativo con proprietà reale dell'alimento;
+- visibilità su più spazi senza duplicazione del record;
+- categorie alimentari e filtro multi-categoria con semantica OR;
+- creazione alimento nel flusso nome → unità → categoria → visibilità → salva;
+- modifica di nome, unità, categoria, visibilità e collaboratori;
+- unità obbligatorie e mostrate in forma leggibile, ad esempio `grammi (g)`;
+- accenti italiani corretti nelle stringhe UI interessate;
+- liste sintetiche e dettagli separati;
+- rimossi gli ID tecnici dalle schermate utente interessate.
+
+### Permessi condivisi
+
+- introdotte `inviti_risorsa` e `permessi_risorsa`;
+- distinzione fra visibilità, modifica e gestione dei permessi;
+- backend fail-closed: nascondere un pulsante non costituisce autorizzazione;
+- fondazione riutilizzabile da alimenti, ricette e future risorse condivisibili.
+
+### Ricette — fondazioni
+
+- introdotta la migration delle fondazioni Ricette;
+- ingredienti predisposti per referenziare direttamente `alimenti.id`;
+- predisposta la ricerca per ingredienti con conteggio delle corrispondenze;
+- nessuna duplicazione testuale degli alimenti;
+- UI Telegram completa delle Ricette rimandata allo Step 7.2D.
+
+### Pulizia UI trasversale
+
+- rimossi dalla UI ID come `#12`, `Casa #3`, `Oggetto #4` ed `Evento #7`;
+- gli ID restano normalmente usati internamente in database, callback e query;
+- ripuliti Oggetti, Luoghi, Contenitori, Foto e Storico;
+- la struttura Luoghi espone comandi leggibili come `/stanza_camera` e
+  `/contenitore_scatola_attrezzi`;
+- in caso di nomi duplicati viene aggiunto progressivamente contesto umano,
+  senza esporre l'ID tecnico;
+- rimossa dal menu principale la riga dei “Comandi rapidi”; i comandi testuali
+  restano disponibili in parallelo ai pulsanti.
+
+### Ruoli di sistema e amministrazione
+
+- introdotto `ruolo_sistema` indipendente dai ruoli negli spazi e dai permessi
+  sulle singole risorse;
+- ruoli iniziali: `utente` e `admin`;
+- il primo utente/bootstrap è amministratore;
+- gli utenti normali non vedono funzioni tecniche;
+- l'amministratore dispone di `🛠️ Amministrazione`;
+- area amministrativa con panoramica, stato sistema ed elenco utenti;
+- `/admin`, `/status` e callback amministrative sono protetti anche lato backend;
+- notifiche online/offline riservate agli amministratori;
+- il ruolo admin non concede automaticamente proprietà o permessi sulle risorse.
+
+### Verifiche
+
+- `cargo fmt --all -- --check`: OK;
+- `cargo check --locked`: OK;
+- `cargo clippy --all-targets --locked -- -D warnings`: OK;
+- `cargo test --locked -- --test-threads=1`: **109/109** test superati;
+- smoke test Telegram di Alimentazione, pulizia UI, comandi Luoghi e area
+  amministrativa: completato con esito positivo;
+- `PRAGMA integrity_check`: `ok`;
+- `PRAGMA foreign_key_check`: nessun errore;
+- migration `20260825003000_ruoli_sistema_amministrazione.sql`: applicata con successo;
+- utente bootstrap verificato con `ruolo_sistema = admin`.
+
+### Requisito futuro già approvato
+
+L'attuale whitelist statica Telegram dovrà essere sostituita come meccanismo
+ordinario da un flusso di ammissione applicativo:
+
+1. qualsiasi account Telegram può contattare il bot;
+2. un account non autorizzato può soltanto richiedere l'accesso;
+3. la richiesta arriva all'amministratore principale;
+4. l'amministratore può accettarla o rifiutarla dalla propria area;
+5. dopo l'accettazione viene creato/attivato un normale utente del gestionale;
+6. l'accesso al bot non concede automaticamente accesso a spazi o risorse.
+
+La whitelist configurata potrà restare come meccanismo bootstrap/emergenza,
+ma non dovrà rappresentare il modello applicativo definitivo.
+
+### Prossimo step
+
+**Step 7.2D — Ricette operative su Telegram.**
 
 ## Step 7.1B — vista multi-spazio e proprietà separata dalla posizione — 2026-08-23
 

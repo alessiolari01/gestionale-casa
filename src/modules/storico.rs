@@ -349,7 +349,6 @@ struct HistoryListRow {
 
 #[derive(Debug, Clone, FromRow)]
 struct HistoryEventDetail {
-    id: i64,
     tipo_entita: String,
     when_local: String,
     modulo: String,
@@ -561,7 +560,7 @@ async fn show_global_event_detail_filtered(
             .await?;
         }
         Ok(None) => {
-            bot.send_message(chat_id, format!("Evento storico #{event_id} non trovato."))
+            bot.send_message(chat_id, "Evento storico non trovato.")
                 .reply_markup(global_event_detail_keyboard(page, filters))
                 .await?;
         }
@@ -1498,12 +1497,9 @@ pub async fn show_item_history(
     let entity = match current_item_history_entity(pool, item_id).await {
         Ok(Some(value)) => value,
         Ok(None) => {
-            bot.send_message(
-                chat_id,
-                format!("Storico non disponibile: oggetto #{item_id} non trovato."),
-            )
-            .reply_markup(item_return_keyboard(item_id))
-            .await?;
+            bot.send_message(chat_id, "Storico non disponibile: oggetto non trovato.")
+                .reply_markup(item_return_keyboard(item_id))
+                .await?;
             return Ok(());
         }
         Err(error) => {
@@ -1632,7 +1628,7 @@ async fn show_event_detail(
             .await?;
         }
         Ok(None) => {
-            bot.send_message(chat_id, format!("Evento storico #{event_id} non trovato."))
+            bot.send_message(chat_id, "Evento storico non trovato.")
                 .reply_markup(event_detail_keyboard(scope, page))
                 .await?;
         }
@@ -1721,7 +1717,7 @@ async fn load_event_detail(
     sqlx::Error,
 > {
     let sql = format!(
-        "SELECT e.id, se.tipo_entita, \
+        "SELECT se.tipo_entita, \
                 strftime('%d/%m/%Y %H:%M', e.avvenuto_il, 'localtime') AS when_local, \
                 e.modulo, e.componente, e.operazione, e.nome_entita_snapshot, \
                 e.abitazione_nome_snapshot, e.stanza_nome_snapshot, \
@@ -1812,7 +1808,7 @@ fn format_event_detail(
     location: Option<&HistoryLocationChangeUi>,
 ) -> String {
     let mut message = format!(
-        "📜 Dettaglio storico\n\n{}\n{} {}\n{} {}\nModulo: {} · {}\nEvento #{}",
+        "📜 Dettaglio storico\n\n{}\n{} {}\n{} {}\nModulo: {} · {}",
         event.when_local,
         operation_icon(&event.operazione),
         operation_label(&event.operazione),
@@ -1820,7 +1816,6 @@ fn format_event_detail(
         event.nome_entita_snapshot,
         event.modulo,
         event.componente,
-        event.id,
     );
 
     if event.automatico != 0 {
@@ -1842,8 +1837,8 @@ fn format_event_detail(
         message.push_str(&format!("\n👥 Spazio dell'entità: {space}"));
     }
 
-    if let Some(parent) = event.evento_padre_id {
-        message.push_str(&format!("\nCollegato all'evento #{parent}"));
+    if event.evento_padre_id.is_some() {
+        message.push_str("\n🔗 Collegato a un evento precedente");
     }
 
     if let Some(context) = detail_context(event) {
@@ -1851,9 +1846,13 @@ fn format_event_detail(
         message.push_str(&context);
     }
 
-    if !changes.is_empty() {
+    let visible_changes = changes
+        .iter()
+        .filter(|change| !matches!(change.campo.as_str(), "foto_id" | "percorso_file"))
+        .collect::<Vec<_>>();
+    if !visible_changes.is_empty() {
         message.push_str("\n\nCambiamenti:");
-        for change in changes {
+        for change in visible_changes {
             let before =
                 format_history_value(&change.tipo_valore, change.valore_prima.as_deref(), true);
             let after =
@@ -2180,9 +2179,9 @@ fn field_label(field: &str) -> &str {
         "valore_stimato_centesimi" => "Valore stimato",
         "condizione" => "Condizione",
         "note" => "Note",
-        "foto_id" => "ID foto",
+        "foto_id" => "Foto",
         "ruolo" => "Ruolo foto",
-        "percorso_file" => "File",
+        "percorso_file" => "File interno",
         _ => field,
     }
 }

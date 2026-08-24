@@ -552,3 +552,76 @@ La UI espone storico globale, storico individuale, dettaglio, paginazione e filt
 ## Vista multi-spazio e proprietà (Step 7.1B)
 
 Lo spazio predefinito determina il contesto di creazione. La vista può includere tutte le membership dell'utente senza ridurre l'isolamento verso spazi non accessibili. Per gli `items`, proprietà (`items.spazio_id`) e posizione (`item_luogo`) sono indipendenti: un oggetto personale può trovarsi in una casa condivisa senza trasferimento di proprietà. `item_condivisioni` prepara la condivisione esplicita della stessa entità con permessi di lettura/modifica.
+
+### Permessi espliciti riutilizzabili per risorse condivise
+
+Visibilità e diritto di modifica sono separati. Una risorsa visibile in uno
+spazio non diventa automaticamente modificabile da tutti i membri. Il modello
+trasversale usa `inviti_risorsa` e `permessi_risorsa` con la coppia
+`(tipo_risorsa, risorsa_id)` e distingue `puo_modificare` da
+`puo_gestire_permessi`.
+
+Alimenti sono il primo tipo operativo. Ricette e future entità condivisibili
+devono riusare la stessa fondazione, aggiungendo i controlli di dominio e
+visibilità specifici. La sicurezza resta fail-closed.
+
+## Ruoli di sistema, frontend e amministrazione
+
+Il ruolo globale di un utente nel gestionale è separato dai ruoli negli spazi
+e dai permessi sulle singole risorse.
+
+I concetti sono indipendenti:
+
+```text
+ruolo di sistema
+≠
+ruolo nello spazio
+≠
+proprietà della risorsa
+≠
+visibilità della risorsa
+≠
+permesso di modifica
+```
+
+I ruoli di sistema iniziali sono `utente` e `admin`. Un amministratore può
+accedere alle funzioni tecniche e di gestione globale del gestionale, ma non
+diventa automaticamente proprietario o collaboratore delle risorse degli altri
+utenti.
+
+Le autorizzazioni amministrative devono essere verificate lato backend anche
+quando la relativa funzione non è mostrata nella UI. `/admin`, `/status` e le
+callback amministrative seguono quindi la stessa regola fail-closed adottata
+per le risorse condivise.
+
+Telegram è un frontend del gestionale, non il luogo in cui deve vivere la
+logica applicativa. Pulsanti inline e comandi testuali devono convergere, quando
+possibile, sulla stessa logica backend, così un futuro frontend differente può
+riusare autorizzazioni e casi d'uso senza duplicarli.
+
+La UI principale resta orientata ai pulsanti e non pubblicizza un elenco di
+“comandi rapidi”. I comandi testuali continuano però a esistere come interfaccia
+parallela. Nei Luoghi vengono mostrati comandi human-friendly contestuali, per
+esempio `/casa_casa_principale`, `/stanza_camera` e
+`/contenitore_scatola_attrezzi`; in caso di omonimia viene aggiunto contesto
+umano progressivo senza esporre gli ID del database.
+
+### Accesso futuro al bot
+
+La whitelist Telegram statica non rappresenta il modello applicativo
+definitivo. Il modello previsto è:
+
+```text
+account Telegram sconosciuto
+        ↓
+richiesta di accesso
+        ↓
+approvazione/rifiuto dell'amministratore principale
+        ↓
+utente normale autorizzato
+```
+
+Un account non autorizzato deve poter utilizzare soltanto il flusso di
+richiesta accesso. L'approvazione all'uso del gestionale resta distinta dalla
+membership negli spazi e dai permessi sulle risorse. La whitelist configurata
+può restare come bootstrap o meccanismo di emergenza.
