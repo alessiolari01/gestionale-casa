@@ -64,3 +64,6 @@ Nel checkpoint iniziale 7.1 i default `spazio_id = 1` mantengono compatibilità.
 Con `20260823174500_spazi_operativi.sql` la UI multi-spazio può essere attivata
 insieme allo scoping delle query: `abitazioni` e `tag` vengono ricostruite con
 unicità `(spazio_id, nome)` senza spostare i dati legacy.
+
+- `20260823200000_vista_multispazio_condivisione.sql`: aggiunge la preferenza di vista multi-spazio, la fondazione `item_condivisioni` e separa la proprietà dell'item dalla sua posizione fisica.
+- `20260823232000_storico_spazi_luogo.sql`: conserva nello storico lo spazio della posizione e lo spazio prima/dopo dei cambi luogo, con backfill degli eventi esistenti.

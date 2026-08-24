@@ -77,7 +77,9 @@ Candidati a snapshot:
 - nome autore;
 - nome entità;
 - contesto del luogo;
-- eventuale nome dello spazio;
+- spazio proprietario dell'entità;
+- spazio della posizione fisica, separato dal proprietario;
+- spazio prima/dopo nei cambi di luogo;
 - valori prima/dopo già previsti dallo storico.
 
 ## Filtri

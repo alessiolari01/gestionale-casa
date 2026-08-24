@@ -1,3 +1,23 @@
+
+
+## Step 7.1B — vista multi-spazio e proprietà separata dalla posizione — 2026-08-23
+
+**Stato: IN SVILUPPO — da verificare su Galaxy S9 prima del commit.**
+
+- aggiunta la migration `20260823200000_vista_multispazio_condivisione.sql`;
+- lo spazio attivo diventa lo **spazio predefinito** per la creazione, non l'unico contesto consultabile;
+- aggiunte le modalità `🎯 Solo spazio predefinito` e `🌐 Tutti i miei spazi`;
+- aggiunti comandi `/vista_spazio` e `/vista_tutti` e relativi pulsanti inline;
+- ripristinati i flussi inline `➕ Nuovo spazio` e `✏️ Rinomina spazio`, con navigazione verso Profilo/Spazi/Menu;
+- oggetti, luoghi, contenitori, foto e storico possono leggere tutti e soli gli spazi di cui l'utente è membro quando la vista globale è attiva;
+- `items.spazio_id` resta lo spazio proprietario dell'item; la posizione fisica può appartenere a un altro spazio accessibile;
+- uno spostamento cross-space di un oggetto richiede permessi di scrittura sia sullo spazio proprietario sia sulla destinazione;
+- i contenitori restano legati allo spazio della casa e non possono essere trasferiti fra spazi diversi;
+- aggiunta `item_condivisioni` come fondazione trasversale per condividere in futuro item/ricette con permesso `lettura` o `modifica` senza duplicarli;
+- lo storico conserva lo spazio proprietario dell'entità anche quando il contesto fisico dell'evento è in un altro spazio;
+- aggiunti test per persistenza della vista e per il caso oggetto personale → casa condivisa;
+- disambiguazione UI dei luoghi omonimi: nella vista multi-spazio case/percorsi mostrano anche lo spazio (`Casa principale · Spazio`), e i messaggi di assegnazione/spostamento mostrano sempre lo spazio della posizione per evitare ambiguità.
+- dettaglio storico multi-spazio: lo spazio proprietario dell'entità resta distinto dallo spazio della posizione e i cambi luogo mostrano `Da`/`A` con lo spazio; gli eventi esistenti vengono backfillati dalla relativa identità storica della casa.
 # Diario di sviluppo
 
 ## Step 7.1 — spazi operativi e isolamento reale — 2026-08-23

@@ -114,3 +114,21 @@ Le funzionalità usano uno dei seguenti stati:
 
 Nessuna funzionalità va descritta come implementata solo perché è stata
 specificata in questi documenti.
+
+
+## Checkpoint 7.1B — vista multi-spazio
+
+**Stato: IN SVILUPPO.**
+
+Lo spazio selezionato viene reinterpretato come **spazio predefinito**: stabilisce dove vengono creati normalmente i nuovi dati, ma l'utente può attivare una vista globale sui propri spazi. La vista globale non amplia i permessi: include esclusivamente gli spazi per cui esiste una membership reale.
+
+Modalità previste nella UI Telegram:
+
+- `🎯 Solo spazio predefinito`;
+- `🌐 Tutti i miei spazi`.
+
+La proprietà e la posizione fisica di un oggetto sono ora concetti distinti. Un item può restare personale e trovarsi temporaneamente in una casa condivisa, purché chi esegue lo spostamento possa modificare sia lo spazio proprietario sia lo spazio della destinazione.
+
+La migration 7.1B introduce inoltre `item_condivisioni`: è la fondazione per condividere la stessa entità, comprese le future ricette, con altri spazi senza crearne automaticamente una copia. L'interfaccia completa di condivisione resta successiva.
+
+Per evitare ambiguità quando spazi differenti contengono luoghi con lo stesso nome, la UI usa il contesto dello spazio: in vista `🌐 Tutti i miei spazi` i percorsi mostrano ad esempio `Casa principale · Spazio principale` e `Casa principale · Casa condivisa`. Nei messaggi di assegnazione/spostamento lo spazio della posizione viene mostrato sempre, così un trasferimento cross-space resta leggibile anche con nomi identici.

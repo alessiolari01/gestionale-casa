@@ -547,3 +547,8 @@ Lo storico è un'infrastruttura condivisa, non specifica del modulo Oggetti. `st
 Il testo Telegram viene generato dai dati strutturati. Le rinomine o cancellazioni future non riscrivono il passato grazie agli snapshot. Le modifiche no-op e la scelta dello stesso luogo non generano eventi. Quando modifica applicativa e storico appartengono alla stessa operazione DB, vengono salvati nella stessa transazione.
 
 La UI espone storico globale, storico individuale, dettaglio, paginazione e filtri combinabili. Lo stato dei filtri è codificato nei callback Telegram in forma compatta. Dettagli: `docs/moduli/storico.md`.
+
+
+## Vista multi-spazio e proprietà (Step 7.1B)
+
+Lo spazio predefinito determina il contesto di creazione. La vista può includere tutte le membership dell'utente senza ridurre l'isolamento verso spazi non accessibili. Per gli `items`, proprietà (`items.spazio_id`) e posizione (`item_luogo`) sono indipendenti: un oggetto personale può trovarsi in una casa condivisa senza trasferimento di proprietà. `item_condivisioni` prepara la condivisione esplicita della stessa entità con permessi di lettura/modifica.

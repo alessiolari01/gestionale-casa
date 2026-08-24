@@ -236,3 +236,18 @@ l'`AuditActor`, così eventuali database legacy o stati incoerenti non possono
 produrre accessi in lettura a uno spazio dal quale l'utente è già stato rimosso.
 In produzione le operazioni space-aware richiedono inoltre un contesto
 `AuditActor` installato: non esiste fallback silenzioso verso lo spazio `#1`.
+
+
+## ADR — spazio predefinito distinto dalla vista
+
+**Decisione:** `spazio_attivo_id` viene mantenuto per compatibilità ma rappresenta lo **spazio predefinito**. La preferenza `vista_spazi` determina se la consultazione è limitata a tale spazio oppure comprende tutte le membership dell'utente.
+
+**Motivazione:** una persona può appartenere contemporaneamente a un contesto personale e a uno condiviso; obbligarla a cambiare spazio per ogni ricerca o confronto rende il modello inutilmente rigido.
+
+**Sicurezza:** la vista globale non autorizza nuovi spazi. Le query usano l'insieme delle membership dell'utente; le mutazioni ricontrollano il ruolo sullo spazio effettivamente coinvolto.
+
+## ADR — proprietà dell'item separata dalla posizione
+
+**Decisione:** `items.spazio_id` non cambia quando un oggetto viene portato in una casa di un altro spazio. `item_luogo` può quindi riferirsi a una casa di un altro spazio, purché l'operazione sia autorizzata su entrambi i contesti.
+
+**Conseguenza:** un portatile personale può trovarsi in una casa condivisa senza diventare proprietà dello spazio condiviso. Lo storico dell'item resta attribuito allo spazio proprietario, mentre conserva il luogo reale dell'evento.

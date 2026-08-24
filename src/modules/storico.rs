@@ -42,6 +42,44 @@ pub(crate) struct LocationSnapshot {
     pub(crate) contenitore_percorso: Option<String>,
 }
 
+async fn entity_owner_space_id(
+    conn: &mut SqliteConnection,
+    tipo_entita: &str,
+    id_origine: i64,
+) -> Result<Option<i64>, sqlx::Error> {
+    match tipo_entita {
+        "oggetto" | "vestito" | "veicolo" | "ricetta" => {
+            sqlx::query_scalar("SELECT spazio_id FROM items WHERE id = ?")
+                .bind(id_origine)
+                .fetch_optional(&mut *conn)
+                .await
+        }
+        "abitazione" => {
+            sqlx::query_scalar("SELECT spazio_id FROM abitazioni WHERE id = ?")
+                .bind(id_origine)
+                .fetch_optional(&mut *conn)
+                .await
+        }
+        "stanza" => {
+            sqlx::query_scalar(
+                "SELECT a.spazio_id FROM stanze s JOIN abitazioni a ON a.id = s.abitazione_id WHERE s.id = ?",
+            )
+            .bind(id_origine)
+            .fetch_optional(&mut *conn)
+            .await
+        }
+        "contenitore" => {
+            sqlx::query_scalar(
+                "SELECT a.spazio_id FROM contenitori c JOIN abitazioni a ON a.id = c.abitazione_id WHERE c.id = ?",
+            )
+            .bind(id_origine)
+            .fetch_optional(&mut *conn)
+            .await
+        }
+        _ => Ok(None),
+    }
+}
+
 pub(crate) async fn ensure_entity(
     conn: &mut SqliteConnection,
     tipo_entita: &str,
@@ -49,6 +87,9 @@ pub(crate) async fn ensure_entity(
     nome: &str,
 ) -> Result<i64, sqlx::Error> {
     let actor = crate::identity::current_actor();
+    let space_id = entity_owner_space_id(conn, tipo_entita, id_origine)
+        .await?
+        .unwrap_or(actor.spazio_id);
     if let Some(id) = sqlx::query_scalar::<_, i64>(
         "SELECT id FROM storico_entita \
          WHERE tipo_entita = ? AND id_origine = ? AND spazio_id = ? \
@@ -57,7 +98,7 @@ pub(crate) async fn ensure_entity(
     )
     .bind(tipo_entita)
     .bind(id_origine)
-    .bind(actor.spazio_id)
+    .bind(space_id)
     .fetch_optional(&mut *conn)
     .await?
     {
@@ -80,7 +121,7 @@ pub(crate) async fn ensure_entity(
     .bind(tipo_entita)
     .bind(id_origine)
     .bind(nome)
-    .bind(actor.spazio_id)
+    .bind(space_id)
     .execute(&mut *conn)
     .await?;
 
@@ -92,15 +133,13 @@ pub(crate) async fn rename_entity(
     storico_entita_id: i64,
     nuovo_nome: &str,
 ) -> Result<(), sqlx::Error> {
-    let space_id = crate::identity::current_space_id();
     sqlx::query(
         "UPDATE storico_entita \
          SET nome_ultimo = ? \
-         WHERE id = ? AND spazio_id = ? AND eliminato_il IS NULL",
+         WHERE id = ? AND eliminato_il IS NULL",
     )
     .bind(nuovo_nome)
     .bind(storico_entita_id)
-    .bind(space_id)
     .execute(&mut *conn)
     .await?;
     Ok(())
@@ -110,17 +149,38 @@ pub(crate) async fn mark_entity_deleted(
     conn: &mut SqliteConnection,
     storico_entita_id: i64,
 ) -> Result<(), sqlx::Error> {
-    let space_id = crate::identity::current_space_id();
     sqlx::query(
         "UPDATE storico_entita \
          SET eliminato_il = COALESCE(eliminato_il, CURRENT_TIMESTAMP) \
-         WHERE id = ? AND spazio_id = ?",
+         WHERE id = ?",
     )
     .bind(storico_entita_id)
-    .bind(space_id)
     .execute(&mut *conn)
     .await?;
     Ok(())
+}
+
+async fn historical_entity_space(
+    conn: &mut SqliteConnection,
+    storico_entita_id: Option<i64>,
+) -> Result<(Option<i64>, Option<String>), sqlx::Error> {
+    let Some(storico_entita_id) = storico_entita_id else {
+        return Ok((None, None));
+    };
+
+    let row = sqlx::query_as::<_, (i64, String)>(
+        "SELECT se.spazio_id, s.nome \
+         FROM storico_entita se JOIN spazi s ON s.id = se.spazio_id \
+         WHERE se.id = ?",
+    )
+    .bind(storico_entita_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+
+    Ok(match row {
+        Some((space_id, space_name)) => (Some(space_id), Some(space_name)),
+        None => (None, None),
+    })
 }
 
 pub(crate) async fn record_event(
@@ -128,6 +188,14 @@ pub(crate) async fn record_event(
     event: &NewHistoryEvent<'_>,
 ) -> Result<i64, sqlx::Error> {
     let actor = crate::identity::current_actor();
+    let (event_space_id, event_space_name): (i64, String) = sqlx::query_as(
+        "SELECT se.spazio_id, s.nome FROM storico_entita se JOIN spazi s ON s.id = se.spazio_id WHERE se.id = ?",
+    )
+    .bind(event.entita_storico_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    let (location_space_id, location_space_name) =
+        historical_entity_space(conn, event.abitazione_storico_id).await?;
     let automatico = i64::from(event.evento_padre_id.is_some());
     let actor_name = actor.utente_id.map(|_| actor.nome_snapshot.as_str());
     let result = sqlx::query(
@@ -136,9 +204,9 @@ pub(crate) async fn record_event(
             nome_entita_snapshot, \
             abitazione_storico_id, abitazione_nome_snapshot, \
             stanza_storico_id, stanza_nome_snapshot, evento_padre_id, \
-            spazio_id, spazio_nome_snapshot, attore_utente_id, \
-            attore_nome_snapshot, origine_azione, automatico\
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            spazio_id, spazio_nome_snapshot, luogo_spazio_id, luogo_spazio_nome_snapshot, \
+            attore_utente_id, attore_nome_snapshot, origine_azione, automatico\
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(event.entita_storico_id)
     .bind(event.modulo)
@@ -150,8 +218,10 @@ pub(crate) async fn record_event(
     .bind(event.stanza_storico_id)
     .bind(event.stanza_nome_snapshot)
     .bind(event.evento_padre_id)
-    .bind(actor.spazio_id)
-    .bind(&actor.spazio_nome_snapshot)
+    .bind(event_space_id)
+    .bind(&event_space_name)
+    .bind(location_space_id)
+    .bind(location_space_name.as_deref())
     .bind(actor.utente_id)
     .bind(actor_name)
     .bind(actor.origine)
@@ -217,24 +287,35 @@ pub(crate) async fn record_location_change(
         return Ok(());
     }
 
+    let (before_space_id, before_space_name) =
+        historical_entity_space(conn, before.abitazione_storico_id).await?;
+    let (after_space_id, after_space_name) =
+        historical_entity_space(conn, after.abitazione_storico_id).await?;
+
     sqlx::query(
         "INSERT INTO storico_cambi_luogo (\
             evento_id, \
+            spazio_prima_id, spazio_prima_nome, \
             abitazione_prima_id, abitazione_prima_nome, \
             stanza_prima_id, stanza_prima_nome, \
             contenitore_prima_id, contenitore_prima_percorso, \
+            spazio_dopo_id, spazio_dopo_nome, \
             abitazione_dopo_id, abitazione_dopo_nome, \
             stanza_dopo_id, stanza_dopo_nome, \
             contenitore_dopo_id, contenitore_dopo_percorso\
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(evento_id)
+    .bind(before_space_id)
+    .bind(before_space_name.as_deref())
     .bind(before.abitazione_storico_id)
     .bind(before.abitazione_nome.as_deref())
     .bind(before.stanza_storico_id)
     .bind(before.stanza_nome.as_deref())
     .bind(before.contenitore_storico_id)
     .bind(before.contenitore_percorso.as_deref())
+    .bind(after_space_id)
+    .bind(after_space_name.as_deref())
     .bind(after.abitazione_storico_id)
     .bind(after.abitazione_nome.as_deref())
     .bind(after.stanza_storico_id)
@@ -259,6 +340,8 @@ struct HistoryListRow {
     abitazione_nome_snapshot: Option<String>,
     stanza_nome_snapshot: Option<String>,
     contenitore_percorso_snapshot: Option<String>,
+    spazio_nome_snapshot: Option<String>,
+    luogo_spazio_nome_snapshot: Option<String>,
     attore_nome_snapshot: Option<String>,
     origine_azione: String,
     automatico: i64,
@@ -276,6 +359,7 @@ struct HistoryEventDetail {
     abitazione_nome_snapshot: Option<String>,
     stanza_nome_snapshot: Option<String>,
     contenitore_percorso_snapshot: Option<String>,
+    luogo_spazio_nome_snapshot: Option<String>,
     evento_padre_id: Option<i64>,
     attore_nome_snapshot: Option<String>,
     spazio_nome_snapshot: Option<String>,
@@ -293,9 +377,11 @@ struct HistoryFieldChangeUi {
 
 #[derive(Debug, Clone, FromRow)]
 struct HistoryLocationChangeUi {
+    spazio_prima_nome: Option<String>,
     abitazione_prima_nome: Option<String>,
     stanza_prima_nome: Option<String>,
     contenitore_prima_percorso: Option<String>,
+    spazio_dopo_nome: Option<String>,
     abitazione_dopo_nome: Option<String>,
     stanza_dopo_nome: Option<String>,
     contenitore_dopo_percorso: Option<String>,
@@ -680,15 +766,13 @@ async fn load_filtered_global_history_page(
     page: i64,
     filters: HistoryFilters,
 ) -> Result<(Vec<HistoryListRow>, i64), sqlx::Error> {
-    let space_id = crate::identity::current_space_id();
     let mut count = QueryBuilder::<Sqlite>::new(
         "SELECT COUNT(*) FROM storico_eventi e \
          JOIN storico_entita se ON se.id = e.entita_storico_id \
-         WHERE e.spazio_id = ",
+         WHERE ",
     );
-    count.push_bind(space_id);
-    count.push(" AND se.spazio_id = ");
-    count.push_bind(space_id);
+    push_visible_space_filter(&mut count, "e");
+    count.push(" AND se.spazio_id = e.spazio_id");
     push_global_history_filters(&mut count, filters);
     let total: i64 = count.build_query_scalar().fetch_one(pool).await?;
 
@@ -697,15 +781,15 @@ async fn load_filtered_global_history_page(
                 strftime('%d/%m/%Y %H:%M', e.avvenuto_il, 'localtime') AS when_local, \
                 e.operazione, e.nome_entita_snapshot, \
                 e.abitazione_nome_snapshot, e.stanza_nome_snapshot, \
-                e.contenitore_percorso_snapshot, e.attore_nome_snapshot, \
+                e.contenitore_percorso_snapshot, e.spazio_nome_snapshot, \
+                e.luogo_spazio_nome_snapshot, e.attore_nome_snapshot, \
                 e.origine_azione, e.automatico \
          FROM storico_eventi e \
          JOIN storico_entita se ON se.id = e.entita_storico_id \
-         WHERE e.spazio_id = ",
+         WHERE ",
     );
-    list.push_bind(space_id);
-    list.push(" AND se.spazio_id = ");
-    list.push_bind(space_id);
+    push_visible_space_filter(&mut list, "e");
+    list.push(" AND se.spazio_id = e.spazio_id");
     push_global_history_filters(&mut list, filters);
     list.push(" ORDER BY e.avvenuto_il DESC, e.id DESC LIMIT ");
     list.push_bind(HISTORY_PAGE_SIZE);
@@ -717,6 +801,23 @@ async fn load_filtered_global_history_page(
         .fetch_all(pool)
         .await?;
     Ok((events, total))
+}
+
+fn push_visible_space_filter(query: &mut QueryBuilder<'_, Sqlite>, alias: &str) {
+    let actor = crate::identity::current_actor();
+    if actor.view_all {
+        if let Some(user_id) = actor.utente_id {
+            query.push(alias);
+            query.push(".spazio_id IN (SELECT spazio_id FROM membri_spazio WHERE utente_id = ");
+            query.push_bind(user_id);
+            query.push(")");
+            return;
+        }
+    }
+
+    query.push(alias);
+    query.push(".spazio_id = ");
+    query.push_bind(actor.spazio_id);
 }
 
 fn push_global_history_filters(query: &mut QueryBuilder<'_, Sqlite>, filters: HistoryFilters) {
@@ -780,91 +881,87 @@ async fn load_history_picker_options(
 ) -> Result<(Vec<HistoryPickerOption>, i64), sqlx::Error> {
     let page = page.max(0);
     let offset = page * HISTORY_FILTER_PICKER_PAGE_SIZE;
-    let space_id = crate::identity::current_space_id();
+    let visible = crate::identity::visible_space_sql("se");
+    let bind_id = crate::identity::visible_space_bind_id();
 
     match kind {
         HistoryFilterKind::Home => {
-            let total: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM storico_entita \
-                 WHERE tipo_entita = 'abitazione' AND spazio_id = ?",
-            )
-            .bind(space_id)
-            .fetch_one(pool)
-            .await?;
-            let options = sqlx::query_as::<_, HistoryPickerOption>(
-                "SELECT id, nome_ultimo AS label, NULL AS subtitle, \
-                        CASE WHEN eliminato_il IS NULL THEN 0 ELSE 1 END AS deleted \
-                 FROM storico_entita \
-                 WHERE tipo_entita = 'abitazione' AND spazio_id = ? \
-                 ORDER BY deleted ASC, nome_ultimo COLLATE NOCASE, id \
-                 LIMIT ? OFFSET ?",
-            )
-            .bind(space_id)
-            .bind(HISTORY_FILTER_PICKER_PAGE_SIZE)
-            .bind(offset)
-            .fetch_all(pool)
-            .await?;
+            let total_sql = format!(
+                "SELECT COUNT(*) FROM storico_entita se WHERE se.tipo_entita = 'abitazione' AND {visible}"
+            );
+            let total: i64 = sqlx::query_scalar(&total_sql)
+                .bind(bind_id)
+                .fetch_one(pool)
+                .await?;
+            let list_sql = format!(
+                "SELECT se.id, se.nome_ultimo AS label, sp.nome AS subtitle, \
+                        CASE WHEN se.eliminato_il IS NULL THEN 0 ELSE 1 END AS deleted \
+                 FROM storico_entita se JOIN spazi sp ON sp.id = se.spazio_id \
+                 WHERE se.tipo_entita = 'abitazione' AND {visible} \
+                 ORDER BY deleted ASC, sp.nome COLLATE NOCASE, se.nome_ultimo COLLATE NOCASE, se.id \
+                 LIMIT ? OFFSET ?"
+            );
+            let options = sqlx::query_as::<_, HistoryPickerOption>(&list_sql)
+                .bind(bind_id)
+                .bind(HISTORY_FILTER_PICKER_PAGE_SIZE)
+                .bind(offset)
+                .fetch_all(pool)
+                .await?;
             Ok((options, total))
         }
         HistoryFilterKind::Room => {
-            let total: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM storico_entita \
-                 WHERE tipo_entita = 'stanza' AND spazio_id = ?",
-            )
-            .bind(space_id)
-            .fetch_one(pool)
-            .await?;
-            let options = sqlx::query_as::<_, HistoryPickerOption>(
+            let total_sql = format!(
+                "SELECT COUNT(*) FROM storico_entita se WHERE se.tipo_entita = 'stanza' AND {visible}"
+            );
+            let total: i64 = sqlx::query_scalar(&total_sql)
+                .bind(bind_id)
+                .fetch_one(pool)
+                .await?;
+            let list_sql = format!(
                 "SELECT se.id, se.nome_ultimo AS label, \
-                        (SELECT e.abitazione_nome_snapshot FROM storico_eventi e \
-                         WHERE e.entita_storico_id = se.id \
-                           AND e.spazio_id = se.spazio_id \
+                        (sp.nome || ' · ' || COALESCE((SELECT e.abitazione_nome_snapshot FROM storico_eventi e \
+                         WHERE e.entita_storico_id = se.id AND e.spazio_id = se.spazio_id \
                            AND e.abitazione_nome_snapshot IS NOT NULL \
-                         ORDER BY e.avvenuto_il DESC, e.id DESC LIMIT 1) AS subtitle, \
+                         ORDER BY e.avvenuto_il DESC, e.id DESC LIMIT 1), '')) AS subtitle, \
                         CASE WHEN se.eliminato_il IS NULL THEN 0 ELSE 1 END AS deleted \
-                 FROM storico_entita se \
-                 WHERE se.tipo_entita = 'stanza' AND se.spazio_id = ? \
-                 ORDER BY deleted ASC, se.nome_ultimo COLLATE NOCASE, se.id \
-                 LIMIT ? OFFSET ?",
-            )
-            .bind(space_id)
-            .bind(HISTORY_FILTER_PICKER_PAGE_SIZE)
-            .bind(offset)
-            .fetch_all(pool)
-            .await?;
+                 FROM storico_entita se JOIN spazi sp ON sp.id = se.spazio_id \
+                 WHERE se.tipo_entita = 'stanza' AND {visible} \
+                 ORDER BY deleted ASC, sp.nome COLLATE NOCASE, se.nome_ultimo COLLATE NOCASE, se.id \
+                 LIMIT ? OFFSET ?"
+            );
+            let options = sqlx::query_as::<_, HistoryPickerOption>(&list_sql)
+                .bind(bind_id)
+                .bind(HISTORY_FILTER_PICKER_PAGE_SIZE)
+                .bind(offset)
+                .fetch_all(pool)
+                .await?;
             Ok((options, total))
         }
         HistoryFilterKind::Entity => {
-            let total: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM storico_entita se \
-                 WHERE se.spazio_id = ? \
-                   AND EXISTS (\
-                       SELECT 1 FROM storico_eventi e \
-                       WHERE e.entita_storico_id = se.id AND e.spazio_id = se.spazio_id\
-                   )",
-            )
-            .bind(space_id)
-            .fetch_one(pool)
-            .await?;
-            let options = sqlx::query_as::<_, HistoryPickerOption>(
-                "SELECT se.id, se.nome_ultimo AS label, se.tipo_entita AS subtitle, \
+            let total_sql = format!(
+                "SELECT COUNT(*) FROM storico_entita se WHERE {visible} AND EXISTS (\
+                    SELECT 1 FROM storico_eventi e WHERE e.entita_storico_id = se.id AND e.spazio_id = se.spazio_id)"
+            );
+            let total: i64 = sqlx::query_scalar(&total_sql)
+                .bind(bind_id)
+                .fetch_one(pool)
+                .await?;
+            let list_sql = format!(
+                "SELECT se.id, se.nome_ultimo AS label, (se.tipo_entita || ' · ' || sp.nome) AS subtitle, \
                         CASE WHEN se.eliminato_il IS NULL THEN 0 ELSE 1 END AS deleted \
-                 FROM storico_entita se \
-                 WHERE se.spazio_id = ? \
-                   AND EXISTS (\
-                       SELECT 1 FROM storico_eventi e \
-                       WHERE e.entita_storico_id = se.id AND e.spazio_id = se.spazio_id\
-                   ) \
+                 FROM storico_entita se JOIN spazi sp ON sp.id = se.spazio_id \
+                 WHERE {visible} AND EXISTS (\
+                       SELECT 1 FROM storico_eventi e WHERE e.entita_storico_id = se.id AND e.spazio_id = se.spazio_id) \
                  ORDER BY (SELECT MAX(e2.id) FROM storico_eventi e2 \
-                           WHERE e2.entita_storico_id = se.id \
-                             AND e2.spazio_id = se.spazio_id) DESC, se.id DESC \
-                 LIMIT ? OFFSET ?",
-            )
-            .bind(space_id)
-            .bind(HISTORY_FILTER_PICKER_PAGE_SIZE)
-            .bind(offset)
-            .fetch_all(pool)
-            .await?;
+                           WHERE e2.entita_storico_id = se.id AND e2.spazio_id = se.spazio_id) DESC, se.id DESC \
+                 LIMIT ? OFFSET ?"
+            );
+            let options = sqlx::query_as::<_, HistoryPickerOption>(&list_sql)
+                .bind(bind_id)
+                .bind(HISTORY_FILTER_PICKER_PAGE_SIZE)
+                .bind(offset)
+                .fetch_all(pool)
+                .await?;
             Ok((options, total))
         }
         HistoryFilterKind::Period | HistoryFilterKind::Module | HistoryFilterKind::Operation => {
@@ -902,15 +999,17 @@ async fn history_filters_summary(pool: &SqlitePool, filters: HistoryFilters) -> 
 
 async fn history_filter_entity_name(pool: &SqlitePool, id: Option<i64>) -> Option<String> {
     let id = id?;
-    sqlx::query_scalar::<_, String>(
-        "SELECT nome_ultimo FROM storico_entita WHERE id = ? AND spazio_id = ?",
-    )
-    .bind(id)
-    .bind(crate::identity::current_space_id())
-    .fetch_optional(pool)
-    .await
-    .ok()
-    .flatten()
+    let sql = format!(
+        "SELECT se.nome_ultimo FROM storico_entita se WHERE se.id = ? AND {}",
+        crate::identity::visible_space_sql("se")
+    );
+    sqlx::query_scalar::<_, String>(&sql)
+        .bind(id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten()
 }
 
 fn global_history_keyboard(
@@ -1552,22 +1651,19 @@ async fn current_item_history_entity(
     pool: &SqlitePool,
     item_id: i64,
 ) -> Result<Option<(i64, String)>, sqlx::Error> {
-    sqlx::query_as::<_, (i64, String)>(
-        "SELECT se.id, i.nome \
-         FROM storico_entita se \
+    let sql = format!(
+        "SELECT se.id, i.nome FROM storico_entita se \
          JOIN items i ON i.id = se.id_origine AND i.tipo = 'oggetto' \
-         WHERE se.tipo_entita = 'oggetto' \
-           AND se.id_origine = ? \
-           AND se.spazio_id = ? \
-           AND i.spazio_id = ? \
-           AND se.eliminato_il IS NULL \
-         ORDER BY se.id DESC LIMIT 1",
-    )
-    .bind(item_id)
-    .bind(crate::identity::current_space_id())
-    .bind(crate::identity::current_space_id())
-    .fetch_optional(pool)
-    .await
+         WHERE se.tipo_entita = 'oggetto' AND se.id_origine = ? \
+           AND se.spazio_id = i.spazio_id AND {} \
+           AND se.eliminato_il IS NULL ORDER BY se.id DESC LIMIT 1",
+        crate::identity::visible_space_sql("i")
+    );
+    sqlx::query_as::<_, (i64, String)>(&sql)
+        .bind(item_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_optional(pool)
+        .await
 }
 
 async fn load_entity_history_page(
@@ -1575,9 +1671,16 @@ async fn load_entity_history_page(
     entity_id: i64,
     page: i64,
 ) -> Result<(Vec<HistoryListRow>, i64), sqlx::Error> {
-    let space_id = crate::identity::current_space_id();
+    let visible = crate::identity::visible_space_sql("se");
+    let check_sql =
+        format!("SELECT se.spazio_id FROM storico_entita se WHERE se.id = ? AND {visible}");
+    let space_id: i64 = sqlx::query_scalar(&check_sql)
+        .bind(entity_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_one(pool)
+        .await?;
     let total: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM storico_eventi          WHERE entita_storico_id = ? AND spazio_id = ?",
+        "SELECT COUNT(*) FROM storico_eventi WHERE entita_storico_id = ? AND spazio_id = ?",
     )
     .bind(entity_id)
     .bind(space_id)
@@ -1589,16 +1692,14 @@ async fn load_entity_history_page(
                 strftime('%d/%m/%Y %H:%M', e.avvenuto_il, 'localtime') AS when_local, \
                 e.operazione, e.nome_entita_snapshot, \
                 e.abitazione_nome_snapshot, e.stanza_nome_snapshot, \
-                e.contenitore_percorso_snapshot, e.attore_nome_snapshot, \
+                e.contenitore_percorso_snapshot, e.spazio_nome_snapshot, \
+                e.luogo_spazio_nome_snapshot, e.attore_nome_snapshot, \
                 e.origine_azione, e.automatico \
-         FROM storico_eventi e \
-         JOIN storico_entita se ON se.id = e.entita_storico_id \
-         WHERE e.entita_storico_id = ? AND e.spazio_id = ? AND se.spazio_id = ? \
-         ORDER BY e.avvenuto_il DESC, e.id DESC \
-         LIMIT ? OFFSET ?",
+         FROM storico_eventi e JOIN storico_entita se ON se.id = e.entita_storico_id \
+         WHERE e.entita_storico_id = ? AND e.spazio_id = ? AND se.spazio_id = e.spazio_id \
+         ORDER BY e.avvenuto_il DESC, e.id DESC LIMIT ? OFFSET ?",
     )
     .bind(entity_id)
-    .bind(space_id)
     .bind(space_id)
     .bind(HISTORY_PAGE_SIZE)
     .bind(page.max(0) * HISTORY_PAGE_SIZE)
@@ -1619,23 +1720,23 @@ async fn load_event_detail(
     )>,
     sqlx::Error,
 > {
-    let event = sqlx::query_as::<_, HistoryEventDetail>(
+    let sql = format!(
         "SELECT e.id, se.tipo_entita, \
                 strftime('%d/%m/%Y %H:%M', e.avvenuto_il, 'localtime') AS when_local, \
                 e.modulo, e.componente, e.operazione, e.nome_entita_snapshot, \
                 e.abitazione_nome_snapshot, e.stanza_nome_snapshot, \
-                e.contenitore_percorso_snapshot, e.evento_padre_id, \
-                e.attore_nome_snapshot, e.spazio_nome_snapshot, \
+                e.contenitore_percorso_snapshot, e.luogo_spazio_nome_snapshot, \
+                e.evento_padre_id, e.attore_nome_snapshot, e.spazio_nome_snapshot, \
                 e.origine_azione, e.automatico \
-         FROM storico_eventi e \
-         JOIN storico_entita se ON se.id = e.entita_storico_id \
-         WHERE e.id = ? AND e.spazio_id = ? AND se.spazio_id = ?",
-    )
-    .bind(event_id)
-    .bind(crate::identity::current_space_id())
-    .bind(crate::identity::current_space_id())
-    .fetch_optional(pool)
-    .await?;
+         FROM storico_eventi e JOIN storico_entita se ON se.id = e.entita_storico_id \
+         WHERE e.id = ? AND se.spazio_id = e.spazio_id AND {}",
+        crate::identity::visible_space_sql("e")
+    );
+    let event = sqlx::query_as::<_, HistoryEventDetail>(&sql)
+        .bind(event_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_optional(pool)
+        .await?;
 
     let Some(event) = event else {
         return Ok(None);
@@ -1652,8 +1753,8 @@ async fn load_event_detail(
     .await?;
 
     let location = sqlx::query_as::<_, HistoryLocationChangeUi>(
-        "SELECT abitazione_prima_nome, stanza_prima_nome, contenitore_prima_percorso, \
-                abitazione_dopo_nome, stanza_dopo_nome, contenitore_dopo_percorso \
+        "SELECT spazio_prima_nome, abitazione_prima_nome, stanza_prima_nome, contenitore_prima_percorso, \
+                spazio_dopo_nome, abitazione_dopo_nome, stanza_dopo_nome, contenitore_dopo_percorso \
          FROM storico_cambi_luogo \
          WHERE evento_id = ?",
     )
@@ -1738,7 +1839,7 @@ fn format_event_detail(
         ));
     }
     if let Some(space) = event.spazio_nome_snapshot.as_deref() {
-        message.push_str(&format!("\n👥 Spazio: {space}"));
+        message.push_str(&format!("\n👥 Spazio dell'entità: {space}"));
     }
 
     if let Some(parent) = event.evento_padre_id {
@@ -1746,7 +1847,7 @@ fn format_event_detail(
     }
 
     if let Some(context) = detail_context(event) {
-        message.push_str("\n📍 ");
+        message.push_str("\n📍 Posizione: ");
         message.push_str(&context);
     }
 
@@ -1767,20 +1868,24 @@ fn format_event_detail(
     }
 
     if let Some(location) = location {
+        let before = format_location_with_space(
+            location.abitazione_prima_nome.as_deref(),
+            location.stanza_prima_nome.as_deref(),
+            location.contenitore_prima_percorso.as_deref(),
+            location.spazio_prima_nome.as_deref(),
+            true,
+        );
+        let after = format_location_with_space(
+            location.abitazione_dopo_nome.as_deref(),
+            location.stanza_dopo_nome.as_deref(),
+            location.contenitore_dopo_percorso.as_deref(),
+            location.spazio_dopo_nome.as_deref(),
+            true,
+        );
+        let before = location_with_home_icon(&before);
+        let after = location_with_home_icon(&after);
         message.push_str("\n\n🚚 Luogo:");
-        message.push_str(&format!(
-            "\n{} → {}",
-            format_location(
-                location.abitazione_prima_nome.as_deref(),
-                location.stanza_prima_nome.as_deref(),
-                location.contenitore_prima_percorso.as_deref(),
-            ),
-            format_location(
-                location.abitazione_dopo_nome.as_deref(),
-                location.stanza_dopo_nome.as_deref(),
-                location.contenitore_dopo_percorso.as_deref(),
-            ),
-        ));
+        message.push_str(&format!("\nDa: {before}\nA: {after}"));
     }
 
     message
@@ -1946,38 +2051,80 @@ fn truncate_chars(value: &str, max: usize) -> String {
 
 fn event_context(event: &HistoryListRow) -> Option<String> {
     event.abitazione_nome_snapshot.as_deref().map(|home| {
-        format_location(
+        let show_space = crate::identity::current_view_all()
+            || event
+                .luogo_spazio_nome_snapshot
+                .as_deref()
+                .zip(event.spazio_nome_snapshot.as_deref())
+                .is_some_and(|(location_space, owner_space)| location_space != owner_space);
+        format_location_with_space(
             Some(home),
             event.stanza_nome_snapshot.as_deref(),
             event.contenitore_percorso_snapshot.as_deref(),
+            event.luogo_spazio_nome_snapshot.as_deref(),
+            show_space,
         )
     })
 }
 
 fn detail_context(event: &HistoryEventDetail) -> Option<String> {
     event.abitazione_nome_snapshot.as_deref().map(|home| {
-        format_location(
+        format_location_with_space(
             Some(home),
             event.stanza_nome_snapshot.as_deref(),
             event.contenitore_percorso_snapshot.as_deref(),
+            event.luogo_spazio_nome_snapshot.as_deref(),
+            event.luogo_spazio_nome_snapshot.is_some(),
         )
     })
 }
 
+#[cfg(test)]
 fn format_location(home: Option<&str>, room: Option<&str>, container_path: Option<&str>) -> String {
-    let mut parts = Vec::new();
-    if let Some(home) = home {
-        parts.push(home);
-    } else {
+    format_location_with_space(home, room, container_path, None, false)
+}
+
+fn format_location_with_space(
+    home: Option<&str>,
+    room: Option<&str>,
+    container_path: Option<&str>,
+    space: Option<&str>,
+    show_space: bool,
+) -> String {
+    let Some(home) = home else {
         return "Nessun luogo".to_string();
+    };
+
+    let mut parts = Vec::new();
+    if show_space {
+        if let Some(space) = space {
+            parts.push(format!("{home} · {space}"));
+        } else {
+            parts.push(home.to_string());
+        }
+    } else {
+        parts.push(home.to_string());
     }
+
     if let Some(room) = room {
-        parts.push(room);
+        parts.push(room.to_string());
     }
     if let Some(path) = container_path {
-        parts.extend(path.split(" / ").filter(|part| !part.is_empty()));
+        parts.extend(
+            path.split(" / ")
+                .filter(|part| !part.is_empty())
+                .map(str::to_string),
+        );
     }
     parts.join(" / ")
+}
+
+fn location_with_home_icon(location: &str) -> String {
+    if location == "Nessun luogo" {
+        location.to_string()
+    } else {
+        format!("🏠 {location}")
+    }
 }
 
 fn operation_icon(operation: &str) -> &'static str {
@@ -2461,6 +2608,7 @@ mod tests {
             nome_snapshot: "Alessio Test".to_string(),
             spazio_id: 1,
             spazio_nome_snapshot: "Spazio principale".to_string(),
+            view_all: false,
             origine: "telegram",
             telegram_user_id: Some(123),
             telegram_username: Some("alessio_test".to_string()),
@@ -2549,6 +2697,25 @@ mod tests {
     }
 
     #[test]
+    fn dettaglio_luogo_disambigua_lo_spazio() {
+        assert_eq!(
+            format_location_with_space(
+                Some("Casa principale"),
+                Some("Camera"),
+                Some("Scaffale prova"),
+                Some("Test isolamento"),
+                true,
+            ),
+            "Casa principale · Test isolamento / Camera / Scaffale prova"
+        );
+        assert_eq!(
+            location_with_home_icon("Casa principale · Test isolamento"),
+            "🏠 Casa principale · Test isolamento"
+        );
+        assert_eq!(location_with_home_icon("Nessun luogo"), "Nessun luogo");
+    }
+
+    #[test]
     fn storico_legacy_rende_esplicito_che_l_autore_non_e_disponibile() {
         assert_eq!(
             format_history_actor_line(None, "legacy", false),
@@ -2576,6 +2743,7 @@ mod tests {
             nome_snapshot: "Sistema test".to_string(),
             spazio_id: space_two,
             spazio_nome_snapshot: "Spazio due".to_string(),
+            view_all: false,
             origine: "sistema",
             telegram_user_id: None,
             telegram_username: None,

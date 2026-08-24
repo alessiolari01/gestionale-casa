@@ -22,6 +22,7 @@ pub(crate) struct AuditActor {
     pub(crate) nome_snapshot: String,
     pub(crate) spazio_id: i64,
     pub(crate) spazio_nome_snapshot: String,
+    pub(crate) view_all: bool,
     pub(crate) origine: &'static str,
     pub(crate) telegram_user_id: Option<i64>,
     pub(crate) telegram_username: Option<String>,
@@ -35,6 +36,7 @@ impl AuditActor {
             nome_snapshot: "Sistema".to_string(),
             spazio_id: LEGACY_SPACE_ID,
             spazio_nome_snapshot: LEGACY_SPACE_NAME.to_string(),
+            view_all: false,
             origine: "sistema",
             telegram_user_id: None,
             telegram_username: None,
@@ -196,8 +198,8 @@ async fn resolve_telegram_profile(
 
     ensure_initial_space(&mut tx, user_id, display_name).await?;
 
-    let (space_id, space_name): (i64, String) = sqlx::query_as(
-        "SELECT s.id, s.nome \
+    let (space_id, space_name, view_mode): (i64, String, String) = sqlx::query_as(
+        "SELECT s.id, s.nome, p.vista_spazi \
          FROM preferenze_utente p \
          JOIN membri_spazio ms \
            ON ms.utente_id = p.utente_id AND ms.spazio_id = p.spazio_attivo_id \
@@ -218,6 +220,7 @@ async fn resolve_telegram_profile(
         nome_snapshot: display_name.clone(),
         spazio_id: space_id,
         spazio_nome_snapshot: space_name,
+        view_all: view_mode == "tutti",
         origine: "telegram",
         telegram_user_id: Some(telegram_user_id),
         telegram_username: profile.username.clone(),
@@ -339,6 +342,109 @@ pub(crate) struct SpaceMembership {
 
 pub(crate) fn current_space_id() -> i64 {
     current_actor().spazio_id
+}
+
+pub(crate) fn current_view_all() -> bool {
+    current_actor().view_all
+}
+
+pub(crate) async fn set_view_all(
+    pool: &SqlitePool,
+    actor: &AuditActor,
+    view_all: bool,
+) -> Result<()> {
+    let user_id = actor
+        .utente_id
+        .context("Vista spazi non disponibile per un attore di sistema")?;
+    let value = if view_all { "tutti" } else { "predefinito" };
+    let affected = sqlx::query(
+        "UPDATE preferenze_utente \
+         SET vista_spazi = ?, aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
+         WHERE utente_id = ?",
+    )
+    .bind(value)
+    .bind(user_id)
+    .execute(pool)
+    .await
+    .context("Impossibile aggiornare la vista multi-spazio")?
+    .rows_affected();
+    if affected != 1 {
+        bail!("Preferenze utente non trovate");
+    }
+    Ok(())
+}
+
+pub(crate) async fn can_write_space(pool: &SqlitePool, space_id: i64) -> Result<bool> {
+    let actor = current_actor();
+    let Some(user_id) = actor.utente_id else {
+        return Ok(true);
+    };
+    sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM membri_spazio \
+         WHERE utente_id = ? AND spazio_id = ? \
+           AND ruolo IN ('proprietario', 'amministratore', 'membro'))",
+    )
+    .bind(user_id)
+    .bind(space_id)
+    .fetch_one(pool)
+    .await
+    .context("Impossibile verificare i permessi dello spazio")
+}
+
+pub(crate) async fn ensure_can_write_space(pool: &SqlitePool, space_id: i64) -> Result<()> {
+    if can_write_space(pool, space_id).await? {
+        Ok(())
+    } else {
+        bail!("Lo spazio di destinazione o proprietario non e' modificabile da questo utente")
+    }
+}
+
+pub(crate) async fn ensure_can_write_space_sqlx(
+    pool: &SqlitePool,
+    space_id: i64,
+) -> Result<(), sqlx::Error> {
+    let actor = current_actor();
+    let Some(user_id) = actor.utente_id else {
+        return Ok(());
+    };
+    let allowed: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM membri_spazio \
+         WHERE utente_id = ? AND spazio_id = ? \
+           AND ruolo IN ('proprietario', 'amministratore', 'membro'))",
+    )
+    .bind(user_id)
+    .bind(space_id)
+    .fetch_one(pool)
+    .await?;
+    if allowed {
+        Ok(())
+    } else {
+        Err(sqlx::Error::RowNotFound)
+    }
+}
+
+pub(crate) fn visible_space_sql(alias: &str) -> String {
+    let actor = current_actor();
+    if actor.view_all {
+        if actor.utente_id.is_some() {
+            format!(
+                "{alias}.spazio_id IN (SELECT spazio_id FROM membri_spazio WHERE utente_id = ?)"
+            )
+        } else {
+            format!("{alias}.spazio_id = ?")
+        }
+    } else {
+        format!("{alias}.spazio_id = ?")
+    }
+}
+
+pub(crate) fn visible_space_bind_id() -> i64 {
+    let actor = current_actor();
+    if actor.view_all {
+        actor.utente_id.unwrap_or(actor.spazio_id)
+    } else {
+        actor.spazio_id
+    }
 }
 
 pub(crate) async fn list_user_spaces(
@@ -555,7 +661,7 @@ pub(crate) async fn spaces_summary(pool: &SqlitePool, actor: &AuditActor) -> Res
     let mut lines = vec![
         "👥 Spazi".to_string(),
         String::new(),
-        "Lo spazio attivo determina quali dati del gestionale sono visibili.".to_string(),
+        "Lo spazio predefinito determina dove vengono creati normalmente i nuovi dati.".to_string(),
         String::new(),
     ];
     for space in spaces {
@@ -567,6 +673,15 @@ pub(crate) async fn spaces_summary(pool: &SqlitePool, actor: &AuditActor) -> Res
             role_label(&space.ruolo)
         ));
     }
+    lines.push(String::new());
+    lines.push(format!(
+        "Vista: {}",
+        if actor.view_all {
+            "🌐 Tutti i miei spazi"
+        } else {
+            "🎯 Solo spazio predefinito"
+        }
+    ));
     lines.push(String::new());
     lines.push("Comandi:".to_string());
     lines.push("/spazio_nuovo <nome> — crea e attiva uno spazio condiviso".to_string());
@@ -614,10 +729,11 @@ pub(crate) async fn profile_summary(pool: &SqlitePool, actor: &AuditActor) -> Re
             .context("Impossibile contare gli spazi disponibili")?;
 
     Ok(format!(
-        "👤 Profilo\n\nNome: {}\nTelegram: {}\nSpazio attivo: {}\nRuolo: {}\nMembro dal: {}\nSpazi disponibili: {}\n\nUsa /spazi per vedere o cambiare spazio.",
+        "👤 Profilo\n\nNome: {}\nTelegram: {}\nSpazio predefinito: {}\nVista: {}\nRuolo: {}\nMembro dal: {}\nSpazi disponibili: {}\n\nUsa /spazi per cambiare spazio predefinito o modalità di visualizzazione.",
         actor.nome_snapshot,
         telegram,
         actor.spazio_nome_snapshot,
+        if actor.view_all { "Tutti i miei spazi" } else { "Solo spazio predefinito" },
         role_label(&role),
         member_since,
         space_count,
@@ -886,12 +1002,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn vista_tutti_persiste_e_non_cambia_lo_spazio_predefinito() {
+        let pool = test_pool().await;
+        let profile = telegram_profile(1001, "Alessio", Some("alessio_test"));
+        let actor = resolve_telegram_profile(&pool, &profile)
+            .await
+            .expect("actor");
+        let family = create_space(&pool, &actor, "Famiglia", "famiglia")
+            .await
+            .expect("spazio famiglia");
+        let actor = resolve_telegram_profile(&pool, &profile)
+            .await
+            .expect("actor aggiornato");
+        assert_eq!(actor.spazio_id, family.id);
+        assert!(!actor.view_all);
+
+        set_view_all(&pool, &actor, true)
+            .await
+            .expect("vista tutti");
+        let all = resolve_telegram_profile(&pool, &profile)
+            .await
+            .expect("actor vista tutti");
+        assert_eq!(all.spazio_id, family.id);
+        assert!(all.view_all);
+
+        set_view_all(&pool, &all, false)
+            .await
+            .expect("vista predefinita");
+        let single = resolve_telegram_profile(&pool, &profile)
+            .await
+            .expect("actor vista singola");
+        assert_eq!(single.spazio_id, family.id);
+        assert!(!single.view_all);
+    }
+
+    #[tokio::test]
     async fn task_local_conserva_attore_solo_nel_contesto() {
         let actor = AuditActor {
             utente_id: Some(9),
             nome_snapshot: "Test".to_string(),
             spazio_id: 1,
             spazio_nome_snapshot: "Spazio principale".to_string(),
+            view_all: false,
             origine: "telegram",
             telegram_user_id: Some(9),
             telegram_username: None,

@@ -127,6 +127,7 @@ struct ItemLocation {
     room_id: Option<i64>,
     container_id: Option<i64>,
     home_name: Option<String>,
+    home_space_name: Option<String>,
     room_name: Option<String>,
 }
 
@@ -763,24 +764,29 @@ async fn send_location_tree(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> Re
         return Ok(());
     }
 
-    let rooms = sqlx::query_as::<_, RoomRecord>(
+    let room_sql = format!(
         "SELECT s.id AS id, s.abitazione_id AS home_id, s.nome AS name, a.nome AS home_name \
          FROM stanze s JOIN abitazioni a ON a.id = s.abitazione_id \
-         WHERE a.spazio_id = ?          ORDER BY s.nome COLLATE NOCASE, s.id",
-    )
-    .bind(crate::identity::current_space_id())
-    .fetch_all(pool)
-    .await
-    .unwrap_or_default();
-    let containers = sqlx::query_as::<_, TreeContainerRecord>(
+         WHERE {} ORDER BY a.nome COLLATE NOCASE, s.nome COLLATE NOCASE, s.id",
+        crate::identity::visible_space_sql("a")
+    );
+    let rooms = sqlx::query_as::<_, RoomRecord>(&room_sql)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
+    let container_sql = format!(
         "SELECT c.id, c.abitazione_id AS home_id, c.stanza_id AS room_id, \
                 c.contenitore_padre_id AS parent_id, c.nome AS name \
-         FROM contenitori c JOIN abitazioni a ON a.id = c.abitazione_id          WHERE a.spazio_id = ? ORDER BY c.nome COLLATE NOCASE, c.id",
-    )
-    .bind(crate::identity::current_space_id())
-    .fetch_all(pool)
-    .await
-    .unwrap_or_default();
+         FROM contenitori c JOIN abitazioni a ON a.id = c.abitazione_id \
+         WHERE {} ORDER BY a.nome COLLATE NOCASE, c.nome COLLATE NOCASE, c.id",
+        crate::identity::visible_space_sql("a")
+    );
+    let containers = sqlx::query_as::<_, TreeContainerRecord>(&container_sql)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
 
     let mut text = "🌳 Struttura completa dei luoghi\n\n".to_string();
     for home in &homes {
@@ -1091,14 +1097,23 @@ async fn send_home_list(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> Respon
 }
 
 async fn send_room_list(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> ResponseResult<()> {
-    let rooms = sqlx::query_as::<_, RoomRecord>(
-        "SELECT s.id AS id, s.abitazione_id AS home_id, s.nome AS name, a.nome AS home_name \
+    let rooms_sql = format!(
+        "SELECT s.id AS id, s.abitazione_id AS home_id, s.nome AS name, \
+                CASE WHEN ? = 1 THEN a.nome || ' · ' || sp.nome ELSE a.nome END AS home_name \
          FROM stanze s JOIN abitazioni a ON a.id = s.abitazione_id \
-         WHERE a.spazio_id = ?          ORDER BY a.nome COLLATE NOCASE, s.nome COLLATE NOCASE, s.id",
-    )
-    .bind(crate::identity::current_space_id())
-    .fetch_all(pool)
-    .await;
+         JOIN spazi sp ON sp.id = a.spazio_id \
+         WHERE {} ORDER BY sp.nome COLLATE NOCASE, a.nome COLLATE NOCASE, s.nome COLLATE NOCASE, s.id",
+        crate::identity::visible_space_sql("a")
+    );
+    let rooms = sqlx::query_as::<_, RoomRecord>(&rooms_sql)
+        .bind(if crate::identity::current_view_all() {
+            1_i64
+        } else {
+            0_i64
+        })
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_all(pool)
+        .await;
 
     match rooms {
         Ok(rooms) if rooms.is_empty() => {
@@ -1905,18 +1920,48 @@ async fn send_filtered_objects(
     Ok(())
 }
 
+#[cfg(test)]
 fn format_location(location: Option<&ItemLocation>) -> String {
+    format_location_with_space(location, false)
+}
+
+fn format_location_with_space(location: Option<&ItemLocation>, show_space: bool) -> String {
     match location {
         Some(location) => match (&location.home_name, &location.room_name) {
-            (Some(home), Some(room)) => format!("🏠 {home} / 🚪 {room}"),
-            (Some(home), None) => format!("🏠 {home}"),
+            (Some(home), Some(room)) => {
+                let home =
+                    location_home_label(home, location.home_space_name.as_deref(), show_space);
+                format!("🏠 {home} / 🚪 {room}")
+            }
+            (Some(home), None) => {
+                let home =
+                    location_home_label(home, location.home_space_name.as_deref(), show_space);
+                format!("🏠 {home}")
+            }
             _ => "Nessun luogo strutturato".to_string(),
         },
         None => "Nessun luogo strutturato".to_string(),
     }
 }
 
+fn location_home_label(home: &str, space: Option<&str>, show_space: bool) -> String {
+    if show_space {
+        if let Some(space) = space {
+            return format!("{home} · {space}");
+        }
+    }
+    home.to_string()
+}
+
 async fn format_location_full(pool: &SqlitePool, location: Option<&ItemLocation>) -> String {
+    format_location_full_mode(pool, location, crate::identity::current_view_all()).await
+}
+
+async fn format_location_full_mode(
+    pool: &SqlitePool,
+    location: Option<&ItemLocation>,
+    show_space: bool,
+) -> String {
     let Some(location) = location else {
         return "Nessun luogo strutturato".to_string();
     };
@@ -1925,20 +1970,11 @@ async fn format_location_full(pool: &SqlitePool, location: Option<&ItemLocation>
         if let Ok(Some(path)) =
             crate::modules::contenitori::container_path(pool, container_id).await
         {
-            let mut parts = vec![format!("🏠 {}", path.home_name)];
-            if let Some(room_name) = path.room_name {
-                parts.push(format!("🚪 {room_name}"));
-            }
-            parts.extend(
-                path.containers
-                    .into_iter()
-                    .map(|container| format!("📦 {}", container.name)),
-            );
-            return parts.join(" / ");
+            return crate::modules::contenitori::format_path_for_ui_with_space(&path, show_space);
         }
     }
 
-    format_location(Some(location))
+    format_location_with_space(Some(location), show_space)
 }
 
 async fn location_change_message_full(
@@ -1946,10 +1982,21 @@ async fn location_change_message_full(
     previous: Option<&ItemLocation>,
     current: Option<&ItemLocation>,
 ) -> String {
-    let before = format_location_full(pool, previous).await;
-    let after = format_location_full(pool, current).await;
+    // Nei messaggi di modifica del luogo mostriamo sempre lo spazio: due case
+    // possono avere lo stesso nome e uno spostamento cross-space deve essere inequivocabile.
+    let mut before = format_location_full_mode(pool, previous, true).await;
+    let mut after = format_location_full_mode(pool, current, true).await;
     let had_location = has_structured_location(previous);
     let has_location = has_structured_location(current);
+
+    // I percorsi che terminano in un contenitore non includono l'emoji della casa.
+    // Nei messaggi di spostamento la aggiungiamo qui per rendere Da/A coerenti.
+    if had_location && !before.starts_with("🏠 ") {
+        before = format!("🏠 {before}");
+    }
+    if has_location && !after.starts_with("🏠 ") {
+        after = format!("🏠 {after}");
+    }
     let unchanged = previous == current;
 
     match (had_location, has_location, unchanged) {
@@ -2093,12 +2140,10 @@ pub(crate) async fn history_location_snapshot(
     room_id: Option<i64>,
     container_id: Option<i64>,
 ) -> Result<crate::modules::storico::LocationSnapshot, sqlx::Error> {
-    let home_name: String =
-        sqlx::query_scalar("SELECT nome FROM abitazioni WHERE id = ? AND spazio_id = ?")
-            .bind(home_id)
-            .bind(crate::identity::current_space_id())
-            .fetch_one(&mut **tx)
-            .await?;
+    let home_name: String = sqlx::query_scalar("SELECT nome FROM abitazioni WHERE id = ?")
+        .bind(home_id)
+        .fetch_one(&mut **tx)
+        .await?;
     let home_history_id =
         crate::modules::storico::ensure_entity(tx, "abitazione", home_id, &home_name).await?;
 
@@ -2189,9 +2234,8 @@ async fn history_item_identity(
     tx: &mut Transaction<'_, Sqlite>,
     item_id: i64,
 ) -> Result<(i64, String), sqlx::Error> {
-    let name: String = sqlx::query_scalar("SELECT nome FROM items WHERE id = ? AND spazio_id = ?")
+    let name: String = sqlx::query_scalar("SELECT nome FROM items WHERE id = ?")
         .bind(item_id)
-        .bind(crate::identity::current_space_id())
         .fetch_one(&mut **tx)
         .await?;
     let history_id = crate::modules::storico::ensure_entity(tx, "oggetto", item_id, &name).await?;
@@ -2284,13 +2328,16 @@ async fn create_home(pool: &SqlitePool, name: &str) -> Result<i64, sqlx::Error> 
 }
 
 async fn rename_home(pool: &SqlitePool, id: i64, name: &str) -> Result<bool, sqlx::Error> {
-    crate::identity::ensure_can_write_sqlx(pool).await?;
+    let Some(space_id) = visible_home_space_id(pool, id).await? else {
+        return Ok(false);
+    };
+    crate::identity::ensure_can_write_space_sqlx(pool, space_id).await?;
     let mut tx = pool.begin().await?;
     let Some(old_name) = sqlx::query_scalar::<_, String>(
         "SELECT nome FROM abitazioni WHERE id = ? AND spazio_id = ?",
     )
     .bind(id)
-    .bind(crate::identity::current_space_id())
+    .bind(space_id)
     .fetch_optional(&mut *tx)
     .await?
     else {
@@ -2308,7 +2355,7 @@ async fn rename_home(pool: &SqlitePool, id: i64, name: &str) -> Result<bool, sql
     )
     .bind(name)
     .bind(id)
-    .bind(crate::identity::current_space_id())
+    .bind(space_id)
     .execute(&mut *tx)
     .await?;
 
@@ -2350,13 +2397,16 @@ async fn rename_home(pool: &SqlitePool, id: i64, name: &str) -> Result<bool, sql
 }
 
 async fn delete_home(pool: &SqlitePool, id: i64) -> Result<bool, sqlx::Error> {
-    crate::identity::ensure_can_write_sqlx(pool).await?;
+    let Some(space_id) = visible_home_space_id(pool, id).await? else {
+        return Ok(false);
+    };
+    crate::identity::ensure_can_write_space_sqlx(pool, space_id).await?;
     let mut tx = pool.begin().await?;
     let Some(home_name) = sqlx::query_scalar::<_, String>(
         "SELECT nome FROM abitazioni WHERE id = ? AND spazio_id = ?",
     )
     .bind(id)
-    .bind(crate::identity::current_space_id())
+    .bind(space_id)
     .fetch_optional(&mut *tx)
     .await?
     else {
@@ -2518,7 +2568,7 @@ async fn delete_home(pool: &SqlitePool, id: i64) -> Result<bool, sqlx::Error> {
 
     let result = sqlx::query("DELETE FROM abitazioni WHERE id = ? AND spazio_id = ?")
         .bind(id)
-        .bind(crate::identity::current_space_id())
+        .bind(space_id)
         .execute(&mut *tx)
         .await?;
 
@@ -2527,41 +2577,126 @@ async fn delete_home(pool: &SqlitePool, id: i64) -> Result<bool, sqlx::Error> {
 }
 
 async fn get_home(pool: &SqlitePool, id: i64) -> Result<Option<HomeRecord>, sqlx::Error> {
-    sqlx::query_as::<_, HomeRecord>(
-        "SELECT id, nome AS name FROM abitazioni WHERE id = ? AND spazio_id = ?",
-    )
-    .bind(id)
-    .bind(crate::identity::current_space_id())
-    .fetch_optional(pool)
-    .await
+    let sql = format!(
+        "SELECT a.id, CASE WHEN ? = 1 THEN a.nome || ' · ' || sp.nome ELSE a.nome END AS name \
+         FROM abitazioni a JOIN spazi sp ON sp.id = a.spazio_id \
+         WHERE a.id = ? AND {}",
+        crate::identity::visible_space_sql("a")
+    );
+    sqlx::query_as::<_, HomeRecord>(&sql)
+        .bind(if crate::identity::current_view_all() {
+            1_i64
+        } else {
+            0_i64
+        })
+        .bind(id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_optional(pool)
+        .await
 }
 
 async fn home_exists(pool: &SqlitePool, id: i64) -> Result<bool, sqlx::Error> {
-    let count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM abitazioni WHERE id = ? AND spazio_id = ?")
-            .bind(id)
-            .bind(crate::identity::current_space_id())
-            .fetch_one(pool)
-            .await?;
+    let sql = format!(
+        "SELECT COUNT(*) FROM abitazioni a WHERE a.id = ? AND {}",
+        crate::identity::visible_space_sql("a")
+    );
+    let count: i64 = sqlx::query_scalar(&sql)
+        .bind(id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_one(pool)
+        .await?;
     Ok(count == 1)
 }
 
 async fn list_homes(pool: &SqlitePool) -> Result<Vec<HomeRecord>, sqlx::Error> {
-    sqlx::query_as::<_, HomeRecord>(
-        "SELECT id, nome AS name FROM abitazioni          WHERE spazio_id = ? ORDER BY nome COLLATE NOCASE, id",
-    )
-    .bind(crate::identity::current_space_id())
-    .fetch_all(pool)
-    .await
+    let sql = format!(
+        "SELECT a.id, CASE WHEN ? = 1 THEN a.nome || ' · ' || sp.nome ELSE a.nome END AS name \
+         FROM abitazioni a JOIN spazi sp ON sp.id = a.spazio_id \
+         WHERE {} ORDER BY sp.nome COLLATE NOCASE, a.nome COLLATE NOCASE, a.id",
+        crate::identity::visible_space_sql("a")
+    );
+    sqlx::query_as::<_, HomeRecord>(&sql)
+        .bind(if crate::identity::current_view_all() {
+            1_i64
+        } else {
+            0_i64
+        })
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_all(pool)
+        .await
+}
+
+async fn visible_home_space_id(
+    pool: &SqlitePool,
+    home_id: i64,
+) -> Result<Option<i64>, sqlx::Error> {
+    let sql = format!(
+        "SELECT a.spazio_id FROM abitazioni a WHERE a.id = ? AND {}",
+        crate::identity::visible_space_sql("a")
+    );
+    sqlx::query_scalar(&sql)
+        .bind(home_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_optional(pool)
+        .await
+}
+
+async fn visible_item_space_id(
+    pool: &SqlitePool,
+    item_id: i64,
+) -> Result<Option<i64>, sqlx::Error> {
+    let sql = format!(
+        "SELECT i.spazio_id FROM items i WHERE i.id = ? AND {}",
+        crate::identity::visible_space_sql("i")
+    );
+    sqlx::query_scalar(&sql)
+        .bind(item_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_optional(pool)
+        .await
+}
+
+pub(crate) async fn ensure_location_target_writable(
+    pool: &SqlitePool,
+    home_id: Option<i64>,
+    container_id: Option<i64>,
+) -> anyhow::Result<()> {
+    let target_space = if let Some(container_id) = container_id {
+        let sql = format!(
+            "SELECT a.spazio_id FROM contenitori c JOIN abitazioni a ON a.id = c.abitazione_id \
+             WHERE c.id = ? AND {}",
+            crate::identity::visible_space_sql("a")
+        );
+        sqlx::query_scalar::<_, i64>(&sql)
+            .bind(container_id)
+            .bind(crate::identity::visible_space_bind_id())
+            .fetch_optional(pool)
+            .await?
+    } else if let Some(home_id) = home_id {
+        visible_home_space_id(pool, home_id).await?
+    } else {
+        None
+    };
+    if let Some(space_id) = target_space {
+        crate::identity::ensure_can_write_space(pool, space_id).await?;
+        Ok(())
+    } else if home_id.is_none() && container_id.is_none() {
+        Ok(())
+    } else {
+        anyhow::bail!("Luogo di destinazione non accessibile")
+    }
 }
 
 async fn create_room(pool: &SqlitePool, home_id: i64, name: &str) -> Result<i64, sqlx::Error> {
-    crate::identity::ensure_can_write_sqlx(pool).await?;
+    let home_space = visible_home_space_id(pool, home_id)
+        .await?
+        .ok_or(sqlx::Error::RowNotFound)?;
+    crate::identity::ensure_can_write_space_sqlx(pool, home_space).await?;
     let mut tx = pool.begin().await?;
     let home_name: String =
         sqlx::query_scalar("SELECT nome FROM abitazioni WHERE id = ? AND spazio_id = ?")
             .bind(home_id)
-            .bind(crate::identity::current_space_id())
+            .bind(home_space)
             .fetch_one(&mut *tx)
             .await?;
     let home_history_id =
@@ -2609,7 +2744,19 @@ async fn create_room(pool: &SqlitePool, home_id: i64, name: &str) -> Result<i64,
 }
 
 async fn rename_room(pool: &SqlitePool, id: i64, name: &str) -> Result<bool, sqlx::Error> {
-    crate::identity::ensure_can_write_sqlx(pool).await?;
+    let room_sql = format!(
+        "SELECT a.spazio_id FROM stanze s JOIN abitazioni a ON a.id = s.abitazione_id WHERE s.id = ? AND {}",
+        crate::identity::visible_space_sql("a")
+    );
+    let Some(space_id) = sqlx::query_scalar::<_, i64>(&room_sql)
+        .bind(id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_optional(pool)
+        .await?
+    else {
+        return Ok(false);
+    };
+    crate::identity::ensure_can_write_space_sqlx(pool, space_id).await?;
     let mut tx = pool.begin().await?;
     let Some((home_id, old_name, home_name)) = sqlx::query_as::<_, (i64, String, String)>(
         "SELECT s.abitazione_id, s.nome, a.nome \
@@ -2617,7 +2764,7 @@ async fn rename_room(pool: &SqlitePool, id: i64, name: &str) -> Result<bool, sql
          WHERE s.id = ? AND a.spazio_id = ?",
     )
     .bind(id)
-    .bind(crate::identity::current_space_id())
+    .bind(space_id)
     .fetch_optional(&mut *tx)
     .await?
     else {
@@ -2638,7 +2785,7 @@ async fn rename_room(pool: &SqlitePool, id: i64, name: &str) -> Result<bool, sql
     )
     .bind(name)
     .bind(id)
-    .bind(crate::identity::current_space_id())
+    .bind(space_id)
     .execute(&mut *tx)
     .await?;
     if result.rows_affected() != 1 {
@@ -2679,7 +2826,19 @@ async fn rename_room(pool: &SqlitePool, id: i64, name: &str) -> Result<bool, sql
 }
 
 async fn delete_room(pool: &SqlitePool, id: i64) -> Result<bool, sqlx::Error> {
-    crate::identity::ensure_can_write_sqlx(pool).await?;
+    let room_sql = format!(
+        "SELECT a.spazio_id FROM stanze s JOIN abitazioni a ON a.id = s.abitazione_id WHERE s.id = ? AND {}",
+        crate::identity::visible_space_sql("a")
+    );
+    let Some(space_id) = sqlx::query_scalar::<_, i64>(&room_sql)
+        .bind(id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_optional(pool)
+        .await?
+    else {
+        return Ok(false);
+    };
+    crate::identity::ensure_can_write_space_sqlx(pool, space_id).await?;
     let mut tx = pool.begin().await?;
     let Some((home_id, room_name, home_name)) = sqlx::query_as::<_, (i64, String, String)>(
         "SELECT s.abitazione_id, s.nome, a.nome \
@@ -2687,7 +2846,7 @@ async fn delete_room(pool: &SqlitePool, id: i64) -> Result<bool, sqlx::Error> {
          WHERE s.id = ? AND a.spazio_id = ?",
     )
     .bind(id)
-    .bind(crate::identity::current_space_id())
+    .bind(space_id)
     .fetch_optional(&mut *tx)
     .await?
     else {
@@ -2775,7 +2934,7 @@ async fn delete_room(pool: &SqlitePool, id: i64) -> Result<bool, sqlx::Error> {
         "DELETE FROM stanze WHERE id = ? AND EXISTS (             SELECT 1 FROM abitazioni a WHERE a.id = stanze.abitazione_id AND a.spazio_id = ?         )",
     )
     .bind(id)
-    .bind(crate::identity::current_space_id())
+    .bind(space_id)
     .execute(&mut *tx)
         .await?;
     if result.rows_affected() != 1 {
@@ -2817,81 +2976,110 @@ async fn delete_room(pool: &SqlitePool, id: i64) -> Result<bool, sqlx::Error> {
 }
 
 async fn get_room(pool: &SqlitePool, id: i64) -> Result<Option<RoomRecord>, sqlx::Error> {
-    sqlx::query_as::<_, RoomRecord>(
-        "SELECT s.id AS id, s.abitazione_id AS home_id, s.nome AS name, a.nome AS home_name \
-         FROM stanze s JOIN abitazioni a ON a.id = s.abitazione_id \
-         WHERE s.id = ? AND a.spazio_id = ?",
-    )
-    .bind(id)
-    .bind(crate::identity::current_space_id())
-    .fetch_optional(pool)
-    .await
+    let sql = format!(
+        "SELECT s.id AS id, s.abitazione_id AS home_id, s.nome AS name, \
+                CASE WHEN ? = 1 THEN a.nome || ' · ' || sp.nome ELSE a.nome END AS home_name \
+         FROM stanze s JOIN abitazioni a ON a.id = s.abitazione_id JOIN spazi sp ON sp.id = a.spazio_id \
+         WHERE s.id = ? AND {}",
+        crate::identity::visible_space_sql("a")
+    );
+    sqlx::query_as::<_, RoomRecord>(&sql)
+        .bind(if crate::identity::current_view_all() {
+            1_i64
+        } else {
+            0_i64
+        })
+        .bind(id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_optional(pool)
+        .await
 }
 
 async fn list_rooms_for_home(
     pool: &SqlitePool,
     home_id: i64,
 ) -> Result<Vec<RoomRecord>, sqlx::Error> {
-    sqlx::query_as::<_, RoomRecord>(
-        "SELECT s.id AS id, s.abitazione_id AS home_id, s.nome AS name, a.nome AS home_name \
-         FROM stanze s JOIN abitazioni a ON a.id = s.abitazione_id \
-         WHERE s.abitazione_id = ? AND a.spazio_id = ? \
-         ORDER BY s.nome COLLATE NOCASE, s.id",
-    )
-    .bind(home_id)
-    .bind(crate::identity::current_space_id())
-    .fetch_all(pool)
-    .await
+    let sql = format!(
+        "SELECT s.id AS id, s.abitazione_id AS home_id, s.nome AS name, \
+                CASE WHEN ? = 1 THEN a.nome || ' · ' || sp.nome ELSE a.nome END AS home_name \
+         FROM stanze s JOIN abitazioni a ON a.id = s.abitazione_id JOIN spazi sp ON sp.id = a.spazio_id \
+         WHERE s.abitazione_id = ? AND {} ORDER BY s.nome COLLATE NOCASE, s.id",
+        crate::identity::visible_space_sql("a")
+    );
+    sqlx::query_as::<_, RoomRecord>(&sql)
+        .bind(if crate::identity::current_view_all() {
+            1_i64
+        } else {
+            0_i64
+        })
+        .bind(home_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_all(pool)
+        .await
 }
 
 async fn count_rooms_for_home(pool: &SqlitePool, home_id: i64) -> Result<i64, sqlx::Error> {
-    sqlx::query_scalar(
-        "SELECT COUNT(*) FROM stanze s          JOIN abitazioni a ON a.id = s.abitazione_id          WHERE s.abitazione_id = ? AND a.spazio_id = ?",
-    )
-    .bind(home_id)
-    .bind(crate::identity::current_space_id())
-    .fetch_one(pool)
-    .await
+    let sql = format!(
+        "SELECT COUNT(*) FROM stanze s JOIN abitazioni a ON a.id = s.abitazione_id \
+         WHERE s.abitazione_id = ? AND {}",
+        crate::identity::visible_space_sql("a")
+    );
+    sqlx::query_scalar(&sql)
+        .bind(home_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_one(pool)
+        .await
 }
 
 async fn count_items_for_home(pool: &SqlitePool, home_id: i64) -> Result<i64, sqlx::Error> {
-    sqlx::query_scalar(
-        "SELECT COUNT(*) FROM item_luogo il          JOIN items i ON i.id = il.item_id          WHERE il.abitazione_id = ? AND i.spazio_id = ?",
-    )
-    .bind(home_id)
-    .bind(crate::identity::current_space_id())
-    .fetch_one(pool)
-    .await
+    let sql = format!(
+        "SELECT COUNT(*) FROM item_luogo il JOIN items i ON i.id = il.item_id \
+         WHERE il.abitazione_id = ? AND {}",
+        crate::identity::visible_space_sql("i")
+    );
+    sqlx::query_scalar(&sql)
+        .bind(home_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_one(pool)
+        .await
 }
 
 async fn count_items_for_room(pool: &SqlitePool, room_id: i64) -> Result<i64, sqlx::Error> {
-    sqlx::query_scalar(
-        "SELECT COUNT(*) FROM item_luogo il          JOIN items i ON i.id = il.item_id          WHERE il.stanza_id = ? AND i.spazio_id = ?",
-    )
-    .bind(room_id)
-    .bind(crate::identity::current_space_id())
-    .fetch_one(pool)
-    .await
+    let sql = format!(
+        "SELECT COUNT(*) FROM item_luogo il JOIN items i ON i.id = il.item_id \
+         WHERE il.stanza_id = ? AND {}",
+        crate::identity::visible_space_sql("i")
+    );
+    sqlx::query_scalar(&sql)
+        .bind(room_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_one(pool)
+        .await
 }
 
 async fn count_containers_for_room(pool: &SqlitePool, room_id: i64) -> Result<i64, sqlx::Error> {
-    sqlx::query_scalar(
-        "SELECT COUNT(*) FROM contenitori c          JOIN abitazioni a ON a.id = c.abitazione_id          WHERE c.stanza_id = ? AND a.spazio_id = ?",
-    )
-    .bind(room_id)
-    .bind(crate::identity::current_space_id())
-    .fetch_one(pool)
-    .await
+    let sql = format!(
+        "SELECT COUNT(*) FROM contenitori c JOIN abitazioni a ON a.id = c.abitazione_id \
+         WHERE c.stanza_id = ? AND {}",
+        crate::identity::visible_space_sql("a")
+    );
+    sqlx::query_scalar(&sql)
+        .bind(room_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_one(pool)
+        .await
 }
 
 async fn object_exists(pool: &SqlitePool, item_id: i64) -> Result<bool, sqlx::Error> {
-    let count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM items WHERE id = ? AND tipo = 'oggetto' AND spazio_id = ?",
-    )
-    .bind(item_id)
-    .bind(crate::identity::current_space_id())
-    .fetch_one(pool)
-    .await?;
+    let sql = format!(
+        "SELECT COUNT(*) FROM items i WHERE i.id = ? AND i.tipo = 'oggetto' AND {}",
+        crate::identity::visible_space_sql("i")
+    );
+    let count: i64 = sqlx::query_scalar(&sql)
+        .bind(item_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_one(pool)
+        .await?;
     Ok(count == 1)
 }
 
@@ -2899,121 +3087,98 @@ async fn get_item_location(
     pool: &SqlitePool,
     item_id: i64,
 ) -> Result<Option<ItemLocation>, sqlx::Error> {
-    sqlx::query_as::<_, ItemLocation>(
-        "SELECT il.abitazione_id AS home_id, il.stanza_id AS room_id, \
-                il.contenitore_id AS container_id, \
-                a.nome AS home_name, s.nome AS room_name \
-         FROM item_luogo il \
-         JOIN items i ON i.id = il.item_id \
+    let sql = format!(
+        "SELECT il.abitazione_id AS home_id, il.stanza_id AS room_id, il.contenitore_id AS container_id, \
+                a.nome AS home_name, ps.nome AS home_space_name, s.nome AS room_name \
+         FROM item_luogo il JOIN items i ON i.id = il.item_id \
          LEFT JOIN abitazioni a ON a.id = il.abitazione_id \
+         LEFT JOIN spazi ps ON ps.id = a.spazio_id \
          LEFT JOIN stanze s ON s.id = il.stanza_id \
-         WHERE il.item_id = ? AND i.spazio_id = ?",
-    )
-    .bind(item_id)
-    .bind(crate::identity::current_space_id())
-    .fetch_optional(pool)
-    .await
+         WHERE il.item_id = ? AND {}",
+        crate::identity::visible_space_sql("i")
+    );
+    sqlx::query_as::<_, ItemLocation>(&sql)
+        .bind(item_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_optional(pool)
+        .await
 }
 
 async fn get_item_location_tx(
     tx: &mut Transaction<'_, Sqlite>,
     item_id: i64,
 ) -> Result<Option<ItemLocation>, sqlx::Error> {
-    sqlx::query_as::<_, ItemLocation>(
-        "SELECT il.abitazione_id AS home_id, il.stanza_id AS room_id, \
-                il.contenitore_id AS container_id, \
-                a.nome AS home_name, s.nome AS room_name \
-         FROM item_luogo il \
-         JOIN items i ON i.id = il.item_id \
+    let sql = format!(
+        "SELECT il.abitazione_id AS home_id, il.stanza_id AS room_id, il.contenitore_id AS container_id, \
+                a.nome AS home_name, ps.nome AS home_space_name, s.nome AS room_name \
+         FROM item_luogo il JOIN items i ON i.id = il.item_id \
          LEFT JOIN abitazioni a ON a.id = il.abitazione_id \
+         LEFT JOIN spazi ps ON ps.id = a.spazio_id \
          LEFT JOIN stanze s ON s.id = il.stanza_id \
-         WHERE il.item_id = ? AND i.spazio_id = ?",
-    )
-    .bind(item_id)
-    .bind(crate::identity::current_space_id())
-    .fetch_optional(&mut **tx)
-    .await
+         WHERE il.item_id = ? AND {}",
+        crate::identity::visible_space_sql("i")
+    );
+    sqlx::query_as::<_, ItemLocation>(&sql)
+        .bind(item_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_optional(&mut **tx)
+        .await
 }
 
 async fn set_item_home(pool: &SqlitePool, item_id: i64, home_id: i64) -> Result<(), sqlx::Error> {
-    crate::identity::ensure_can_write_sqlx(pool).await?;
+    let item_space = visible_item_space_id(pool, item_id)
+        .await?
+        .ok_or(sqlx::Error::RowNotFound)?;
+    let home_space = visible_home_space_id(pool, home_id)
+        .await?
+        .ok_or(sqlx::Error::RowNotFound)?;
+    crate::identity::ensure_can_write_space_sqlx(pool, item_space).await?;
+    crate::identity::ensure_can_write_space_sqlx(pool, home_space).await?;
     let mut tx = pool.begin().await?;
-    let space_id = crate::identity::current_space_id();
-    let allowed: i64 = sqlx::query_scalar(
-        "SELECT EXISTS(\
-             SELECT 1 FROM items i, abitazioni a \
-             WHERE i.id = ? AND i.spazio_id = ? \
-               AND a.id = ? AND a.spazio_id = ?\
-         )",
-    )
-    .bind(item_id)
-    .bind(space_id)
-    .bind(home_id)
-    .bind(space_id)
-    .fetch_one(&mut *tx)
-    .await?;
-    if allowed == 0 {
-        return Err(sqlx::Error::RowNotFound);
-    }
     let previous = get_item_location_tx(&mut tx, item_id).await?;
-
     if previous.as_ref().is_some_and(|location| {
         location.home_id == home_id && location.room_id.is_none() && location.container_id.is_none()
     }) {
         return Ok(());
     }
-
     let before = if let Some(previous) = previous.as_ref() {
         history_snapshot_from_item_location(&mut tx, previous).await?
     } else {
         crate::modules::storico::LocationSnapshot::default()
     };
     let after = history_location_snapshot(&mut tx, home_id, None, None).await?;
-
     sqlx::query(
         "INSERT INTO item_luogo (item_id, abitazione_id, stanza_id, contenitore_id) VALUES (?, ?, NULL, NULL) \
          ON CONFLICT(item_id) DO UPDATE SET abitazione_id = excluded.abitazione_id, stanza_id = NULL, contenitore_id = NULL",
-    )
-    .bind(item_id)
-    .bind(home_id)
-    .execute(&mut *tx)
-    .await?;
-
+    ).bind(item_id).bind(home_id).execute(&mut *tx).await?;
     let operation = if previous.is_some() {
         "spostamento"
     } else {
         "assegnazione"
     };
     record_item_location_event(&mut tx, item_id, operation, &before, &after, None).await?;
-
     tx.commit().await?;
     Ok(())
 }
 
 async fn set_item_room(pool: &SqlitePool, item_id: i64, room_id: i64) -> Result<(), sqlx::Error> {
-    crate::identity::ensure_can_write_sqlx(pool).await?;
+    let item_space = visible_item_space_id(pool, item_id)
+        .await?
+        .ok_or(sqlx::Error::RowNotFound)?;
+    let room_sql = format!(
+        "SELECT s.abitazione_id, a.spazio_id FROM stanze s JOIN abitazioni a ON a.id = s.abitazione_id \
+         WHERE s.id = ? AND {}",
+        crate::identity::visible_space_sql("a")
+    );
+    let (home_id, home_space): (i64, i64) = sqlx::query_as(&room_sql)
+        .bind(room_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_one(pool)
+        .await?;
+    crate::identity::ensure_can_write_space_sqlx(pool, item_space).await?;
+    crate::identity::ensure_can_write_space_sqlx(pool, home_space).await?;
     let mut tx = pool.begin().await?;
-    let space_id = crate::identity::current_space_id();
-    let home_id: i64 = sqlx::query_scalar(
-        "SELECT s.abitazione_id FROM stanze s \
-         JOIN abitazioni a ON a.id = s.abitazione_id \
-         WHERE s.id = ? AND a.spazio_id = ?",
-    )
-    .bind(room_id)
-    .bind(space_id)
-    .fetch_one(&mut *tx)
-    .await?;
-    let item_ok: i64 =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM items WHERE id = ? AND spazio_id = ?)")
-            .bind(item_id)
-            .bind(space_id)
-            .fetch_one(&mut *tx)
-            .await?;
-    if item_ok == 0 {
-        return Err(sqlx::Error::RowNotFound);
-    }
     let previous = get_item_location_tx(&mut tx, item_id).await?;
-
     if previous.as_ref().is_some_and(|location| {
         location.home_id == home_id
             && location.room_id == Some(room_id)
@@ -3021,31 +3186,22 @@ async fn set_item_room(pool: &SqlitePool, item_id: i64, room_id: i64) -> Result<
     }) {
         return Ok(());
     }
-
     let before = if let Some(previous) = previous.as_ref() {
         history_snapshot_from_item_location(&mut tx, previous).await?
     } else {
         crate::modules::storico::LocationSnapshot::default()
     };
     let after = history_location_snapshot(&mut tx, home_id, Some(room_id), None).await?;
-
     sqlx::query(
         "INSERT INTO item_luogo (item_id, abitazione_id, stanza_id, contenitore_id) VALUES (?, ?, ?, NULL) \
          ON CONFLICT(item_id) DO UPDATE SET abitazione_id = excluded.abitazione_id, stanza_id = excluded.stanza_id, contenitore_id = NULL",
-    )
-    .bind(item_id)
-    .bind(home_id)
-    .bind(room_id)
-    .execute(&mut *tx)
-    .await?;
-
+    ).bind(item_id).bind(home_id).bind(room_id).execute(&mut *tx).await?;
     let operation = if previous.is_some() {
         "spostamento"
     } else {
         "assegnazione"
     };
     record_item_location_event(&mut tx, item_id, operation, &before, &after, None).await?;
-
     tx.commit().await?;
     Ok(())
 }
@@ -3055,32 +3211,22 @@ async fn set_item_container(
     item_id: i64,
     container_id: i64,
 ) -> Result<(), sqlx::Error> {
-    crate::identity::ensure_can_write_sqlx(pool).await?;
+    let item_space = visible_item_space_id(pool, item_id)
+        .await?
+        .ok_or(sqlx::Error::RowNotFound)?;
+    let target_sql = format!(
+        "SELECT c.abitazione_id, c.stanza_id, a.spazio_id FROM contenitori c \
+         JOIN abitazioni a ON a.id = c.abitazione_id WHERE c.id = ? AND {}",
+        crate::identity::visible_space_sql("a")
+    );
+    let (home_id, room_id, home_space): (i64, Option<i64>, i64) = sqlx::query_as(&target_sql)
+        .bind(container_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_one(pool)
+        .await?;
+    crate::identity::ensure_can_write_space_sqlx(pool, item_space).await?;
+    crate::identity::ensure_can_write_space_sqlx(pool, home_space).await?;
     let mut tx = pool.begin().await?;
-    let space_id = crate::identity::current_space_id();
-    let Some((home_id, room_id)) = sqlx::query_as::<_, (i64, Option<i64>)>(
-        "SELECT c.abitazione_id, c.stanza_id \
-         FROM contenitori c JOIN abitazioni a ON a.id = c.abitazione_id \
-         WHERE c.id = ? AND a.spazio_id = ?",
-    )
-    .bind(container_id)
-    .bind(space_id)
-    .fetch_optional(&mut *tx)
-    .await?
-    else {
-        return Err(sqlx::Error::RowNotFound);
-    };
-
-    let item_ok: i64 =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM items WHERE id = ? AND spazio_id = ?)")
-            .bind(item_id)
-            .bind(space_id)
-            .fetch_one(&mut *tx)
-            .await?;
-    if item_ok == 0 {
-        return Err(sqlx::Error::RowNotFound);
-    }
-
     let previous = get_item_location_tx(&mut tx, item_id).await?;
     if previous
         .as_ref()
@@ -3088,90 +3234,70 @@ async fn set_item_container(
     {
         return Ok(());
     }
-
     let before = if let Some(previous) = previous.as_ref() {
         history_snapshot_from_item_location(&mut tx, previous).await?
     } else {
         crate::modules::storico::LocationSnapshot::default()
     };
     let after = history_location_snapshot(&mut tx, home_id, room_id, Some(container_id)).await?;
-
     sqlx::query(
-        "INSERT INTO item_luogo (item_id, abitazione_id, stanza_id, contenitore_id) \
-         VALUES (?, ?, ?, ?) \
-         ON CONFLICT(item_id) DO UPDATE SET \
-             abitazione_id = excluded.abitazione_id, \
-             stanza_id = excluded.stanza_id, \
-             contenitore_id = excluded.contenitore_id",
-    )
-    .bind(item_id)
-    .bind(home_id)
-    .bind(room_id)
-    .bind(container_id)
-    .execute(&mut *tx)
-    .await?;
-
+        "INSERT INTO item_luogo (item_id, abitazione_id, stanza_id, contenitore_id) VALUES (?, ?, ?, ?) \
+         ON CONFLICT(item_id) DO UPDATE SET abitazione_id = excluded.abitazione_id, stanza_id = excluded.stanza_id, contenitore_id = excluded.contenitore_id",
+    ).bind(item_id).bind(home_id).bind(room_id).bind(container_id).execute(&mut *tx).await?;
     let operation = if previous.is_some() {
         "spostamento"
     } else {
         "assegnazione"
     };
-
     record_item_location_event(&mut tx, item_id, operation, &before, &after, None).await?;
-
     tx.commit().await?;
     Ok(())
 }
 
 async fn clear_item_location(pool: &SqlitePool, item_id: i64) -> Result<(), sqlx::Error> {
-    crate::identity::ensure_can_write_sqlx(pool).await?;
+    let item_space = visible_item_space_id(pool, item_id)
+        .await?
+        .ok_or(sqlx::Error::RowNotFound)?;
+    crate::identity::ensure_can_write_space_sqlx(pool, item_space).await?;
     let mut tx = pool.begin().await?;
-    let item_ok: i64 =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM items WHERE id = ? AND spazio_id = ?)")
-            .bind(item_id)
-            .bind(crate::identity::current_space_id())
-            .fetch_one(&mut *tx)
-            .await?;
-    if item_ok == 0 {
-        return Err(sqlx::Error::RowNotFound);
-    }
     let Some(previous) = get_item_location_tx(&mut tx, item_id).await? else {
         return Ok(());
     };
     let before = history_snapshot_from_item_location(&mut tx, &previous).await?;
     let after = crate::modules::storico::LocationSnapshot::default();
-
     sqlx::query("DELETE FROM item_luogo WHERE item_id = ?")
         .bind(item_id)
         .execute(&mut *tx)
         .await?;
-
     record_item_location_event(&mut tx, item_id, "rimozione", &before, &after, None).await?;
-
     tx.commit().await?;
     Ok(())
 }
 
 async fn count_objects_for_home(pool: &SqlitePool, home_id: i64) -> Result<i64, sqlx::Error> {
-    sqlx::query_scalar(
+    let sql = format!(
         "SELECT COUNT(*) FROM items i JOIN item_luogo il ON il.item_id = i.id \
-         WHERE i.tipo = 'oggetto' AND i.spazio_id = ? AND il.abitazione_id = ?",
-    )
-    .bind(crate::identity::current_space_id())
-    .bind(home_id)
-    .fetch_one(pool)
-    .await
+         WHERE i.tipo = 'oggetto' AND il.abitazione_id = ? AND {}",
+        crate::identity::visible_space_sql("i")
+    );
+    sqlx::query_scalar(&sql)
+        .bind(home_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_one(pool)
+        .await
 }
 
 async fn count_objects_for_room(pool: &SqlitePool, room_id: i64) -> Result<i64, sqlx::Error> {
-    sqlx::query_scalar(
+    let sql = format!(
         "SELECT COUNT(*) FROM items i JOIN item_luogo il ON il.item_id = i.id \
-         WHERE i.tipo = 'oggetto' AND i.spazio_id = ? AND il.stanza_id = ?",
-    )
-    .bind(crate::identity::current_space_id())
-    .bind(room_id)
-    .fetch_one(pool)
-    .await
+         WHERE i.tipo = 'oggetto' AND il.stanza_id = ? AND {}",
+        crate::identity::visible_space_sql("i")
+    );
+    sqlx::query_scalar(&sql)
+        .bind(room_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_one(pool)
+        .await
 }
 
 async fn list_objects_for_home(
@@ -3179,7 +3305,7 @@ async fn list_objects_for_home(
     home_id: i64,
     limit: i64,
 ) -> Result<Vec<LocatedObjectSummary>, sqlx::Error> {
-    sqlx::query_as::<_, LocatedObjectSummary>(
+    let sql = format!(
         "SELECT i.id AS id, i.nome AS name, \
                 il.abitazione_id AS home_id, a.nome AS home_name, \
                 il.stanza_id AS room_id, s.nome AS room_name, il.contenitore_id AS container_id \
@@ -3188,14 +3314,16 @@ async fn list_objects_for_home(
          JOIN item_luogo il ON il.item_id = i.id \
          LEFT JOIN abitazioni a ON a.id = il.abitazione_id \
          LEFT JOIN stanze s ON s.id = il.stanza_id \
-         WHERE i.tipo = 'oggetto' AND i.spazio_id = ? AND il.abitazione_id = ? \
+         WHERE i.tipo = 'oggetto' AND il.abitazione_id = ? AND {} \
          ORDER BY i.nome COLLATE NOCASE, i.id LIMIT ?",
-    )
-    .bind(crate::identity::current_space_id())
-    .bind(home_id)
-    .bind(limit)
-    .fetch_all(pool)
-    .await
+        crate::identity::visible_space_sql("i")
+    );
+    sqlx::query_as::<_, LocatedObjectSummary>(&sql)
+        .bind(home_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .bind(limit)
+        .fetch_all(pool)
+        .await
 }
 
 async fn list_objects_for_room(
@@ -3203,7 +3331,7 @@ async fn list_objects_for_room(
     room_id: i64,
     limit: i64,
 ) -> Result<Vec<LocatedObjectSummary>, sqlx::Error> {
-    sqlx::query_as::<_, LocatedObjectSummary>(
+    let sql = format!(
         "SELECT i.id AS id, i.nome AS name, \
                 il.abitazione_id AS home_id, a.nome AS home_name, \
                 il.stanza_id AS room_id, s.nome AS room_name, il.contenitore_id AS container_id \
@@ -3212,14 +3340,16 @@ async fn list_objects_for_room(
          JOIN item_luogo il ON il.item_id = i.id \
          LEFT JOIN abitazioni a ON a.id = il.abitazione_id \
          LEFT JOIN stanze s ON s.id = il.stanza_id \
-         WHERE i.tipo = 'oggetto' AND i.spazio_id = ? AND il.stanza_id = ? \
+         WHERE i.tipo = 'oggetto' AND il.stanza_id = ? AND {} \
          ORDER BY i.nome COLLATE NOCASE, i.id LIMIT ?",
-    )
-    .bind(crate::identity::current_space_id())
-    .bind(room_id)
-    .bind(limit)
-    .fetch_all(pool)
-    .await
+        crate::identity::visible_space_sql("i")
+    );
+    sqlx::query_as::<_, LocatedObjectSummary>(&sql)
+        .bind(room_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .bind(limit)
+        .fetch_all(pool)
+        .await
 }
 
 fn locations_menu_keyboard() -> InlineKeyboardMarkup {
@@ -4051,6 +4181,7 @@ mod tests {
             room_id: Some(10),
             container_id: None,
             home_name: Some("Casa principale".to_string()),
+            home_space_name: Some("Spazio principale".to_string()),
             room_name: Some("Garage".to_string()),
         };
         let camera = ItemLocation {
@@ -4058,6 +4189,7 @@ mod tests {
             room_id: Some(11),
             container_id: None,
             home_name: Some("Casa principale".to_string()),
+            home_space_name: Some("Casa condivisa".to_string()),
             room_name: Some("Camera".to_string()),
         };
 
@@ -4071,6 +4203,11 @@ mod tests {
         assert!(spostamento.contains("A:"));
         assert!(spostamento.contains("Garage"));
         assert!(spostamento.contains("Camera"));
+
+        let garage_con_spazio = format_location_with_space(Some(&garage), true);
+        let camera_con_spazio = format_location_with_space(Some(&camera), true);
+        assert!(garage_con_spazio.contains("Casa principale · Spazio principale"));
+        assert!(camera_con_spazio.contains("Casa principale · Casa condivisa"));
 
         let invariato = location_change_message(Some(&camera), Some(&camera));
         assert!(invariato.contains("Nessuno spostamento effettuato"));
@@ -4148,6 +4285,7 @@ mod tests {
             nome_snapshot: "Sistema test".to_string(),
             spazio_id: space_two,
             spazio_nome_snapshot: "Spazio due".to_string(),
+            view_all: false,
             origine: "sistema",
             telegram_user_id: None,
             telegram_username: None,
@@ -4186,6 +4324,132 @@ mod tests {
                 .await
                 .expect("casa cross-space inversa")
                 .is_none());
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn vista_tutti_consente_oggetto_personale_in_casa_condivisa_senza_cambiarne_proprieta() {
+        let pool = test_pool().await;
+        let user_id = sqlx::query("INSERT INTO utenti (nome_visualizzato) VALUES ('Alessio')")
+            .execute(&pool)
+            .await
+            .expect("utente")
+            .last_insert_rowid();
+        let space_two = sqlx::query(
+            "INSERT INTO spazi (nome, tipo, creato_da_utente_id) VALUES ('Casa condivisa', 'condiviso', ?)",
+        )
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("spazio due")
+        .last_insert_rowid();
+        let space_three = sqlx::query(
+            "INSERT INTO spazi (nome, tipo) VALUES ('Spazio non accessibile', 'condiviso')",
+        )
+        .execute(&pool)
+        .await
+        .expect("spazio tre")
+        .last_insert_rowid();
+
+        sqlx::query(
+            "INSERT INTO membri_spazio (spazio_id, utente_id, ruolo) VALUES (1, ?, 'proprietario')",
+        )
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("membership personale");
+        sqlx::query(
+            "INSERT INTO membri_spazio (spazio_id, utente_id, ruolo) VALUES (?, ?, 'membro')",
+        )
+        .bind(space_two)
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("membership condivisa");
+
+        let personal_home =
+            sqlx::query("INSERT INTO abitazioni (spazio_id, nome) VALUES (1, 'Casa principale')")
+                .execute(&pool)
+                .await
+                .expect("casa personale")
+                .last_insert_rowid();
+        let shared_home =
+            sqlx::query("INSERT INTO abitazioni (spazio_id, nome) VALUES (?, 'Casa principale')")
+                .bind(space_two)
+                .execute(&pool)
+                .await
+                .expect("casa condivisa")
+                .last_insert_rowid();
+        let forbidden_home =
+            sqlx::query("INSERT INTO abitazioni (spazio_id, nome) VALUES (?, 'Casa terza')")
+                .bind(space_three)
+                .execute(&pool)
+                .await
+                .expect("casa non accessibile")
+                .last_insert_rowid();
+        let item_id = sqlx::query(
+            "INSERT INTO items (tipo, nome, spazio_id) VALUES ('oggetto', 'Portatile', 1)",
+        )
+        .execute(&pool)
+        .await
+        .expect("item")
+        .last_insert_rowid();
+        sqlx::query("INSERT INTO oggetti (item_id) VALUES (?)")
+            .bind(item_id)
+            .execute(&pool)
+            .await
+            .expect("oggetto");
+
+        let actor = crate::identity::AuditActor {
+            utente_id: Some(user_id),
+            nome_snapshot: "Alessio".to_string(),
+            spazio_id: 1,
+            spazio_nome_snapshot: "Spazio principale".to_string(),
+            view_all: true,
+            origine: "telegram",
+            telegram_user_id: None,
+            telegram_username: None,
+        };
+
+        crate::identity::with_actor(actor.clone(), async {
+            let homes = home_choices(&pool).await.expect("case visibili");
+            assert!(homes.iter().any(|home| home.id == personal_home));
+            assert!(homes.iter().any(|home| home.id == shared_home));
+            assert!(!homes.iter().any(|home| home.id == forbidden_home));
+
+            set_item_home(&pool, item_id, shared_home)
+                .await
+                .expect("spostamento cross-space consentito");
+            let owner: i64 = sqlx::query_scalar("SELECT spazio_id FROM items WHERE id = ?")
+                .bind(item_id)
+                .fetch_one(&pool)
+                .await
+                .expect("proprietario");
+            let location: i64 =
+                sqlx::query_scalar("SELECT abitazione_id FROM item_luogo WHERE item_id = ?")
+                    .bind(item_id)
+                    .fetch_one(&pool)
+                    .await
+                    .expect("posizione");
+            assert_eq!(owner, 1);
+            assert_eq!(location, shared_home);
+
+            assert!(set_item_home(&pool, item_id, forbidden_home).await.is_err());
+        })
+        .await;
+
+        sqlx::query(
+            "UPDATE membri_spazio SET ruolo = 'lettura' WHERE spazio_id = ? AND utente_id = ?",
+        )
+        .bind(space_two)
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("ruolo lettura");
+
+        crate::identity::with_actor(actor, async {
+            assert!(set_item_home(&pool, item_id, shared_home).await.is_err());
         })
         .await;
     }

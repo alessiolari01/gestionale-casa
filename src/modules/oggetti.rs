@@ -170,6 +170,7 @@ impl ObjectDraft {
 
 #[derive(Debug, Clone, FromRow)]
 struct ObjectHistorySnapshot {
+    owner_space_id: i64,
     name: String,
     description: Option<String>,
     brand: Option<String>,
@@ -226,6 +227,8 @@ impl ObjectCondition {
 struct ObjectRecord {
     id: i64,
     name: String,
+    owner_space_name: String,
+    location_space_name: Option<String>,
     description: Option<String>,
     brand: Option<String>,
     model: Option<String>,
@@ -248,6 +251,8 @@ struct ObjectRecord {
 struct ObjectSummary {
     id: i64,
     name: String,
+    owner_space_name: String,
+    location_space_name: Option<String>,
     home_id: Option<i64>,
     home_name: Option<String>,
     room_id: Option<i64>,
@@ -259,6 +264,17 @@ struct ObjectSummary {
 struct ObjectLocationDisplay {
     label: String,
     command: String,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ObjectLocationInput<'a> {
+    home_id: Option<i64>,
+    home_name: Option<&'a str>,
+    location_space_name: Option<&'a str>,
+    owner_space_name: &'a str,
+    room_id: Option<i64>,
+    room_name: Option<&'a str>,
+    container_id: Option<i64>,
 }
 
 pub fn main_menu_keyboard() -> InlineKeyboardMarkup {
@@ -1588,7 +1604,10 @@ async fn send_object_list(
             let total_pages = ((total + PAGE_SIZE - 1) / PAGE_SIZE).max(1);
             let mut text = format!("📋 Oggetti · pagina {}/{}\n\n", page + 1, total_pages);
             for object in &objects {
-                text.push_str(&format!("#{} · {}", object.id, object.name));
+                text.push_str(&format!(
+                    "#{} · {}\n👥 {}",
+                    object.id, object.name, object.owner_space_name
+                ));
                 push_summary_location(&mut text, pool, object).await;
                 text.push_str("\n\n");
             }
@@ -1621,7 +1640,10 @@ async fn send_search_results(
         Ok(objects) => {
             let mut text = format!("🔎 Risultati per: {query}\n\n");
             for object in &objects {
-                text.push_str(&format!("#{} · {}", object.id, object.name));
+                text.push_str(&format!(
+                    "#{} · {}\n👥 {}",
+                    object.id, object.name, object.owner_space_name
+                ));
                 push_summary_location(&mut text, pool, object).await;
                 text.push_str("\n\n");
             }
@@ -1697,11 +1719,15 @@ async fn send_object_detail_with_return(
         Ok(Some(object)) => {
             let location = resolve_object_location(
                 pool,
-                object.home_id,
-                object.home_name.as_deref(),
-                object.room_id,
-                object.room_name.as_deref(),
-                object.container_id,
+                ObjectLocationInput {
+                    home_id: object.home_id,
+                    home_name: object.home_name.as_deref(),
+                    location_space_name: object.location_space_name.as_deref(),
+                    owner_space_name: &object.owner_space_name,
+                    room_id: object.room_id,
+                    room_name: object.room_name.as_deref(),
+                    container_id: object.container_id,
+                },
             )
             .await;
             let contextual_return = match return_to {
@@ -2128,8 +2154,8 @@ async fn get_object_history_snapshot(
     tx: &mut Transaction<'_, Sqlite>,
     id: i64,
 ) -> Result<Option<ObjectHistorySnapshot>, sqlx::Error> {
-    sqlx::query_as::<_, ObjectHistorySnapshot>(
-        "SELECT i.nome AS name, \
+    sqlx::query_as::<_, ObjectHistorySnapshot>(&format!(
+        "SELECT i.spazio_id AS owner_space_id, i.nome AS name, \
                 o.descrizione AS description, o.marca AS brand, o.modello AS model, \
                 o.numero_serie AS serial_number, o.posizione AS position, \
                 o.data_acquisto AS purchase_date, \
@@ -2138,16 +2164,23 @@ async fn get_object_history_snapshot(
                 o.valore_stimato_centesimi AS estimated_value_cents, \
                 o.condizione AS condition, o.note AS notes \
          FROM items i JOIN oggetti o ON o.item_id = i.id \
-         WHERE i.id = ? AND i.tipo = 'oggetto' AND i.spazio_id = ?",
-    )
+         WHERE i.id = ? AND i.tipo = 'oggetto' AND {}",
+        crate::identity::visible_space_sql("i")
+    ))
     .bind(id)
-    .bind(crate::identity::current_space_id())
+    .bind(crate::identity::visible_space_bind_id())
     .fetch_optional(&mut **tx)
     .await
 }
 
 async fn create_object(pool: &SqlitePool, draft: &ObjectDraft) -> anyhow::Result<i64> {
     crate::identity::ensure_can_write(pool).await?;
+    crate::modules::luoghi::ensure_location_target_writable(
+        pool,
+        draft.home_id,
+        draft.container_id,
+    )
+    .await?;
     let space_id = crate::identity::current_space_id();
     let mut tx = pool.begin().await?;
     let item_result: SqliteQueryResult =
@@ -2238,13 +2271,13 @@ async fn create_object(pool: &SqlitePool, draft: &ObjectDraft) -> anyhow::Result
 }
 
 async fn update_object(pool: &SqlitePool, id: i64, draft: &ObjectDraft) -> anyhow::Result<()> {
-    crate::identity::ensure_can_write(pool).await?;
-    let space_id = crate::identity::current_space_id();
     let mut tx = pool.begin().await?;
 
     let Some(before) = get_object_history_snapshot(&mut tx, id).await? else {
         anyhow::bail!("oggetto #{id} non trovato durante l'aggiornamento");
     };
+    crate::identity::ensure_can_write_space(pool, before.owner_space_id).await?;
+    let space_id = before.owner_space_id;
     let changes = object_update_changes(&before, draft);
 
     // Salvare una modifica senza cambiare nulla non genera UPDATE né storico.
@@ -2325,13 +2358,13 @@ async fn update_object(pool: &SqlitePool, id: i64, draft: &ObjectDraft) -> anyho
 }
 
 async fn delete_object(pool: &SqlitePool, id: i64) -> anyhow::Result<bool> {
-    crate::identity::ensure_can_write(pool).await?;
-    let space_id = crate::identity::current_space_id();
     let mut tx = pool.begin().await?;
 
     let Some(before) = get_object_history_snapshot(&mut tx, id).await? else {
         return Ok(false);
     };
+    crate::identity::ensure_can_write_space(pool, before.owner_space_id).await?;
+    let space_id = before.owner_space_id;
     let storico_id =
         crate::modules::storico::ensure_entity(&mut tx, "oggetto", id, &before.name).await?;
 
@@ -2399,28 +2432,32 @@ async fn insert_object_details(
 }
 
 async fn get_object(pool: &SqlitePool, id: i64) -> Result<Option<ObjectRecord>, sqlx::Error> {
-    sqlx::query_as::<_, ObjectRecord>(
+    let sql = format!(
         "SELECT \
-            i.id AS id, i.nome AS name, \
+            i.id AS id, i.nome AS name, i.spazio_id AS owner_space_id, os.nome AS owner_space_name, \
             o.descrizione AS description, o.marca AS brand, o.modello AS model, \
             o.numero_serie AS serial_number, o.posizione AS position, \
             o.data_acquisto AS purchase_date, \
             o.prezzo_acquisto_centesimi AS purchase_price_cents, \
             o.venditore AS seller, o.valore_stimato_centesimi AS estimated_value_cents, \
             o.condizione AS condition, o.note AS notes, \
-            il.abitazione_id AS home_id, a.nome AS home_name, \
+            il.abitazione_id AS home_id, a.nome AS home_name, ps.nome AS location_space_name, \
             il.stanza_id AS room_id, s.nome AS room_name, il.contenitore_id AS container_id \
          FROM items i \
+         JOIN spazi os ON os.id = i.spazio_id \
          JOIN oggetti o ON o.item_id = i.id \
          LEFT JOIN item_luogo il ON il.item_id = i.id \
          LEFT JOIN abitazioni a ON a.id = il.abitazione_id \
+         LEFT JOIN spazi ps ON ps.id = a.spazio_id \
          LEFT JOIN stanze s ON s.id = il.stanza_id \
-         WHERE i.id = ? AND i.tipo = 'oggetto' AND i.spazio_id = ?",
-    )
-    .bind(id)
-    .bind(crate::identity::current_space_id())
-    .fetch_optional(pool)
-    .await
+         WHERE i.id = ? AND i.tipo = 'oggetto' AND {}",
+        crate::identity::visible_space_sql("i")
+    );
+    sqlx::query_as::<_, ObjectRecord>(&sql)
+        .bind(id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_optional(pool)
+        .await
 }
 
 async fn list_objects(
@@ -2429,33 +2466,37 @@ async fn list_objects(
     page_size: i64,
 ) -> Result<(Vec<ObjectSummary>, i64), sqlx::Error> {
     let offset = page.max(0) * page_size;
-    let total: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) \
-         FROM items i \
-         JOIN oggetti o ON o.item_id = i.id \
-         WHERE i.tipo = 'oggetto' AND i.spazio_id = ?",
-    )
-    .bind(crate::identity::current_space_id())
-    .fetch_one(pool)
-    .await?;
-    let objects = sqlx::query_as::<_, ObjectSummary>(
-        "SELECT i.id AS id, i.nome AS name, \
-                il.abitazione_id AS home_id, a.nome AS home_name, \
+    let visible = crate::identity::visible_space_sql("i");
+    let count_sql = format!(
+        "SELECT COUNT(*) FROM items i JOIN oggetti o ON o.item_id = i.id \
+         WHERE i.tipo = 'oggetto' AND {visible}"
+    );
+    let total: i64 = sqlx::query_scalar(&count_sql)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_one(pool)
+        .await?;
+    let list_sql = format!(
+        "SELECT i.id AS id, i.nome AS name, i.spazio_id AS owner_space_id, \
+                os.nome AS owner_space_name, \
+                il.abitazione_id AS home_id, a.nome AS home_name, ps.nome AS location_space_name, \
                 il.stanza_id AS room_id, s.nome AS room_name, il.contenitore_id AS container_id \
          FROM items i \
+         JOIN spazi os ON os.id = i.spazio_id \
          JOIN oggetti o ON o.item_id = i.id \
          LEFT JOIN item_luogo il ON il.item_id = i.id \
          LEFT JOIN abitazioni a ON a.id = il.abitazione_id \
+         LEFT JOIN spazi ps ON ps.id = a.spazio_id \
          LEFT JOIN stanze s ON s.id = il.stanza_id \
-         WHERE i.tipo = 'oggetto' AND i.spazio_id = ? \
-         ORDER BY i.nome COLLATE NOCASE, i.id \
-         LIMIT ? OFFSET ?",
-    )
-    .bind(crate::identity::current_space_id())
-    .bind(page_size)
-    .bind(offset)
-    .fetch_all(pool)
-    .await?;
+         WHERE i.tipo = 'oggetto' AND {visible} \
+         ORDER BY os.nome COLLATE NOCASE, i.nome COLLATE NOCASE, i.id \
+         LIMIT ? OFFSET ?"
+    );
+    let objects = sqlx::query_as::<_, ObjectSummary>(&list_sql)
+        .bind(crate::identity::visible_space_bind_id())
+        .bind(page_size)
+        .bind(offset)
+        .fetch_all(pool)
+        .await?;
     Ok((objects, total))
 }
 
@@ -2465,47 +2506,47 @@ async fn search_objects(
     limit: i64,
 ) -> Result<Vec<ObjectSummary>, sqlx::Error> {
     let pattern = format!("%{}%", query.trim());
-    sqlx::query_as::<_, ObjectSummary>(
-        "SELECT i.id AS id, i.nome AS name, \
-                il.abitazione_id AS home_id, a.nome AS home_name, \
-                il.stanza_id AS room_id, s.nome AS room_name, il.contenitore_id AS container_id \
-         FROM items i \
-         JOIN oggetti o ON o.item_id = i.id \
-         LEFT JOIN item_luogo il ON il.item_id = i.id \
-         LEFT JOIN abitazioni a ON a.id = il.abitazione_id \
-         LEFT JOIN stanze s ON s.id = il.stanza_id \
-         LEFT JOIN contenitori c ON c.id = il.contenitore_id \
-         WHERE i.tipo = 'oggetto' AND i.spazio_id = ? AND (\
-            i.nome LIKE ? COLLATE NOCASE OR \
-            o.marca LIKE ? COLLATE NOCASE OR \
-            o.modello LIKE ? COLLATE NOCASE OR \
-            o.numero_serie LIKE ? COLLATE NOCASE OR \
-            o.posizione LIKE ? COLLATE NOCASE OR \
-            o.venditore LIKE ? COLLATE NOCASE OR \
-            o.descrizione LIKE ? COLLATE NOCASE OR \
-            o.note LIKE ? COLLATE NOCASE OR \
-            a.nome LIKE ? COLLATE NOCASE OR \
-            s.nome LIKE ? COLLATE NOCASE OR \
-            c.nome LIKE ? COLLATE NOCASE\
-         ) \
-         ORDER BY i.nome COLLATE NOCASE, i.id \
-         LIMIT ?",
-    )
-    .bind(crate::identity::current_space_id())
-    .bind(&pattern)
-    .bind(&pattern)
-    .bind(&pattern)
-    .bind(&pattern)
-    .bind(&pattern)
-    .bind(&pattern)
-    .bind(&pattern)
-    .bind(&pattern)
-    .bind(&pattern)
-    .bind(&pattern)
-    .bind(&pattern)
-    .bind(limit)
-    .fetch_all(pool)
-    .await
+    let sql = format!(
+        r#"SELECT i.id AS id, i.nome AS name, i.spazio_id AS owner_space_id,
+                  os.nome AS owner_space_name,
+                  il.abitazione_id AS home_id, a.nome AS home_name, ps.nome AS location_space_name,
+                  il.stanza_id AS room_id, s.nome AS room_name, il.contenitore_id AS container_id
+           FROM items i
+           JOIN spazi os ON os.id = i.spazio_id
+           JOIN oggetti o ON o.item_id = i.id
+           LEFT JOIN item_luogo il ON il.item_id = i.id
+           LEFT JOIN abitazioni a ON a.id = il.abitazione_id
+           LEFT JOIN spazi ps ON ps.id = a.spazio_id
+           LEFT JOIN stanze s ON s.id = il.stanza_id
+           LEFT JOIN contenitori c ON c.id = il.contenitore_id
+           WHERE i.tipo = 'oggetto' AND {} AND (
+              i.nome LIKE ? COLLATE NOCASE OR o.marca LIKE ? COLLATE NOCASE OR
+              o.modello LIKE ? COLLATE NOCASE OR o.numero_serie LIKE ? COLLATE NOCASE OR
+              o.posizione LIKE ? COLLATE NOCASE OR o.venditore LIKE ? COLLATE NOCASE OR
+              o.descrizione LIKE ? COLLATE NOCASE OR o.note LIKE ? COLLATE NOCASE OR
+              a.nome LIKE ? COLLATE NOCASE OR s.nome LIKE ? COLLATE NOCASE OR
+              c.nome LIKE ? COLLATE NOCASE
+           )
+           ORDER BY os.nome COLLATE NOCASE, i.nome COLLATE NOCASE, i.id
+           LIMIT ?"#,
+        crate::identity::visible_space_sql("i")
+    );
+    sqlx::query_as::<_, ObjectSummary>(&sql)
+        .bind(crate::identity::visible_space_bind_id())
+        .bind(&pattern)
+        .bind(&pattern)
+        .bind(&pattern)
+        .bind(&pattern)
+        .bind(&pattern)
+        .bind(&pattern)
+        .bind(&pattern)
+        .bind(&pattern)
+        .bind(&pattern)
+        .bind(&pattern)
+        .bind(&pattern)
+        .bind(limit)
+        .fetch_all(pool)
+        .await
 }
 
 fn format_draft(draft: &ObjectDraft) -> String {
@@ -2557,7 +2598,11 @@ fn format_draft(draft: &ObjectDraft) -> String {
 }
 
 fn format_object(object: &ObjectRecord, location: Option<&ObjectLocationDisplay>) -> String {
-    let mut lines = vec![format!("🏷️ {}", object.name), format!("#{}", object.id)];
+    let mut lines = vec![
+        format!("🏷️ {}", object.name),
+        format!("#{}", object.id),
+        format!("👥 Proprietà: {}", object.owner_space_name),
+    ];
 
     if object.brand.is_some() || object.model.is_some() {
         let brand_model = [object.brand.as_deref(), object.model.as_deref()]
@@ -2568,7 +2613,7 @@ fn format_object(object: &ObjectRecord, location: Option<&ObjectLocationDisplay>
         lines.push(format!("🏭 {brand_model}"));
     }
     if let Some(location) = location {
-        lines.push(format!("📍 {}", location.label));
+        lines.push(format!("📍 Posizione: {}", location.label));
         lines.push(location.command.clone());
     }
     if let Some(position) = &object.position {
@@ -2872,11 +2917,15 @@ fn search_results_keyboard(objects: &[ObjectSummary]) -> InlineKeyboardMarkup {
 async fn push_summary_location(text: &mut String, pool: &SqlitePool, object: &ObjectSummary) {
     if let Some(location) = resolve_object_location(
         pool,
-        object.home_id,
-        object.home_name.as_deref(),
-        object.room_id,
-        object.room_name.as_deref(),
-        object.container_id,
+        ObjectLocationInput {
+            home_id: object.home_id,
+            home_name: object.home_name.as_deref(),
+            location_space_name: object.location_space_name.as_deref(),
+            owner_space_name: &object.owner_space_name,
+            room_id: object.room_id,
+            room_name: object.room_name.as_deref(),
+            container_id: object.container_id,
+        },
     )
     .await
     {
@@ -2886,35 +2935,54 @@ async fn push_summary_location(text: &mut String, pool: &SqlitePool, object: &Ob
 
 async fn resolve_object_location(
     pool: &SqlitePool,
-    home_id: Option<i64>,
-    home_name: Option<&str>,
-    room_id: Option<i64>,
-    room_name: Option<&str>,
-    container_id: Option<i64>,
+    location: ObjectLocationInput<'_>,
 ) -> Option<ObjectLocationDisplay> {
-    if let Some(container_id) = container_id {
+    let show_space = crate::identity::current_view_all()
+        || location
+            .location_space_name
+            .is_some_and(|space| space != location.owner_space_name);
+
+    if let Some(container_id) = location.container_id {
         if let Ok(Some(path)) =
             crate::modules::contenitori::container_path(pool, container_id).await
         {
             return Some(ObjectLocationDisplay {
-                label: crate::modules::contenitori::format_path_for_ui(&path),
+                label: crate::modules::contenitori::format_path_for_ui_with_space(
+                    &path, show_space,
+                ),
                 command: format!("/luogo_c{container_id}"),
             });
         }
     }
-    if let (Some(room_id), Some(home), Some(room)) = (room_id, home_name, room_name) {
+    if let (Some(room_id), Some(home), Some(room)) =
+        (location.room_id, location.home_name, location.room_name)
+    {
+        let home = object_location_home_label(home, location.location_space_name, show_space);
         return Some(ObjectLocationDisplay {
             label: format!("{home} / {room}"),
             command: format!("/luogo_r{room_id}"),
         });
     }
-    if let (Some(home_id), Some(home)) = (home_id, home_name) {
+    if let (Some(home_id), Some(home)) = (location.home_id, location.home_name) {
         return Some(ObjectLocationDisplay {
-            label: home.to_string(),
+            label: object_location_home_label(home, location.location_space_name, show_space),
             command: format!("/luogo_h{home_id}"),
         });
     }
     None
+}
+
+fn object_location_home_label(
+    home_name: &str,
+    location_space_name: Option<&str>,
+    show_space: bool,
+) -> String {
+    if show_space {
+        if let Some(space) = location_space_name {
+            return format!("{home_name} · {space}");
+        }
+    }
+    home_name.to_string()
 }
 
 fn object_button_label(object: &ObjectSummary) -> String {
@@ -3260,6 +3328,8 @@ mod tests {
         let record = ObjectRecord {
             id: 42,
             name: "MacBook".to_string(),
+            owner_space_name: "Spazio principale".to_string(),
+            location_space_name: None,
             description: None,
             brand: Some("Apple".to_string()),
             model: Some("Pro".to_string()),
@@ -3736,6 +3806,7 @@ mod tests {
             nome_snapshot: "Sistema test".to_string(),
             spazio_id: space_two,
             spazio_nome_snapshot: "Spazio due".to_string(),
+            view_all: false,
             origine: "sistema",
             telegram_user_id: None,
             telegram_username: None,
@@ -3845,6 +3916,7 @@ mod tests {
             nome_snapshot: "Lettore".to_string(),
             spazio_id: 1,
             spazio_nome_snapshot: "Spazio principale".to_string(),
+            view_all: false,
             origine: "telegram",
             telegram_user_id: Some(9001),
             telegram_username: None,

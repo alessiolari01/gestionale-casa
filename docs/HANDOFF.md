@@ -630,3 +630,16 @@ Ogni step deve lasciare documentati:
 
 Aggiornare almeno `CHANGELOG.md`; aggiornare anche `README.md`,
 `ARCHITETTURA.md` o i documenti dei moduli quando il loro contenuto cambia.
+
+
+## Step 7.1B in corso — vista multi-spazio
+
+Base stabile di partenza: `454615b` (`Step 7.1A: rende operativi e isolati gli spazi`).
+
+Il blocco 7.1B cambia la semantica dello spazio attivo: diventa lo **spazio predefinito di creazione**, mentre la consultazione può essere limitata a quello spazio oppure estesa a tutte le membership dell'utente. La sicurezza continua a negare gli spazi non accessibili anche conoscendo direttamente gli ID.
+
+Nuovo caso supportato: un oggetto di proprietà dello spazio personale può trovarsi fisicamente in una casa di uno spazio condiviso senza trasferire la proprietà. Lo spostamento richiede scrittura sia sullo spazio proprietario sia sulla destinazione.
+
+UI 7.1B: quando più spazi sono visibili, case e percorsi omonimi vengono disambiguati con il nome dello spazio (`Casa principale · Spazio`). Le conferme di assegnazione/spostamento mostrano sempre lo spazio della posizione, anche se i nomi delle case coincidono.
+
+Nuova migration: `20260823200000_vista_multispazio_condivisione.sql`. Non modificare le 8 migration già applicate. Prima di eseguire `cargo run` sull'S9: `fmt`, `check`, `clippy -D warnings` e suite completa low-memory.

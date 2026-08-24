@@ -157,3 +157,40 @@ Verifiche obbligatorie:
 - trigger cross-space ancora operativi;
 - rimozione membership attiva → fallback a un altro spazio disponibile;
 - rimozione ultima membership → preferenza attiva rimossa e ricreabile dal bootstrap identità.
+
+
+## Migration `20260823200000_vista_multispazio_condivisione.sql`
+
+**Stato: IN SVILUPPO — non applicare al DB reale prima di fmt/check/clippy/test.**
+
+La migration è append-only rispetto alle 8 già applicate e non modifica retroattivamente `20260823174500_spazi_operativi.sql`. Introduce:
+
+- `preferenze_utente.vista_spazi`, con valori `predefinito` / `tutti`;
+- `item_condivisioni(item_id, spazio_id, permesso, ...)`;
+- rimozione dei due trigger Step 7.1A che vietavano qualsiasi `item_luogo` cross-space.
+
+La rimozione dei trigger non rende libere le relazioni: la sicurezza viene spostata sulla logica applicativa, che verifica membership e permessi dello spazio proprietario e della destinazione prima delle mutazioni. Le foreign key strutturali casa→stanza→contenitore restano attive.
+
+Test richiesti prima del commit:
+
+- catena completa delle 9 migration da zero;
+- migration 9 sul DB di sviluppo con backup;
+- `integrity_check = ok` e `foreign_key_check` vuoto;
+- vista globale che include solo membership reali;
+- vista singola che torna al solo spazio predefinito;
+- oggetto personale spostabile in casa condivisa senza cambiare `items.spazio_id`;
+- destinazione senza membership o in sola lettura rifiutata;
+- ID appartenenti a spazi non accessibili ancora negati;
+- storico attribuito allo spazio proprietario dell'entità.
+
+## Migration `20260823232000_storico_spazi_luogo.sql`
+
+**Stato: IN SVILUPPO — applicare solo dopo fmt/check/clippy/test.**
+
+Aggiunge snapshot separati dello spazio della posizione allo storico:
+
+- `storico_eventi.luogo_spazio_id` e `luogo_spazio_nome_snapshot`;
+- `storico_cambi_luogo.spazio_prima_*` e `spazio_dopo_*`;
+- backfill degli eventi esistenti usando `storico_entita` della casa, senza inventare cronologia.
+
+Questo permette di distinguere correttamente, per esempio, un oggetto di `Spazio principale` spostato da `Casa principale · Spazio principale` a `Casa principale · Test isolamento`.

@@ -417,26 +417,43 @@ async fn send_photos(
 }
 
 async fn object_name(pool: &SqlitePool, item_id: i64) -> Result<Option<String>, sqlx::Error> {
-    sqlx::query_scalar(
-        "SELECT nome FROM items \
-         WHERE id = ? AND tipo = 'oggetto' AND spazio_id = ?",
-    )
-    .bind(item_id)
-    .bind(crate::identity::current_space_id())
-    .fetch_optional(pool)
-    .await
+    let sql = format!(
+        "SELECT i.nome FROM items i WHERE i.id = ? AND i.tipo = 'oggetto' AND {}",
+        crate::identity::visible_space_sql("i")
+    );
+    sqlx::query_scalar(&sql)
+        .bind(item_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_optional(pool)
+        .await
+}
+
+async fn visible_object_space_id(
+    pool: &SqlitePool,
+    item_id: i64,
+) -> Result<Option<i64>, sqlx::Error> {
+    let sql = format!(
+        "SELECT i.spazio_id FROM items i WHERE i.id = ? AND i.tipo = 'oggetto' AND {}",
+        crate::identity::visible_space_sql("i")
+    );
+    sqlx::query_scalar(&sql)
+        .bind(item_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_optional(pool)
+        .await
 }
 
 async fn count_photos(pool: &SqlitePool, item_id: i64) -> Result<i64, sqlx::Error> {
-    sqlx::query_scalar(
-        "SELECT COUNT(*) \
-         FROM foto f JOIN items i ON i.id = f.item_id \
-         WHERE f.item_id = ? AND i.tipo = 'oggetto' AND i.spazio_id = ?",
-    )
-    .bind(item_id)
-    .bind(crate::identity::current_space_id())
-    .fetch_one(pool)
-    .await
+    let sql = format!(
+        "SELECT COUNT(*) FROM foto f JOIN items i ON i.id = f.item_id \
+         WHERE f.item_id = ? AND i.tipo = 'oggetto' AND {}",
+        crate::identity::visible_space_sql("i")
+    );
+    sqlx::query_scalar(&sql)
+        .bind(item_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_one(pool)
+        .await
 }
 
 async fn register_photo(
@@ -445,19 +462,16 @@ async fn register_photo(
     path: &str,
     description: Option<&str>,
 ) -> Result<&'static str, sqlx::Error> {
-    crate::identity::ensure_can_write_sqlx(pool).await?;
+    let space_id = visible_object_space_id(pool, item_id)
+        .await?
+        .ok_or(sqlx::Error::RowNotFound)?;
+    crate::identity::ensure_can_write_space_sqlx(pool, space_id).await?;
     let mut tx = pool.begin().await?;
 
-    let space_id = crate::identity::current_space_id();
-    let existing: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) \
-         FROM foto f JOIN items i ON i.id = f.item_id \
-         WHERE f.item_id = ? AND i.tipo = 'oggetto' AND i.spazio_id = ?",
-    )
-    .bind(item_id)
-    .bind(space_id)
-    .fetch_one(&mut *tx)
-    .await?;
+    let existing: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM foto f WHERE f.item_id = ?")
+        .bind(item_id)
+        .fetch_one(&mut *tx)
+        .await?;
     let role = if existing == 0 {
         "principale"
     } else {
@@ -465,8 +479,7 @@ async fn register_photo(
     };
 
     let object_name: String = sqlx::query_scalar(
-        "SELECT nome FROM items \
-         WHERE id = ? AND tipo = 'oggetto' AND spazio_id = ?",
+        "SELECT nome FROM items WHERE id = ? AND tipo = 'oggetto' AND spazio_id = ?",
     )
     .bind(item_id)
     .bind(space_id)
@@ -542,16 +555,18 @@ async fn register_photo(
 }
 
 async fn list_photos(pool: &SqlitePool, item_id: i64) -> Result<Vec<PhotoRecord>, sqlx::Error> {
-    sqlx::query_as::<_, PhotoRecord>(
+    let sql = format!(
         "SELECT f.id, f.percorso_file, f.ruolo, f.descrizione \
          FROM foto f JOIN items i ON i.id = f.item_id \
-         WHERE f.item_id = ? AND i.tipo = 'oggetto' AND i.spazio_id = ? \
+         WHERE f.item_id = ? AND i.tipo = 'oggetto' AND {} \
          ORDER BY CASE WHEN f.ruolo = 'principale' THEN 0 ELSE 1 END, f.id",
-    )
-    .bind(item_id)
-    .bind(crate::identity::current_space_id())
-    .fetch_all(pool)
-    .await
+        crate::identity::visible_space_sql("i")
+    );
+    sqlx::query_as::<_, PhotoRecord>(&sql)
+        .bind(item_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_all(pool)
+        .await
 }
 
 fn photo_menu_keyboard(item_id: i64, count: i64) -> InlineKeyboardMarkup {
@@ -793,6 +808,7 @@ mod tests {
             nome_snapshot: "Sistema test".to_string(),
             spazio_id: space_two,
             spazio_nome_snapshot: "Spazio due".to_string(),
+            view_all: false,
             origine: "sistema",
             telegram_user_id: None,
             telegram_username: None,

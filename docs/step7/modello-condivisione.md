@@ -126,20 +126,42 @@ Questo evita di obbligare bambini, ospiti o amici a registrarsi.
 Quando in futuro un ospite diventa utente, l'eventuale collegamento fra profilo
 e account dovrà essere esplicito e non basato solo sul nome.
 
-## 6. Regola cross-space
+## 6. Proprietà, visibilità e posizione cross-space
 
-Una relazione che rappresenta possesso/posizione non deve collegare entità di
-spazi incompatibili.
+Da Step 7.1B non vale più la regola assoluta "item e luogo devono appartenere allo stesso spazio". Si distinguono tre concetti:
 
-Esempio da impedire:
+- **proprietà**: `items.spazio_id` indica lo spazio proprietario dell'entità;
+- **visibilità**: dipende dalle membership e, in futuro, dalle condivisioni esplicite;
+- **posizione fisica**: per gli oggetti può appartenere a un altro spazio accessibile.
+
+Esempio valido:
 
 ```text
-oggetto dello Spazio B -> casa dello Spazio A
+Portatile
+Proprietà: Personale Alessio
+Posizione: Casa condivisa / Camera
 ```
 
-I vincoli verranno implementati con foreign key, query transazionali e, dove
-necessario, trigger/validazioni applicative. La scelta concreta va verificata
-nella migration 7.1.
+Lo spostamento non trasferisce la proprietà. Per effettuare uno spostamento verso un altro spazio, l'attore deve avere diritto di scrittura sia sullo spazio proprietario dell'oggetto sia sullo spazio che contiene la destinazione. Un ID conosciuto ma appartenente a uno spazio senza membership resta inutilizzabile.
+
+Case, stanze e contenitori restano invece entità strutturali dello spazio che le possiede. In particolare un contenitore non viene trasferito cross-space come effetto di un semplice spostamento: si spostano gli oggetti, oppure si modellerà esplicitamente un futuro trasferimento di proprietà.
+
+### Vista multi-spazio
+
+Lo `spazio_attivo_id` storico diventa semanticamente lo **spazio predefinito**. `preferenze_utente.vista_spazi` può valere:
+
+- `predefinito`: query e liste mostrano solo lo spazio predefinito;
+- `tutti`: query e liste mostrano tutti e soli gli spazi di cui l'utente è membro.
+
+La modalità di vista è un filtro di consultazione, non una concessione di permessi.
+
+#### Disambiguazione dei luoghi omonimi
+
+Nomi identici sono validi in spazi differenti. Di conseguenza il nome dello spazio fa parte del **contesto visivo**, non del nome persistito dell'abitazione. In vista multi-spazio la UI rende i luoghi come `Casa principale · Spazio principale` e `Casa principale · Casa condivisa`; stanze e contenitori ereditano lo stesso contesto nel percorso. I messaggi che confermano un'assegnazione o uno spostamento mostrano sempre lo spazio della posizione. Non si rinominano automaticamente le case e non si duplica il dato solo per renderlo distinguibile.
+
+### Condivisione della stessa entità
+
+`item_condivisioni` associa un item a uno spazio ulteriore con permesso `lettura` o `modifica`. Questa tabella prepara la condivisione di oggetti, ricette e altri item senza duplicazione. La UI e le regole complete di modifica condivisa saranno abilitate in un blocco successivo.
 
 ## 7. Cancellazione e uscita dallo spazio
 

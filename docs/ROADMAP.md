@@ -162,3 +162,16 @@ Restano in progettazione:
 Una feature approvata viene prima documentata nel modulo o nella roadmap. Se
 influenza lo schema o più domini, va descritta anche in `ARCHITETTURA.md` o in
 `docs/step7/decisioni-architetturali.md` prima dell'implementazione.
+
+
+### Step 7.1B — Vista multi-spazio e condivisione trasversale — IN SVILUPPO
+
+- spazio attivo reinterpretato come spazio predefinito;
+- vista singolo spazio / tutti gli spazi di membership;
+- proprietà item separata dalla posizione fisica;
+- oggetti personali collocabili in case condivise con doppio controllo permessi;
+- fondazione `item_condivisioni` per condivisione senza copia;
+- UI Telegram disponibile sia tramite comandi testuali sia pulsanti inline;
+- verifica S9 obbligatoria prima del commit.
+
+Alimentazione 7.2 parte solo dopo la verifica di questo blocco.

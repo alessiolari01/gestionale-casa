@@ -8,7 +8,10 @@ mod db;
 mod identity;
 mod modules;
 
-use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 use anyhow::Context;
 use config::Config;
@@ -22,6 +25,45 @@ use teloxide::{
     prelude::*,
     types::{InlineKeyboardButton, InlineKeyboardMarkup},
 };
+
+#[derive(Clone, Default)]
+struct IdentitySessionStore {
+    inner: Arc<Mutex<HashMap<i64, IdentityConversationState>>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum IdentityConversationState {
+    AwaitingNewSpaceName,
+    AwaitingRenameSpaceName,
+}
+
+impl IdentitySessionStore {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn get(&self, chat_id: i64) -> Option<IdentityConversationState> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(&chat_id)
+            .copied()
+    }
+
+    fn set(&self, chat_id: i64, state: IdentityConversationState) {
+        self.inner
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(chat_id, state);
+    }
+
+    fn clear_chat(&self, chat_id: i64) {
+        self.inner
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&chat_id);
+    }
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -43,6 +85,7 @@ async fn main() -> anyhow::Result<()> {
         schema_core = database_status.schema_core_present,
         shared_foundations = database_status.shared_foundations_present,
         operational_spaces = database_status.operational_spaces_present,
+        multi_space_view = database_status.multi_space_view_present,
         "Database SQLite pronto"
     );
 
@@ -69,6 +112,7 @@ async fn main() -> anyhow::Result<()> {
     let location_sessions = LocationSessionStore::new();
     let container_sessions = ContainerSessionStore::new();
     let photo_sessions = PhotoSessionStore::new();
+    let identity_sessions = IdentitySessionStore::new();
     let handler = dptree::entry()
         .branch(Update::filter_message().endpoint(handle_message))
         .branch(Update::filter_callback_query().endpoint(handle_callback));
@@ -85,7 +129,8 @@ async fn main() -> anyhow::Result<()> {
             sessions,
             location_sessions,
             container_sessions,
-            photo_sessions
+            photo_sessions,
+            identity_sessions
         ])
         .enable_ctrlc_handler()
         .build()
@@ -119,6 +164,7 @@ async fn handle_message(
     location_sessions: LocationSessionStore,
     container_sessions: ContainerSessionStore,
     photo_sessions: PhotoSessionStore,
+    identity_sessions: IdentitySessionStore,
 ) -> ResponseResult<()> {
     let chat_id = msg.chat.id.0;
     if !auth::is_authorized(chat_id, &config.allowed_chat_ids) {
@@ -159,6 +205,7 @@ async fn handle_message(
             location_sessions,
             container_sessions,
             photo_sessions,
+            identity_sessions,
             actor,
         ),
     )
@@ -174,6 +221,7 @@ async fn handle_authorized_message(
     location_sessions: LocationSessionStore,
     container_sessions: ContainerSessionStore,
     photo_sessions: PhotoSessionStore,
+    identity_sessions: IdentitySessionStore,
     actor: identity::AuditActor,
 ) -> ResponseResult<()> {
     let chat_id = msg.chat.id.0;
@@ -212,6 +260,58 @@ async fn handle_authorized_message(
     // evita che una foto inviata piu' tardi venga associata per errore.
     if command.is_some() {
         photo_sessions.clear_chat(chat_id);
+        if command != Some("/spazio_nuovo")
+            && command != Some("/spazio_rinomina")
+            && command != Some("/annulla")
+        {
+            identity_sessions.clear_chat(chat_id);
+        }
+    }
+
+    if command == Some("/annulla") && identity_sessions.get(chat_id).is_some() {
+        identity_sessions.clear_chat(chat_id);
+        send_spaces(&bot, msg.chat.id, &pool, &actor).await?;
+        return respond(());
+    }
+
+    if command.is_none() {
+        if let Some(state) = identity_sessions.get(chat_id) {
+            let result = match state {
+                IdentityConversationState::AwaitingNewSpaceName => {
+                    identity::create_space(&pool, &actor, text, "condiviso")
+                        .await
+                        .map(|space| {
+                            format!(
+                                "✅ Spazio creato e impostato come predefinito: {}",
+                                space.nome
+                            )
+                        })
+                }
+                IdentityConversationState::AwaitingRenameSpaceName => {
+                    identity::rename_active_space(&pool, &actor, text)
+                        .await
+                        .map(|name| format!("✅ Spazio predefinito rinominato: {name}"))
+                }
+            };
+            match result {
+                Ok(message) => {
+                    identity_sessions.clear_chat(chat_id);
+                    bot.send_message(msg.chat.id, message)
+                        .reply_markup(profile_keyboard())
+                        .await?;
+                }
+                Err(error) => {
+                    tracing::warn!(?error, "Operazione spazio guidata non riuscita");
+                    bot.send_message(
+                        msg.chat.id,
+                        format!("⚠️ {error}\n\nRiprova oppure usa /annulla."),
+                    )
+                    .reply_markup(space_flow_keyboard())
+                    .await?;
+                }
+            }
+            return respond(());
+        }
     }
 
     if modules::contenitori::handle_message(&bot, &msg, &pool, &container_sessions, text).await? {
@@ -272,11 +372,12 @@ async fn handle_authorized_message(
             photo_sessions.clear_chat(chat_id);
             let name = command_args(text);
             if name.is_empty() {
+                identity_sessions.set(chat_id, IdentityConversationState::AwaitingNewSpaceName);
                 bot.send_message(
                     msg.chat.id,
-                    "Uso: /spazio_nuovo <nome>\nEsempio: /spazio_nuovo Famiglia",
+                    "➕ Nuovo spazio\n\nScrivi il nome del nuovo spazio.\nPuoi usare /annulla per uscire.",
                 )
-                .reply_markup(profile_keyboard())
+                .reply_markup(space_flow_keyboard())
                 .await?;
             } else {
                 match identity::create_space(&pool, &actor, name, "condiviso").await {
@@ -307,8 +408,12 @@ async fn handle_authorized_message(
             photo_sessions.clear_chat(chat_id);
             let name = command_args(text);
             if name.is_empty() {
-                bot.send_message(msg.chat.id, "Uso: /spazio_rinomina <nuovo nome>")
-                    .reply_markup(profile_keyboard())
+                identity_sessions.set(chat_id, IdentityConversationState::AwaitingRenameSpaceName);
+                bot.send_message(
+                    msg.chat.id,
+                    format!("✏️ Rinomina spazio\n\nSpazio predefinito attuale: {}\nScrivi il nuovo nome oppure /annulla.", actor.spazio_nome_snapshot),
+                )
+                    .reply_markup(space_flow_keyboard())
                     .await?;
             } else {
                 match identity::rename_active_space(&pool, &actor, name).await {
@@ -326,6 +431,33 @@ async fn handle_authorized_message(
                 }
             }
         }
+        Some("/vista_tutti") => match identity::set_view_all(&pool, &actor, true).await {
+            Ok(()) => {
+                bot.send_message(msg.chat.id, "🌐 Vista impostata su: tutti i miei spazi.")
+                    .reply_markup(profile_keyboard())
+                    .await?;
+            }
+            Err(error) => {
+                bot.send_message(msg.chat.id, format!("⚠️ {error}"))
+                    .reply_markup(profile_keyboard())
+                    .await?;
+            }
+        },
+        Some("/vista_spazio") => match identity::set_view_all(&pool, &actor, false).await {
+            Ok(()) => {
+                bot.send_message(
+                    msg.chat.id,
+                    "🎯 Vista impostata su: solo spazio predefinito.",
+                )
+                .reply_markup(profile_keyboard())
+                .await?;
+            }
+            Err(error) => {
+                bot.send_message(msg.chat.id, format!("⚠️ {error}"))
+                    .reply_markup(profile_keyboard())
+                    .await?;
+            }
+        },
         Some("/status") => {
             send_status(&bot, msg.chat.id, &pool).await?;
         }
@@ -358,6 +490,7 @@ async fn handle_callback(
     location_sessions: LocationSessionStore,
     container_sessions: ContainerSessionStore,
     photo_sessions: PhotoSessionStore,
+    identity_sessions: IdentitySessionStore,
 ) -> ResponseResult<()> {
     bot.answer_callback_query(q.id.clone()).await?;
 
@@ -404,6 +537,7 @@ async fn handle_callback(
             location_sessions,
             container_sessions,
             photo_sessions,
+            identity_sessions,
             actor,
             data,
         ),
@@ -420,6 +554,7 @@ async fn handle_authorized_callback(
     location_sessions: LocationSessionStore,
     container_sessions: ContainerSessionStore,
     photo_sessions: PhotoSessionStore,
+    identity_sessions: IdentitySessionStore,
     actor: identity::AuditActor,
     data: String,
 ) -> ResponseResult<()> {
@@ -450,6 +585,45 @@ async fn handle_authorized_callback(
             photo_sessions.clear_chat(chat_id.0);
             send_spaces(&bot, chat_id, &pool, &actor).await?;
         }
+        "identity:space:new" => {
+            identity_sessions.set(chat_id.0, IdentityConversationState::AwaitingNewSpaceName);
+            bot.send_message(
+                chat_id,
+                "➕ Nuovo spazio\n\nScrivi il nome del nuovo spazio.\nPuoi usare /annulla per uscire.",
+            )
+            .reply_markup(space_flow_keyboard())
+            .await?;
+        }
+        "identity:space:rename" => {
+            identity_sessions.set(
+                chat_id.0,
+                IdentityConversationState::AwaitingRenameSpaceName,
+            );
+            bot.send_message(
+                chat_id,
+                format!("✏️ Rinomina spazio\n\nSpazio predefinito attuale: {}\nScrivi il nuovo nome oppure /annulla.", actor.spazio_nome_snapshot),
+            )
+            .reply_markup(space_flow_keyboard())
+            .await?;
+        }
+        "identity:view:all" => {
+            if let Err(error) = identity::set_view_all(&pool, &actor, true).await {
+                bot.send_message(chat_id, format!("⚠️ {error}")).await?;
+            } else {
+                bot.send_message(chat_id, "🌐 Ora visualizzi tutti i tuoi spazi.")
+                    .reply_markup(profile_keyboard())
+                    .await?;
+            }
+        }
+        "identity:view:default" => {
+            if let Err(error) = identity::set_view_all(&pool, &actor, false).await {
+                bot.send_message(chat_id, format!("⚠️ {error}")).await?;
+            } else {
+                bot.send_message(chat_id, "🎯 Ora visualizzi solo lo spazio predefinito.")
+                    .reply_markup(profile_keyboard())
+                    .await?;
+            }
+        }
         _ if data.starts_with("identity:space:") => {
             sessions.clear_chat(chat_id.0);
             location_sessions.clear_chat(chat_id.0);
@@ -462,9 +636,12 @@ async fn handle_authorized_callback(
                 Some(space_id) => {
                     match identity::switch_active_space(&pool, &actor, space_id).await {
                         Ok(space) => {
-                            bot.send_message(chat_id, format!("✅ Spazio attivo: {}", space.nome))
-                                .reply_markup(profile_keyboard())
-                                .await?;
+                            bot.send_message(
+                                chat_id,
+                                format!("⭐ Spazio predefinito: {}", space.nome),
+                            )
+                            .reply_markup(profile_keyboard())
+                            .await?;
                         }
                         Err(error) => {
                             tracing::warn!(?error, space_id, "Cambio spazio non riuscito");
@@ -551,7 +728,7 @@ async fn handle_authorized_callback(
 async fn send_online_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
-        "🟢 Gestionale Casa è online.\n\n🏠 Menu principale\nScegli una sezione.\n\nComandi rapidi: /oggetti · /luoghi · /struttura · /contenitori · /storico · /profilo · /spazi · /status · /ping",
+        "🟢 Gestionale Casa è online.\n\n🏠 Menu principale\nScegli una sezione.\n\nComandi rapidi: /oggetti · /luoghi · /struttura · /contenitori · /storico · /profilo · /spazi · /vista_tutti · /vista_spazio · /status · /ping",
     )
     .reply_markup(modules::oggetti::main_menu_keyboard())
     .await?;
@@ -561,7 +738,7 @@ async fn send_online_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
 async fn send_main_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
-        "🏠 Gestionale Casa\n\nScegli una sezione. I moduli non ancora disponibili sono indicati come prossimamente.\n\nComandi rapidi: /oggetti · /luoghi · /struttura · /contenitori · /storico · /profilo · /spazi · /status · /ping",
+        "🏠 Gestionale Casa\n\nScegli una sezione. I moduli non ancora disponibili sono indicati come prossimamente.\n\nComandi rapidi: /oggetti · /luoghi · /struttura · /contenitori · /storico · /profilo · /spazi · /vista_tutti · /vista_spazio · /status · /ping",
     )
     .reply_markup(modules::oggetti::main_menu_keyboard())
     .await?;
@@ -613,12 +790,42 @@ async fn send_spaces(
                 .unwrap_or_else(|_| "👥 Spazi".to_string());
             let mut rows = Vec::new();
             for space in spaces {
-                let marker = if space.attivo != 0 { "✅" } else { "○" };
+                let marker = if space.attivo != 0 { "⭐" } else { "○" };
                 rows.push(vec![InlineKeyboardButton::callback(
                     format!("{marker} {}", space.nome),
                     format!("identity:space:{}", space.id),
                 )]);
             }
+            rows.push(vec![
+                InlineKeyboardButton::callback(
+                    if actor.view_all {
+                        "✅ 🌐 Tutti i miei spazi"
+                    } else {
+                        "🌐 Tutti i miei spazi"
+                    }
+                    .to_string(),
+                    "identity:view:all".to_string(),
+                ),
+                InlineKeyboardButton::callback(
+                    if actor.view_all {
+                        "🎯 Solo predefinito"
+                    } else {
+                        "✅ 🎯 Solo predefinito"
+                    }
+                    .to_string(),
+                    "identity:view:default".to_string(),
+                ),
+            ]);
+            rows.push(vec![
+                InlineKeyboardButton::callback(
+                    "➕ Nuovo spazio".to_string(),
+                    "identity:space:new".to_string(),
+                ),
+                InlineKeyboardButton::callback(
+                    "✏️ Rinomina".to_string(),
+                    "identity:space:rename".to_string(),
+                ),
+            ]);
             rows.push(vec![InlineKeyboardButton::callback(
                 "👤 Profilo".to_string(),
                 "identity:profile".to_string(),
@@ -665,6 +872,11 @@ async fn send_status(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> ResponseR
             } else {
                 "❌"
             };
+            let multi_view = if status.multi_space_view_present {
+                "✅"
+            } else {
+                "❌"
+            };
             let message = format!(
                 "🏠 Gestionale Casa\n\n\
                  Bot Telegram: ✅\n\
@@ -673,7 +885,8 @@ async fn send_status(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> ResponseR
                  Migrazioni applicate: {}\n\
                  Schema core: {schema}\n\
                  Fondazioni condivise Step 7: {shared}\n\
-                 Isolamento multi-spazio: {operational}",
+                 Isolamento multi-spazio: {operational}\n\
+                 Vista multi-spazio Step 7.1B: {multi_view}",
                 status.applied_migrations
             );
             bot.send_message(chat_id, message)
@@ -695,6 +908,23 @@ async fn send_status(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> ResponseR
 
 fn profile_keyboard() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
+        vec![InlineKeyboardButton::callback(
+            "👥 Spazi".to_string(),
+            "identity:spaces".to_string(),
+        )],
+        vec![InlineKeyboardButton::callback(
+            "🏠 Menu principale".to_string(),
+            "menu:main".to_string(),
+        )],
+    ])
+}
+
+fn space_flow_keyboard() -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![
+        vec![InlineKeyboardButton::callback(
+            "👤 Profilo".to_string(),
+            "identity:profile".to_string(),
+        )],
         vec![InlineKeyboardButton::callback(
             "👥 Spazi".to_string(),
             "identity:spaces".to_string(),

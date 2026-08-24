@@ -296,3 +296,7 @@ PREVISTO o RIMANDATO.
 ## UX Telegram compatta
 
 Le tastiere inline raggruppano le azioni simili, usano `⚙️ Gestisci` per rinomina/modifica/eliminazione e mantengono `🗑 Elimina` isolato. Le azioni frequenti, come lo spostamento degli oggetti, restano direttamente accessibili. I figli gerarchici vengono mostrati prima dei comandi; le righe di creazione usano etichette compatte come `➕🚪 Stanza`, `➕📦 Contenitore`, `➕🏷️ Oggetto`, mentre gli elenchi usano `📋` + simbolo dell'entità.
+
+### Step 7.1B — vista multi-spazio (in sviluppo)
+
+Lo spazio selezionato è lo **spazio predefinito**; tramite Profilo/Spazi è possibile passare fra `🎯 Solo spazio predefinito` e `🌐 Tutti i miei spazi`. Gli oggetti mantengono il proprio spazio proprietario anche quando vengono collocati in una casa di un altro spazio accessibile. Dettagli in `docs/step7/`.
