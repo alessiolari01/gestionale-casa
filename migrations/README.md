@@ -67,3 +67,10 @@ unicità `(spazio_id, nome)` senza spostare i dati legacy.
 
 - `20260823200000_vista_multispazio_condivisione.sql`: aggiunge la preferenza di vista multi-spazio, la fondazione `item_condivisioni` e separa la proprietà dell'item dalla sua posizione fisica.
 - `20260823232000_storico_spazi_luogo.sql`: conserva nello storico lo spazio della posizione e lo spazio prima/dopo dei cambi luogo, con backfill degli eventi esistenti.
+
+## Step 7.2A — alimenti e unità
+
+`20260824143000_alimenti_unita.sql` introduce `unita_misura`, `alimenti` e
+`alimento_alias`. Le conversioni automatiche sono previste soltanto nelle
+famiglie massa (`g`/`kg`) e volume (`ml`/`l`). Il dettaglio architetturale è in
+`docs/step7/step-7.2a-alimenti-unita.md`.
