@@ -1,6 +1,6 @@
 //! Punto di ingresso del Gestionale Casa.
 //!
-//! Step corrente: Step 7.1, fondazioni condivise e audit con autore.
+//! Step corrente: Step 7.2B, backend e Telegram per gli alimenti.
 
 mod auth;
 mod config;
@@ -16,8 +16,8 @@ use std::{
 use anyhow::Context;
 use config::Config;
 use modules::{
-    contenitori::ContainerSessionStore, foto::PhotoSessionStore, luoghi::LocationSessionStore,
-    oggetti::SessionStore,
+    alimentazione::FoodSessionStore, contenitori::ContainerSessionStore, foto::PhotoSessionStore,
+    luoghi::LocationSessionStore, oggetti::SessionStore,
 };
 use sqlx::SqlitePool;
 use teloxide::{
@@ -112,6 +112,7 @@ async fn main() -> anyhow::Result<()> {
     let location_sessions = LocationSessionStore::new();
     let container_sessions = ContainerSessionStore::new();
     let photo_sessions = PhotoSessionStore::new();
+    let food_sessions = FoodSessionStore::new();
     let identity_sessions = IdentitySessionStore::new();
     let handler = dptree::entry()
         .branch(Update::filter_message().endpoint(handle_message))
@@ -130,6 +131,7 @@ async fn main() -> anyhow::Result<()> {
             location_sessions,
             container_sessions,
             photo_sessions,
+            food_sessions,
             identity_sessions
         ])
         .enable_ctrlc_handler()
@@ -164,6 +166,7 @@ async fn handle_message(
     location_sessions: LocationSessionStore,
     container_sessions: ContainerSessionStore,
     photo_sessions: PhotoSessionStore,
+    food_sessions: FoodSessionStore,
     identity_sessions: IdentitySessionStore,
 ) -> ResponseResult<()> {
     let chat_id = msg.chat.id.0;
@@ -205,6 +208,7 @@ async fn handle_message(
             location_sessions,
             container_sessions,
             photo_sessions,
+            food_sessions,
             identity_sessions,
             actor,
         ),
@@ -221,6 +225,7 @@ async fn handle_authorized_message(
     location_sessions: LocationSessionStore,
     container_sessions: ContainerSessionStore,
     photo_sessions: PhotoSessionStore,
+    food_sessions: FoodSessionStore,
     identity_sessions: IdentitySessionStore,
     actor: identity::AuditActor,
 ) -> ResponseResult<()> {
@@ -312,6 +317,15 @@ async fn handle_authorized_message(
             }
             return respond(());
         }
+    }
+
+    if modules::alimentazione::handle_message(&bot, &msg, &pool, &food_sessions, text).await? {
+        sessions.clear_chat(chat_id);
+        location_sessions.clear_chat(chat_id);
+        container_sessions.clear_chat(chat_id);
+        photo_sessions.clear_chat(chat_id);
+        identity_sessions.clear_chat(chat_id);
+        return respond(());
     }
 
     if modules::contenitori::handle_message(&bot, &msg, &pool, &container_sessions, text).await? {
@@ -490,6 +504,7 @@ async fn handle_callback(
     location_sessions: LocationSessionStore,
     container_sessions: ContainerSessionStore,
     photo_sessions: PhotoSessionStore,
+    food_sessions: FoodSessionStore,
     identity_sessions: IdentitySessionStore,
 ) -> ResponseResult<()> {
     bot.answer_callback_query(q.id.clone()).await?;
@@ -537,6 +552,7 @@ async fn handle_callback(
             location_sessions,
             container_sessions,
             photo_sessions,
+            food_sessions,
             identity_sessions,
             actor,
             data,
@@ -554,11 +570,27 @@ async fn handle_authorized_callback(
     location_sessions: LocationSessionStore,
     container_sessions: ContainerSessionStore,
     photo_sessions: PhotoSessionStore,
+    food_sessions: FoodSessionStore,
     identity_sessions: IdentitySessionStore,
     actor: identity::AuditActor,
     data: String,
 ) -> ResponseResult<()> {
     let data = data.as_str();
+
+    if data.starts_with("food:") || (data == "menu:main" && food_sessions.has_active(chat_id.0)) {
+        if modules::alimentazione::handle_callback(&bot, chat_id, &pool, &food_sessions, data)
+            .await?
+        {
+            sessions.clear_chat(chat_id.0);
+            location_sessions.clear_chat(chat_id.0);
+            container_sessions.clear_chat(chat_id.0);
+            photo_sessions.clear_chat(chat_id.0);
+            identity_sessions.clear_chat(chat_id.0);
+            return respond(());
+        }
+    } else {
+        food_sessions.clear_chat(chat_id.0);
+    }
 
     match data {
         "menu:main" => {
@@ -566,6 +598,7 @@ async fn handle_authorized_callback(
             location_sessions.clear_chat(chat_id.0);
             container_sessions.clear_chat(chat_id.0);
             photo_sessions.clear_chat(chat_id.0);
+            food_sessions.clear_chat(chat_id.0);
             send_main_menu(&bot, chat_id).await?;
         }
         "menu:soon" => {
@@ -728,7 +761,7 @@ async fn handle_authorized_callback(
 async fn send_online_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
-        "🟢 Gestionale Casa è online.\n\n🏠 Menu principale\nScegli una sezione.\n\nComandi rapidi: /oggetti · /luoghi · /struttura · /contenitori · /storico · /profilo · /spazi · /vista_tutti · /vista_spazio · /status · /ping",
+        "🟢 Gestionale Casa è online.\n\n🏠 Menu principale\nScegli una sezione.\n\nComandi rapidi: /alimenti · /oggetti · /luoghi · /struttura · /contenitori · /storico · /profilo · /spazi · /vista_tutti · /vista_spazio · /status · /ping",
     )
     .reply_markup(modules::oggetti::main_menu_keyboard())
     .await?;
@@ -738,7 +771,7 @@ async fn send_online_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
 async fn send_main_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
-        "🏠 Gestionale Casa\n\nScegli una sezione. I moduli non ancora disponibili sono indicati come prossimamente.\n\nComandi rapidi: /oggetti · /luoghi · /struttura · /contenitori · /storico · /profilo · /spazi · /vista_tutti · /vista_spazio · /status · /ping",
+        "🏠 Gestionale Casa\n\nScegli una sezione. I moduli non ancora disponibili sono indicati come prossimamente.\n\nComandi rapidi: /alimenti · /oggetti · /luoghi · /struttura · /contenitori · /storico · /profilo · /spazi · /vista_tutti · /vista_spazio · /status · /ping",
     )
     .reply_markup(modules::oggetti::main_menu_keyboard())
     .await?;

@@ -74,3 +74,10 @@ unicità `(spazio_id, nome)` senza spostare i dati legacy.
 `alimento_alias`. Le conversioni automatiche sono previste soltanto nelle
 famiglie massa (`g`/`kg`) e volume (`ml`/`l`). Il dettaglio architetturale è in
 `docs/step7/step-7.2a-alimenti-unita.md`.
+
+## Step 7.2B — proprietà e condivisione alimenti
+
+`20260824160500_alimenti_proprieta_condivisione.sql` separa la proprietà
+personale dell'alimento dalla sua visibilità negli spazi e introduce
+`alimento_spazi`. La perdita di una membership non cancella gli alimenti
+posseduti dall'utente.

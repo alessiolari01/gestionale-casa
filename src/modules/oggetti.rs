@@ -290,7 +290,7 @@ pub fn main_menu_keyboard() -> InlineKeyboardMarkup {
             button("👕 Vestiti · prossimamente", "menu:soon"),
             button("🚗 Veicoli · prossimamente", "menu:soon"),
         ],
-        vec![button("🍝 Ricette · prossimamente", "menu:soon")],
+        vec![button("🍽️ Alimentazione", "food:menu")],
         vec![button("📊 Stato sistema", "system:status")],
     ])
 }
