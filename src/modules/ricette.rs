@@ -1,4 +1,4 @@
-//! Step 7.2C - fondazioni Ricette.
+//! Step 7.2D.0.3 - fondazioni Ricette con prodotto commerciale opzionale.
 //!
 //! Una ricetta è un record centrale posseduto da un utente e può essere resa
 //! visibile in zero, uno o più spazi senza crearne copie. Gli ingredienti
@@ -149,4 +149,42 @@ pub async fn recipe_food_compatibility(
     .fetch_all(pool)
     .await
     .context("Impossibile calcolare la compatibilità alimentare della ricetta")
+}
+
+/// Prodotto commerciale opzionalmente selezionabile per un ingrediente.
+///
+/// La ricetta mantiene sempre anche `alimento_id`: il prodotto specifico è
+/// un livello aggiuntivo utile per prezzi, disponibilità e valori nutrizionali.
+#[expect(dead_code)]
+#[derive(Debug, Clone, FromRow)]
+pub struct RecipeProductChoice {
+    pub product_id: i64,
+    pub brand: String,
+    pub product_name: String,
+    pub package_quantity: f64,
+    pub package_unit_symbol: String,
+}
+
+#[expect(dead_code)]
+pub async fn product_choices_for_food(
+    pool: &SqlitePool,
+    food_id: i64,
+) -> Result<Vec<RecipeProductChoice>> {
+    sqlx::query_as::<_, RecipeProductChoice>(
+        "SELECT \
+            p.id AS product_id, \
+            p.marca AS brand, \
+            p.nome_commerciale AS product_name, \
+            p.quantita_confezione AS package_quantity, \
+            um.simbolo AS package_unit_symbol \
+         FROM prodotti_alimentari p \
+         JOIN unita_misura um ON um.id = p.unita_confezione_id \
+         WHERE p.alimento_id = ? \
+           AND p.attivo = 1 \
+         ORDER BY p.marca COLLATE NOCASE, p.nome_commerciale COLLATE NOCASE, p.id",
+    )
+    .bind(food_id)
+    .fetch_all(pool)
+    .await
+    .context("Impossibile leggere i prodotti commerciali dell'ingrediente")
 }

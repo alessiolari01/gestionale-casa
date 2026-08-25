@@ -122,3 +122,27 @@ compatibile.
 
 Le etichette sono un supporto gestionale e non sostituiscono la verifica
 dell'etichetta reale per allergie o intolleranze.
+
+## Step 7.2D.0.2 — prodotti commerciali e catalogo paginato
+
+`20260825101500_prodotti_alimentari.sql` separa l'alimento generico usato
+nelle Ricette dal prodotto commerciale acquistabile. Un prodotto conserva
+marca, nome commerciale e formato della confezione ed è collegato a un solo
+`alimenti.id`.
+
+Il futuro tracciamento prezzi dovrà referenziare `prodotti_alimentari.id`, così
+lo stesso alimento potrà avere più marche/formati e più rilevazioni per punto
+vendita senza alterare le Ricette.
+
+## Step 7.2D.0.3 — nutrizione prodotti e prodotto specifico nelle Ricette
+
+`20260825113000_prodotti_nutrizione_ricette.sql` aggiunge i valori nutrizionali
+facoltativi dei prodotti commerciali, normalizzati per 100 g oppure 100 ml.
+I dati restano separati dall'alimento generico e possono essere modificati o
+rimossi senza alterare la ricetta o il catalogo base.
+
+La stessa migration aggiunge a `ricetta_ingredienti` il riferimento opzionale
+`prodotto_alimentare_id`. L'ingrediente mantiene sempre `alimento_id`: se viene
+scelto un prodotto reale, un trigger verifica che appartenga allo stesso
+alimento. Questo permette alle future Ricette di scegliere tra ingrediente
+generico e prodotto specifico senza legare il modello ricetta a una marca.

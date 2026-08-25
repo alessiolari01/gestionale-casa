@@ -1,3 +1,15 @@
+## Step 7.2D.0.2–0.3 — prodotti commerciali, paginazione e nutrizione — 2026-08-25
+
+- aggiunta paginazione reale del catalogo alimenti con conteggio totale e pagina X/Y;
+- introdotti prodotti commerciali associati agli alimenti generici;
+- quantità e unità della confezione sono salvate sul prodotto;
+- aggiunto cambio unità durante il wizard prodotto;
+- aggiunti valori nutrizionali facoltativi per 100 g / 100 ml;
+- predisposto `prodotto_alimentare_id` opzionale negli ingredienti Ricetta mantenendo sempre `alimento_id`;
+- vincolo DB che impedisce prodotto e alimento incoerenti nella stessa riga ingrediente;
+- database verificato: integrity_check OK, foreign_key_check pulito, 418 alimenti base;
+- introdotto `docs/HANDOFF_COMPLETO.md` come documento strutturale permanente da mantenere dopo gli step importanti.
+
 ## Step 7.2C — alimenti operativi, fondazioni Ricette e amministrazione — 2026-08-25
 
 ### Stato

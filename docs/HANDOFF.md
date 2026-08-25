@@ -677,3 +677,10 @@ Nuovo caso supportato: un oggetto di proprietà dello spazio personale può trov
 UI 7.1B: quando più spazi sono visibili, case e percorsi omonimi vengono disambiguati con il nome dello spazio (`Casa principale · Spazio`). Le conferme di assegnazione/spostamento mostrano sempre lo spazio della posizione, anche se i nomi delle case coincidono.
 
 Nuova migration: `20260823200000_vista_multispazio_condivisione.sql`. Non modificare le 8 migration già applicate. Prima di eseguire `cargo run` sull'S9: `fmt`, `check`, `clippy -D warnings` e suite completa low-memory.
+
+## Documento di continuità completo
+
+Per proseguire il progetto senza il contesto delle conversazioni precedenti,
+leggere `docs/HANDOFF_COMPLETO.md`. Questo documento è la fonte di continuità
+strutturale e va aggiornato dopo ogni cambiamento importante di architettura,
+schema dati o interfaccia utente.
