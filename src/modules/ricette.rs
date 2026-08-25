@@ -107,3 +107,46 @@ pub async fn search_by_ingredients(
         .await
         .context("Impossibile cercare le ricette per ingredienti")
 }
+
+#[expect(dead_code)]
+#[derive(Debug, Clone, FromRow)]
+pub struct RecipeFoodCompatibility {
+    pub label_code: String,
+    pub label_name: String,
+    pub label_emoji: String,
+    pub label_type: String,
+    pub status: String,
+    pub total_ingredients: i64,
+    pub incompatible_ingredients: i64,
+    pub ingredients_to_check: i64,
+}
+
+/// Restituisce le compatibilità alimentari derivate dagli ingredienti.
+///
+/// La vista database considera `verificare` anche una compatibilità mancante:
+/// in questo modo un nuovo alimento non classificato non può far apparire una
+/// ricetta come certamente compatibile.
+#[expect(dead_code)]
+pub async fn recipe_food_compatibility(
+    pool: &SqlitePool,
+    recipe_id: i64,
+) -> Result<Vec<RecipeFoodCompatibility>> {
+    sqlx::query_as::<_, RecipeFoodCompatibility>(
+        "SELECT \
+            etichetta_codice AS label_code, \
+            etichetta_nome AS label_name, \
+            etichetta_emoji AS label_emoji, \
+            etichetta_tipo AS label_type, \
+            stato AS status, \
+            ingredienti_totali AS total_ingredients, \
+            ingredienti_non_compatibili AS incompatible_ingredients, \
+            ingredienti_da_verificare AS ingredients_to_check \
+         FROM v_ricetta_compatibilita_alimentare \
+         WHERE ricetta_id = ? \
+         ORDER BY ordinamento, etichetta_nome COLLATE NOCASE",
+    )
+    .bind(recipe_id)
+    .fetch_all(pool)
+    .await
+    .context("Impossibile calcolare la compatibilità alimentare della ricetta")
+}

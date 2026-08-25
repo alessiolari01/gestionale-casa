@@ -100,3 +100,25 @@ dalle future entita condivisibili.
 e `ricetta_ingredienti`. Gli ingredienti referenziano gli alimenti esistenti.
 La struttura è indicizzata per la ricerca OR su più ingredienti e per il
 ranking in base al numero di ingredienti richiesti presenti nella ricetta.
+
+## Step 7.2D.0 — catalogo alimenti base
+
+`20260825014500_catalogo_alimenti_base.sql` sostituisce gli alimenti presenti
+al momento del passaggio con il catalogo globale di base usato come vocabolario
+condiviso per le Ricette. La migration è già applicata sul database reale e
+non deve più essere modificata.
+
+## Step 7.2D.0.1 — compatibilità alimentare
+
+`20260825023000_compatibilita_alimentare.sql` aggiunge le etichette alimentari
+trasversali (diete ed esclusioni), la matrice di compatibilità degli alimenti
+del catalogo base e la vista `v_ricetta_compatibilita_alimentare`.
+
+Ogni associazione usa uno stato tra `si`, `no` e `verificare`. Lo stato
+`verificare` è usato quando formulazione, marca o processo produttivo possono
+cambiare la compatibilità. La vista Ricette applica una regola fail-closed:
+una compatibilità mancante viene trattata come `verificare`, non come
+compatibile.
+
+Le etichette sono un supporto gestionale e non sostituiscono la verifica
+dell'etichetta reale per allergie o intolleranze.

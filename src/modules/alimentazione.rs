@@ -3609,6 +3609,23 @@ mod tests {
         }
     }
 
+    async fn compatibility_status(pool: &SqlitePool, food_name: &str, label_code: &str) -> String {
+        sqlx::query_scalar(
+            "SELECT ac.stato \
+             FROM alimento_compatibilita ac \
+             JOIN alimenti a ON a.id = ac.alimento_id \
+             JOIN etichette_alimentari e ON e.id = ac.etichetta_id \
+             WHERE a.catalogo_globale = 1 \
+               AND a.nome_normalizzato = ? \
+               AND e.codice = ?",
+        )
+        .bind(food_name)
+        .bind(label_code)
+        .fetch_one(pool)
+        .await
+        .expect("compatibilità alimento")
+    }
+
     #[test]
     fn nomi_alimento_vengono_ripuliti_e_normalizzati() {
         assert_eq!(
@@ -3671,6 +3688,108 @@ mod tests {
         assert!(!can_manage_food(&pool, food_id, admin_id)
             .await
             .expect("manage catalogo globale"));
+    }
+
+    #[tokio::test]
+    async fn catalogo_base_ha_compatibilita_alimentare_completa() {
+        let pool = test_pool().await;
+
+        let labels: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM etichette_alimentari WHERE attiva = 1")
+                .fetch_one(&pool)
+                .await
+                .expect("conteggio etichette");
+        assert_eq!(labels, 19);
+
+        let foods: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM alimenti WHERE catalogo_globale = 1 AND archiviato = 0",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("conteggio alimenti base");
+        assert_eq!(foods, 418);
+
+        let assignments: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) \
+             FROM alimento_compatibilita ac \
+             JOIN alimenti a ON a.id = ac.alimento_id \
+             WHERE a.catalogo_globale = 1 AND a.archiviato = 0",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("conteggio compatibilità");
+        assert_eq!(assignments, foods * labels);
+
+        let missing: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) \
+             FROM alimenti a \
+             CROSS JOIN etichette_alimentari e \
+             LEFT JOIN alimento_compatibilita ac \
+               ON ac.alimento_id = a.id AND ac.etichetta_id = e.id \
+             WHERE a.catalogo_globale = 1 \
+               AND a.archiviato = 0 \
+               AND e.attiva = 1 \
+               AND ac.alimento_id IS NULL",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("compatibilità mancanti");
+        assert_eq!(missing, 0);
+    }
+
+    #[tokio::test]
+    async fn compatibilita_catalogo_base_copre_casi_significativi() {
+        let pool = test_pool().await;
+
+        assert_eq!(compatibility_status(&pool, "riso", "vegano").await, "si");
+        assert_eq!(
+            compatibility_status(&pool, "riso", "senza_glutine").await,
+            "si"
+        );
+        assert_eq!(
+            compatibility_status(&pool, "petto di pollo", "vegano").await,
+            "no"
+        );
+        assert_eq!(
+            compatibility_status(&pool, "tofu", "senza_soia").await,
+            "no"
+        );
+        assert_eq!(
+            compatibility_status(&pool, "latte intero", "senza_lattosio").await,
+            "no"
+        );
+        assert_eq!(
+            compatibility_status(&pool, "grana padano", "senza_uova").await,
+            "no"
+        );
+        assert_eq!(
+            compatibility_status(&pool, "tagliatelle", "senza_glutine").await,
+            "no"
+        );
+        assert_eq!(
+            compatibility_status(&pool, "salsa di soia", "senza_soia").await,
+            "no"
+        );
+        assert_eq!(
+            compatibility_status(&pool, "gamberi", "senza_crostacei").await,
+            "no"
+        );
+        assert_eq!(
+            compatibility_status(&pool, "cozze", "senza_molluschi").await,
+            "no"
+        );
+        assert_eq!(
+            compatibility_status(&pool, "sedano", "senza_sedano").await,
+            "no"
+        );
+        assert_eq!(
+            compatibility_status(&pool, "birra analcolica", "senza_alcol").await,
+            "verificare"
+        );
+        assert_eq!(
+            compatibility_status(&pool, "uvetta", "senza_solfiti").await,
+            "verificare"
+        );
     }
 
     #[tokio::test]
