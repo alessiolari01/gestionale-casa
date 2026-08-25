@@ -8,20 +8,24 @@
 
 Repository GitHub: `alessiolari01/gestionale-casa`
 Branch di sviluppo corrente: `step-7-alimentazione`
-Ultimo commit già consolidato prima delle modifiche D0.2/D0.3: `bedcfa6` — `Step 7.2D.0.1: aggiunge compatibilità alimentare`.
+Ultimo checkpoint già consolidato prima delle modifiche correnti: `544c7f2` — `Step 7.2D.0.2-0.3: aggiunge prodotti, nutrizione e handoff completo`.
 
-Sono attualmente verificati sul database reale anche gli Step **7.2D.0.2** e **7.2D.0.3**, che al momento della generazione di questo documento devono essere consolidati nel checkpoint successivo insieme a questo handoff.
+Gli Step **7.2D.0.4** e **7.2D.0.4.1** sono stati completati e verificati sul Samsung Galaxy S9/Termux e vengono consolidati nello stesso checkpoint che include questo aggiornamento dell'handoff.
 
-Verifiche confermate sul Samsung Galaxy S9/Termux:
+Verifiche confermate:
 
+- `cargo fmt --all -- --check` → ok;
+- `cargo check --locked` → ok;
+- `cargo clippy --all-targets --locked -- -D warnings` → ok;
+- `cargo test --locked -- --test-threads=1` → **124 test superati**;
 - `PRAGMA integrity_check` → `ok`;
 - `PRAGMA foreign_key_check` → nessuna violazione;
-- migration `20260825101500_prodotti_alimentari.sql` → applicata con successo;
-- migration `20260825113000_prodotti_nutrizione_ricette.sql` → applicata con successo;
 - catalogo base → **418 alimenti** attivi;
-- `ricetta_ingredienti.prodotto_alimentare_id` presente;
-- pipeline Rust e smoke test Telegram dello Step D0.3 dichiarati funzionanti dall'utente;
-- totale test del checkpoint D0.3: **120 test** nel flusso di verifica previsto.
+- migration `20260825101500_prodotti_alimentari.sql` e `20260825113000_prodotti_nutrizione_ricette.sql` già applicate e immutabili;
+- D0.4/D0.4.1 non aggiungono nuove migration;
+- smoke test Telegram di paginazione Alimenti, UI Storico e audit dei prodotti commerciali dichiarato funzionante dall'utente.
+
+Rimane il warning esterno di future incompatibility relativo a `proc-macro-error2 v2.0.1`; non è un warning del codice del progetto e non impedisce il checkpoint.
 
 Il database reale è il riferimento operativo; le migration già applicate **non devono essere riscritte**.
 
@@ -319,13 +323,45 @@ Per eventi collegati si usa testo umano come:
 🔗 Collegato a un evento precedente
 ```
 
-### Modifica UI già approvata ma non ancora applicata
+### Stato UI dopo D0.4/D0.4.1
 
-Ridurre lo Storico a **massimo 5 eventi per pagina**, mantenendo:
+Lo Storico usa **massimo 5 eventi per pagina**, mantenendo conteggio totale e indicatore pagina corrente/totale.
 
-- conteggio totale;
-- `Pagina X/Y`;
-- pagina precedente/successiva.
+La navigazione tra pagine è separata dalla navigazione tra sezioni. La parte finale della schermata segue il principio:
+
+```text
+⬅️ Pagina precedente | X / Y | Pagina successiva ➡️
+
+🔎 Filtri | 🧹 Azzera filtri
+
+⬅️ Indietro | 🏠 Menu principale
+```
+
+Il pulsante centrale della paginazione è informativo/no-op.
+
+`⬅️ Indietro` torna alla sezione precedente e non va confuso con `⬅️ Pagina precedente`.
+
+È presente anche il filtro modulo `Alimentazione`.
+
+### Audit prodotti commerciali
+
+D0.4.1 integra nello Storico i prodotti commerciali associati agli alimenti. Vengono registrati almeno:
+
+- creazione/associazione prodotto;
+- modifica marca;
+- modifica nome commerciale;
+- modifica quantità confezione;
+- modifica unità confezione;
+- aggiunta/modifica/rimozione EAN;
+- aggiunta/modifica/rimozione valori nutrizionali.
+
+Gli eventi usano nomi umani, ad esempio `Philadelphia · Original` collegato a `🥛 Formaggio spalmabile`, senza esporre ID tecnici.
+
+Le modifiche al prodotto e la relativa registrazione Storico avvengono nella stessa transazione: se l'audit fallisce, non deve restare una modifica parziale.
+
+L'attore deve essere realmente valido nello spazio dell'evento e la lettura dello Storico ricontrolla anche la visibilità della risorsa alimentare associata. Non indebolire questi controlli per rendere più permissiva la UI.
+
+Gli eventi avvenuti prima dell'introduzione dell'audit prodotti **non vengono inventati retroattivamente**.
 
 ---
 
@@ -597,31 +633,32 @@ compatibilità mancante
 
 ## 18. Elenco, ricerca e filtri alimenti — stato attuale
 
-Lo Step D0.2 ha introdotto paginazione reale.
+La paginazione reale è operativa e dopo D0.4 usa:
 
-**Stato attuale implementato:** `FOOD_PAGE_SIZE = 10`.
+```text
+FOOD_PAGE_SIZE = 5
+```
 
-Le schermate mostrano:
+Le schermate mostrano il totale e la pagina corrente, ad esempio:
 
 ```text
 📋 Alimenti · 418 risultati
-Pagina 1/42
+Pagina 2/84
 ```
 
-Ricerca:
+La riga di navigazione include un pulsante centrale informativo/no-op:
 
 ```text
-🔎 Risultati per: "ci" · N risultati
-Pagina X/Y
+⬅️ Pagina precedente | 2/84 | Pagina successiva ➡️
 ```
 
-I filtri mantengono contesto e pagina con `🔄 Aggiorna`.
+Lo stesso schema vale per:
 
-### Rifiniture già approvate, non ancora implementate
+- elenco completo;
+- risultati di ricerca;
+- filtri per categoria.
 
-1. Ridurre gli alimenti a **massimo 5 per pagina**.
-2. Non mostrare `🌐` per gli alimenti base né nel testo né nei pulsanti.
-3. Usare indicatori solo per le eccezioni, a fine riga:
+Gli alimenti base non mostrano più `🌐` né nel testo né nei pulsanti. Gli indicatori vengono usati solo per le eccezioni:
 
 ```text
 🥩 Alimento personale 👤
@@ -634,9 +671,20 @@ Legenda:
 👤 tuo · 👥 condiviso
 ```
 
-4. Nel dettaglio si può continuare a mostrare `🌐 Catalogo base`.
-5. Estendere la ricerca anche a **marca e nome commerciale dei prodotti reali**.
-6. Se più prodotti dello stesso alimento corrispondono, non duplicare l'alimento; mostrare eventualmente i prodotti trovati come contesto.
+Nel dettaglio alimento è ancora possibile mostrare `🌐 Catalogo base`.
+
+### Ricerca tramite prodotto commerciale
+
+La ricerca alimenti cerca anche in:
+
+- marca del prodotto commerciale;
+- nome commerciale del prodotto.
+
+Esempio: cercando `Philadelphia` oppure `Original` può essere restituito `🥛 Formaggio spalmabile` con i prodotti corrispondenti come contesto.
+
+Se più prodotti dello stesso alimento corrispondono, l'alimento compare **una sola volta**.
+
+I filtri mantengono contesto e pagina con `🔄 Aggiorna`.
 
 ---
 
@@ -694,9 +742,9 @@ Nello Step D0.3 la schermata quantità mostra l'unità attuale e permette `📏 
 
 L'unità viene salvata sul prodotto e non dipende dinamicamente dal default dell'alimento.
 
-### Modifiche prodotto già approvate, non ancora implementate
+### Modifica prodotto operativa
 
-Dal dettaglio deve essere possibile:
+Dal dettaglio è disponibile:
 
 ```text
 ✏️ Modifica prodotto
@@ -707,11 +755,13 @@ Dal dettaglio deve essere possibile:
 └── Barcode / EAN
 ```
 
+La modifica mantiene lo stesso record interno e **non cambia** automaticamente `alimento_id`.
+
 I valori nutrizionali restano una sezione separata.
 
-Non cambiare automaticamente `alimento_id`; un eventuale cambio di alimento associato richiederà in futuro una funzione esplicita.
+Un eventuale cambio di alimento generico associato richiederà in futuro una funzione esplicita e più delicata.
 
-### Icone unità approvate per la UI futura
+### Icone unità operative nella UI
 
 - `⚖️` → g / kg;
 - `🥤` → ml / l;
@@ -767,25 +817,25 @@ Campi principali:
 
 I singoli valori possono essere assenti.
 
-### Stato UI attuale
+### Stato UI dopo D0.4
 
 L'inserimento usa un messaggio con valori separati da `;`.
 
-### Miglioria già approvata, non ancora implementata
+Se l'utente fornisce meno di 9 valori ma almeno un valore valido, i campi mancanti in coda vengono completati automaticamente con `-`.
 
-Se l'utente fornisce meno di 9 valori ma almeno un valore valido:
+Esempio:
 
 ```text
 225; 934; -
 ```
 
-completare automaticamente in coda:
+viene interpretato come:
 
 ```text
 225; 934; -; -; -; -; -; -; -
 ```
 
-Prima del salvataggio mostrare **sempre** un riepilogo completo e chiedere conferma:
+Prima del salvataggio viene mostrato **sempre** un riepilogo completo e viene richiesta conferma esplicita:
 
 ```text
 ✅ Conferma
@@ -800,6 +850,12 @@ Regole:
 - più di 9 → errore;
 - token non numerico diverso da `-` → errore;
 - nessun salvataggio prima di `✅ Conferma`.
+
+Le operazioni nutrizionali vengono inoltre registrate nello Storico del prodotto commerciale.
+
+### Rifinitura UI ancora approvata
+
+Quando un prodotto non possiede alcun valore nutrizionale, non limitarsi al testo “nessun valore inserito”: mostrare anche una breve spiegazione che invita ad aggiungerli, ricordando che la sezione è facoltativa. Deve restare disponibile `➕ Inserisci valori`; se l'utente entra nel wizard deve poter usare `❌ Annulla` senza salvare nulla.
 
 ---
 
@@ -1457,38 +1513,57 @@ significa che **quello script non ha modificato il repository**; non fare restor
 
 ---
 
-# MODIFICHE APPROVATE DA FARE PRIMA/INSIEME AL PROSSIMO STEP
+# MODIFICHE APPROVATE DA FARE NEI PROSSIMI STEP
 
-## 39. Rifiniture UI già decise
+## 39. Rifiniture e classificazione ancora da applicare
 
-Queste modifiche sono approvate ma non ancora applicate nello stato rappresentato da questo documento:
+Le rifiniture D0.4/D0.4.1 elencate nelle versioni precedenti di questo handoff sono ora operative. Restano approvate queste modifiche successive.
 
-### Alimentazione
+### Categorie Alimentazione
 
-- massimo **5 alimenti per pagina**;
-- niente `🌐` per gli alimenti base nell'elenco e nei pulsanti;
-- `👤` e `👥` solo per eccezioni, a fine riga;
-- ricerca alimento anche tramite marca/nome di un prodotto commerciale;
-- evitare duplicati quando più prodotti corrispondono.
+Aggiungere una categoria dedicata:
 
-### Storico
+```text
+🍝 Pasta
+```
 
-- massimo **5 eventi per pagina**;
-- conteggio totale;
-- `Pagina X/Y`.
+separata da `🌾 Cereali e derivati`.
 
-### Prodotti commerciali
+Prima della migration rivalutare anche altre categorie troppo ampie mantenendo però un numero contenuto e utile per ricerca, filtri e scelta ingredienti. Candidati già discussi:
 
-- icona dinamica per unità (`⚖️`, `🥤`, `🔢`, `🥄`);
-- `✏️ Modifica prodotto`;
-- modifica marca/nome/formato/unità/EAN;
-- mantenere separata la modifica nutrizione.
+```text
+🍚 Riso
+🍞 Pane e prodotti da forno
+🥜 Frutta secca e semi
+🌿 Spezie e aromi
+```
 
-### Valori nutrizionali
+Non creare invece categorie eccessivamente granulari quando il nome dell'alimento o le etichette di compatibilità coprono già la distinzione.
 
-- input parziale completato automaticamente con `-`;
-- riepilogo dei 9 valori;
-- conferma esplicita prima del salvataggio.
+Questa modifica deve usare **una nuova migration** e riclassificare in modo esplicito i 418 alimenti base esistenti. Non riscrivere migration già applicate.
+
+### Accesso rapido ai prodotti associati
+
+Nelle schermate di ricerca/elenco dove un alimento ha prodotti commerciali associati, valutare un pulsante diretto:
+
+```text
+🛒 Prodotti associati (N)
+```
+
+così l'utente può raggiungere i prodotti senza dover prima aprire il dettaglio dell'alimento.
+
+Il pulsante è condizionale e va mostrato solo quando esistono prodotti associati. Se la ricerca è stata soddisfatta tramite marca/nome commerciale, questa scorciatoia è particolarmente utile.
+
+Se i prodotti sono molti, non elencarli tutti nel testo: mostrare un contesto compatto e usare `🛒 Prodotti associati (N)` per aprire la lista completa.
+
+### Valori nutrizionali vuoti
+
+Quando non sono presenti valori nutrizionali, mostrare un messaggio guidato che spieghi che:
+
+- i valori possono essere aggiunti ora;
+- la sezione è facoltativa;
+- sarà sempre possibile tornare indietro;
+- entrando nell'inserimento si può usare `❌ Annulla` senza salvare.
 
 ---
 
@@ -1496,9 +1571,11 @@ Queste modifiche sono approvate ma non ancora applicate nello stato rappresentat
 
 ## 40. Step immediatamente successivo consigliato
 
-Prima di sviluppare tutta la UI Ricette, applicare una piccola rifinitura **D0.4** con le modifiche approvate nella sezione precedente.
+D0.4/D0.4.1 sono completati.
 
-Dopo D0.4 passare a:
+Prima della UI Ricette completa è consigliabile un piccolo step dedicato alla **revisione categorie** (D0.5), perché categorie più naturali migliorano direttamente i filtri e la futura selezione ingredienti.
+
+Subito dopo passare a:
 
 ```text
 Step 7.2D.1 — Ricette operative Telegram
@@ -1559,6 +1636,6 @@ Il documento deve permettere a una terza persona di capire:
 
 ## 42. Sintesi finale per il prossimo sviluppatore
 
-Il progetto è ormai un gestionale multiutente/multispazio con Telegram come frontend corrente. Oggetti, luoghi, contenitori, foto e storico sono già operativi; Alimentazione dispone di un catalogo globale di 418 alimenti, categorie, ownership/condivisione, permessi generici, compatibilità alimentare, prodotti commerciali e nutrizione opzionale. Le Ricette hanno già fondazioni DB e funzioni di ricerca/compatibilità, ma manca ancora la UI Telegram completa.
+Il progetto è ormai un gestionale multiutente/multispazio con Telegram come frontend corrente. Oggetti, luoghi, contenitori, foto e storico sono già operativi; Alimentazione dispone di un catalogo globale di 418 alimenti, categorie, ownership/condivisione, permessi generici, compatibilità alimentare, prodotti commerciali modificabili, ricerca tramite prodotti, nutrizione opzionale con conferma e audit Storico dei prodotti. Le Ricette hanno già fondazioni DB e funzioni di ricerca/compatibilità, ma manca ancora la UI Telegram completa.
 
 Le priorità sono mantenere separati ownership, visibilità e permessi; non esporre ID tecnici; mantenere il backend fail-closed; non modificare migration già applicate; trattare alimento generico e prodotto commerciale come livelli distinti; e aggiornare questo handoff dopo ogni cambiamento strutturale importante.

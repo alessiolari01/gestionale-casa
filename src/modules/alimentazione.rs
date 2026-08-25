@@ -1,4 +1,4 @@
-//! Step 7.2D.0.3 - catalogo alimenti, prodotti commerciali e nutrizione.
+//! Step 7.2D.0.4.1 - rifiniture catalogo, audit prodotti e navigazione.
 //!
 //! Proprietà e visibilità sono separate:
 //! - l'alimento appartiene all'utente che lo crea;
@@ -13,15 +13,16 @@ use std::{
 };
 
 use anyhow::{bail, Context, Result};
-use sqlx::{FromRow, SqlitePool};
+use sqlx::{FromRow, SqliteConnection, SqlitePool};
 use teloxide::{
     prelude::*,
     types::{InlineKeyboardButton, InlineKeyboardMarkup},
 };
 
+use super::storico::{self, NewFieldChange, NewHistoryEvent};
 use crate::identity;
 
-const FOOD_PAGE_SIZE: usize = 10;
+const FOOD_PAGE_SIZE: usize = 5;
 const FOOD_PAGE_FETCH: i64 = FOOD_PAGE_SIZE as i64 + 1;
 const FOOD_NAME_MAX_CHARS: usize = 120;
 const PRODUCT_TEXT_MAX_CHARS: usize = 120;
@@ -83,6 +84,24 @@ enum FoodConversationState {
     ProductNutritionInput {
         product_id: i64,
         reference_unit_id: i64,
+    },
+    ProductNutritionConfirm {
+        product_id: i64,
+        reference_unit_id: i64,
+        values: [Option<f64>; 9],
+    },
+    ProductEditBrand {
+        product_id: i64,
+    },
+    ProductEditName {
+        product_id: i64,
+    },
+    ProductEditQuantity {
+        product_id: i64,
+        unit_id: i64,
+    },
+    ProductEditEan {
+        product_id: i64,
     },
 }
 
@@ -160,7 +179,9 @@ struct ProductRecord {
     brand: String,
     product_name: String,
     package_quantity: f64,
+    package_unit_id: i64,
     package_unit_symbol: String,
+    ean: Option<String>,
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -480,25 +501,150 @@ pub async fn handle_message(
             reference_unit_id,
         }) => {
             match parse_nutrition_values(text) {
-                Ok(values) => {
-                    match save_product_nutrition(pool, product_id, reference_unit_id, &values).await
-                    {
-                        Ok(()) => {
-                            sessions.clear_chat(chat_id);
-                            bot.send_message(msg.chat.id, "✅ Valori nutrizionali aggiornati.")
-                                .await?;
-                            send_product_nutrition(bot, msg.chat.id, pool, product_id).await?;
-                        }
-                        Err(error) => {
-                            bot.send_message(msg.chat.id, format!("⚠️ {error}"))
-                                .reply_markup(nutrition_input_keyboard(product_id))
-                                .await?;
-                        }
+                Ok(values) => match get_unit_by_id(pool, reference_unit_id).await {
+                    Ok(Some(unit)) => {
+                        sessions.set(
+                            chat_id,
+                            FoodConversationState::ProductNutritionConfirm {
+                                product_id,
+                                reference_unit_id,
+                                values,
+                            },
+                        );
+                        send_nutrition_confirmation(bot, msg.chat.id, product_id, &unit, &values)
+                            .await?;
                     }
-                }
+                    _ => {
+                        bot.send_message(msg.chat.id, "⚠️ Unità nutrizionale non disponibile.")
+                            .reply_markup(nutrition_input_keyboard(product_id))
+                            .await?;
+                    }
+                },
                 Err(error) => {
                     bot.send_message(msg.chat.id, format!("⚠️ {error}"))
                         .reply_markup(nutrition_input_keyboard(product_id))
+                        .await?;
+                }
+            }
+            Ok(true)
+        }
+        Some(FoodConversationState::ProductNutritionConfirm { product_id, .. }) => {
+            bot.send_message(
+                msg.chat.id,
+                "Usa ✅ Conferma per salvare, ✏️ Modifica per correggere oppure ❌ Annulla.",
+            )
+            .reply_markup(nutrition_confirmation_keyboard(product_id))
+            .await?;
+            Ok(true)
+        }
+        Some(FoodConversationState::ProductEditBrand { product_id }) => {
+            let Some(brand) = clean_product_text(text) else {
+                bot.send_message(msg.chat.id, "⚠️ Marca non valida. Riprova.")
+                    .reply_markup(product_edit_cancel_keyboard(product_id))
+                    .await?;
+                return Ok(true);
+            };
+            sessions.clear_chat(chat_id);
+            match update_product_brand(pool, product_id, &brand).await {
+                Ok(()) => {
+                    bot.send_message(msg.chat.id, "✅ Marca aggiornata.")
+                        .await?;
+                    send_product_detail(bot, msg.chat.id, pool, product_id).await?;
+                }
+                Err(error) => {
+                    bot.send_message(msg.chat.id, format!("⚠️ {error}"))
+                        .reply_markup(product_edit_cancel_keyboard(product_id))
+                        .await?;
+                }
+            }
+            Ok(true)
+        }
+        Some(FoodConversationState::ProductEditName { product_id }) => {
+            let Some(product_name) = clean_product_text(text) else {
+                bot.send_message(msg.chat.id, "⚠️ Nome commerciale non valido. Riprova.")
+                    .reply_markup(product_edit_cancel_keyboard(product_id))
+                    .await?;
+                return Ok(true);
+            };
+            sessions.clear_chat(chat_id);
+            match update_product_name(pool, product_id, &product_name).await {
+                Ok(()) => {
+                    bot.send_message(msg.chat.id, "✅ Nome commerciale aggiornato.")
+                        .await?;
+                    send_product_detail(bot, msg.chat.id, pool, product_id).await?;
+                }
+                Err(error) => {
+                    bot.send_message(msg.chat.id, format!("⚠️ {error}"))
+                        .reply_markup(product_edit_cancel_keyboard(product_id))
+                        .await?;
+                }
+            }
+            Ok(true)
+        }
+        Some(FoodConversationState::ProductEditQuantity {
+            product_id,
+            unit_id,
+        }) => {
+            let normalized = text.trim().replace(',', ".");
+            let quantity = normalized
+                .parse::<f64>()
+                .ok()
+                .filter(|value| value.is_finite() && *value > 0.0);
+            let Some(quantity) = quantity else {
+                match get_unit_by_id(pool, unit_id).await {
+                    Ok(Some(unit)) => {
+                        bot.send_message(
+                            msg.chat.id,
+                            "⚠️ Quantità non valida. Scrivi un numero maggiore di zero.",
+                        )
+                        .reply_markup(product_edit_quantity_keyboard(product_id))
+                        .await?;
+                        send_product_edit_quantity_prompt(bot, msg.chat.id, product_id, &unit)
+                            .await?;
+                    }
+                    _ => {
+                        bot.send_message(msg.chat.id, "⚠️ Unità confezione non disponibile.")
+                            .reply_markup(product_edit_cancel_keyboard(product_id))
+                            .await?;
+                    }
+                }
+                return Ok(true);
+            };
+            sessions.clear_chat(chat_id);
+            match update_product_quantity(pool, product_id, quantity, unit_id).await {
+                Ok(()) => {
+                    bot.send_message(msg.chat.id, "✅ Confezione aggiornata.")
+                        .await?;
+                    send_product_detail(bot, msg.chat.id, pool, product_id).await?;
+                }
+                Err(error) => {
+                    bot.send_message(msg.chat.id, format!("⚠️ {error}"))
+                        .reply_markup(product_edit_cancel_keyboard(product_id))
+                        .await?;
+                }
+            }
+            Ok(true)
+        }
+        Some(FoodConversationState::ProductEditEan { product_id }) => {
+            let ean = match parse_ean_input(text) {
+                Ok(ean) => ean,
+                Err(error) => {
+                    bot.send_message(msg.chat.id, format!("⚠️ {error}"))
+                        .reply_markup(product_edit_cancel_keyboard(product_id))
+                        .await?;
+                    return Ok(true);
+                }
+            };
+            sessions.clear_chat(chat_id);
+            match update_product_ean(pool, product_id, ean.as_deref()).await {
+                Ok(()) => {
+                    bot.send_message(msg.chat.id, "✅ Barcode / EAN aggiornato.")
+                        .await?;
+                    send_product_detail(bot, msg.chat.id, pool, product_id).await?;
+                }
+                Err(error) => {
+                    bot.send_message(msg.chat.id, format!("⚠️ {error}"))
+                        .reply_markup(product_edit_cancel_keyboard(product_id))
                         .await?;
                 }
             }
@@ -535,6 +681,7 @@ pub async fn handle_callback(
     data: &str,
 ) -> ResponseResult<bool> {
     match data {
+        "food:noop" => Ok(true),
         "food:menu" => {
             sessions.clear_chat(chat_id.0);
             show_menu(bot, chat_id).await?;
@@ -1710,6 +1857,267 @@ pub async fn handle_callback(
             }
             Ok(true)
         }
+        _ if data.starts_with("food:product:edit:brand:") => {
+            let product_id = data
+                .strip_prefix("food:product:edit:brand:")
+                .and_then(parse_positive_id);
+            if let Some(product_id) = product_id {
+                match get_product(pool, product_id).await {
+                    Ok(Some(product))
+                        if can_edit_food_current(pool, product.food_id)
+                            .await
+                            .unwrap_or(false) =>
+                    {
+                        sessions.set(
+                            chat_id.0,
+                            FoodConversationState::ProductEditBrand { product_id },
+                        );
+                        bot.send_message(
+                            chat_id,
+                            format!(
+                                "🏷 Modifica marca\n\nMarca attuale: {}\n\nScrivi la nuova marca.",
+                                product.brand
+                            ),
+                        )
+                        .reply_markup(product_edit_cancel_keyboard(product_id))
+                        .await?;
+                    }
+                    Ok(Some(_)) => {
+                        bot.send_message(
+                            chat_id,
+                            "⚠️ Non hai il permesso di modificare questo prodotto.",
+                        )
+                        .await?;
+                    }
+                    Ok(None) => {
+                        bot.send_message(chat_id, "Prodotto non disponibile.")
+                            .await?;
+                    }
+                    Err(error) => {
+                        tracing::error!(?error, product_id, "Errore modifica marca prodotto");
+                        bot.send_message(chat_id, "⚠️ Non riesco a leggere questo prodotto.")
+                            .await?;
+                    }
+                }
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:product:edit:name:") => {
+            let product_id = data
+                .strip_prefix("food:product:edit:name:")
+                .and_then(parse_positive_id);
+            if let Some(product_id) = product_id {
+                match get_product(pool, product_id).await {
+                    Ok(Some(product))
+                        if can_edit_food_current(pool, product.food_id)
+                            .await
+                            .unwrap_or(false) =>
+                    {
+                        sessions.set(
+                            chat_id.0,
+                            FoodConversationState::ProductEditName { product_id },
+                        );
+                        bot.send_message(
+                            chat_id,
+                            format!(
+                                "🛒 Modifica nome commerciale\n\nNome attuale: {}\n\nScrivi il nuovo nome.",
+                                product.product_name
+                            ),
+                        )
+                        .reply_markup(product_edit_cancel_keyboard(product_id))
+                        .await?;
+                    }
+                    Ok(Some(_)) => {
+                        bot.send_message(
+                            chat_id,
+                            "⚠️ Non hai il permesso di modificare questo prodotto.",
+                        )
+                        .await?;
+                    }
+                    Ok(None) => {
+                        bot.send_message(chat_id, "Prodotto non disponibile.")
+                            .await?;
+                    }
+                    Err(error) => {
+                        tracing::error!(?error, product_id, "Errore modifica nome prodotto");
+                        bot.send_message(chat_id, "⚠️ Non riesco a leggere questo prodotto.")
+                            .await?;
+                    }
+                }
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:product:edit:quantity:") => {
+            let product_id = data
+                .strip_prefix("food:product:edit:quantity:")
+                .and_then(parse_positive_id);
+            if let Some(product_id) = product_id {
+                match get_product(pool, product_id).await {
+                    Ok(Some(product))
+                        if can_edit_food_current(pool, product.food_id)
+                            .await
+                            .unwrap_or(false) =>
+                    {
+                        match get_unit_by_id(pool, product.package_unit_id).await {
+                            Ok(Some(unit)) => {
+                                sessions.set(
+                                    chat_id.0,
+                                    FoodConversationState::ProductEditQuantity {
+                                        product_id,
+                                        unit_id: unit.id,
+                                    },
+                                );
+                                send_product_edit_quantity_prompt(bot, chat_id, product_id, &unit)
+                                    .await?;
+                            }
+                            _ => {
+                                bot.send_message(chat_id, "⚠️ Unità confezione non disponibile.")
+                                    .await?;
+                            }
+                        }
+                    }
+                    Ok(Some(_)) => {
+                        bot.send_message(
+                            chat_id,
+                            "⚠️ Non hai il permesso di modificare questo prodotto.",
+                        )
+                        .await?;
+                    }
+                    Ok(None) => {
+                        bot.send_message(chat_id, "Prodotto non disponibile.")
+                            .await?;
+                    }
+                    Err(error) => {
+                        tracing::error!(?error, product_id, "Errore modifica confezione prodotto");
+                        bot.send_message(chat_id, "⚠️ Non riesco a leggere questo prodotto.")
+                            .await?;
+                    }
+                }
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:product:edit:changeunit:") => {
+            let product_id = data
+                .strip_prefix("food:product:edit:changeunit:")
+                .and_then(parse_positive_id);
+            match (product_id, sessions.get(chat_id.0)) {
+                (
+                    Some(product_id),
+                    Some(FoodConversationState::ProductEditQuantity {
+                        product_id: state_product_id,
+                        ..
+                    }),
+                ) if product_id == state_product_id => {
+                    send_product_edit_unit_choice(bot, chat_id, pool, product_id).await?;
+                }
+                _ => {
+                    bot.send_message(chat_id, "Modifica confezione non più attiva.")
+                        .reply_markup(food_menu_keyboard())
+                        .await?;
+                }
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:product:edit:unit:") => {
+            let raw = data
+                .strip_prefix("food:product:edit:unit:")
+                .unwrap_or_default();
+            let mut parts = raw.split(':');
+            let product_id = parts.next().and_then(parse_positive_id);
+            let unit_id = parts.next().and_then(parse_positive_id);
+            if parts.next().is_some() {
+                return Ok(true);
+            }
+            match (product_id, unit_id, sessions.get(chat_id.0)) {
+                (
+                    Some(product_id),
+                    Some(unit_id),
+                    Some(FoodConversationState::ProductEditQuantity {
+                        product_id: state_product_id,
+                        ..
+                    }),
+                ) if product_id == state_product_id => {
+                    match get_product_package_unit(pool, unit_id).await {
+                        Ok(Some(unit)) => {
+                            sessions.set(
+                                chat_id.0,
+                                FoodConversationState::ProductEditQuantity {
+                                    product_id,
+                                    unit_id,
+                                },
+                            );
+                            send_product_edit_quantity_prompt(bot, chat_id, product_id, &unit)
+                                .await?;
+                        }
+                        _ => {
+                            bot.send_message(chat_id, "⚠️ Unità confezione non disponibile.")
+                                .await?;
+                        }
+                    }
+                }
+                _ => {
+                    bot.send_message(chat_id, "Modifica confezione non più attiva.")
+                        .reply_markup(food_menu_keyboard())
+                        .await?;
+                }
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:product:edit:ean:") => {
+            let product_id = data
+                .strip_prefix("food:product:edit:ean:")
+                .and_then(parse_positive_id);
+            if let Some(product_id) = product_id {
+                match get_product(pool, product_id).await {
+                    Ok(Some(product))
+                        if can_edit_food_current(pool, product.food_id)
+                            .await
+                            .unwrap_or(false) =>
+                    {
+                        sessions.set(
+                            chat_id.0,
+                            FoodConversationState::ProductEditEan { product_id },
+                        );
+                        let current = product.ean.as_deref().unwrap_or("non impostato");
+                        bot.send_message(
+                            chat_id,
+                            format!(
+                                "🔢 Barcode / EAN\n\nValore attuale: {current}\n\nScrivi il nuovo codice oppure - per rimuoverlo."
+                            ),
+                        )
+                        .reply_markup(product_edit_cancel_keyboard(product_id))
+                        .await?;
+                    }
+                    Ok(Some(_)) => {
+                        bot.send_message(
+                            chat_id,
+                            "⚠️ Non hai il permesso di modificare questo prodotto.",
+                        )
+                        .await?;
+                    }
+                    Ok(None) => {
+                        bot.send_message(chat_id, "Prodotto non disponibile.")
+                            .await?;
+                    }
+                    Err(error) => {
+                        tracing::error!(?error, product_id, "Errore modifica EAN prodotto");
+                        bot.send_message(chat_id, "⚠️ Non riesco a leggere questo prodotto.")
+                            .await?;
+                    }
+                }
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:product:edit:") => {
+            let product_id = data
+                .strip_prefix("food:product:edit:")
+                .and_then(parse_positive_id);
+            sessions.clear_chat(chat_id.0);
+            if let Some(product_id) = product_id {
+                send_product_edit_menu(bot, chat_id, pool, product_id).await?;
+            }
+            Ok(true)
+        }
         _ if data.starts_with("food:product:nutrition:edit:") => {
             let product_id = data
                 .strip_prefix("food:product:nutrition:edit:")
@@ -1807,6 +2215,88 @@ pub async fn handle_callback(
                     bot.send_message(chat_id, "Inserimento nutrizionale non più attivo.")
                         .await?;
                 }
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:product:nutrition:confirm:") => {
+            let product_id = data
+                .strip_prefix("food:product:nutrition:confirm:")
+                .and_then(parse_positive_id);
+            match (product_id, sessions.get(chat_id.0)) {
+                (
+                    Some(product_id),
+                    Some(FoodConversationState::ProductNutritionConfirm {
+                        product_id: state_product_id,
+                        reference_unit_id,
+                        values,
+                    }),
+                ) if product_id == state_product_id => {
+                    match save_product_nutrition(pool, product_id, reference_unit_id, &values).await
+                    {
+                        Ok(()) => {
+                            sessions.clear_chat(chat_id.0);
+                            bot.send_message(chat_id, "✅ Valori nutrizionali aggiornati.")
+                                .await?;
+                            send_product_nutrition(bot, chat_id, pool, product_id).await?;
+                        }
+                        Err(error) => {
+                            bot.send_message(chat_id, format!("⚠️ {error}"))
+                                .reply_markup(nutrition_confirmation_keyboard(product_id))
+                                .await?;
+                        }
+                    }
+                }
+                _ => {
+                    bot.send_message(chat_id, "Conferma nutrizionale non più attiva.")
+                        .await?;
+                }
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:product:nutrition:modify:") => {
+            let product_id = data
+                .strip_prefix("food:product:nutrition:modify:")
+                .and_then(parse_positive_id);
+            match (product_id, sessions.get(chat_id.0)) {
+                (
+                    Some(product_id),
+                    Some(FoodConversationState::ProductNutritionConfirm {
+                        product_id: state_product_id,
+                        reference_unit_id,
+                        ..
+                    }),
+                ) if product_id == state_product_id => {
+                    match get_unit_by_id(pool, reference_unit_id).await {
+                        Ok(Some(unit)) => {
+                            sessions.set(
+                                chat_id.0,
+                                FoodConversationState::ProductNutritionInput {
+                                    product_id,
+                                    reference_unit_id,
+                                },
+                            );
+                            send_nutrition_input_prompt(bot, chat_id, product_id, &unit).await?;
+                        }
+                        _ => {
+                            bot.send_message(chat_id, "⚠️ Unità nutrizionale non disponibile.")
+                                .await?;
+                        }
+                    }
+                }
+                _ => {
+                    bot.send_message(chat_id, "Conferma nutrizionale non più attiva.")
+                        .await?;
+                }
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:product:nutrition:cancel:") => {
+            let product_id = data
+                .strip_prefix("food:product:nutrition:cancel:")
+                .and_then(parse_positive_id);
+            sessions.clear_chat(chat_id.0);
+            if let Some(product_id) = product_id {
+                send_product_nutrition(bot, chat_id, pool, product_id).await?;
             }
             Ok(true)
         }
@@ -2083,7 +2573,7 @@ async fn send_food_list(
             );
             append_food_lines(&mut text, &foods, current_user);
             bot.send_message(chat_id, text)
-                .reply_markup(food_results_keyboard(&foods, page, has_next))
+                .reply_markup(food_results_keyboard(&foods, page, has_next, total))
                 .await?;
         }
         Err(error) => {
@@ -2150,9 +2640,9 @@ async fn send_search_results(
                 page + 1,
                 total_pages(total)
             );
-            append_food_lines(&mut text, &foods, current_user);
+            append_search_food_lines(pool, &mut text, &foods, current_user, &normalized).await;
             bot.send_message(chat_id, text)
-                .reply_markup(food_search_results_keyboard(&foods, page, has_next))
+                .reply_markup(food_search_results_keyboard(&foods, page, has_next, total))
                 .await?;
         }
         Err(error) => {
@@ -2260,7 +2750,9 @@ async fn send_filtered_food_list(
             );
             append_food_lines(&mut text, &foods, current_user);
             bot.send_message(chat_id, text)
-                .reply_markup(food_filtered_results_keyboard(&foods, page, has_next))
+                .reply_markup(food_filtered_results_keyboard(
+                    &foods, page, has_next, total,
+                ))
                 .await?;
         }
         Err(error) => {
@@ -3407,6 +3899,15 @@ async fn list_foods_with_offset(
                             WHERE aa.alimento_id = a.id \
                               AND instr(aa.alias_normalizzato, ?) > 0\
                         )\
+                        OR EXISTS (\
+                            SELECT 1 FROM prodotti_alimentari p \
+                            WHERE p.alimento_id = a.id \
+                              AND p.attivo = 1 \
+                              AND instr(\
+                                    p.marca_normalizzata || ' ' || p.nome_commerciale_normalizzato, \
+                                    ?\
+                                  ) > 0\
+                        )\
                    ) \
                    AND (\
                         ? IS NULL \
@@ -3427,6 +3928,7 @@ async fn list_foods_with_offset(
             sqlx::query_as::<_, FoodRecord>(&sql)
                 .bind(user_id)
                 .bind(user_id)
+                .bind(search.as_deref())
                 .bind(search.as_deref())
                 .bind(search.as_deref())
                 .bind(search.as_deref())
@@ -3458,6 +3960,15 @@ async fn list_foods_with_offset(
                             WHERE aa.alimento_id = a.id \
                               AND instr(aa.alias_normalizzato, ?) > 0\
                         )\
+                        OR EXISTS (\
+                            SELECT 1 FROM prodotti_alimentari p \
+                            WHERE p.alimento_id = a.id \
+                              AND p.attivo = 1 \
+                              AND instr(\
+                                    p.marca_normalizzata || ' ' || p.nome_commerciale_normalizzato, \
+                                    ?\
+                                  ) > 0\
+                        )\
                    ) \
                    AND (\
                         ? IS NULL \
@@ -3478,6 +3989,7 @@ async fn list_foods_with_offset(
             sqlx::query_as::<_, FoodRecord>(&sql)
                 .bind(user_id)
                 .bind(actor.spazio_id)
+                .bind(search.as_deref())
                 .bind(search.as_deref())
                 .bind(search.as_deref())
                 .bind(search.as_deref())
@@ -3502,6 +4014,15 @@ async fn list_foods_with_offset(
                         WHERE aa.alimento_id = a.id \
                           AND instr(aa.alias_normalizzato, ?) > 0\
                     )\
+                    OR EXISTS (\
+                        SELECT 1 FROM prodotti_alimentari p \
+                        WHERE p.alimento_id = a.id \
+                          AND p.attivo = 1 \
+                          AND instr(\
+                                p.marca_normalizzata || ' ' || p.nome_commerciale_normalizzato, \
+                                ?\
+                              ) > 0\
+                    )\
                ) \
                AND (\
                     ? IS NULL \
@@ -3515,6 +4036,7 @@ async fn list_foods_with_offset(
              LIMIT ? OFFSET ?"
         );
         sqlx::query_as::<_, FoodRecord>(&sql)
+            .bind(search.as_deref())
             .bind(search.as_deref())
             .bind(search.as_deref())
             .bind(search.as_deref())
@@ -3769,9 +4291,14 @@ fn food_menu_keyboard() -> InlineKeyboardMarkup {
     ])
 }
 
-fn food_results_keyboard(foods: &[FoodRecord], page: i64, has_next: bool) -> InlineKeyboardMarkup {
+fn food_results_keyboard(
+    foods: &[FoodRecord],
+    page: i64,
+    has_next: bool,
+    total: usize,
+) -> InlineKeyboardMarkup {
     let mut rows = food_item_rows(foods);
-    push_pagination_row(&mut rows, page, has_next, "food:list:page");
+    push_pagination_row(&mut rows, page, has_next, total, "food:list:page");
     rows.push(vec![
         button("➕ Nuovo alimento", "food:new"),
         button("🔎 Cerca", "food:search:list"),
@@ -3791,9 +4318,10 @@ fn food_search_results_keyboard(
     foods: &[FoodRecord],
     page: i64,
     has_next: bool,
+    total: usize,
 ) -> InlineKeyboardMarkup {
     let mut rows = food_item_rows(foods);
-    push_pagination_row(&mut rows, page, has_next, "food:search:page");
+    push_pagination_row(&mut rows, page, has_next, total, "food:search:page");
     rows.push(vec![
         button("🔎 Nuova ricerca", "food:search:list"),
         button("🏷 Filtra", "food:filter"),
@@ -3892,9 +4420,10 @@ fn food_filtered_results_keyboard(
     foods: &[FoodRecord],
     page: i64,
     has_next: bool,
+    total: usize,
 ) -> InlineKeyboardMarkup {
     let mut rows = food_item_rows(foods);
-    push_pagination_row(&mut rows, page, has_next, "food:filter:page");
+    push_pagination_row(&mut rows, page, has_next, total, "food:filter:page");
     rows.push(vec![
         button("➕ Nuovo alimento", "food:new"),
         button("🔎 Cerca", "food:search:list"),
@@ -4146,16 +4675,19 @@ fn button(text: impl Into<String>, callback: impl Into<String>) -> InlineKeyboar
 }
 
 fn food_summary_line(food: &FoodRecord, current_user: Option<i64>) -> String {
-    format!("{} {}", food.name, food_origin_marker(food, current_user))
+    match food_origin_marker(food, current_user) {
+        Some(marker) => format!("{} {marker}", food.name),
+        None => food.name.clone(),
+    }
 }
 
-fn food_origin_marker(food: &FoodRecord, current_user: Option<i64>) -> &'static str {
+fn food_origin_marker(food: &FoodRecord, current_user: Option<i64>) -> Option<&'static str> {
     if food.global_catalog == 1 {
-        "🌐"
+        None
     } else if food.owner_user_id == current_user && current_user.is_some() {
-        "👤"
+        Some("👤")
     } else {
-        "👥"
+        Some("👥")
     }
 }
 
@@ -4170,11 +4702,51 @@ fn food_origin_rank(food: &FoodRecord) -> i64 {
 }
 
 fn append_food_lines(text: &mut String, foods: &[FoodRecord], current_user: Option<i64>) {
+    let mut has_non_base = false;
     for food in foods {
+        if food_origin_marker(food, current_user).is_some() {
+            has_non_base = true;
+        }
         text.push_str(&food_summary_line(food, current_user));
         text.push('\n');
     }
-    text.push_str("\n🌐 base · 👤 tuo · 👥 condiviso");
+    if has_non_base {
+        text.push_str("\n👤 tuo · 👥 condiviso");
+    }
+}
+
+async fn append_search_food_lines(
+    pool: &SqlitePool,
+    text: &mut String,
+    foods: &[FoodRecord],
+    current_user: Option<i64>,
+    normalized_query: &str,
+) {
+    let mut has_non_base = false;
+    for food in foods {
+        if food_origin_marker(food, current_user).is_some() {
+            has_non_base = true;
+        }
+        text.push_str(&food_summary_line(food, current_user));
+        text.push('\n');
+        match matching_products_for_food(pool, food.id, normalized_query).await {
+            Ok(products) => {
+                for (brand, product_name) in products {
+                    text.push_str(&format!("   🛒 {brand} · {product_name}\n"));
+                }
+            }
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    food_id = food.id,
+                    "Errore prodotti corrispondenti ricerca"
+                );
+            }
+        }
+    }
+    if has_non_base {
+        text.push_str("\n👤 tuo · 👥 condiviso");
+    }
 }
 
 fn food_item_rows(foods: &[FoodRecord]) -> Vec<Vec<InlineKeyboardButton>> {
@@ -4183,7 +4755,7 @@ fn food_item_rows(foods: &[FoodRecord]) -> Vec<Vec<InlineKeyboardButton>> {
         .iter()
         .map(|food| {
             vec![button(
-                format!("{} {}", food.name, food_origin_marker(food, current_user)),
+                food_summary_line(food, current_user),
                 format!("food:view:{}", food.id),
             )]
         })
@@ -4194,8 +4766,14 @@ fn push_pagination_row(
     rows: &mut Vec<Vec<InlineKeyboardButton>>,
     page: i64,
     has_next: bool,
+    total: usize,
     callback_prefix: &str,
 ) {
+    let pages = total_pages(total);
+    if pages <= 1 {
+        return;
+    }
+
     let mut pagination = Vec::new();
     if page > 0 {
         pagination.push(button(
@@ -4203,15 +4781,14 @@ fn push_pagination_row(
             format!("{callback_prefix}:{}", page - 1),
         ));
     }
+    pagination.push(button(format!("{}/{}", page + 1, pages), "food:noop"));
     if has_next {
         pagination.push(button(
             "Pagina successiva ➡️",
             format!("{callback_prefix}:{}", page + 1),
         ));
     }
-    if !pagination.is_empty() {
-        rows.push(pagination);
-    }
+    rows.push(pagination);
 }
 
 fn page_offset(page: i64) -> i64 {
@@ -4319,6 +4896,29 @@ async fn send_food_products(
     Ok(())
 }
 
+async fn matching_products_for_food(
+    pool: &SqlitePool,
+    food_id: i64,
+    normalized_query: &str,
+) -> Result<Vec<(String, String)>> {
+    if normalized_query.is_empty() {
+        return Ok(Vec::new());
+    }
+    sqlx::query_as::<_, (String, String)>(
+        "SELECT marca, nome_commerciale \
+         FROM prodotti_alimentari \
+         WHERE alimento_id = ? AND attivo = 1 \
+           AND instr(marca_normalizzata || ' ' || nome_commerciale_normalizzato, ?) > 0 \
+         ORDER BY marca COLLATE NOCASE, nome_commerciale COLLATE NOCASE, id \
+         LIMIT 3",
+    )
+    .bind(food_id)
+    .bind(normalized_query)
+    .fetch_all(pool)
+    .await
+    .context("Impossibile leggere i prodotti corrispondenti alla ricerca")
+}
+
 async fn list_products_for_food(pool: &SqlitePool, food_id: i64) -> Result<Vec<ProductRecord>> {
     sqlx::query_as::<_, ProductRecord>(
         "SELECT \
@@ -4327,7 +4927,9 @@ async fn list_products_for_food(pool: &SqlitePool, food_id: i64) -> Result<Vec<P
             p.marca AS brand, \
             p.nome_commerciale AS product_name, \
             p.quantita_confezione AS package_quantity, \
-            um.simbolo AS package_unit_symbol \
+            p.unita_confezione_id AS package_unit_id, \
+            um.simbolo AS package_unit_symbol, \
+            p.codice_ean AS ean \
          FROM prodotti_alimentari p \
          JOIN unita_misura um ON um.id = p.unita_confezione_id \
          WHERE p.alimento_id = ? AND p.attivo = 1 \
@@ -4347,7 +4949,9 @@ async fn get_product(pool: &SqlitePool, product_id: i64) -> Result<Option<Produc
             p.marca AS brand, \
             p.nome_commerciale AS product_name, \
             p.quantita_confezione AS package_quantity, \
-            um.simbolo AS package_unit_symbol \
+            p.unita_confezione_id AS package_unit_id, \
+            um.simbolo AS package_unit_symbol, \
+            p.codice_ean AS ean \
          FROM prodotti_alimentari p \
          JOIN unita_misura um ON um.id = p.unita_confezione_id \
          WHERE p.id = ? AND p.attivo = 1",
@@ -4366,6 +4970,50 @@ async fn get_product(pool: &SqlitePool, product_id: i64) -> Result<Option<Produc
     } else {
         Ok(None)
     }
+}
+
+fn product_history_name(brand: &str, product_name: &str) -> String {
+    format!("{brand} · {product_name}")
+}
+
+fn package_history_value(quantity: f64, unit_symbol: &str) -> String {
+    format!("{} {unit_symbol}", display_quantity(quantity))
+}
+
+async fn record_product_history_event(
+    conn: &mut SqliteConnection,
+    product_id: i64,
+    product_label: &str,
+    operation: &'static str,
+    component: &'static str,
+    changes: &[NewFieldChange],
+) -> Result<()> {
+    let entity_id = storico::ensure_entity(conn, "prodotto_alimentare", product_id, product_label)
+        .await
+        .context("Impossibile preparare lo storico del prodotto")?;
+
+    let event_id = storico::record_event(
+        conn,
+        &NewHistoryEvent {
+            entita_storico_id: entity_id,
+            modulo: "alimentazione",
+            componente: component,
+            operazione: operation,
+            nome_entita_snapshot: product_label,
+            abitazione_storico_id: None,
+            abitazione_nome_snapshot: None,
+            stanza_storico_id: None,
+            stanza_nome_snapshot: None,
+            evento_padre_id: None,
+        },
+    )
+    .await
+    .context("Impossibile registrare l'evento nello storico")?;
+
+    storico::record_field_changes(conn, event_id, changes)
+        .await
+        .context("Impossibile registrare i cambiamenti nello storico")?;
+    Ok(())
 }
 
 async fn create_product_association(
@@ -4388,9 +5036,9 @@ async fn create_product_association(
         bail!("Quantità confezione non valida");
     }
 
-    if get_product_package_unit(pool, unit_id).await?.is_none() {
-        bail!("Unità confezione non disponibile");
-    }
+    let unit = get_product_package_unit(pool, unit_id)
+        .await?
+        .context("Unità confezione non disponibile")?;
 
     let duplicate: bool = sqlx::query_scalar(
         "SELECT EXISTS(\
@@ -4414,6 +5062,10 @@ async fn create_product_association(
         bail!("Questo prodotto è già associato all'alimento");
     }
 
+    let mut tx = pool
+        .begin()
+        .await
+        .context("Impossibile iniziare il salvataggio del prodotto")?;
     let id = sqlx::query(
         "INSERT INTO prodotti_alimentari (\
             alimento_id, marca, marca_normalizzata, nome_commerciale, \
@@ -4429,12 +5081,362 @@ async fn create_product_association(
     .bind(quantity)
     .bind(unit_id)
     .bind(user_id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .context("Impossibile associare il prodotto commerciale")?
     .last_insert_rowid();
 
+    let food_name: String =
+        sqlx::query_scalar("SELECT nome FROM alimenti WHERE id = ? AND archiviato = 0")
+            .bind(food_id)
+            .fetch_one(&mut *tx)
+            .await
+            .context("Impossibile leggere l'alimento associato per lo storico")?;
+    let product_label = product_history_name(&brand, &product_name);
+    record_product_history_event(
+        &mut tx,
+        id,
+        &product_label,
+        "creazione",
+        "prodotto_commerciale",
+        &[
+            NewFieldChange {
+                campo: "alimento_associato",
+                tipo_valore: "testo",
+                valore_prima: None,
+                valore_dopo: Some(food_name),
+            },
+            NewFieldChange {
+                campo: "marca",
+                tipo_valore: "testo",
+                valore_prima: None,
+                valore_dopo: Some(brand.clone()),
+            },
+            NewFieldChange {
+                campo: "nome_commerciale",
+                tipo_valore: "testo",
+                valore_prima: None,
+                valore_dopo: Some(product_name.clone()),
+            },
+            NewFieldChange {
+                campo: "confezione",
+                tipo_valore: "testo",
+                valore_prima: None,
+                valore_dopo: Some(package_history_value(quantity, &unit.simbolo)),
+            },
+        ],
+    )
+    .await?;
+
+    tx.commit()
+        .await
+        .context("Impossibile completare il salvataggio del prodotto")?;
     Ok(id)
+}
+
+async fn product_duplicate_exists(
+    pool: &SqlitePool,
+    product_id: i64,
+    product: &ProductRecord,
+    brand: &str,
+    product_name: &str,
+    quantity: f64,
+    unit_id: i64,
+) -> Result<bool> {
+    sqlx::query_scalar(
+        "SELECT EXISTS(\
+            SELECT 1 FROM prodotti_alimentari \
+            WHERE alimento_id = ? AND attivo = 1 AND id <> ? \
+              AND marca_normalizzata = ? \
+              AND nome_commerciale_normalizzato = ? \
+              AND quantita_confezione = ? \
+              AND unita_confezione_id = ?\
+         )",
+    )
+    .bind(product.food_id)
+    .bind(product_id)
+    .bind(normalize_name(brand))
+    .bind(normalize_name(product_name))
+    .bind(quantity)
+    .bind(unit_id)
+    .fetch_one(pool)
+    .await
+    .context("Impossibile verificare i duplicati del prodotto")
+}
+
+async fn update_product_brand(pool: &SqlitePool, product_id: i64, raw_brand: &str) -> Result<()> {
+    let product = get_product(pool, product_id)
+        .await?
+        .context("Prodotto non disponibile")?;
+    if !can_edit_food_current(pool, product.food_id).await? {
+        bail!("Non hai il permesso di modificare questo prodotto");
+    }
+    let brand = clean_product_text(raw_brand).context("Marca non valida")?;
+    if product.brand == brand {
+        return Ok(());
+    }
+    if product_duplicate_exists(
+        pool,
+        product_id,
+        &product,
+        &brand,
+        &product.product_name,
+        product.package_quantity,
+        product.package_unit_id,
+    )
+    .await?
+    {
+        bail!("Esiste già un prodotto identico associato a questo alimento");
+    }
+
+    let mut tx = pool
+        .begin()
+        .await
+        .context("Impossibile iniziare la modifica della marca")?;
+    sqlx::query(
+        "UPDATE prodotti_alimentari SET marca = ?, marca_normalizzata = ?, \
+         aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
+    )
+    .bind(&brand)
+    .bind(normalize_name(&brand))
+    .bind(product_id)
+    .execute(&mut *tx)
+    .await
+    .context("Impossibile aggiornare la marca")?;
+
+    let product_label = product_history_name(&brand, &product.product_name);
+    record_product_history_event(
+        &mut tx,
+        product_id,
+        &product_label,
+        "modifica",
+        "prodotto_commerciale",
+        &[NewFieldChange {
+            campo: "marca",
+            tipo_valore: "testo",
+            valore_prima: Some(product.brand),
+            valore_dopo: Some(brand),
+        }],
+    )
+    .await?;
+    tx.commit()
+        .await
+        .context("Impossibile completare la modifica della marca")?;
+    Ok(())
+}
+
+async fn update_product_name(
+    pool: &SqlitePool,
+    product_id: i64,
+    raw_product_name: &str,
+) -> Result<()> {
+    let product = get_product(pool, product_id)
+        .await?
+        .context("Prodotto non disponibile")?;
+    if !can_edit_food_current(pool, product.food_id).await? {
+        bail!("Non hai il permesso di modificare questo prodotto");
+    }
+    let product_name = clean_product_text(raw_product_name).context("Nome prodotto non valido")?;
+    if product.product_name == product_name {
+        return Ok(());
+    }
+    if product_duplicate_exists(
+        pool,
+        product_id,
+        &product,
+        &product.brand,
+        &product_name,
+        product.package_quantity,
+        product.package_unit_id,
+    )
+    .await?
+    {
+        bail!("Esiste già un prodotto identico associato a questo alimento");
+    }
+
+    let mut tx = pool
+        .begin()
+        .await
+        .context("Impossibile iniziare la modifica del nome commerciale")?;
+    sqlx::query(
+        "UPDATE prodotti_alimentari SET nome_commerciale = ?, \
+         nome_commerciale_normalizzato = ?, \
+         aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
+    )
+    .bind(&product_name)
+    .bind(normalize_name(&product_name))
+    .bind(product_id)
+    .execute(&mut *tx)
+    .await
+    .context("Impossibile aggiornare il nome commerciale")?;
+
+    let product_label = product_history_name(&product.brand, &product_name);
+    record_product_history_event(
+        &mut tx,
+        product_id,
+        &product_label,
+        "modifica",
+        "prodotto_commerciale",
+        &[NewFieldChange {
+            campo: "nome_commerciale",
+            tipo_valore: "testo",
+            valore_prima: Some(product.product_name),
+            valore_dopo: Some(product_name),
+        }],
+    )
+    .await?;
+    tx.commit()
+        .await
+        .context("Impossibile completare la modifica del nome commerciale")?;
+    Ok(())
+}
+
+async fn update_product_quantity(
+    pool: &SqlitePool,
+    product_id: i64,
+    quantity: f64,
+    unit_id: i64,
+) -> Result<()> {
+    let product = get_product(pool, product_id)
+        .await?
+        .context("Prodotto non disponibile")?;
+    if !can_edit_food_current(pool, product.food_id).await? {
+        bail!("Non hai il permesso di modificare questo prodotto");
+    }
+    if !quantity.is_finite() || quantity <= 0.0 {
+        bail!("Quantità confezione non valida");
+    }
+    let unit = get_product_package_unit(pool, unit_id)
+        .await?
+        .context("Unità confezione non disponibile")?;
+    if product.package_quantity == quantity && product.package_unit_id == unit_id {
+        return Ok(());
+    }
+    if product_duplicate_exists(
+        pool,
+        product_id,
+        &product,
+        &product.brand,
+        &product.product_name,
+        quantity,
+        unit_id,
+    )
+    .await?
+    {
+        bail!("Esiste già un prodotto identico associato a questo alimento");
+    }
+
+    let mut tx = pool
+        .begin()
+        .await
+        .context("Impossibile iniziare la modifica della confezione")?;
+    sqlx::query(
+        "UPDATE prodotti_alimentari SET quantita_confezione = ?, unita_confezione_id = ?, \
+         aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
+    )
+    .bind(quantity)
+    .bind(unit_id)
+    .bind(product_id)
+    .execute(&mut *tx)
+    .await
+    .context("Impossibile aggiornare la confezione")?;
+
+    let product_label = product_history_name(&product.brand, &product.product_name);
+    record_product_history_event(
+        &mut tx,
+        product_id,
+        &product_label,
+        "modifica",
+        "prodotto_commerciale",
+        &[NewFieldChange {
+            campo: "confezione",
+            tipo_valore: "testo",
+            valore_prima: Some(package_history_value(
+                product.package_quantity,
+                &product.package_unit_symbol,
+            )),
+            valore_dopo: Some(package_history_value(quantity, &unit.simbolo)),
+        }],
+    )
+    .await?;
+    tx.commit()
+        .await
+        .context("Impossibile completare la modifica della confezione")?;
+    Ok(())
+}
+
+fn parse_ean_input(raw: &str) -> Result<Option<String>> {
+    let value = raw.trim();
+    if value == "-" || value.is_empty() {
+        return Ok(None);
+    }
+    if !value.chars().all(|ch| ch.is_ascii_digit()) {
+        bail!("Il barcode / EAN deve contenere solo cifre");
+    }
+    if !matches!(value.len(), 8 | 12 | 13 | 14) {
+        bail!("Usa un codice da 8, 12, 13 o 14 cifre, oppure - per rimuoverlo");
+    }
+    Ok(Some(value.to_string()))
+}
+
+async fn update_product_ean(pool: &SqlitePool, product_id: i64, ean: Option<&str>) -> Result<()> {
+    let product = get_product(pool, product_id)
+        .await?
+        .context("Prodotto non disponibile")?;
+    if !can_edit_food_current(pool, product.food_id).await? {
+        bail!("Non hai il permesso di modificare questo prodotto");
+    }
+    if product.ean.as_deref() == ean {
+        return Ok(());
+    }
+    if let Some(ean) = ean {
+        let duplicate: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM prodotti_alimentari \
+             WHERE codice_ean = ? AND attivo = 1 AND id <> ?)",
+        )
+        .bind(ean)
+        .bind(product_id)
+        .fetch_one(pool)
+        .await
+        .context("Impossibile verificare il barcode / EAN")?;
+        if duplicate {
+            bail!("Questo barcode / EAN è già associato a un altro prodotto");
+        }
+    }
+
+    let mut tx = pool
+        .begin()
+        .await
+        .context("Impossibile iniziare la modifica del barcode / EAN")?;
+    sqlx::query(
+        "UPDATE prodotti_alimentari SET codice_ean = ?, \
+         aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
+    )
+    .bind(ean)
+    .bind(product_id)
+    .execute(&mut *tx)
+    .await
+    .context("Impossibile aggiornare il barcode / EAN")?;
+
+    let product_label = product_history_name(&product.brand, &product.product_name);
+    record_product_history_event(
+        &mut tx,
+        product_id,
+        &product_label,
+        "modifica",
+        "prodotto_commerciale",
+        &[NewFieldChange {
+            campo: "barcode_ean",
+            tipo_valore: "testo",
+            valore_prima: product.ean,
+            valore_dopo: ean.map(str::to_string),
+        }],
+    )
+    .await?;
+    tx.commit()
+        .await
+        .context("Impossibile completare la modifica del barcode / EAN")?;
+    Ok(())
 }
 
 async fn get_unit_by_id(pool: &SqlitePool, unit_id: i64) -> Result<Option<UnitRecord>> {
@@ -4484,7 +5486,8 @@ async fn send_product_quantity_prompt(
     bot.send_message(
         chat_id,
         format!(
-            "📦 Quantità confezione\n\nUnità attuale: {}\n\nScrivi solo il numero.\nEsempio: 200",
+            "📦 Quantità confezione\n\nUnità attuale: {} {}\n\nScrivi solo il numero.\nEsempio: 200",
+            unit_icon(&unit.simbolo),
             unit_display_label(&unit.nome, &unit.simbolo)
         ),
     )
@@ -4522,6 +5525,102 @@ async fn send_product_unit_choice(
     Ok(())
 }
 
+async fn send_product_edit_menu(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    product_id: i64,
+) -> ResponseResult<()> {
+    let Some(product) = (match get_product(pool, product_id).await {
+        Ok(product) => product,
+        Err(error) => {
+            tracing::error!(?error, product_id, "Errore menu modifica prodotto");
+            bot.send_message(chat_id, "⚠️ Non riesco a leggere questo prodotto.")
+                .await?;
+            return Ok(());
+        }
+    }) else {
+        bot.send_message(chat_id, "Prodotto non disponibile.")
+            .await?;
+        return Ok(());
+    };
+    if !can_edit_food_current(pool, product.food_id)
+        .await
+        .unwrap_or(false)
+    {
+        bot.send_message(
+            chat_id,
+            "⚠️ Non hai il permesso di modificare questo prodotto.",
+        )
+        .await?;
+        return Ok(());
+    }
+    let ean = product.ean.as_deref().unwrap_or("non impostato");
+    bot.send_message(
+        chat_id,
+        format!(
+            "✏️ Modifica prodotto\n\n{} · {}\n{} Confezione: {} {}\n🔢 Barcode / EAN: {}",
+            product.brand,
+            product.product_name,
+            unit_icon(&product.package_unit_symbol),
+            display_quantity(product.package_quantity),
+            product.package_unit_symbol,
+            ean,
+        ),
+    )
+    .reply_markup(product_edit_keyboard(product_id))
+    .await?;
+    Ok(())
+}
+
+async fn send_product_edit_quantity_prompt(
+    bot: &Bot,
+    chat_id: ChatId,
+    product_id: i64,
+    unit: &UnitRecord,
+) -> ResponseResult<()> {
+    bot.send_message(
+        chat_id,
+        format!(
+            "⚖️ Modifica confezione\n\nUnità attuale: {} {}\n\nScrivi la nuova quantità come numero maggiore di zero.",
+            unit_icon(&unit.simbolo),
+            unit_display_label(&unit.nome, &unit.simbolo),
+        ),
+    )
+    .reply_markup(product_edit_quantity_keyboard(product_id))
+    .await?;
+    Ok(())
+}
+
+async fn send_product_edit_unit_choice(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    product_id: i64,
+) -> ResponseResult<()> {
+    match list_units(pool).await {
+        Ok(units) => {
+            let allowed = units
+                .into_iter()
+                .filter(|unit| matches!(unit.simbolo.as_str(), "g" | "kg" | "ml" | "l" | "pz"))
+                .collect::<Vec<_>>();
+            bot.send_message(
+                chat_id,
+                "📏 Unità confezione\n\nScegli l'unità e poi inserisci la nuova quantità.",
+            )
+            .reply_markup(product_edit_unit_keyboard(product_id, &allowed))
+            .await?;
+        }
+        Err(error) => {
+            tracing::error!(?error, product_id, "Errore unità modifica prodotto");
+            bot.send_message(chat_id, "⚠️ Non riesco a leggere le unità di misura.")
+                .reply_markup(product_edit_cancel_keyboard(product_id))
+                .await?;
+        }
+    }
+    Ok(())
+}
+
 async fn send_product_detail(
     bot: &Bot,
     chat_id: ChatId,
@@ -4545,14 +5644,21 @@ async fn send_product_detail(
     let can_edit = can_edit_food_current(pool, product.food_id)
         .await
         .unwrap_or(false);
+    let ean_line = product
+        .ean
+        .as_deref()
+        .map(|ean| format!("\n🔢 Barcode / EAN: {ean}"))
+        .unwrap_or_default();
     bot.send_message(
         chat_id,
         format!(
-            "🛒 {} · {}\n\n📦 Confezione: {} {}\n\nIl prodotto resta collegato all'alimento generico e potrà avere prezzi, punti vendita e valori nutrizionali propri.",
+            "🛒 {} · {}\n\n{} Confezione: {} {}{}\n\nIl prodotto resta collegato all'alimento generico e potrà avere prezzi, punti vendita e valori nutrizionali propri.",
             product.brand,
             product.product_name,
+            unit_icon(&product.package_unit_symbol),
             display_quantity(product.package_quantity),
-            product.package_unit_symbol
+            product.package_unit_symbol,
+            ean_line
         ),
     )
     .reply_markup(product_detail_keyboard(&product, can_edit))
@@ -4677,7 +5783,7 @@ async fn send_nutrition_input_prompt(
     bot.send_message(
         chat_id,
         format!(
-            "🧮 Inserisci valori nutrizionali\n\nRiferimento attuale: 100 {}\n\nInvia 9 valori separati da punto e virgola in questo ordine:\n1. kcal\n2. kJ\n3. grassi\n4. saturi\n5. carboidrati\n6. zuccheri\n7. fibre\n8. proteine\n9. sale\n\nUsa - per un valore non disponibile.\nEsempio:\n225; 934; 21; 14; 4,3; 4,3; 0,3; 5,4; 0,75",
+            "🧮 Inserisci valori nutrizionali\n\nRiferimento attuale: 100 {}\n\nInvia fino a 9 valori separati da punto e virgola in questo ordine:\n1. kcal\n2. kJ\n3. grassi\n4. saturi\n5. carboidrati\n6. zuccheri\n7. fibre\n8. proteine\n9. sale\n\nUsa - per un valore non disponibile. Se interrompi prima del nono valore, i campi rimanenti verranno completati automaticamente con -.\nPrima del salvataggio ti mostrerò un riepilogo da confermare.\nEsempio:\n225; 934; 21; 14; 4,3; 4,3; 0,3; 5,4; 0,75",
             reference_unit.simbolo
         ),
     )
@@ -4686,10 +5792,38 @@ async fn send_nutrition_input_prompt(
     Ok(())
 }
 
+async fn send_nutrition_confirmation(
+    bot: &Bot,
+    chat_id: ChatId,
+    product_id: i64,
+    reference_unit: &UnitRecord,
+    values: &[Option<f64>; 9],
+) -> ResponseResult<()> {
+    bot.send_message(
+        chat_id,
+        format!(
+            "🧮 Conferma valori nutrizionali\n\nRiferimento: 100 {}\n\n🔥 kcal: {}\n⚡ kJ: {}\n🥑 Grassi: {} g\n   Saturi: {} g\n🍞 Carboidrati: {} g\n   Zuccheri: {} g\n🌾 Fibre: {} g\n💪 Proteine: {} g\n🧂 Sale: {} g\n\nI campi mancanti sono stati completati con —.",
+            reference_unit.simbolo,
+            display_optional_number(values[0]),
+            display_optional_number(values[1]),
+            display_optional_number(values[2]),
+            display_optional_number(values[3]),
+            display_optional_number(values[4]),
+            display_optional_number(values[5]),
+            display_optional_number(values[6]),
+            display_optional_number(values[7]),
+            display_optional_number(values[8]),
+        ),
+    )
+    .reply_markup(nutrition_confirmation_keyboard(product_id))
+    .await?;
+    Ok(())
+}
+
 fn parse_nutrition_values(raw: &str) -> Result<[Option<f64>; 9]> {
     let parts = raw.split(';').map(str::trim).collect::<Vec<_>>();
-    if parts.len() != 9 {
-        bail!("Servono esattamente 9 valori separati da punto e virgola");
+    if parts.len() > 9 {
+        bail!("Puoi inserire al massimo 9 valori separati da punto e virgola");
     }
     let mut values = [None; 9];
     for (index, raw_value) in parts.iter().enumerate() {
@@ -4710,6 +5844,84 @@ fn parse_nutrition_values(raw: &str) -> Result<[Option<f64>; 9]> {
     Ok(values)
 }
 
+fn nutrition_history_changes(
+    before: Option<&NutritionRecord>,
+    after_reference_unit: Option<&str>,
+    after_values: Option<&[Option<f64>; 9]>,
+) -> Vec<NewFieldChange> {
+    let before_value = |extract: fn(&NutritionRecord) -> Option<f64>| {
+        before.and_then(extract).map(display_quantity)
+    };
+    let after_value = |index: usize| {
+        after_values
+            .and_then(|values| values[index])
+            .map(display_quantity)
+    };
+
+    vec![
+        NewFieldChange {
+            campo: "riferimento_nutrizionale",
+            tipo_valore: "testo",
+            valore_prima: before.map(|record| format!("100 {}", record.reference_unit_symbol)),
+            valore_dopo: after_reference_unit.map(|symbol| format!("100 {symbol}")),
+        },
+        NewFieldChange {
+            campo: "energia_kcal",
+            tipo_valore: "testo",
+            valore_prima: before_value(|record| record.energy_kcal),
+            valore_dopo: after_value(0),
+        },
+        NewFieldChange {
+            campo: "energia_kj",
+            tipo_valore: "testo",
+            valore_prima: before_value(|record| record.energy_kj),
+            valore_dopo: after_value(1),
+        },
+        NewFieldChange {
+            campo: "grassi_g",
+            tipo_valore: "testo",
+            valore_prima: before_value(|record| record.fat_g),
+            valore_dopo: after_value(2),
+        },
+        NewFieldChange {
+            campo: "saturi_g",
+            tipo_valore: "testo",
+            valore_prima: before_value(|record| record.saturated_fat_g),
+            valore_dopo: after_value(3),
+        },
+        NewFieldChange {
+            campo: "carboidrati_g",
+            tipo_valore: "testo",
+            valore_prima: before_value(|record| record.carbohydrates_g),
+            valore_dopo: after_value(4),
+        },
+        NewFieldChange {
+            campo: "zuccheri_g",
+            tipo_valore: "testo",
+            valore_prima: before_value(|record| record.sugars_g),
+            valore_dopo: after_value(5),
+        },
+        NewFieldChange {
+            campo: "fibre_g",
+            tipo_valore: "testo",
+            valore_prima: before_value(|record| record.fibre_g),
+            valore_dopo: after_value(6),
+        },
+        NewFieldChange {
+            campo: "proteine_g",
+            tipo_valore: "testo",
+            valore_prima: before_value(|record| record.protein_g),
+            valore_dopo: after_value(7),
+        },
+        NewFieldChange {
+            campo: "sale_g",
+            tipo_valore: "testo",
+            valore_prima: before_value(|record| record.salt_g),
+            valore_dopo: after_value(8),
+        },
+    ]
+}
+
 async fn save_product_nutrition(
     pool: &SqlitePool,
     product_id: i64,
@@ -4726,7 +5938,20 @@ async fn save_product_nutrition(
         .await?
         .filter(|unit| matches!(unit.simbolo.as_str(), "g" | "ml"))
         .context("Unità nutrizionale non valida")?;
+    let before = get_product_nutrition(pool, product_id).await?;
+    let changes =
+        nutrition_history_changes(before.as_ref(), Some(&reference_unit.simbolo), Some(values));
+    if changes
+        .iter()
+        .all(|change| change.valore_prima == change.valore_dopo)
+    {
+        return Ok(());
+    }
 
+    let mut tx = pool
+        .begin()
+        .await
+        .context("Impossibile iniziare il salvataggio dei valori nutrizionali")?;
     sqlx::query(
         "INSERT INTO valori_nutrizionali_prodotto (\
             prodotto_alimentare_id, riferimento_unita_id, energia_kcal, energia_kj, \
@@ -4752,9 +5977,23 @@ async fn save_product_nutrition(
     .bind(values[6])
     .bind(values[7])
     .bind(values[8])
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .context("Impossibile salvare i valori nutrizionali")?;
+
+    let product_label = product_history_name(&product.brand, &product.product_name);
+    record_product_history_event(
+        &mut tx,
+        product_id,
+        &product_label,
+        "modifica",
+        "valori_nutrizionali",
+        &changes,
+    )
+    .await?;
+    tx.commit()
+        .await
+        .context("Impossibile completare il salvataggio dei valori nutrizionali")?;
     Ok(())
 }
 
@@ -4765,11 +6004,35 @@ async fn remove_product_nutrition(pool: &SqlitePool, product_id: i64) -> Result<
     if !can_edit_food_current(pool, product.food_id).await? {
         bail!("Non hai il permesso di modificare questo prodotto");
     }
+    let before = get_product_nutrition(pool, product_id).await?;
+    let Some(before) = before else {
+        return Ok(());
+    };
+    let changes = nutrition_history_changes(Some(&before), None, None);
+
+    let mut tx = pool
+        .begin()
+        .await
+        .context("Impossibile iniziare la rimozione dei valori nutrizionali")?;
     sqlx::query("DELETE FROM valori_nutrizionali_prodotto WHERE prodotto_alimentare_id = ?")
         .bind(product_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .context("Impossibile rimuovere i valori nutrizionali")?;
+
+    let product_label = product_history_name(&product.brand, &product.product_name);
+    record_product_history_event(
+        &mut tx,
+        product_id,
+        &product_label,
+        "modifica",
+        "valori_nutrizionali",
+        &changes,
+    )
+    .await?;
+    tx.commit()
+        .await
+        .context("Impossibile completare la rimozione dei valori nutrizionali")?;
     Ok(())
 }
 
@@ -4804,17 +6067,93 @@ fn food_products_keyboard(
     InlineKeyboardMarkup::new(rows)
 }
 
-fn product_detail_keyboard(product: &ProductRecord, _can_edit: bool) -> InlineKeyboardMarkup {
+fn product_detail_keyboard(product: &ProductRecord, can_edit: bool) -> InlineKeyboardMarkup {
+    let mut rows = vec![vec![button(
+        "🧮 Valori nutrizionali",
+        format!("food:product:nutrition:{}", product.id),
+    )]];
+    if can_edit {
+        rows.push(vec![button(
+            "✏️ Modifica prodotto",
+            format!("food:product:edit:{}", product.id),
+        )]);
+    }
+    rows.push(vec![
+        button("⬅️ Indietro", format!("food:products:{}", product.food_id)),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
+    InlineKeyboardMarkup::new(rows)
+}
+
+fn product_edit_keyboard(product_id: i64) -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
+        vec![
+            button("🏷 Marca", format!("food:product:edit:brand:{product_id}")),
+            button(
+                "🛒 Nome commerciale",
+                format!("food:product:edit:name:{product_id}"),
+            ),
+        ],
         vec![button(
-            "🧮 Valori nutrizionali",
-            format!("food:product:nutrition:{}", product.id),
+            "⚖️ Quantità e unità",
+            format!("food:product:edit:quantity:{product_id}"),
+        )],
+        vec![button(
+            "🔢 Barcode / EAN",
+            format!("food:product:edit:ean:{product_id}"),
         )],
         vec![
-            button("⬅️ Indietro", format!("food:products:{}", product.food_id)),
+            button("⬅️ Indietro", format!("food:product:view:{product_id}")),
             button("🏠 Menu principale", "menu:main"),
         ],
     ])
+}
+
+fn product_edit_cancel_keyboard(product_id: i64) -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![vec![
+        button("⬅️ Indietro", format!("food:product:edit:{product_id}")),
+        button("❌ Annulla", format!("food:product:view:{product_id}")),
+        button("🏠 Menu principale", "menu:main"),
+    ]])
+}
+
+fn product_edit_quantity_keyboard(product_id: i64) -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![
+        vec![button(
+            "📏 Cambia unità",
+            format!("food:product:edit:changeunit:{product_id}"),
+        )],
+        vec![
+            button("⬅️ Indietro", format!("food:product:edit:{product_id}")),
+            button("❌ Annulla", format!("food:product:view:{product_id}")),
+            button("🏠 Menu principale", "menu:main"),
+        ],
+    ])
+}
+
+fn product_edit_unit_keyboard(product_id: i64, units: &[UnitRecord]) -> InlineKeyboardMarkup {
+    let mut rows = Vec::new();
+    for pair in units.chunks(2) {
+        rows.push(
+            pair.iter()
+                .map(|unit| {
+                    button(
+                        unit_display_label(&unit.nome, &unit.simbolo),
+                        format!("food:product:edit:unit:{product_id}:{}", unit.id),
+                    )
+                })
+                .collect(),
+        );
+    }
+    rows.push(vec![
+        button(
+            "⬅️ Indietro",
+            format!("food:product:edit:quantity:{product_id}"),
+        ),
+        button("❌ Annulla", format!("food:product:view:{product_id}")),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
+    InlineKeyboardMarkup::new(rows)
 }
 
 fn product_cancel_keyboard(food_id: i64) -> InlineKeyboardMarkup {
@@ -4890,6 +6229,28 @@ fn product_nutrition_keyboard(
     InlineKeyboardMarkup::new(rows)
 }
 
+fn nutrition_confirmation_keyboard(product_id: i64) -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![
+        vec![
+            button(
+                "✅ Conferma",
+                format!("food:product:nutrition:confirm:{product_id}"),
+            ),
+            button(
+                "✏️ Modifica",
+                format!("food:product:nutrition:modify:{product_id}"),
+            ),
+        ],
+        vec![
+            button(
+                "❌ Annulla",
+                format!("food:product:nutrition:cancel:{product_id}"),
+            ),
+            button("🏠 Menu principale", "menu:main"),
+        ],
+    ])
+}
+
 fn nutrition_input_keyboard(product_id: i64) -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
         vec![
@@ -4911,6 +6272,16 @@ fn nutrition_input_keyboard(product_id: i64) -> InlineKeyboardMarkup {
             button("🏠 Menu principale", "menu:main"),
         ],
     ])
+}
+
+fn unit_icon(symbol: &str) -> &'static str {
+    match symbol {
+        "g" | "kg" => "⚖️",
+        "ml" | "l" => "🥤",
+        "pz" => "🔢",
+        "cucchiaio" | "cucchiaino" => "🥄",
+        _ => "📏",
+    }
 }
 
 fn display_quantity(value: f64) -> String {
@@ -5229,11 +6600,11 @@ mod tests {
     }
 
     #[test]
-    fn paginazione_alimenti_usa_dieci_elementi() {
-        assert_eq!(FOOD_PAGE_SIZE, 10);
+    fn paginazione_alimenti_usa_cinque_elementi() {
+        assert_eq!(FOOD_PAGE_SIZE, 5);
         assert_eq!(page_offset(0), 0);
-        assert_eq!(page_offset(1), 10);
-        assert_eq!(page_offset(3), 30);
+        assert_eq!(page_offset(1), 5);
+        assert_eq!(page_offset(3), 15);
     }
 
     #[tokio::test]
@@ -5251,6 +6622,7 @@ mod tests {
     async fn prodotto_commerciale_si_collega_all_alimento_senza_sostituirlo() {
         let pool = test_pool().await;
         let admin_id = create_user(&pool, "Admin prodotti").await;
+        add_membership(&pool, 1, admin_id, "proprietario").await;
         sqlx::query("UPDATE utenti SET ruolo_sistema = 'admin' WHERE id = ?")
             .bind(admin_id)
             .execute(&pool)
@@ -5283,13 +6655,107 @@ mod tests {
         assert_eq!(products[0].package_quantity, 200.0);
     }
 
+    #[tokio::test]
+    async fn ricerca_alimenti_trova_anche_marca_e_nome_commerciale() {
+        let pool = test_pool().await;
+        let admin_id = create_user(&pool, "Admin ricerca prodotti").await;
+        add_membership(&pool, 1, admin_id, "proprietario").await;
+        sqlx::query("UPDATE utenti SET ruolo_sistema = 'admin' WHERE id = ?")
+            .bind(admin_id)
+            .execute(&pool)
+            .await
+            .expect("promozione admin");
+        let food_id: i64 = sqlx::query_scalar(
+            "SELECT id FROM alimenti WHERE catalogo_globale = 1 AND nome_normalizzato = 'formaggio spalmabile'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("formaggio spalmabile");
+        let unit_id: i64 = sqlx::query_scalar("SELECT id FROM unita_misura WHERE simbolo = 'g'")
+            .fetch_one(&pool)
+            .await
+            .expect("grammi");
+        let actor = actor(admin_id, 1, true, "Admin ricerca prodotti");
+        identity::with_actor(actor, async {
+            create_product_association(&pool, food_id, "Philadelphia", "Original", 200.0, unit_id)
+                .await
+                .expect("prodotto");
+            let by_brand = list_foods(&pool, Some("philadelphia"), None, 20)
+                .await
+                .expect("ricerca marca");
+            let by_name = list_foods(&pool, Some("original"), None, 20)
+                .await
+                .expect("ricerca nome commerciale");
+            assert_eq!(by_brand.iter().filter(|food| food.id == food_id).count(), 1);
+            assert_eq!(by_name.iter().filter(|food| food.id == food_id).count(), 1);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn prodotto_commerciale_puo_essere_modificato_senza_cambiare_alimento() {
+        let pool = test_pool().await;
+        let admin_id = create_user(&pool, "Admin modifica prodotto").await;
+        add_membership(&pool, 1, admin_id, "proprietario").await;
+        sqlx::query("UPDATE utenti SET ruolo_sistema = 'admin' WHERE id = ?")
+            .bind(admin_id)
+            .execute(&pool)
+            .await
+            .expect("promozione admin");
+        let food_id: i64 = sqlx::query_scalar(
+            "SELECT id FROM alimenti WHERE catalogo_globale = 1 AND nome_normalizzato = 'formaggio spalmabile'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("formaggio spalmabile");
+        let grammi_id: i64 = sqlx::query_scalar("SELECT id FROM unita_misura WHERE simbolo = 'g'")
+            .fetch_one(&pool)
+            .await
+            .expect("grammi");
+        let actor = actor(admin_id, 1, true, "Admin modifica prodotto");
+        identity::with_actor(actor, async {
+            let product_id = create_product_association(
+                &pool,
+                food_id,
+                "Philadelphia prova",
+                "Original",
+                200.0,
+                grammi_id,
+            )
+            .await
+            .expect("prodotto");
+            update_product_brand(&pool, product_id, "Philadelphia")
+                .await
+                .expect("marca");
+            update_product_name(&pool, product_id, "Original Light")
+                .await
+                .expect("nome");
+            update_product_quantity(&pool, product_id, 175.0, grammi_id)
+                .await
+                .expect("quantità");
+            update_product_ean(&pool, product_id, Some("1234567890123"))
+                .await
+                .expect("ean");
+            let product = get_product(&pool, product_id)
+                .await
+                .expect("lettura")
+                .expect("prodotto presente");
+            assert_eq!(product.food_id, food_id);
+            assert_eq!(product.brand, "Philadelphia");
+            assert_eq!(product.product_name, "Original Light");
+            assert_eq!(product.package_quantity, 175.0);
+            assert_eq!(product.ean.as_deref(), Some("1234567890123"));
+        })
+        .await;
+    }
+
     #[test]
     fn intestazione_paginata_calcola_totale_e_pagine() {
         assert_eq!(result_count_label(1), "1 risultato");
         assert_eq!(result_count_label(37), "37 risultati");
-        assert_eq!(total_pages(37), 4);
+        assert_eq!(total_pages(37), 8);
         assert_eq!(clamp_page(1, 37), 1);
-        assert_eq!(clamp_page(99, 37), 3);
+        assert_eq!(clamp_page(99, 37), 7);
     }
 
     #[test]
@@ -5299,13 +6765,20 @@ mod tests {
         assert_eq!(values[0], Some(225.0));
         assert_eq!(values[6], None);
         assert_eq!(values[8], Some(0.75));
-        assert!(parse_nutrition_values("225; 934").is_err());
+
+        let partial = parse_nutrition_values("225; 934; -")
+            .expect("campi mancanti completati automaticamente");
+        assert_eq!(partial[0], Some(225.0));
+        assert_eq!(partial[1], Some(934.0));
+        assert!(partial[2..].iter().all(Option::is_none));
+        assert!(parse_nutrition_values("1;2;3;4;5;6;7;8;9;10").is_err());
     }
 
     #[tokio::test]
     async fn valori_nutrizionali_prodotto_sono_facoltativi_e_salvabili() {
         let pool = test_pool().await;
         let admin_id = create_user(&pool, "Admin nutrizione").await;
+        add_membership(&pool, 1, admin_id, "proprietario").await;
         sqlx::query("UPDATE utenti SET ruolo_sistema = 'admin' WHERE id = ?")
             .bind(admin_id)
             .execute(&pool)
@@ -5345,6 +6818,90 @@ mod tests {
             .expect("presente");
         assert_eq!(nutrition.energy_kcal, Some(225.0));
         assert_eq!(nutrition.fibre_g, None);
+    }
+
+    #[tokio::test]
+    async fn storico_prodotti_registra_creazione_modifiche_e_nutrizione() {
+        let pool = test_pool().await;
+        let admin_id = create_user(&pool, "Admin storico prodotti").await;
+        add_membership(&pool, 1, admin_id, "proprietario").await;
+        sqlx::query("UPDATE utenti SET ruolo_sistema = 'admin' WHERE id = ?")
+            .bind(admin_id)
+            .execute(&pool)
+            .await
+            .expect("promozione admin");
+        let food_id: i64 = sqlx::query_scalar(
+            "SELECT id FROM alimenti WHERE catalogo_globale = 1 AND nome_normalizzato = 'formaggio spalmabile'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("formaggio spalmabile");
+        let unit_id: i64 = sqlx::query_scalar("SELECT id FROM unita_misura WHERE simbolo = 'g'")
+            .fetch_one(&pool)
+            .await
+            .expect("grammi");
+        let actor = actor(admin_id, 1, true, "Admin storico prodotti");
+
+        let product_id = identity::with_actor(actor.clone(), async {
+            create_product_association(&pool, food_id, "Philadelphia", "Original", 200.0, unit_id)
+                .await
+                .expect("creazione prodotto")
+        })
+        .await;
+
+        identity::with_actor(actor.clone(), async {
+            update_product_brand(&pool, product_id, "Philadelphia prova")
+                .await
+                .expect("modifica marca");
+            let values =
+                parse_nutrition_values("225;934;-;14").expect("valori nutrizionali parziali");
+            save_product_nutrition(&pool, product_id, unit_id, &values)
+                .await
+                .expect("salvataggio nutrizione");
+            remove_product_nutrition(&pool, product_id)
+                .await
+                .expect("rimozione nutrizione");
+        })
+        .await;
+
+        let events: Vec<(String, String, String)> = sqlx::query_as(
+            "SELECT e.modulo, e.componente, e.operazione \
+             FROM storico_eventi e \
+             JOIN storico_entita se ON se.id = e.entita_storico_id \
+             WHERE se.tipo_entita = 'prodotto_alimentare' AND se.id_origine = ? \
+             ORDER BY e.id",
+        )
+        .bind(product_id)
+        .fetch_all(&pool)
+        .await
+        .expect("eventi prodotto");
+
+        assert_eq!(events.len(), 4);
+        assert_eq!(events[0].0.as_str(), "alimentazione");
+        assert_eq!(events[0].1.as_str(), "prodotto_commerciale");
+        assert_eq!(events[0].2.as_str(), "creazione");
+        assert_eq!(events[1].1.as_str(), "prodotto_commerciale");
+        assert_eq!(events[1].2.as_str(), "modifica");
+        assert_eq!(events[2].1.as_str(), "valori_nutrizionali");
+        assert_eq!(events[3].1.as_str(), "valori_nutrizionali");
+
+        let fields: Vec<String> = sqlx::query_scalar(
+            "SELECT sc.campo \
+             FROM storico_cambiamenti sc \
+             JOIN storico_eventi e ON e.id = sc.evento_id \
+             JOIN storico_entita se ON se.id = e.entita_storico_id \
+             WHERE se.tipo_entita = 'prodotto_alimentare' AND se.id_origine = ?",
+        )
+        .bind(product_id)
+        .fetch_all(&pool)
+        .await
+        .expect("cambiamenti prodotto");
+        assert!(fields.iter().any(|field| field == "alimento_associato"));
+        assert!(fields.iter().any(|field| field == "marca"));
+        assert!(fields.iter().any(|field| field == "energia_kcal"));
+        assert!(fields
+            .iter()
+            .any(|field| field == "riferimento_nutrizionale"));
     }
 
     #[tokio::test]

@@ -328,7 +328,7 @@ pub(crate) async fn record_location_change(
     Ok(())
 }
 
-const HISTORY_PAGE_SIZE: i64 = 6;
+const HISTORY_PAGE_SIZE: i64 = 5;
 
 #[derive(Debug, Clone, FromRow)]
 struct HistoryListRow {
@@ -428,6 +428,7 @@ enum HistoryModuleFilter {
     All,
     Oggetti,
     Luoghi,
+    Alimentazione,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -666,7 +667,12 @@ async fn show_history_filter_picker(
                 .reply_markup(static_filter_keyboard(
                     kind,
                     filters,
-                    &[("0", "Tutti"), ("o", "Oggetti"), ("l", "Luoghi")],
+                    &[
+                        ("0", "Tutti"),
+                        ("o", "Oggetti"),
+                        ("l", "Luoghi"),
+                        ("a", "Alimentazione"),
+                    ],
                 ))
                 .await?;
         }
@@ -772,6 +778,7 @@ async fn load_filtered_global_history_page(
     );
     push_visible_space_filter(&mut count, "e");
     count.push(" AND se.spazio_id = e.spazio_id");
+    push_history_resource_visibility(&mut count, "se");
     push_global_history_filters(&mut count, filters);
     let total: i64 = count.build_query_scalar().fetch_one(pool).await?;
 
@@ -789,6 +796,7 @@ async fn load_filtered_global_history_page(
     );
     push_visible_space_filter(&mut list, "e");
     list.push(" AND se.spazio_id = e.spazio_id");
+    push_history_resource_visibility(&mut list, "se");
     push_global_history_filters(&mut list, filters);
     list.push(" ORDER BY e.avvenuto_il DESC, e.id DESC LIMIT ");
     list.push_bind(HISTORY_PAGE_SIZE);
@@ -817,6 +825,51 @@ fn push_visible_space_filter(query: &mut QueryBuilder<'_, Sqlite>, alias: &str) 
     query.push(alias);
     query.push(".spazio_id = ");
     query.push_bind(actor.spazio_id);
+}
+
+fn push_history_resource_visibility(query: &mut QueryBuilder<'_, Sqlite>, entity_alias: &str) {
+    let actor = crate::identity::current_actor();
+    query.push(" AND (");
+    query.push(entity_alias);
+    query.push(
+        ".tipo_entita <> 'prodotto_alimentare' OR EXISTS (\
+        SELECT 1 FROM prodotti_alimentari p \
+        JOIN alimenti a ON a.id = p.alimento_id \
+        WHERE p.id = ",
+    );
+    query.push(entity_alias);
+    query.push(".id_origine AND (");
+
+    match actor.utente_id {
+        Some(user_id) if actor.view_all => {
+            query.push("a.catalogo_globale = 1 OR a.proprietario_utente_id = ");
+            query.push_bind(user_id);
+            query.push(
+                " OR EXISTS (\
+                SELECT 1 FROM alimento_spazi asp \
+                JOIN membri_spazio ms ON ms.spazio_id = asp.spazio_id \
+                WHERE asp.alimento_id = a.id AND ms.utente_id = ",
+            );
+            query.push_bind(user_id);
+            query.push(")");
+        }
+        Some(user_id) => {
+            query.push("a.catalogo_globale = 1 OR a.proprietario_utente_id = ");
+            query.push_bind(user_id);
+            query.push(
+                " OR EXISTS (\
+                SELECT 1 FROM alimento_spazi asp \
+                WHERE asp.alimento_id = a.id AND asp.spazio_id = ",
+            );
+            query.push_bind(actor.spazio_id);
+            query.push(")");
+        }
+        None => {
+            query.push("a.catalogo_globale = 1");
+        }
+    }
+
+    query.push(")))");
 }
 
 fn push_global_history_filters(query: &mut QueryBuilder<'_, Sqlite>, filters: HistoryFilters) {
@@ -937,28 +990,45 @@ async fn load_history_picker_options(
             Ok((options, total))
         }
         HistoryFilterKind::Entity => {
-            let total_sql = format!(
-                "SELECT COUNT(*) FROM storico_entita se WHERE {visible} AND EXISTS (\
-                    SELECT 1 FROM storico_eventi e WHERE e.entita_storico_id = se.id AND e.spazio_id = se.spazio_id)"
+            let mut count =
+                QueryBuilder::<Sqlite>::new("SELECT COUNT(*) FROM storico_entita se WHERE ");
+            push_visible_space_filter(&mut count, "se");
+            push_history_resource_visibility(&mut count, "se");
+            count.push(
+                " AND EXISTS (\
+                    SELECT 1 FROM storico_eventi e \
+                    WHERE e.entita_storico_id = se.id AND e.spazio_id = se.spazio_id)",
             );
-            let total: i64 = sqlx::query_scalar(&total_sql)
-                .bind(bind_id)
-                .fetch_one(pool)
-                .await?;
-            let list_sql = format!(
-                "SELECT se.id, se.nome_ultimo AS label, (se.tipo_entita || ' · ' || sp.nome) AS subtitle, \
+            let total: i64 = count.build_query_scalar().fetch_one(pool).await?;
+
+            let mut list = QueryBuilder::<Sqlite>::new(
+                "SELECT se.id, se.nome_ultimo AS label, \
+                        ((CASE se.tipo_entita \
+                            WHEN 'prodotto_alimentare' THEN 'Prodotto alimentare' \
+                            WHEN 'oggetto' THEN 'Oggetto' \
+                            WHEN 'abitazione' THEN 'Casa' \
+                            WHEN 'stanza' THEN 'Stanza' \
+                            WHEN 'contenitore' THEN 'Contenitore' \
+                            ELSE se.tipo_entita END) || ' · ' || sp.nome) AS subtitle, \
                         CASE WHEN se.eliminato_il IS NULL THEN 0 ELSE 1 END AS deleted \
                  FROM storico_entita se JOIN spazi sp ON sp.id = se.spazio_id \
-                 WHERE {visible} AND EXISTS (\
-                       SELECT 1 FROM storico_eventi e WHERE e.entita_storico_id = se.id AND e.spazio_id = se.spazio_id) \
+                 WHERE ",
+            );
+            push_visible_space_filter(&mut list, "se");
+            push_history_resource_visibility(&mut list, "se");
+            list.push(
+                " AND EXISTS (\
+                       SELECT 1 FROM storico_eventi e \
+                       WHERE e.entita_storico_id = se.id AND e.spazio_id = se.spazio_id) \
                  ORDER BY (SELECT MAX(e2.id) FROM storico_eventi e2 \
                            WHERE e2.entita_storico_id = se.id AND e2.spazio_id = se.spazio_id) DESC, se.id DESC \
-                 LIMIT ? OFFSET ?"
+                 LIMIT ",
             );
-            let options = sqlx::query_as::<_, HistoryPickerOption>(&list_sql)
-                .bind(bind_id)
-                .bind(HISTORY_FILTER_PICKER_PAGE_SIZE)
-                .bind(offset)
+            list.push_bind(HISTORY_FILTER_PICKER_PAGE_SIZE);
+            list.push(" OFFSET ");
+            list.push_bind(offset);
+            let options = list
+                .build_query_as::<HistoryPickerOption>()
                 .fetch_all(pool)
                 .await?;
             Ok((options, total))
@@ -998,13 +1068,14 @@ async fn history_filters_summary(pool: &SqlitePool, filters: HistoryFilters) -> 
 
 async fn history_filter_entity_name(pool: &SqlitePool, id: Option<i64>) -> Option<String> {
     let id = id?;
-    let sql = format!(
-        "SELECT se.nome_ultimo FROM storico_entita se WHERE se.id = ? AND {}",
-        crate::identity::visible_space_sql("se")
-    );
-    sqlx::query_scalar::<_, String>(&sql)
-        .bind(id)
-        .bind(crate::identity::visible_space_bind_id())
+    let mut query =
+        QueryBuilder::<Sqlite>::new("SELECT se.nome_ultimo FROM storico_entita se WHERE se.id = ");
+    query.push_bind(id);
+    query.push(" AND ");
+    push_visible_space_filter(&mut query, "se");
+    push_history_resource_visibility(&mut query, "se");
+    query
+        .build_query_scalar::<String>()
         .fetch_optional(pool)
         .await
         .ok()
@@ -1050,14 +1121,18 @@ fn global_history_keyboard(
         rows.push(nav);
     }
 
-    rows.push(vec![button("🔎 Filtri", &format!("h:f:{token}"))]);
+    let mut filter_row = vec![button("🔎 Filtri", &format!("h:f:{token}"))];
     if !filters.is_default() {
-        rows.push(vec![button(
+        filter_row.push(button(
             "🧹 Azzera filtri",
             &format!("h:g:0:{}", HistoryFilters::default().to_token()),
-        )]);
+        ));
     }
-    rows.push(vec![button("🏠 Menu principale", "menu:main")]);
+    rows.push(filter_row);
+    rows.push(vec![
+        button("⬅️ Indietro", "menu:main"),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
     InlineKeyboardMarkup::new(rows)
 }
 
@@ -1318,6 +1393,7 @@ impl HistoryModuleFilter {
             Self::All => '0',
             Self::Oggetti => 'o',
             Self::Luoghi => 'l',
+            Self::Alimentazione => 'a',
         }
     }
     fn from_code(code: char) -> Option<Self> {
@@ -1325,6 +1401,7 @@ impl HistoryModuleFilter {
             '0' => Some(Self::All),
             'o' => Some(Self::Oggetti),
             'l' => Some(Self::Luoghi),
+            'a' => Some(Self::Alimentazione),
             _ => None,
         }
     }
@@ -1338,6 +1415,7 @@ impl HistoryModuleFilter {
             Self::All => None,
             Self::Oggetti => Some("oggetti"),
             Self::Luoghi => Some("luoghi"),
+            Self::Alimentazione => Some("alimentazione"),
         }
     }
     fn label(self) -> &'static str {
@@ -1345,6 +1423,7 @@ impl HistoryModuleFilter {
             Self::All => "Tutti",
             Self::Oggetti => "Oggetti",
             Self::Luoghi => "Luoghi",
+            Self::Alimentazione => "Alimentazione",
         }
     }
 }
@@ -1716,7 +1795,7 @@ async fn load_event_detail(
     )>,
     sqlx::Error,
 > {
-    let sql = format!(
+    let mut query = QueryBuilder::<Sqlite>::new(
         "SELECT se.tipo_entita, \
                 strftime('%d/%m/%Y %H:%M', e.avvenuto_il, 'localtime') AS when_local, \
                 e.modulo, e.componente, e.operazione, e.nome_entita_snapshot, \
@@ -1725,12 +1804,14 @@ async fn load_event_detail(
                 e.evento_padre_id, e.attore_nome_snapshot, e.spazio_nome_snapshot, \
                 e.origine_azione, e.automatico \
          FROM storico_eventi e JOIN storico_entita se ON se.id = e.entita_storico_id \
-         WHERE e.id = ? AND se.spazio_id = e.spazio_id AND {}",
-        crate::identity::visible_space_sql("e")
+         WHERE e.id = ",
     );
-    let event = sqlx::query_as::<_, HistoryEventDetail>(&sql)
-        .bind(event_id)
-        .bind(crate::identity::visible_space_bind_id())
+    query.push_bind(event_id);
+    query.push(" AND se.spazio_id = e.spazio_id AND ");
+    push_visible_space_filter(&mut query, "e");
+    push_history_resource_visibility(&mut query, "se");
+    let event = query
+        .build_query_as::<HistoryEventDetail>()
         .fetch_optional(pool)
         .await?;
 
@@ -2161,6 +2242,8 @@ fn entity_icon(entity_type: &str) -> &'static str {
         "contenitore" => "📦",
         "veicolo" => "🚗",
         "vestito" => "👕",
+        "alimento" => "🥕",
+        "prodotto_alimentare" => "🛒",
         _ => "🔹",
     }
 }
@@ -2170,6 +2253,20 @@ fn field_label(field: &str) -> &str {
         "nome" => "Nome",
         "descrizione" => "Descrizione",
         "marca" => "Marca",
+        "nome_commerciale" => "Nome commerciale",
+        "alimento_associato" => "Alimento associato",
+        "confezione" => "Confezione",
+        "barcode_ean" => "Barcode / EAN",
+        "riferimento_nutrizionale" => "Riferimento nutrizionale",
+        "energia_kcal" => "Energia (kcal)",
+        "energia_kj" => "Energia (kJ)",
+        "grassi_g" => "Grassi (g)",
+        "saturi_g" => "Saturi (g)",
+        "carboidrati_g" => "Carboidrati (g)",
+        "zuccheri_g" => "Zuccheri (g)",
+        "fibre_g" => "Fibre (g)",
+        "proteine_g" => "Proteine (g)",
+        "sale_g" => "Sale (g)",
         "modello" => "Modello",
         "numero_serie" => "Numero seriale",
         "posizione" => "Dettaglio posizione",
@@ -2440,6 +2537,21 @@ mod tests {
             "callback troppo lungo: {}",
             callback.len()
         );
+    }
+
+    #[test]
+    fn filtro_modulo_alimentazione_roundtrip() {
+        let filters = HistoryFilters {
+            module: HistoryModuleFilter::Alimentazione,
+            ..HistoryFilters::default()
+        };
+        let token = filters.to_token();
+        assert_eq!(HistoryFilters::from_token(&token), Some(filters));
+        assert_eq!(
+            HistoryModuleFilter::Alimentazione.db_value(),
+            Some("alimentazione")
+        );
+        assert_eq!(HistoryModuleFilter::Alimentazione.label(), "Alimentazione");
     }
 
     #[test]
