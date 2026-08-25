@@ -1,3 +1,24 @@
+## Step 7.2F.1 — Ricette operative con procedimento guidato — 2026-08-25
+
+- attivato il menu `🍳 Ricette` dentro Alimentazione;
+- aggiunti elenco paginato, dettaglio, creazione, modifica e archiviazione;
+- ingredienti sempre collegati ad `alimenti.id` con prodotto commerciale opzionale;
+- il formato di vendita non viene salvato nella ricetta e resta responsabilità della futura Lista spesa;
+- aggiunta ricerca per nome e ricerca OR per più ingredienti con ranking per corrispondenze;
+- visibilità multi-spazio e collaboratori riusano il modello generico di permessi con backend fail-closed;
+- aggiunta migration `20260825231500_ricette_procedimento_guidato.sql`;
+- procedimento modellato in step numerati ordinabili;
+- ogni step supporta zero o più foto/video locali;
+- aggiunte due modalità di consultazione: `📖 Procedimento completo` e `👨‍🍳 Procedura guidata`;
+- la modalità guidata mostra un solo step alla volta con precedente/successivo e indicatore `X/Y` no-op;
+- il procedimento completo viene spezzato in più messaggi se supera il limite Telegram, senza perdere step;
+- i vecchi procedimenti testuali vengono migrati conservativamente nello Step 1;
+- aggiunti test di regressione per salvataggio, ricerca OR, prodotto/formati, permessi, riordino/rinumerazione step, callback e testi lunghi.
+- confermata la politica di sviluppo: macro-struttura prima, rifiniture UX nel backlog `💡 Miglioramenti`;
+- approvato come step successivo il workflow `da_approvare`/`verificato` e l'indicatore amministrativo `🆕` separato dallo stato.
+
+**Stato:** verificato su S9; compilazione/avvio e smoke Telegram strutturale completati con esito positivo. Pronto per il checkpoint.
+
 ## Step 7.2E — accesso controllato e Miglioramenti — 2026-08-25
 
 - `ALLOWED_CHAT_IDS` diventa whitelist di bootstrap/emergenza e non più il modello ordinario di autorizzazione;

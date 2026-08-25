@@ -642,3 +642,16 @@ Un account non autorizzato deve poter utilizzare soltanto il flusso di
 richiesta accesso. L'approvazione all'uso del gestionale resta distinta dalla
 membership negli spazi e dai permessi sulle risorse. La whitelist configurata
 può restare come bootstrap o meccanismo di emergenza.
+
+
+## Ricette operative e procedimento guidato — Step 7.2F.1
+
+Le Ricette sono una risorsa centrale con proprietario, visibilità multi-spazio e
+permessi espliciti. Gli ingredienti referenziano sempre l'alimento generico e
+possono opzionalmente fissare un prodotto commerciale; il formato acquistabile
+non appartiene alla ricetta.
+
+Il procedimento è normalizzato in `ricetta_step` e `ricetta_step_media`: ogni
+step ha ordine e testo e può possedere più foto/video. Gli stessi dati vengono
+letti sia in modalità completa sia in modalità guidata. La colonna legacy
+`ricette.procedimento` resta solo per compatibilità storica.

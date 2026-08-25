@@ -1,97 +1,245 @@
 # Ricette
 
-**Stato: STEP 7.2C — fondazioni operative.**
+**Stato: Step 7.2F.1 — implementazione operativa Telegram nel pacchetto, da verificare su S9 prima del commit.**
 
-## Decisione architetturale
+## Modello
 
-Le ricette seguono lo stesso modello introdotto per gli alimenti:
+Le Ricette seguono gli stessi principi del resto del gestionale:
 
-- proprietà personale separata dalla visibilità;
+- proprietario separato dalla visibilità negli spazi;
 - una sola ricetta centrale, condivisibile in zero, uno o più spazi;
-- nessuna duplicazione automatica quando una ricetta viene condivisa;
-- permessi espliciti di modifica/gestione separati dalla semplice visibilità;
-- backend fail-closed.
+- nessuna copia della ricetta quando viene condivisa;
+- visibilità ≠ modifica ≠ gestione permessi;
+- backend fail-closed;
+- nessun ID tecnico mostrato nella UI utente.
 
-La precedente ipotesi di riusare direttamente la radice `items` non viene
-adottata per la ricetta centrale, perché lo scoping storico di `items` non
-rappresenta bene il modello «un proprietario + più spazi visibili» consolidato
-nello Step 7.1/7.2. Foto, storico e altre funzioni trasversali verranno
-collegate con integrazioni dedicate, senza duplicare la ricetta.
+Le tabelle di base restano:
 
-## Tabelle Step 7.2C
+- `ricette`;
+- `ricetta_spazi`;
+- `ricetta_ingredienti`.
 
-La migration introduce:
+I permessi riusano `inviti_risorsa` / `permessi_risorsa` con
+`tipo_risorsa = 'ricetta'`.
 
-- `ricette` — dati principali e proprietario;
-- `ricetta_spazi` — visibilità della stessa ricetta nei diversi spazi;
-- `ricetta_ingredienti` — ingredienti strutturati che referenziano gli
-  `alimenti` esistenti.
+## Ingredienti
 
-Ogni ingrediente conserva:
+Ogni ingrediente mantiene sempre il riferimento all'alimento generico:
 
-- alimento;
-- quantità;
-- unità di misura;
-- nota opzionale;
-- flag opzionale;
-- ordinamento.
+```text
+ricetta_ingredienti
+├── ricetta_id
+├── alimento_id                 obbligatorio
+├── prodotto_alimentare_id      opzionale
+├── quantita
+├── unita_misura_id
+├── note                        opzionali
+└── opzionale
+```
 
-L'alimento non viene copiato dentro la ricetta: `alimento_id` resta il
-riferimento centrale.
+Se l'alimento possiede prodotti commerciali, il wizard permette di scegliere:
+
+```text
+🌐 Usa alimento generico
+oppure
+🛒 Scegli prodotto specifico
+```
+
+Il prodotto specifico non sostituisce mai `alimento_id`. Un trigger DB verifica
+che il prodotto appartenga allo stesso alimento.
+
+### Prodotto ≠ formato
+
+Dal Step 7.2F.0 un prodotto commerciale può avere più formati di vendita.
+La Ricetta salva eventualmente il prodotto, **mai il formato acquistabile**.
+
+Esempio:
+
+```text
+Ricetta:
+Philadelphia · Original
+150 g necessari
+
+Prodotto:
+Philadelphia · Original
+
+Formati disponibili:
+175 g
+200 g
+350 g
+```
+
+La scelta del formato verrà effettuata dalla futura Lista spesa in base alla
+quantità aggregata, disponibilità, prezzo e avanzo previsto.
+
+## Porzioni
+
+`ricette.porzioni_base` conserva il numero di porzioni per cui sono state
+inserite le quantità. Quantità e unità degli ingredienti sono strutturate e
+restano indipendenti dalle confezioni dei prodotti.
+
+## Procedimento strutturato
+
+La migration `20260825231500_ricette_procedimento_guidato.sql` aggiunge:
+
+- `ricetta_step`;
+- `ricetta_step_media`;
+- `v_ricetta_step_con_media`.
+
+Il procedimento non viene più modellato come un unico testo libero. Ogni
+ricetta ha step ordinati e numerati:
+
+```text
+Ricetta
+└── Procedimento
+    ├── Step 1
+    │   ├── testo
+    │   ├── 0..N foto
+    │   └── 0..N video
+    ├── Step 2
+    │   ├── testo
+    │   └── media opzionali
+    └── Step N
+```
+
+La colonna legacy `ricette.procedimento` resta nello schema per compatibilità
+storica ma non è più la fonte autorevole. Se al momento della migration esiste
+un vecchio procedimento testuale, viene convertito conservativamente nello
+Step 1.
+
+Gli allegati sono salvati localmente sotto:
+
+```text
+data/media/ricette/<ricetta_id>/<step_id>/
+```
+
+Durante la creazione vengono prima salvati sotto una cartella `_draft` e
+spostati nella posizione definitiva solo dopo il salvataggio della ricetta.
+
+## Due modalità di consultazione
+
+Gli stessi step alimentano due viste differenti.
+
+### 📖 Procedimento completo
+
+Mostra tutti gli step in ordine, con indicazione degli allegati disponibili.
+Se il testo supera il limite di un singolo messaggio Telegram, viene suddiviso
+in più messaggi senza perdere step. Gli step con foto/video espongono un
+pulsante per aprire i media associati.
+
+### 👨‍🍳 Procedura guidata
+
+Mostra un solo step alla volta:
+
+```text
+👨‍🍳 Procedura guidata
+Step 2/7
+
+[testo dello step]
+
+📎 Vedi foto/video dello step
+
+⬅️ Step precedente | 2/7 | Step successivo ➡️
+```
+
+Il pulsante centrale `2/7` è informativo/no-op. All'ultimo step compare
+`✅ Termina`.
+
+## Creazione Telegram
+
+Flusso strutturale:
+
+```text
+➕ Nuova ricetta
+→ Nome
+→ Porzioni base
+→ Ingredienti
+   → alimento
+   → generico / prodotto specifico
+   → quantità
+   → unità
+→ Procedimento
+   → testo Step 1
+   → foto/video opzionali
+   → aggiungi Step 2 / fine procedimento
+→ Visibilità
+→ Riepilogo
+→ Salva
+```
+
+Sono richiesti almeno un ingrediente e uno step.
+
+## Modifica
+
+La UI operativa permette almeno:
+
+- modifica nome;
+- modifica porzioni;
+- aggiunta/rimozione ingredienti;
+- aggiunta/modifica/eliminazione step;
+- spostamento step su/giù con numerazione coerente;
+- aggiunta/rimozione foto e video per step;
+- modifica visibilità;
+- gestione collaboratori;
+- archiviazione da parte del proprietario.
+
+Una ricetta deve mantenere almeno uno step.
+
+## Elenco, dettaglio e ricerca
+
+Menu Ricette:
+
+```text
+🍳 Ricette
+├── 📋 Elenco ricette
+├── ➕ Nuova ricetta
+├── 🔎 Cerca
+└── 🥕 Cerca per ingredienti
+```
+
+Gli elenchi usano 5 ricette per pagina e il pulsante centrale pagina/totale è
+informativo.
+
+La ricerca per nome usa `nome_normalizzato` e rispetta la visibilità corrente.
 
 ## Ricerca per ingredienti
 
-La struttura è predisposta per selezionare più alimenti e cercare le ricette
-che ne contengono **almeno uno**.
+La ricerca multi-ingrediente usa semantica **OR** e ordina per numero di
+corrispondenze:
 
-Esempio, con ingredienti richiesti `Pollo + Riso + Zucchine`:
+```text
+Richiesti: pollo + riso + zucchine
 
-1. ricetta con Pollo + Riso + Zucchine → 3 corrispondenze;
-2. ricetta con Pollo + Riso → 2 corrispondenze;
-3. ricetta con Zucchine → 1 corrispondenza.
+Ricetta A → 3/3
+Ricetta B → 2/3
+Ricetta C → 1/3
+```
 
-L'ordinamento principale è quindi il numero di ingredienti richiesti presenti,
-dal maggiore al minore. A parità viene usato il nome della ricetta come
-criterio stabile e leggibile.
+A parità vengono usati nome ricetta e ID interno stabile; l'ID non viene
+mostrato all'utente.
 
-L'indice `idx_ricetta_ingredienti_ricerca (alimento_id, ricetta_id)` è pensato
-proprio per questa query con `COUNT(DISTINCT alimento_id)`.
+## Compatibilità alimentare
 
-## Dosi e porzioni
+Il dettaglio può usare `v_ricetta_compatibilita_alimentare` per derivare la
+compatibilità dagli ingredienti:
 
-La ricetta salva `porzioni_base`. Gli ingredienti hanno quantità e unità
-strutturate, così il passo successivo potrà scalare le dosi senza interpretare
-testo libero.
+- almeno un ingrediente `no` → ricetta `no`;
+- nessun `no` ma almeno un `verificare`/dato mancante → `da verificare`;
+- tutti `si` → compatibile.
 
-## Condivisione e permessi
+Le etichette sono un supporto gestionale e non sostituiscono la verifica delle
+etichette reali in caso di allergie/intolleranze.
 
-`inviti_risorsa` e `permessi_risorsa` vengono riusati con
-`tipo_risorsa = 'ricetta'`.
+## Permessi e condivisione
 
-La sola visibilità in uno spazio non concede automaticamente il diritto di
-modifica. Proprietario e collaboratori autorizzati seguiranno gli stessi
-livelli già definiti per gli alimenti:
+- proprietario: modifica e gestione;
+- permesso `Edit`: modifica contenuti ma non gestione dei permessi;
+- permesso `Manage`: modifica + gestione permessi;
+- semplice visibilità nello stesso spazio: sola lettura;
+- ruolo admin di sistema: non rende automaticamente proprietario della ricetta.
 
-- può modificare;
-- può modificare e gestire i permessi.
+## Da non confondere con le rifiniture UX
 
-## Passo successivo
-
-Il backend Telegram dovrà aggiungere:
-
-- creazione ricetta;
-- aggiunta/rimozione ingredienti;
-- procedimento;
-- modifica;
-- condivisione e collaboratori;
-- ricerca per più ingredienti con ranking delle corrispondenze.
-
-## Prodotto specifico e formato
-
-Dal Step 7.2F.0 un prodotto commerciale può avere più formati. Un ingrediente
-ricetta può continuare a scegliere opzionalmente il prodotto commerciale, ma
-**non salva il formato della confezione**.
-
-Esempio: una ricetta può richiedere `150 g` di `Philadelphia · Original`; non
-deve sapere se al supermercato verrà acquistata una confezione da 175 g, 200 g
-o 350 g. Questa decisione appartiene alla futura Lista spesa.
+Il macro-step punta alla struttura e alle funzioni principali. Piccole
+rifiniture di testi, disposizione pulsanti e scorciatoie possono essere
+registrate in `💡 Miglioramenti` senza bloccare lo sviluppo strutturale.

@@ -4751,7 +4751,7 @@ fn food_menu_keyboard() -> InlineKeyboardMarkup {
             button("🔎 Cerca", "food:search"),
         ],
         vec![button("🔄 Aggiorna alimenti", "food:refresh")],
-        vec![button("🍝 Ricette · prossimamente", "menu:soon")],
+        vec![button("🍳 Ricette", "recipe:menu")],
         vec![button("🏠 Menu principale", "menu:main")],
     ])
 }

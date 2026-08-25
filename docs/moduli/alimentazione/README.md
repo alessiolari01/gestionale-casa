@@ -1,6 +1,6 @@
 # Modulo Alimentazione
 
-**Stato complessivo: PREVISTO — implementazione Step 7.2.**
+**Stato complessivo: IN SVILUPPO — Alimentazione operativa, Ricette Step 7.2F.1 da verificare su S9.**
 
 Alimentazione raccoglie alimenti, ricette, profili, turni/routine,
 pianificazione dei pasti e lista della spesa. È progettato per uso personale e
@@ -10,9 +10,9 @@ condiviso.
 
 | Area | Stato |
 |---|---|
-| Fondazioni utenti/spazi | PREVISTO — Step 7.1 |
-| Alimenti e unità | PREVISTO |
-| Ricette | PREVISTO |
+| Fondazioni utenti/spazi | OPERATIVE |
+| Alimenti e unità | OPERATIVI |
+| Ricette | STEP 7.2F.1 — implementate nel pacchetto, da verificare |
 | Profili e porzioni | PREVISTO |
 | Turni/routine | PREVISTO |
 | Planner pasti | PREVISTO |

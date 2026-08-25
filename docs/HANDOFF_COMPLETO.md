@@ -18,24 +18,24 @@ deve aprire il repository `alessiolari01/gestionale-casa`, usare il branch `step
 
 Repository GitHub: `alessiolari01/gestionale-casa`
 Branch di sviluppo corrente: `step-7-alimentazione`
-Ultimo checkpoint consolidato: `2c55de7` — `Step 7.2D.0.4-0.4.1: rifinisce alimenti e integra storico prodotti`.
+Ultimo checkpoint consolidato: `43dbc95` — `Step 7.2E-7.2F.0: aggiunge accesso controllato, miglioramenti e formati prodotto`.
 
-Il macro-step **Step 7.2E — Accesso controllato + Miglioramenti** è stato applicato e verificato anche con un secondo account Telegram approvato. Dopo il rinforzo dello stack Tokio, il secondo account riesce a navigare normalmente anche in Alimentazione. Il lavoro resta da consolidare nel prossimo checkpoint Git insieme alle modifiche strutturali successive.
+Lo Step **7.2E — Accesso controllato + Miglioramenti** e lo Step **7.2F.0 — Formati dei prodotti commerciali** sono consolidati nel checkpoint `43dbc95`. Il secondo account Telegram approvato è stato verificato anche in Alimentazione dopo il rinforzo dello stack Tokio e la navigazione risulta operativa.
 
-Il macro-step strutturale corrente è **Step 7.2F.0 — Formati dei prodotti commerciali**.
+Lo Step **7.2F.1 — Ricette operative con procedimento guidato** è stato verificato su S9 e nello smoke Telegram strutturale: creazione ricetta, ingredienti, prodotto commerciale opzionale, procedimento completo, procedura guidata, modifica/riordino/eliminazione step, ricerca e navigazione risultano operativi. La migration append-only `20260825231500_ricette_procedimento_guidato.sql` è applicata al database reale e non deve più essere modificata. Questo documento accompagna il checkpoint di chiusura dello Step 7.2F.1.
 
-Baseline già verificata prima di iniziare 7.2E:
+Baseline `43dbc95`:
 
-- `cargo fmt --all -- --check` → ok;
-- `cargo check --locked` → ok;
-- `cargo clippy --all-targets --locked -- -D warnings` → ok;
-- `cargo test --locked -- --test-threads=1` → **124 test superati**;
-- `PRAGMA integrity_check` → `ok`;
-- `PRAGMA foreign_key_check` → nessuna violazione;
+- accesso Telegram approvato via database operativo;
+- backlog `💡 Miglioramenti` operativo;
 - catalogo base → **418 alimenti** attivi;
-- working tree pulito al commit `2c55de7`.
+- prodotti commerciali separati dai formati di vendita;
+- formati multipli verificati sul database reale;
+- secondo account approvato capace di navigare Alimentazione e le altre funzioni;
+- `PRAGMA integrity_check` → `ok` e `PRAGMA foreign_key_check` → nessuna violazione al checkpoint;
+- working tree pulito dopo il push di `43dbc95`.
 
-La nuova migration di 7.2E è `20260825153000_accesso_miglioramenti.sql`. Una volta applicata al database reale diventa immutabile come tutte le migration precedenti.
+Le migration `20260825153000_accesso_miglioramenti.sql`, `20260825220000_formati_prodotti_alimentari.sql` e `20260825231500_ricette_procedimento_guidato.sql` sono applicate al database reale e non devono essere modificate.
 
 Rimane il warning esterno di future incompatibility relativo a `proc-macro-error2 v2.0.1`; non è un warning del codice del progetto.
 
@@ -951,14 +951,18 @@ Quando un prodotto non possiede alcun valore nutrizionale, non limitarsi al test
 
 # RICETTE
 
-## 21. Stato Ricette
+## 21. Stato Ricette — Step 7.2F.1
 
-Le fondazioni database sono già presenti, ma la UI Telegram completa delle Ricette **non è ancora operativa**.
+Le fondazioni DB dello Step 7.2C vengono rese operative su Telegram nello Step
+7.2F.1. La patch è costruita sulla baseline `43dbc95` e va verificata su S9
+prima del commit.
 
-Migration base:
+Migration coinvolte:
 
 ```text
 20260824222000_ricette_fondazioni.sql
+20260825113000_prodotti_nutrizione_ricette.sql
+20260825231500_ricette_procedimento_guidato.sql
 ```
 
 Tabelle principali:
@@ -967,112 +971,228 @@ Tabelle principali:
 ricette
 ricetta_spazi
 ricetta_ingredienti
+ricetta_step
+ricetta_step_media
 ```
 
-Le Ricette devono seguire lo stesso modello:
+Vista nuova:
+
+```text
+v_ricetta_step_con_media
+```
+
+Le Ricette seguono il modello:
 
 ```text
 Proprietario
 ↓
-Spazi visibili
+Visibilità in zero/uno/più spazi
 ↓
 Collaboratori autorizzati
 ```
 
-Visibile ≠ modificabile.
-
-I permessi devono riutilizzare:
-
-```text
-inviti_risorsa
-permessi_risorsa
-```
-
-con `tipo_risorsa = "ricetta"`.
+Visibile ≠ modificabile. I permessi riusano `inviti_risorsa` e
+`permessi_risorsa` con `tipo_risorsa = "ricetta"`.
 
 ---
 
 ## 22. Ingredienti Ricetta
 
-Regola fondamentale:
-
-**Mai salvare l'ingrediente come semplice testo libero se esiste nel catalogo.**
-
-Struttura:
+Regola fondamentale: l'ingrediente non viene duplicato come testo libero se
+esiste nel catalogo.
 
 ```text
 ricetta_ingredienti
 ├── ricetta_id
 ├── alimento_id                 obbligatorio
 ├── prodotto_alimentare_id      opzionale
-├── quantità
-└── unità
+├── quantita
+├── unita_misura_id
+├── note                        opzionali
+└── opzionale
 ```
 
-Lo Step D0.3 ha già aggiunto `prodotto_alimentare_id` opzionale.
-
-Il DB verifica che l'eventuale prodotto scelto appartenga allo stesso alimento.
-
-### Flusso approvato per il prossimo wizard
+Quando un alimento possiede prodotti commerciali, il wizard permette:
 
 ```text
-🥕 Scegli alimento
-        ↓
-esistono prodotti commerciali?
-   ├── no → continua con generico
-   └── sì
-        ↓
-   🌐 Usa alimento generico
-   oppure
-   🛒 Scegli prodotto reale
-        ↓
-   quantità
-        ↓
-   unità proposta dall'alimento
-   + possibilità di cambiarla
+🌐 Usa alimento generico
+oppure
+🛒 Scegli prodotto specifico
 ```
 
-La scelta del prodotto **non sostituisce** `alimento_id`.
+La scelta del prodotto non sostituisce mai `alimento_id`; il DB verifica che
+prodotto e alimento siano coerenti.
 
-Esempio:
+### Prodotto commerciale ≠ formato acquistabile
+
+La Ricetta **non salva il formato**. Esempio:
 
 ```text
-alimento_id = Formaggio spalmabile
-prodotto_alimentare_id = Philadelphia Original (opzionale)
-quantità ricetta = 250 g
-confezione prodotto = 200 g
+Ricetta:
+Philadelphia · Original
+150 g necessari
+
+Formati del prodotto:
+100 g
+200 g
+350 g
 ```
 
-Quantità ricetta e quantità confezione sono indipendenti.
+Il formato verrà scelto dalla futura Lista spesa in funzione della quantità
+aggregata da acquistare, del prezzo, della disponibilità e dell'avanzo.
 
-### Vantaggio futuro
-
-Ricetta generica:
-
-```text
-Formaggio spalmabile
-→ confronta tutti i prodotti associati
-→ suggerisce il più conveniente
-```
-
-Ricetta specifica:
-
-```text
-Philadelphia Original
-→ cerca prezzi e disponibilità proprio di quel prodotto
-```
-
-Se il prodotto specifico viene disattivato, la ricetta deve restare valida grazie ad `alimento_id`.
+Quantità della ricetta, quantità confezione e formato restano quindi concetti
+separati.
 
 ---
 
-## 23. Ricerca Ricette per ingredienti
+## 23. Procedimento strutturato e media per step
 
-La fondazione Rust è già presente in `src/modules/ricette.rs`.
+Il procedimento non è più un unico campo testuale. La migration
+`20260825231500_ricette_procedimento_guidato.sql` aggiunge:
 
-Semantica scelta: **OR**, ordinata per numero di ingredienti richiesti presenti.
+```text
+ricetta_step
+├── ricetta_id
+├── numero
+└── testo
 
-Esempio:
+ricetta_step_media
+├── ricetta_step_id
+├── tipo_media        foto | video
+├── percorso_file
+├── descrizione
+└── ordinamento
+```
+
+Ogni ricetta deve mantenere almeno uno step. Gli step possono essere aggiunti,
+modificati, eliminati e spostati su/giù; la numerazione viene mantenuta
+coerente anche dopo l'eliminazione di uno step intermedio.
+
+Ogni step può avere zero o più foto e zero o più video. I file vengono salvati
+sotto:
+
+```text
+data/media/ricette/<ricetta_id>/<step_id>/
+```
+
+Durante la creazione vengono usati file temporanei sotto
+`data/media/ricette/_draft/<chat_id>/`, eliminati in caso di annullamento e
+spostati nella cartella definitiva dopo il salvataggio.
+
+La vecchia colonna `ricette.procedimento` resta soltanto per compatibilità
+storica. Se contiene testo al momento della migration, questo viene convertito
+conservativamente nello Step 1.
+
+### 📖 Procedimento completo
+
+Mostra tutti gli step numerati nello stesso flusso di lettura. Gli step con
+media espongono il comando `📎 Media step N`.
+
+Se il procedimento supera il limite di un singolo messaggio Telegram, il testo
+viene suddiviso in più messaggi senza perdere alcuno step.
+
+### 👨‍🍳 Procedura guidata
+
+Usa gli stessi identici dati ma mostra un solo step alla volta:
+
+```text
+👨‍🍳 Procedura guidata
+Step 2/7
+
+[testo]
+
+📎 Vedi foto/video dello step
+
+⬅️ Step precedente | 2/7 | Step successivo ➡️
+```
+
+`2/7` è un pulsante informativo/no-op. All'ultimo step compare `✅ Termina`.
+
+---
+
+## 24. UI Ricette operativa nel pacchetto
+
+Menu:
+
+```text
+🍽 Alimentazione
+├── 🥕 Alimenti
+└── 🍳 Ricette
+    ├── 📋 Elenco ricette
+    ├── ➕ Nuova ricetta
+    ├── 🔎 Cerca
+    └── 🥕 Cerca per ingredienti
+```
+
+Creazione:
+
+```text
+➕ Nuova ricetta
+→ Nome
+→ Porzioni base
+→ Ingredienti
+   → alimento
+   → generico / prodotto specifico
+   → quantità
+   → unità
+→ Procedimento guidato
+   → testo Step 1
+   → foto/video opzionali
+   → nuovo step / fine procedimento
+→ Visibilità
+→ Riepilogo
+→ ✅ Salva
+```
+
+Dettaglio:
+
+```text
+🍳 Nome ricetta
+👥 Porzioni base
+👤 Proprietario
+👁 Visibilità
+
+🥕 Ingredienti
+📝 Numero step
+🧭 Compatibilità principali
+
+📖 Procedimento completo
+👨‍🍳 Procedura guidata
+✏️ Modifica ricetta          [se autorizzato]
+```
+
+Modifica strutturale:
+
+```text
+✏️ Modifica ricetta
+├── 🏷 Nome
+├── 👥 Porzioni
+├── 🥕 Ingredienti
+├── 📝 Procedimento
+├── 👁 Visibilità             [manage]
+├── 👥 Collaboratori          [manage]
+└── 🗄 Archivia               [proprietario]
+```
+
+La prima versione permette aggiunta/rimozione ingredienti; ulteriori comodità
+UX sull'editing puntuale possono essere raccolte tramite `💡 Miglioramenti`
+senza cambiare il modello dati.
+
+Gli elenchi mostrano 5 ricette per pagina e usano il pulsante centrale `X/Y`
+come no-op informativo.
+
+---
+
+## 25. Ricerca e compatibilità Ricette
+
+### Ricerca per nome
+
+Ricerca sul nome normalizzato delle ricette visibili all'utente.
+
+### Ricerca per ingredienti
+
+Semantica **OR** con ranking per numero di ingredienti richiesti presenti:
 
 ```text
 Richiesti:
@@ -1085,111 +1205,30 @@ Ricetta C → 1/3
 
 Ordine:
 
-```text
-3/3
-2/3
-1/3
-```
-
-La query conta `COUNT(DISTINCT alimento_id)` limitato agli ingredienti richiesti.
-
-Criteri secondari attuali nella fondazione Rust:
-
-1. numero di corrispondenze decrescente;
+1. corrispondenze decrescenti;
 2. nome ricetta;
-3. ID interno stabile, mai mostrato in UI.
+3. ID interno stabile, mai mostrato nella UI.
 
----
+### Compatibilità alimentare
 
-## 24. UI Ricette prevista
-
-Direzione approvata:
-
-```text
-🍽 Alimentazione
-├── 🥕 Alimenti
-└── 🍳 Ricette
-    ├── 📋 Elenco ricette
-    ├── ➕ Nuova ricetta
-    ├── 🔎 Cerca
-    └── 🥕 Cerca per ingredienti
-```
-
-Creazione prevista:
+Il dettaglio usa `v_ricetta_compatibilita_alimentare` e applica la logica già
+consolidata:
 
 ```text
-➕ Nuova ricetta
-Nome
- ↓
-Ingredienti
- ↓
-per ogni ingrediente:
-  generico/prodotto specifico se disponibile
-  quantità
-  unità
- ↓
-Procedimento
- ↓
-Visibilità
- ↓
-✅ Salva
+almeno un no       → ❌
+nessun no + dubbio → ⚠️ da verificare
+tutti sì           → ✅
 ```
 
-Dettaglio previsto:
+I dati servono come supporto gestionale e non sostituiscono la verifica delle
+etichette reali per allergie/intolleranze.
 
-```text
-🍳 Pollo e riso
+### Nutrizione Ricette — futuro
 
-👤 Proprietà: tua
-👥 Visibile in: ...
-
-🥕 Ingredienti
-• Petto di pollo — 150 g
-• Riso — 100 g
-
-📖 Procedimento
-...
-
-🎯 Compatibilità
-...
-
-✏️ Modifica ricetta
-```
-
-Modifica prevista:
-
-```text
-✏️ Modifica ricetta
-├── 📝 Nome
-├── 🥕 Ingredienti
-├── 📖 Procedimento
-├── 👥 Visibilità
-└── 🔐 Collaboratori
-```
-
----
-
-## 25. Nutrizione Ricette — direzione futura
-
-Se gli ingredienti usano prodotti commerciali dotati di valori nutrizionali, il gestionale potrà calcolare automaticamente valori totali e per porzione.
-
-Esempio futuro:
-
-```text
-Totale ricetta
-🔥 kcal
-💪 proteine
-🍞 carboidrati
-🥑 grassi
-...
-
-8 porzioni
-→ valori per porzione
-```
-
-Se mancano dati affidabili, non inventare valori.
-
-Mostrare invece che il calcolo è incompleto e quali ingredienti non hanno dati sufficienti.
+I valori nutrizionali aggregati non fanno ancora parte di 7.2F.1. In futuro
+potranno essere calcolati quando gli ingredienti specifici hanno dati
+nutrizionali affidabili; in presenza di dati mancanti il sistema deve mostrare
+un risultato incompleto e non inventare valori.
 
 ---
 
@@ -1659,42 +1698,68 @@ Quando non sono presenti valori nutrizionali, mostrare un messaggio guidato che 
 
 ---
 
-# PROSSIMA DIREZIONE
+## 39-bis. Workflow approvato per `💡 Miglioramenti` e amministrazione
 
-## 40. Step immediatamente successivo consigliato
+Il backlog deve distinguere **stato operativo** e **stato di lettura**. Sono due concetti diversi e non vanno fusi.
 
-Lo Step 7.2E ha consolidato accesso approvato al bot e backlog `💡 Miglioramenti`. Lo Step 7.2F.0 separa ora prodotto commerciale e formato acquistabile, fondazione necessaria prima di Ricette, prezzi e Lista spesa.
-
-Dopo verifica e checkpoint di 7.2F.0, il prossimo macro-step consigliato torna a:
+Stati approvati per i miglioramenti:
 
 ```text
-Step 7.2D.1 — Ricette operative Telegram
+🟡 Da approvare
+🟢 Verificato
+🔵 Pianificato
+✅ Fatto
+❌ Scartato
 ```
 
-Prima tranche strutturale:
+Regole approvate:
 
-1. menu Ricette;
-2. elenco e dettaglio;
-3. creazione ricetta;
-4. ingredienti collegati ad `alimenti.id`;
-5. scelta alimento generico oppure prodotto commerciale specifico quando disponibile;
-6. quantità/unità indipendenti dalla confezione del prodotto;
-7. procedimento;
-8. ownership e visibilità negli spazi;
-9. modifica e permessi collaboratori;
-10. ricerca per nome e ricerca OR per ingredienti con ranking.
+- miglioramento creato da un utente con ruolo di sistema `admin` → nasce `verificato`;
+- miglioramento creato da un utente non admin → nasce `da_approvare`;
+- `da leggere` non è uno stato del miglioramento: è un flag/timestamp amministrativo separato;
+- un nuovo miglioramento non admin deve mostrare `🆕` in fondo alla riga nell'elenco admin;
+- una nuova richiesta di accesso deve usare la stessa semantica `🆕`;
+- aprire il dettaglio marca l'elemento come letto e rimuove `🆕`;
+- qualsiasi decisione esplicita (`verificato`, `scartato`, approvazione/rifiuto richiesta) marca comunque l'elemento come letto;
+- `fatto` e `scartato` non devono essere proposti durante la pianificazione del lavoro;
+- quando l'utente chiede esplicitamente una **revisione dei miglioramenti**, tutti i miglioramenti `scartato` devono essere eliminati insieme ai relativi allegati fisici;
+- `da_approvare` deve essere valutato dall'admin prima di entrare nel backlog operativo;
+- la lettura `🆕` è amministrativa: l'autore normale continua a vedere il proprio stato (`da_approvare`, ecc.) senza bisogno di un proprio flag non-letto.
 
-Le rifiniture già annotate — `🍝 Pasta`, eventuale `🍚 Riso`, `🍞 Pane e prodotti da forno`, pulsante diretto `🛒 Prodotti associati (N)`, messaggi guidati dei valori nutrizionali e altre osservazioni UX — **non devono più bloccare il macro-step strutturale**. Possono essere registrate e gestite tramite `💡 Miglioramenti`.
+Queste regole sono il prossimo step trasversale da implementare con una nuova migration append-only; non riscrivere `20260825153000_accesso_miglioramenti.sql`.
 
-Successivamente:
+# PROSSIMA DIREZIONE
 
-- compatibilità alimentare derivata nelle Ricette;
-- calcolo nutrizionale;
-- prezzi/punti vendita;
+## 40. Direzione dopo Step 7.2F.1
+
+Lo Step **7.2F.1 — Ricette operative con procedimento guidato** è verificato e pronto per il checkpoint. Il prossimo intervento trasversale riguarda il workflow del backlog `💡 Miglioramenti` e gli indicatori amministrativi di elementi non letti.
+
+Smoke strutturale completato con esito positivo. La stessa sequenza resta il test di regressione consigliato:
+
+1. apertura menu Ricette;
+2. creazione ricetta con almeno due ingredienti;
+3. scelta di un prodotto commerciale specifico per un ingrediente;
+4. verifica che nessun formato di vendita venga salvato nella ricetta;
+5. creazione di almeno tre step;
+6. aggiunta di una foto e di un video a step differenti;
+7. `📖 Procedimento completo`;
+8. `👨‍🍳 Procedura guidata` con precedente/successivo e `X/Y` no-op;
+9. modifica/riordino/eliminazione di uno step intermedio;
+10. ricerca per nome;
+11. ricerca OR per più ingredienti;
+12. condivisione/permesso collaboratore quando disponibile un secondo account.
+
+Dopo il checkpoint Ricette, i macro-step successivi possono concentrarsi su:
+
+- calcolo nutrizionale ricette;
+- Lista spesa e scelta automatica dei formati da acquistare;
+- prezzi/disponibilità per punto vendita;
 - dispensa e quantità;
-- pianificazione;
-- fase dedicata di rifinitura UX.
+- pianificazione pasti.
 
+Le rifiniture già annotate — categoria `🍝 Pasta`, eventuali ulteriori
+categorie, scorciatoie UI, testi più guidati e altri dettagli — non devono
+bloccare il macro-step e possono essere registrate in `💡 Miglioramenti`.
 
 ## 41. Regola fissa di documentazione
 
@@ -1726,7 +1791,7 @@ Il documento deve permettere a una terza persona di capire:
 
 ## 42. Sintesi finale per il prossimo sviluppatore
 
-Il progetto è un gestionale multiutente/multispazio con Telegram come frontend corrente. Oggetti, luoghi, contenitori, foto e storico sono operativi; Alimentazione dispone di catalogo globale, categorie, ownership/condivisione, permessi generici, compatibilità alimentare, prodotti commerciali, nutrizione e audit. Le Ricette hanno fondazioni DB ma non ancora la UI Telegram completa.
+Il progetto è un gestionale multiutente/multispazio con Telegram come frontend corrente. Oggetti, luoghi, contenitori, foto e storico sono operativi; Alimentazione dispone di catalogo globale, categorie, ownership/condivisione, permessi generici, compatibilità alimentare, prodotti commerciali, formati di vendita, nutrizione e audit. La baseline consolidata precedente è `43dbc95`; lo Step 7.2F.1 è ora verificato su S9 e rende operative le Ricette su Telegram con ingredienti strutturati, prodotto commerciale opzionale, ricerca, condivisione e procedimento guidato a step con foto/video. Il checkpoint che contiene questo documento deve essere considerato la nuova base operativa verificando `git log -5 --oneline --decorate`.
 
 Lo Step 7.2E aggiunge due fondazioni trasversali: **accesso Telegram approvato dal database** e **backlog `💡 Miglioramenti` con screenshot**. `ALLOWED_CHAT_IDS` resta solo bootstrap/emergenza. Un nuovo account richiede accesso; solo l'amministratore principale approva/rifiuta; l'approvazione crea un utente normale e uno spazio personale senza concedere accesso alle risorse altrui.
 

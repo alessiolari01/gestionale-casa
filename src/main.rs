@@ -20,6 +20,7 @@ use config::Config;
 use modules::{
     alimentazione::FoodSessionStore, contenitori::ContainerSessionStore, foto::PhotoSessionStore,
     luoghi::LocationSessionStore, miglioramenti::ImprovementSessionStore, oggetti::SessionStore,
+    ricette::RecipeSessionStore,
 };
 use sqlx::SqlitePool;
 use teloxide::{
@@ -112,6 +113,7 @@ async fn async_main() -> anyhow::Result<()> {
         system_roles = database_status.system_roles_present,
         access_improvements = database_status.access_improvements_present,
         product_formats = database_status.product_formats_present,
+        guided_recipes = database_status.guided_recipes_present,
         "Database SQLite pronto"
     );
 
@@ -148,6 +150,7 @@ async fn async_main() -> anyhow::Result<()> {
     let photo_sessions = PhotoSessionStore::new();
     let food_sessions = FoodSessionStore::new();
     let improvement_sessions = ImprovementSessionStore::new();
+    let recipe_sessions = RecipeSessionStore::new();
     let identity_sessions = IdentitySessionStore::new();
     let handler = dptree::entry()
         .branch(Update::filter_message().endpoint(handle_message))
@@ -168,6 +171,7 @@ async fn async_main() -> anyhow::Result<()> {
             photo_sessions,
             food_sessions,
             improvement_sessions,
+            recipe_sessions,
             identity_sessions
         ])
         .enable_ctrlc_handler()
@@ -214,6 +218,7 @@ async fn handle_message(
     photo_sessions: PhotoSessionStore,
     food_sessions: FoodSessionStore,
     improvement_sessions: ImprovementSessionStore,
+    recipe_sessions: RecipeSessionStore,
     identity_sessions: IdentitySessionStore,
 ) -> ResponseResult<()> {
     let chat_id = msg.chat.id.0;
@@ -273,6 +278,7 @@ async fn handle_message(
             photo_sessions,
             food_sessions,
             improvement_sessions,
+            recipe_sessions,
             identity_sessions,
             actor,
         )),
@@ -291,6 +297,7 @@ async fn handle_authorized_message(
     photo_sessions: PhotoSessionStore,
     food_sessions: FoodSessionStore,
     improvement_sessions: ImprovementSessionStore,
+    recipe_sessions: RecipeSessionStore,
     identity_sessions: IdentitySessionStore,
     actor: identity::AuditActor,
 ) -> ResponseResult<()> {
@@ -306,6 +313,30 @@ async fn handle_authorized_message(
         container_sessions.clear_chat(chat_id);
         photo_sessions.clear_chat(chat_id);
         food_sessions.clear_chat(chat_id);
+        recipe_sessions.clear_chat(chat_id);
+        identity_sessions.clear_chat(chat_id);
+        return respond(());
+    }
+
+    // Ricette gestisce anche foto e video per i singoli step del procedimento,
+    // quindi deve avere priorità sul modulo Foto quando esiste un flusso attivo.
+    // Il future è boxed come Alimentazione per limitare la pressione sullo stack
+    // del dispatcher su Termux/Android.
+    if Box::pin(modules::ricette::handle_message(
+        &bot,
+        &msg,
+        &pool,
+        &recipe_sessions,
+        msg.text(),
+    ))
+    .await?
+    {
+        sessions.clear_chat(chat_id);
+        location_sessions.clear_chat(chat_id);
+        container_sessions.clear_chat(chat_id);
+        photo_sessions.clear_chat(chat_id);
+        food_sessions.clear_chat(chat_id);
+        improvement_sessions.clear_chat(chat_id);
         identity_sessions.clear_chat(chat_id);
         return respond(());
     }
@@ -345,6 +376,7 @@ async fn handle_authorized_message(
     if command.is_some() {
         photo_sessions.clear_chat(chat_id);
         improvement_sessions.clear_chat(chat_id);
+        recipe_sessions.clear_chat(chat_id);
         if command != Some("/spazio_nuovo")
             && command != Some("/spazio_rinomina")
             && command != Some("/annulla")
@@ -414,6 +446,7 @@ async fn handle_authorized_message(
         location_sessions.clear_chat(chat_id);
         container_sessions.clear_chat(chat_id);
         photo_sessions.clear_chat(chat_id);
+        recipe_sessions.clear_chat(chat_id);
         identity_sessions.clear_chat(chat_id);
         return respond(());
     }
@@ -421,18 +454,21 @@ async fn handle_authorized_message(
     if modules::contenitori::handle_message(&bot, &msg, &pool, &container_sessions, text).await? {
         sessions.clear_chat(chat_id);
         location_sessions.clear_chat(chat_id);
+        recipe_sessions.clear_chat(chat_id);
         return respond(());
     }
 
     if modules::luoghi::handle_message(&bot, &msg, &pool, &location_sessions, text).await? {
         sessions.clear_chat(chat_id);
         container_sessions.clear_chat(chat_id);
+        recipe_sessions.clear_chat(chat_id);
         return respond(());
     }
 
     if modules::oggetti::handle_message(&bot, &msg, &pool, &sessions, text).await? {
         location_sessions.clear_chat(chat_id);
         container_sessions.clear_chat(chat_id);
+        recipe_sessions.clear_chat(chat_id);
         return respond(());
     }
 
@@ -443,6 +479,7 @@ async fn handle_authorized_message(
             container_sessions.clear_chat(chat_id);
             photo_sessions.clear_chat(chat_id);
             improvement_sessions.clear_chat(chat_id);
+            recipe_sessions.clear_chat(chat_id);
             send_main_menu(&bot, msg.chat.id, &pool, &actor).await?;
         }
         Some("/ping") => {
@@ -600,6 +637,7 @@ async fn handle_callback(
     photo_sessions: PhotoSessionStore,
     food_sessions: FoodSessionStore,
     improvement_sessions: ImprovementSessionStore,
+    recipe_sessions: RecipeSessionStore,
     identity_sessions: IdentitySessionStore,
 ) -> ResponseResult<()> {
     bot.answer_callback_query(q.id.clone()).await?;
@@ -658,6 +696,7 @@ async fn handle_callback(
             photo_sessions,
             food_sessions,
             improvement_sessions,
+            recipe_sessions,
             identity_sessions,
             actor,
             data,
@@ -677,6 +716,7 @@ async fn handle_authorized_callback(
     photo_sessions: PhotoSessionStore,
     food_sessions: FoodSessionStore,
     improvement_sessions: ImprovementSessionStore,
+    recipe_sessions: RecipeSessionStore,
     identity_sessions: IdentitySessionStore,
     actor: identity::AuditActor,
     data: String,
@@ -698,8 +738,33 @@ async fn handle_authorized_callback(
         container_sessions.clear_chat(chat_id.0);
         photo_sessions.clear_chat(chat_id.0);
         food_sessions.clear_chat(chat_id.0);
+        recipe_sessions.clear_chat(chat_id.0);
         identity_sessions.clear_chat(chat_id.0);
         return respond(());
+    }
+
+    if data.starts_with("recipe:") || (data == "menu:main" && recipe_sessions.has_active(chat_id.0))
+    {
+        if Box::pin(modules::ricette::handle_callback(
+            &bot,
+            chat_id,
+            &pool,
+            &recipe_sessions,
+            data,
+        ))
+        .await?
+        {
+            sessions.clear_chat(chat_id.0);
+            location_sessions.clear_chat(chat_id.0);
+            container_sessions.clear_chat(chat_id.0);
+            photo_sessions.clear_chat(chat_id.0);
+            food_sessions.clear_chat(chat_id.0);
+            improvement_sessions.clear_chat(chat_id.0);
+            identity_sessions.clear_chat(chat_id.0);
+            return respond(());
+        }
+    } else {
+        recipe_sessions.clear_chat(chat_id.0);
     }
 
     if data.starts_with("food:") || (data == "menu:main" && food_sessions.has_active(chat_id.0)) {
@@ -718,6 +783,7 @@ async fn handle_authorized_callback(
             location_sessions.clear_chat(chat_id.0);
             container_sessions.clear_chat(chat_id.0);
             photo_sessions.clear_chat(chat_id.0);
+            recipe_sessions.clear_chat(chat_id.0);
             identity_sessions.clear_chat(chat_id.0);
             return respond(());
         }
@@ -733,6 +799,7 @@ async fn handle_authorized_callback(
             photo_sessions.clear_chat(chat_id.0);
             food_sessions.clear_chat(chat_id.0);
             improvement_sessions.clear_chat(chat_id.0);
+            recipe_sessions.clear_chat(chat_id.0);
             send_main_menu(&bot, chat_id, &pool, &actor).await?;
         }
         "menu:soon" => {
@@ -1317,6 +1384,11 @@ async fn send_status(
             } else {
                 "❌"
             };
+            let guided_recipes = if status.guided_recipes_present {
+                "✅"
+            } else {
+                "❌"
+            };
             let message = format!(
                 "📊 Stato sistema\n\n\
                  Bot Telegram: ✅\n\
@@ -1329,7 +1401,8 @@ async fn send_status(
                  Vista multi-spazio Step 7.1B: {multi_view}\n\
                  Ruoli di sistema: {system_roles}\n\
                  Accesso controllato + Miglioramenti: {access_improvements}\n\
-                 Formati prodotto: {product_formats}",
+                 Formati prodotto: {product_formats}\n\
+                 Ricette guidate: {guided_recipes}",
                 status.applied_migrations
             );
             bot.send_message(chat_id, message)

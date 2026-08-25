@@ -175,3 +175,23 @@ come base per Lista spesa, prezzi e disponibilità per punto vendita. Le vecchie
 colonne confezione presenti in `prodotti_alimentari` restano temporaneamente
 solo per compatibilità con le migration già applicate e non vanno più usate
 come fonte autorevole dal codice nuovo.
+
+## Step 7.2F.1 — Ricette operative e procedimento guidato
+
+`20260825231500_ricette_procedimento_guidato.sql` rende strutturato il
+procedimento delle Ricette introducendo `ricetta_step` e
+`ricetta_step_media`, più la vista `v_ricetta_step_con_media`.
+
+Ogni step ha numero e testo; foto e video sono allegati al singolo step e non
+alla ricetta in modo indistinto. La stessa struttura alimenta sia la vista
+`📖 Procedimento completo` sia la modalità `👨‍🍳 Procedura guidata` con
+step precedente/successivo.
+
+La migration effettua un backfill conservativo: se una ricetta preesistente
+contiene ancora `ricette.procedimento`, quel testo viene convertito nello
+Step 1. La colonna legacy resta nello schema ma il codice nuovo usa gli step
+come fonte autorevole.
+
+Gli ingredienti continuano a salvare `alimento_id` e, opzionalmente,
+`prodotto_alimentare_id`; non viene salvato alcun `formato_id`, perché la
+scelta della confezione appartiene alla futura Lista spesa.

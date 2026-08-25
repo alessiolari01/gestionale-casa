@@ -82,20 +82,24 @@ Specifica: `docs/moduli/alimentazione/README.md`.
 - ruoli globali `utente/admin` e area amministrativa protetta lato backend;
 - 109/109 test e smoke Telegram verificato.
 
-### 7.2D — Ricette operative Telegram
+### 7.2F.1 — Ricette operative Telegram
 
-**Stato: PROSSIMO.**
+**Stato: IMPLEMENTATO NEL PACCHETTO — da verificare su S9 prima del commit.**
 
 - creazione e modifica ricetta;
 - proprietario e visibilità sugli spazi;
 - collaboratori tramite il sistema generico dei permessi;
 - ingredienti collegati direttamente agli alimenti;
-- quantità e unità;
-- procedimento;
-- elenco, dettaglio e ricerca;
+- scelta opzionale del prodotto commerciale senza salvare il formato;
+- quantità e unità indipendenti dalla confezione;
+- procedimento strutturato in step numerati;
+- zero o più foto/video per singolo step;
+- vista completa del procedimento e modalità guidata step precedente/successivo;
+- elenco, dettaglio e ricerca per nome;
 - ricerca per più ingredienti con semantica OR e ordinamento per numero di
   corrispondenze;
-- test backend e smoke Telegram.
+- compatibilità alimentare derivata;
+- test backend e smoke Telegram da completare sull'S9.
 
 ### 7.3 — Condivisione operativa e integrazioni
 
