@@ -1729,7 +1729,42 @@ async fn food_visible_to_user(pool: &SqlitePool, food_id: i64, user_id: i64) -> 
     Ok(visible)
 }
 
+async fn is_system_admin_user(pool: &SqlitePool, user_id: i64) -> Result<bool> {
+    sqlx::query_scalar(
+        "SELECT EXISTS(\
+            SELECT 1 FROM utenti \
+            WHERE id = ? \
+              AND stato = 'attivo' \
+              AND ruolo_sistema = 'admin'\
+         )",
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await
+    .context("Impossibile verificare il ruolo di sistema")
+}
+
+async fn food_is_global_catalog(pool: &SqlitePool, food_id: i64) -> Result<bool> {
+    sqlx::query_scalar(
+        "SELECT EXISTS(\
+            SELECT 1 FROM alimenti \
+            WHERE id = ? AND archiviato = 0 AND catalogo_globale = 1\
+         )",
+    )
+    .bind(food_id)
+    .fetch_one(pool)
+    .await
+    .context("Impossibile verificare il catalogo globale")
+}
+
 async fn can_edit_food(pool: &SqlitePool, food_id: i64, user_id: i64) -> Result<bool> {
+    if food_is_global_catalog(pool, food_id).await? {
+        // Il catalogo base e' visibile a tutti, ma modificabile solo
+        // dall'amministratore di sistema. Non viene trasformato in una
+        // risorsa personale e non richiede permessi_risorsa.
+        return is_system_admin_user(pool, user_id).await;
+    }
+
     let owner: bool = sqlx::query_scalar(
         "SELECT EXISTS(\
             SELECT 1 FROM alimenti \
@@ -1753,6 +1788,12 @@ async fn can_edit_food(pool: &SqlitePool, food_id: i64, user_id: i64) -> Result<
 }
 
 async fn can_manage_food(pool: &SqlitePool, food_id: i64, user_id: i64) -> Result<bool> {
+    if food_is_global_catalog(pool, food_id).await? {
+        // Gli alimenti base sono globali per definizione: non hanno una
+        // visibilita' per-spazio o collaboratori da amministrare.
+        return Ok(false);
+    }
+
     let owner: bool = sqlx::query_scalar(
         "SELECT EXISTS(\
             SELECT 1 FROM alimenti \
@@ -3454,7 +3495,7 @@ fn food_summary_line(food: &FoodRecord, current_user: Option<i64>) -> String {
 
 fn ownership_label(food: &FoodRecord, current_user: Option<i64>) -> String {
     if food.global_catalog == 1 {
-        return "🌐 Catalogo globale".to_string();
+        return "🌐 Catalogo base".to_string();
     }
 
     if food.owner_user_id == current_user && current_user.is_some() {
@@ -3579,6 +3620,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn catalogo_base_viene_seedato_ed_e_visibile() {
+        let pool = test_pool().await;
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM alimenti WHERE catalogo_globale = 1 AND archiviato = 0",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("conteggio catalogo base");
+
+        assert_eq!(count, 418);
+
+        let pollo: (String, String) = sqlx::query_as(
+            "SELECT nome, nome_normalizzato FROM alimenti \
+             WHERE catalogo_globale = 1 AND nome_normalizzato = 'petto di pollo'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("petto di pollo base");
+
+        assert_eq!(pollo.0, "🥩 Petto di pollo");
+        assert_eq!(pollo.1, "petto di pollo");
+    }
+
+    #[tokio::test]
+    async fn catalogo_base_e_modificabile_solo_da_admin_e_non_ha_condivisione() {
+        let pool = test_pool().await;
+        let admin_id = create_user(&pool, "Admin catalogo").await;
+        let user_id = create_user(&pool, "Utente catalogo").await;
+
+        sqlx::query("UPDATE utenti SET ruolo_sistema = 'admin' WHERE id = ?")
+            .bind(admin_id)
+            .execute(&pool)
+            .await
+            .expect("promozione admin");
+
+        let food_id: i64 = sqlx::query_scalar(
+            "SELECT id FROM alimenti WHERE catalogo_globale = 1 AND nome_normalizzato = 'petto di pollo'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("alimento base");
+
+        assert!(can_edit_food(&pool, food_id, admin_id)
+            .await
+            .expect("edit admin"));
+        assert!(!can_edit_food(&pool, food_id, user_id)
+            .await
+            .expect("edit utente"));
+        assert!(!can_manage_food(&pool, food_id, admin_id)
+            .await
+            .expect("manage catalogo globale"));
+    }
+
+    #[tokio::test]
     async fn alimento_personale_viene_creato_elencato_e_cercato() {
         let pool = test_pool().await;
         let user_id = create_user(&pool, "Tester").await;
@@ -3590,7 +3685,7 @@ mod tests {
             .expect("unita g");
 
         let id = identity::with_actor(actor(user_id, 1, false, "Tester"), async {
-            create_food(&pool, "Petto di pollo", Some(unit_id), &[])
+            create_food(&pool, "Petto di pollo test personale", Some(unit_id), &[])
                 .await
                 .expect("creazione alimento")
         })
@@ -3603,13 +3698,15 @@ mod tests {
         })
         .await;
 
-        assert_eq!(foods.len(), 1);
-        assert_eq!(foods[0].id, id);
-        assert_eq!(foods[0].owner_user_id, Some(user_id));
-        assert_eq!(foods[0].unit_code.as_deref(), Some("g"));
+        let personal = foods
+            .iter()
+            .find(|food| food.id == id)
+            .expect("alimento personale nell'elenco");
+        assert_eq!(personal.owner_user_id, Some(user_id));
+        assert_eq!(personal.unit_code.as_deref(), Some("g"));
 
         let found = identity::with_actor(actor(user_id, 1, false, "Tester"), async {
-            list_foods(&pool, Some("POLLO"), None, 20)
+            list_foods(&pool, Some("POLLO TEST PERSONALE"), None, 20)
                 .await
                 .expect("ricerca alimenti")
         })
@@ -3681,10 +3778,10 @@ mod tests {
         add_membership(&pool, 1, user_id, "proprietario").await;
 
         identity::with_actor(actor(user_id, 1, false, "Tester"), async {
-            create_food(&pool, "Riso", Some(1), &[])
+            create_food(&pool, "Riso duplicato test", Some(1), &[])
                 .await
                 .expect("primo alimento");
-            let duplicate = create_food(&pool, "  RISO ", Some(1), &[]).await;
+            let duplicate = create_food(&pool, "  RISO DUPLICATO TEST ", Some(1), &[]).await;
             assert!(duplicate.is_err());
         })
         .await;
@@ -3705,7 +3802,7 @@ mod tests {
         add_membership(&pool, space_2, user_id, "membro").await;
 
         let food_id = identity::with_actor(actor(user_id, 1, false, "Tester"), async {
-            create_food(&pool, "Pasta", Some(1), &[1, space_2])
+            create_food(&pool, "Pasta condivisione test", Some(1), &[1, space_2])
                 .await
                 .expect("alimento condiviso")
         })
@@ -3737,7 +3834,7 @@ mod tests {
         add_membership(&pool, space_2, user_id, "membro").await;
 
         let food_id = identity::with_actor(actor(user_id, 1, false, "Tester"), async {
-            create_food(&pool, "Avena", Some(1), &[space_2])
+            create_food(&pool, "Avena ownership test", Some(1), &[space_2])
                 .await
                 .expect("creazione alimento")
         })
@@ -3779,7 +3876,7 @@ mod tests {
         add_membership(&pool, shared_space, guest_id, "lettura").await;
 
         let food_id = identity::with_actor(actor(owner_id, 1, true, "Owner"), async {
-            create_food(&pool, "Cous cous", Some(1), &[shared_space])
+            create_food(&pool, "Cous cous visibilita test", Some(1), &[shared_space])
                 .await
                 .expect("alimento condiviso")
         })
