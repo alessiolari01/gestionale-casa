@@ -62,3 +62,22 @@ il planner in un modulo contabile.
 
 Un viaggio può in futuro usare pasti, liste e spese ma resta un dominio
 separato.
+
+## Prodotto commerciale e formato di vendita — Step 7.2F.0
+
+Il prodotto commerciale non coincide più con una singola confezione. La
+gerarchia di riferimento è:
+
+```text
+🥛 Formaggio spalmabile
+└── 🛒 Philadelphia · Original
+    ├── 📦 175 g
+    ├── 📦 200 g
+    └── 📦 350 g
+```
+
+Marca, nome commerciale e valori nutrizionali appartengono al prodotto.
+Quantità confezione, unità e barcode/EAN appartengono invece al formato.
+Ricette e ingredienti specifici continuano a referenziare
+`prodotto_alimentare_id`; la scelta del formato è demandata alla Lista spesa e
+ai futuri prezzi/disponibilità.

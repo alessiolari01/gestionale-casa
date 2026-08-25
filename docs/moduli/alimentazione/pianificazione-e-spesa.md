@@ -67,3 +67,19 @@ La futura dispensa potrà sottrarre le scorte ma non fa parte dello Step 7.
 
 La lista dice **cosa serve**. Il futuro modulo Acquisti dirà **quale prodotto o
 confezione comprare e a quale prezzo base**.
+
+## Scelta del formato acquistabile
+
+Dal Step 7.2F.0 i formati di vendita sono dati strutturati separati dal
+prodotto commerciale. La Lista spesa dovrà quindi:
+
+1. aggregare la quantità necessaria dello stesso alimento/prodotto;
+2. sottrarre in futuro eventuali quantità già disponibili in dispensa;
+3. leggere i formati attivi del prodotto;
+4. scegliere una combinazione di confezioni che copra la quantità necessaria;
+5. minimizzare inizialmente lo spreco e il numero di confezioni;
+6. quando saranno disponibili i prezzi, poter privilegiare il costo totale più
+   conveniente e indicare punto vendita e avanzo previsto.
+
+Esempio: per 300 g necessari e formati 175 g, 200 g e 350 g, la Lista spesa
+non modifica la ricetta ma valuta quale confezione/combinazione acquistare.

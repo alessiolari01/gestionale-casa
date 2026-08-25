@@ -24,6 +24,7 @@ Per ogni area vanno descritti, quando applicabili:
 - [Navigazione dei luoghi](navigazione-luoghi.md)
 - [Contenitori](contenitori.md)
 - [Storico](storico.md)
+- [Miglioramenti](miglioramenti.md) — backlog interno con screenshot, Step 7.2E;
 
 ## Step 7 — in progettazione/implementazione
 

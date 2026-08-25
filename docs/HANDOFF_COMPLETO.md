@@ -4,15 +4,27 @@
 >
 > **Regola di manutenzione:** questo file va aggiornato dopo ogni checkpoint che modifica in modo significativo architettura, schema dati, sicurezza, flussi applicativi o interfaccia utente.
 
+## Come riprendere il progetto
+
+Se una nuova persona o una nuova chat riceve semplicemente l'istruzione:
+
+```text
+Prendi il progetto GitHub e inizia a leggere l'handoff.
+```
+
+deve aprire il repository `alessiolari01/gestionale-casa`, usare il branch `step-7-alimentazione`, leggere **interamente questo file** e considerarlo il punto di partenza ufficiale. Prima di modificare il progetto deve verificare `git status` e `git log -5 --oneline --decorate`, controllare la baseline indicata qui sotto e non chiedere all'utente di ricostruire da zero il contesto già documentato.
+
 ## 1. Stato del progetto al momento di questo handoff
 
 Repository GitHub: `alessiolari01/gestionale-casa`
 Branch di sviluppo corrente: `step-7-alimentazione`
-Ultimo checkpoint già consolidato prima delle modifiche correnti: `544c7f2` — `Step 7.2D.0.2-0.3: aggiunge prodotti, nutrizione e handoff completo`.
+Ultimo checkpoint consolidato: `2c55de7` — `Step 7.2D.0.4-0.4.1: rifinisce alimenti e integra storico prodotti`.
 
-Gli Step **7.2D.0.4** e **7.2D.0.4.1** sono stati completati e verificati sul Samsung Galaxy S9/Termux e vengono consolidati nello stesso checkpoint che include questo aggiornamento dell'handoff.
+Il macro-step **Step 7.2E — Accesso controllato + Miglioramenti** è stato applicato e verificato anche con un secondo account Telegram approvato. Dopo il rinforzo dello stack Tokio, il secondo account riesce a navigare normalmente anche in Alimentazione. Il lavoro resta da consolidare nel prossimo checkpoint Git insieme alle modifiche strutturali successive.
 
-Verifiche confermate:
+Il macro-step strutturale corrente è **Step 7.2F.0 — Formati dei prodotti commerciali**.
+
+Baseline già verificata prima di iniziare 7.2E:
 
 - `cargo fmt --all -- --check` → ok;
 - `cargo check --locked` → ok;
@@ -21,11 +33,11 @@ Verifiche confermate:
 - `PRAGMA integrity_check` → `ok`;
 - `PRAGMA foreign_key_check` → nessuna violazione;
 - catalogo base → **418 alimenti** attivi;
-- migration `20260825101500_prodotti_alimentari.sql` e `20260825113000_prodotti_nutrizione_ricette.sql` già applicate e immutabili;
-- D0.4/D0.4.1 non aggiungono nuove migration;
-- smoke test Telegram di paginazione Alimenti, UI Storico e audit dei prodotti commerciali dichiarato funzionante dall'utente.
+- working tree pulito al commit `2c55de7`.
 
-Rimane il warning esterno di future incompatibility relativo a `proc-macro-error2 v2.0.1`; non è un warning del codice del progetto e non impedisce il checkpoint.
+La nuova migration di 7.2E è `20260825153000_accesso_miglioramenti.sql`. Una volta applicata al database reale diventa immutabile come tutte le migration precedenti.
+
+Rimane il warning esterno di future incompatibility relativo a `proc-macro-error2 v2.0.1`; non è un warning del codice del progetto.
 
 Il database reale è il riferimento operativo; le migration già applicate **non devono essere riscritte**.
 
@@ -67,6 +79,12 @@ Alimentazione
 
 Vestiti                              [fondazione/modulo non ancora operativo]
 Veicoli                              [fondazione/modulo non ancora operativo]
+
+Miglioramenti
+├── backlog interno del gestionale
+├── autore
+├── stato
+└── screenshot/allegati
 ```
 
 Principio generale: il backend deve modellare entità e permessi in modo riutilizzabile, mentre Telegram è soltanto un frontend. Una futura applicazione deve poter riusare la stessa logica senza dipendere dai pulsanti Telegram.
@@ -176,18 +194,19 @@ Area amministrativa attuale:
 🛠️ Amministrazione
 ├── 🧭 Panoramica
 ├── 📊 Stato sistema
-└── 👥 Utenti
+├── 👥 Utenti
+└── 📨 Richieste di accesso (N)      [solo amministratore principale]
 ```
 
 `/admin`, `/status` e le callback amministrative sono protette anche lato backend.
 
 Le notifiche backend `online/offline` sono riservate agli amministratori.
 
-### Accesso al bot — requisito futuro già approvato
+### Accesso al bot — Step 7.2E
 
-La whitelist Telegram statica non deve essere il modello definitivo.
+Dallo Step 7.2E la whitelist Telegram statica non è più il modello ordinario di autorizzazione. `ALLOWED_CHAT_IDS` resta come **bootstrap/emergenza**: serve a inizializzare il primo amministratore su un database nuovo e non deve essere usata per aggiungere manualmente ogni nuovo utente.
 
-Flusso previsto:
+Flusso applicativo:
 
 ```text
 account Telegram sconosciuto
@@ -196,19 +215,58 @@ può contattare il bot
         ↓
 📨 Richiedi accesso
         ↓
-richiesta in attesa
+richiesta in attesa nel database
         ↓
-admin principale
+👑 amministratore principale
         ↓
-✅ Accetta / ❌ Rifiuta
+✅ Approva / ❌ Rifiuta
         ↓
-se accettato:
-utente normale autorizzato
+se approvato:
+utente normale + account Telegram + spazio personale
 ```
 
-L'approvazione al bot **non concede automaticamente** accesso a spazi o risorse.
+L'approvazione **non concede automaticamente** accesso allo spazio bootstrap, alle case, agli alimenti personali o ad altre risorse di altri utenti. Gli spazi condivisi continuano a richiedere membership/inviti espliciti.
 
-La whitelist configurata potrà rimanere come bootstrap/emergenza.
+È introdotto il concetto distinto di `amministratore_principale`: oggi è unico e viene assegnato al proprietario/bootstrap già amministratore. Solo lui vede e decide le richieste di accesso. Questo concetto è separato da `ruolo_sistema = admin`, così in futuro potranno esistere altri amministratori senza ricevere automaticamente il potere di approvare nuovi account.
+
+Tabelle principali:
+
+- `richieste_accesso`;
+- `utenti.amministratore_principale`;
+- `account_telegram` resta il collegamento definitivo dopo l'approvazione.
+
+Il backend prima prova a risolvere un account Telegram già approvato dal database; usa `ALLOWED_CHAT_IDS` solo come fallback bootstrap per un account non ancora esistente.
+
+### Sezione `💡 Miglioramenti`
+
+Tutti gli utenti Telegram approvati possono usare la sezione `💡 Miglioramenti`. Non è collegata agli spazi domestici: rappresenta feedback sul gestionale stesso.
+
+Flusso iniziale:
+
+```text
+💡 Miglioramenti
+├── ➕ Nuovo miglioramento
+│   ├── descrizione
+│   ├── screenshot facoltativo
+│   └── salvataggio
+├── 📋 I miei miglioramenti
+└── 🗂️ Tutti i miglioramenti        [admin]
+```
+
+Gli screenshot sono salvati localmente sotto `data/media/miglioramenti/<id>/` e registrati in `miglioramento_allegati`, quindi rientrano nel modello di backup dei media. La struttura DB supporta più allegati per miglioramento anche se l'UX iniziale rimane volutamente semplice.
+
+Stati iniziali:
+
+```text
+🟡 Aperto
+🔵 Pianificato
+✅ Fatto
+❌ Scartato
+```
+
+L'autore vede i propri miglioramenti. Gli admin possono vedere tutti i miglioramenti e cambiarne lo stato.
+
+**Nuova regola di sviluppo:** il progetto procede prima per macro-struttura e funzionalità principali; le osservazioni UX non bloccanti vanno registrate nella sezione `💡 Miglioramenti` e vengono raffinate in una fase successiva.
 
 ---
 
@@ -688,96 +746,128 @@ I filtri mantengono contesto e pagina con `🔄 Aggiorna`.
 
 ---
 
-## 19. Prodotti commerciali
+## 19. Prodotti commerciali e formati di vendita
 
-Migration immutabile già applicata:
+Migration prodotto già applicata e immutabile:
 
 ```text
 20260825101500_prodotti_alimentari.sql
 ```
 
-Il prodotto commerciale rappresenta ciò che si compra realmente, mentre l'alimento generico resta il concetto usato dalle Ricette.
-
-Esempio:
+Nuova migration Step 7.2F.0:
 
 ```text
-🥛 Formaggio spalmabile
-├── Philadelphia · Original · 200 g
-├── Philadelphia · Light · 175 g
-└── Exquisa · Classico · 175 g
+20260825220000_formati_prodotti_alimentari.sql
 ```
 
-Una Ricetta generica continuerà a riferirsi a `Formaggio spalmabile`.
+Dal 7.2F.0 **prodotto commerciale** e **formato acquistabile** sono separati.
 
-Questo livello è predisposto per il futuro:
+Esempio corretto:
 
 ```text
-prodotto commerciale
-→ punto vendita
-→ prezzo
-→ data rilevazione
-→ €/kg o €/l
-→ storico prezzi
-→ prezzo attuale
-→ dove conviene comprarlo
+🥛 Formaggio spalmabile                    ← alimento generico
+└── 🛒 Philadelphia · Original             ← prodotto commerciale
+    ├── 📦 175 g                           ← formato
+    ├── 📦 200 g
+    └── 📦 350 g
 ```
 
-### Inserimento prodotto attuale
+Il prodotto conserva identità stabile: alimento associato, marca, nome
+commerciale, valori nutrizionali e futuro eventuale metadata di prodotto.
 
-Flusso:
+Il formato conserva invece:
+
+- quantità confezione;
+- unità confezione;
+- barcode/EAN;
+- stato attivo;
+- in futuro disponibilità/prezzo per punto vendita.
+
+La tabella autorevole è `formati_prodotto_alimentare`. Le vecchie colonne
+`quantita_confezione`, `unita_confezione_id` e `codice_ean` rimaste in
+`prodotti_alimentari` esistono soltanto per compatibilità con le migration già
+applicate: il codice nuovo non deve usarle come fonte autorevole. La migration
+7.2F.0 copia automaticamente ogni vecchia confezione nel primo formato e sposta
+logicamente l'EAN sul formato.
+
+È disponibile la vista:
 
 ```text
-Marca
- ↓
-Nome commerciale
- ↓
-Quantità confezione
- ↓
-Unità confezione
- ↓
-Salva
+v_prodotti_formati_attivi
 ```
 
-Nello Step D0.3 la schermata quantità mostra l'unità attuale e permette `📏 Cambia unità` nello stesso passaggio.
+che restituisce una riga per formato attivo ed è la base prevista per Lista
+spesa, disponibilità e prezzi.
 
-L'unità viene salvata sul prodotto e non dipende dinamicamente dal default dell'alimento.
+### Regola Ricette
 
-### Modifica prodotto operativa
-
-Dal dettaglio è disponibile:
+Una Ricetta può usare:
 
 ```text
-✏️ Modifica prodotto
-├── 🏷 Marca
-├── 🛒 Nome commerciale
-├── quantità confezione
-├── 📏 Unità confezione
-└── Barcode / EAN
+alimento_id                 obbligatorio
+prodotto_alimentare_id      facoltativo
+quantità/unità              proprie della ricetta
 ```
 
-La modifica mantiene lo stesso record interno e **non cambia** automaticamente `alimento_id`.
+La Ricetta **non salva il formato**. Se richiede 150 g di `Philadelphia ·
+Original`, non deve sapere se verrà acquistata una confezione da 175 g, 200 g o
+350 g. Questa decisione appartiene alla futura Lista spesa.
 
-I valori nutrizionali restano una sezione separata.
+### Regola Lista spesa futura
 
-Un eventuale cambio di alimento generico associato richiederà in futuro una funzione esplicita e più delicata.
+La Lista spesa dovrà aggregare la quantità richiesta e scegliere tra i formati
+disponibili la combinazione più adatta. Prima logica prevista:
 
-### Icone unità operative nella UI
+```text
+quantità sufficiente
+→ minor avanzo
+→ minor numero di confezioni
+```
+
+quando saranno presenti prezzi reali potrà essere privilegiato il costo totale
+più conveniente, mantenendo visibili avanzo previsto e punto vendita.
+
+### UI Telegram strutturale
+
+Dal dettaglio prodotto:
+
+```text
+🛒 Philadelphia · Original
+├── 📦 Formati (N)
+├── 🧮 Valori nutrizionali
+└── ✏️ Modifica prodotto
+```
+
+`✏️ Modifica prodotto` modifica marca e nome commerciale. Quantità, unità ed
+EAN si gestiscono nel singolo formato.
+
+La sezione formati permette almeno:
+
+```text
+📦 Formati disponibili
+├── ⚖️ 175 g
+├── ⚖️ 200 g
+├── ⚖️ 350 g
+└── ➕ Aggiungi formato
+```
+
+Ogni formato ha dettaglio e modifica di quantità/unità/EAN. L'aggiunta di un
+nuovo formato con la stessa marca e lo stesso nome commerciale riusa lo stesso
+prodotto invece di crearne un duplicato. Un formato identico sullo stesso
+prodotto viene rifiutato.
+
+### Storico
+
+Creazione e modifica dei formati vengono registrate nello storico dello stesso
+prodotto commerciale con componente `formato_prodotto`; non viene introdotta
+una seconda identità di prodotto soltanto perché cambia la confezione.
+
+### Icone unità
 
 - `⚖️` → g / kg;
 - `🥤` → ml / l;
 - `🔢` → pz;
 - `🥄` → cucchiaio / cucchiaino.
-
-Esempi:
-
-```text
-⚖️ Confezione: 200 g
-🥤 Confezione: 500 ml
-🔢 Confezione: 6 pz
-🥄 Quantità: 2 cucchiai
-```
-
----
 
 ## 20. Valori nutrizionali prodotto
 
@@ -1515,6 +1605,8 @@ significa che **quello script non ha modificato il repository**; non fare restor
 
 # MODIFICHE APPROVATE DA FARE NEI PROSSIMI STEP
 
+**Politica di sviluppo attuale:** completare prima la struttura e le funzionalità principali dei moduli. Le rifiniture UX non bloccanti, come categorie più naturali, scorciatoie di navigazione o testi più guidati, vanno annotate nel backlog `💡 Miglioramenti` e affrontate in una fase di rifinitura dedicata.
+
 ## 39. Rifiniture e classificazione ancora da applicare
 
 Le rifiniture D0.4/D0.4.1 elencate nelle versioni precedenti di questo handoff sono ora operative. Restano approvate queste modifiche successive.
@@ -1571,40 +1663,38 @@ Quando non sono presenti valori nutrizionali, mostrare un messaggio guidato che 
 
 ## 40. Step immediatamente successivo consigliato
 
-D0.4/D0.4.1 sono completati.
+Lo Step 7.2E ha consolidato accesso approvato al bot e backlog `💡 Miglioramenti`. Lo Step 7.2F.0 separa ora prodotto commerciale e formato acquistabile, fondazione necessaria prima di Ricette, prezzi e Lista spesa.
 
-Prima della UI Ricette completa è consigliabile un piccolo step dedicato alla **revisione categorie** (D0.5), perché categorie più naturali migliorano direttamente i filtri e la futura selezione ingredienti.
-
-Subito dopo passare a:
+Dopo verifica e checkpoint di 7.2F.0, il prossimo macro-step consigliato torna a:
 
 ```text
 Step 7.2D.1 — Ricette operative Telegram
 ```
 
-Prima tranche consigliata:
+Prima tranche strutturale:
 
 1. menu Ricette;
-2. elenco paginato;
-3. dettaglio ricetta;
-4. wizard nuova ricetta;
-5. selezione alimento dal catalogo;
-6. se esistono prodotti: generico vs prodotto reale;
-7. quantità/unità;
-8. procedimento;
-9. visibilità;
-10. salvataggio fail-closed.
+2. elenco e dettaglio;
+3. creazione ricetta;
+4. ingredienti collegati ad `alimenti.id`;
+5. scelta alimento generico oppure prodotto commerciale specifico quando disponibile;
+6. quantità/unità indipendenti dalla confezione del prodotto;
+7. procedimento;
+8. ownership e visibilità negli spazi;
+9. modifica e permessi collaboratori;
+10. ricerca per nome e ricerca OR per ingredienti con ranking.
+
+Le rifiniture già annotate — `🍝 Pasta`, eventuale `🍚 Riso`, `🍞 Pane e prodotti da forno`, pulsante diretto `🛒 Prodotti associati (N)`, messaggi guidati dei valori nutrizionali e altre osservazioni UX — **non devono più bloccare il macro-step strutturale**. Possono essere registrate e gestite tramite `💡 Miglioramenti`.
 
 Successivamente:
 
-- modifica ricetta;
-- collaboratori;
-- ricerca per nome;
-- ricerca per ingredienti;
-- compatibilità alimentare derivata;
+- compatibilità alimentare derivata nelle Ricette;
 - calcolo nutrizionale;
-- prezzi/punti vendita.
+- prezzi/punti vendita;
+- dispensa e quantità;
+- pianificazione;
+- fase dedicata di rifinitura UX.
 
----
 
 ## 41. Regola fissa di documentazione
 
@@ -1636,6 +1726,8 @@ Il documento deve permettere a una terza persona di capire:
 
 ## 42. Sintesi finale per il prossimo sviluppatore
 
-Il progetto è ormai un gestionale multiutente/multispazio con Telegram come frontend corrente. Oggetti, luoghi, contenitori, foto e storico sono già operativi; Alimentazione dispone di un catalogo globale di 418 alimenti, categorie, ownership/condivisione, permessi generici, compatibilità alimentare, prodotti commerciali modificabili, ricerca tramite prodotti, nutrizione opzionale con conferma e audit Storico dei prodotti. Le Ricette hanno già fondazioni DB e funzioni di ricerca/compatibilità, ma manca ancora la UI Telegram completa.
+Il progetto è un gestionale multiutente/multispazio con Telegram come frontend corrente. Oggetti, luoghi, contenitori, foto e storico sono operativi; Alimentazione dispone di catalogo globale, categorie, ownership/condivisione, permessi generici, compatibilità alimentare, prodotti commerciali, nutrizione e audit. Le Ricette hanno fondazioni DB ma non ancora la UI Telegram completa.
 
-Le priorità sono mantenere separati ownership, visibilità e permessi; non esporre ID tecnici; mantenere il backend fail-closed; non modificare migration già applicate; trattare alimento generico e prodotto commerciale come livelli distinti; e aggiornare questo handoff dopo ogni cambiamento strutturale importante.
+Lo Step 7.2E aggiunge due fondazioni trasversali: **accesso Telegram approvato dal database** e **backlog `💡 Miglioramenti` con screenshot**. `ALLOWED_CHAT_IDS` resta solo bootstrap/emergenza. Un nuovo account richiede accesso; solo l'amministratore principale approva/rifiuta; l'approvazione crea un utente normale e uno spazio personale senza concedere accesso alle risorse altrui.
+
+La strategia di sviluppo attuale è completare prima la macro-struttura e usare `💡 Miglioramenti` per raccogliere dettagli UX emersi durante gli smoke test. Le priorità tecniche restano: backend fail-closed, separazione ownership/visibilità/permessi, niente ID tecnici in UI, migration già applicate immutabili, Telegram come frontend e non come dominio applicativo, aggiornamento di questo handoff dopo ogni checkpoint strutturale.

@@ -290,6 +290,7 @@ pub fn main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup {
             button("🚗 Veicoli · prossimamente", "menu:soon"),
         ],
         vec![button("🍽️ Alimentazione", "food:menu")],
+        vec![button("💡 Miglioramenti", "improve:menu")],
     ];
     if is_admin {
         rows.push(vec![button("🛠️ Amministrazione", "admin:menu")]);

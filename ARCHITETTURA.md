@@ -298,6 +298,23 @@ lista della spesa, reminder ed export.
 Alimento, prodotto acquistabile, scorta e oggetto posseduto restano concetti
 differenti. La specifica è in `docs/moduli/alimentazione/README.md`.
 
+Dal Step 7.2F.0 anche **prodotto commerciale** e **formato di vendita** sono
+concetti distinti:
+
+```text
+Alimento generico
+  ↓
+Prodotto commerciale (marca + nome)
+  ↓
+Formato acquistabile (quantità + unità + EAN)
+  ↓
+Futuri prezzo/disponibilità per punto vendita
+```
+
+Le Ricette possono scegliere il prodotto commerciale ma non devono fissare una
+confezione. La futura Lista spesa aggrega invece la quantità realmente
+necessaria e sceglie tra i formati disponibili la combinazione più adatta.
+
 ### 2.13 Reminder trasversali
 
 Lo Step 7 progetta i reminder come servizio riutilizzabile. I canali previsti

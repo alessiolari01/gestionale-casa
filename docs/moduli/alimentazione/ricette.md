@@ -85,3 +85,13 @@ Il backend Telegram dovrà aggiungere:
 - modifica;
 - condivisione e collaboratori;
 - ricerca per più ingredienti con ranking delle corrispondenze.
+
+## Prodotto specifico e formato
+
+Dal Step 7.2F.0 un prodotto commerciale può avere più formati. Un ingrediente
+ricetta può continuare a scegliere opzionalmente il prodotto commerciale, ma
+**non salva il formato della confezione**.
+
+Esempio: una ricetta può richiedere `150 g` di `Philadelphia · Original`; non
+deve sapere se al supermercato verrà acquistata una confezione da 175 g, 200 g
+o 350 g. Questa decisione appartiene alla futura Lista spesa.

@@ -96,12 +96,18 @@ enum FoodConversationState {
     ProductEditName {
         product_id: i64,
     },
-    ProductEditQuantity {
+    ProductFormatQuantity {
         product_id: i64,
         unit_id: i64,
     },
-    ProductEditEan {
+    ProductFormatEditQuantity {
         product_id: i64,
+        format_id: i64,
+        unit_id: i64,
+    },
+    ProductFormatEditEan {
+        product_id: i64,
+        format_id: i64,
     },
 }
 
@@ -178,6 +184,13 @@ struct ProductRecord {
     food_id: i64,
     brand: String,
     product_name: String,
+    format_count: i64,
+}
+
+#[derive(Debug, Clone, FromRow)]
+struct ProductFormatRecord {
+    id: i64,
+    product_id: i64,
     package_quantity: f64,
     package_unit_id: i64,
     package_unit_symbol: String,
@@ -581,7 +594,7 @@ pub async fn handle_message(
             }
             Ok(true)
         }
-        Some(FoodConversationState::ProductEditQuantity {
+        Some(FoodConversationState::ProductFormatQuantity {
             product_id,
             unit_id,
         }) => {
@@ -597,54 +610,109 @@ pub async fn handle_message(
                             msg.chat.id,
                             "⚠️ Quantità non valida. Scrivi un numero maggiore di zero.",
                         )
-                        .reply_markup(product_edit_quantity_keyboard(product_id))
+                        .reply_markup(product_format_quantity_keyboard(product_id))
                         .await?;
-                        send_product_edit_quantity_prompt(bot, msg.chat.id, product_id, &unit)
+                        send_product_format_quantity_prompt(bot, msg.chat.id, product_id, &unit)
                             .await?;
                     }
                     _ => {
-                        bot.send_message(msg.chat.id, "⚠️ Unità confezione non disponibile.")
-                            .reply_markup(product_edit_cancel_keyboard(product_id))
+                        bot.send_message(msg.chat.id, "⚠️ Unità formato non disponibile.")
+                            .reply_markup(product_format_cancel_keyboard(product_id))
                             .await?;
                     }
                 }
                 return Ok(true);
             };
             sessions.clear_chat(chat_id);
-            match update_product_quantity(pool, product_id, quantity, unit_id).await {
-                Ok(()) => {
-                    bot.send_message(msg.chat.id, "✅ Confezione aggiornata.")
+            match create_product_format(pool, product_id, quantity, unit_id).await {
+                Ok(_) => {
+                    bot.send_message(msg.chat.id, "✅ Formato aggiunto.")
                         .await?;
-                    send_product_detail(bot, msg.chat.id, pool, product_id).await?;
+                    send_product_formats(bot, msg.chat.id, pool, product_id).await?;
                 }
                 Err(error) => {
                     bot.send_message(msg.chat.id, format!("⚠️ {error}"))
-                        .reply_markup(product_edit_cancel_keyboard(product_id))
+                        .reply_markup(product_format_cancel_keyboard(product_id))
                         .await?;
                 }
             }
             Ok(true)
         }
-        Some(FoodConversationState::ProductEditEan { product_id }) => {
+        Some(FoodConversationState::ProductFormatEditQuantity {
+            product_id,
+            format_id,
+            unit_id,
+        }) => {
+            let normalized = text.trim().replace(',', ".");
+            let quantity = normalized
+                .parse::<f64>()
+                .ok()
+                .filter(|value| value.is_finite() && *value > 0.0);
+            let Some(quantity) = quantity else {
+                match get_unit_by_id(pool, unit_id).await {
+                    Ok(Some(unit)) => {
+                        bot.send_message(
+                            msg.chat.id,
+                            "⚠️ Quantità non valida. Scrivi un numero maggiore di zero.",
+                        )
+                        .reply_markup(product_format_edit_quantity_keyboard(format_id))
+                        .await?;
+                        send_product_format_edit_quantity_prompt(
+                            bot,
+                            msg.chat.id,
+                            format_id,
+                            &unit,
+                        )
+                        .await?;
+                    }
+                    _ => {
+                        bot.send_message(msg.chat.id, "⚠️ Unità formato non disponibile.")
+                            .reply_markup(product_format_detail_keyboard(
+                                format_id, product_id, true,
+                            ))
+                            .await?;
+                    }
+                }
+                return Ok(true);
+            };
+            sessions.clear_chat(chat_id);
+            match update_product_format_quantity(pool, format_id, quantity, unit_id).await {
+                Ok(()) => {
+                    bot.send_message(msg.chat.id, "✅ Formato aggiornato.")
+                        .await?;
+                    send_product_format_detail(bot, msg.chat.id, pool, format_id).await?;
+                }
+                Err(error) => {
+                    bot.send_message(msg.chat.id, format!("⚠️ {error}"))
+                        .reply_markup(product_format_detail_keyboard(format_id, product_id, true))
+                        .await?;
+                }
+            }
+            Ok(true)
+        }
+        Some(FoodConversationState::ProductFormatEditEan {
+            product_id,
+            format_id,
+        }) => {
             let ean = match parse_ean_input(text) {
                 Ok(ean) => ean,
                 Err(error) => {
                     bot.send_message(msg.chat.id, format!("⚠️ {error}"))
-                        .reply_markup(product_edit_cancel_keyboard(product_id))
+                        .reply_markup(product_format_detail_keyboard(format_id, product_id, true))
                         .await?;
                     return Ok(true);
                 }
             };
             sessions.clear_chat(chat_id);
-            match update_product_ean(pool, product_id, ean.as_deref()).await {
+            match update_product_format_ean(pool, format_id, ean.as_deref()).await {
                 Ok(()) => {
                     bot.send_message(msg.chat.id, "✅ Barcode / EAN aggiornato.")
                         .await?;
-                    send_product_detail(bot, msg.chat.id, pool, product_id).await?;
+                    send_product_format_detail(bot, msg.chat.id, pool, format_id).await?;
                 }
                 Err(error) => {
                     bot.send_message(msg.chat.id, format!("⚠️ {error}"))
-                        .reply_markup(product_edit_cancel_keyboard(product_id))
+                        .reply_markup(product_format_detail_keyboard(format_id, product_id, true))
                         .await?;
                 }
             }
@@ -1857,6 +1925,331 @@ pub async fn handle_callback(
             }
             Ok(true)
         }
+        _ if data.starts_with("food:product:formats:") => {
+            let product_id = data
+                .strip_prefix("food:product:formats:")
+                .and_then(parse_positive_id);
+            sessions.clear_chat(chat_id.0);
+            if let Some(product_id) = product_id {
+                send_product_formats(bot, chat_id, pool, product_id).await?;
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:product:format:new:") => {
+            let product_id = data
+                .strip_prefix("food:product:format:new:")
+                .and_then(parse_positive_id);
+            if let Some(product_id) = product_id {
+                match get_product(pool, product_id).await {
+                    Ok(Some(product))
+                        if can_edit_food_current(pool, product.food_id)
+                            .await
+                            .unwrap_or(false) =>
+                    {
+                        match default_product_format_unit(pool, product_id).await {
+                            Ok(unit) => {
+                                sessions.set(
+                                    chat_id.0,
+                                    FoodConversationState::ProductFormatQuantity {
+                                        product_id,
+                                        unit_id: unit.id,
+                                    },
+                                );
+                                send_product_format_quantity_prompt(
+                                    bot, chat_id, product_id, &unit,
+                                )
+                                .await?;
+                            }
+                            Err(error) => {
+                                tracing::error!(?error, product_id, "Errore unità nuovo formato");
+                                bot.send_message(
+                                    chat_id,
+                                    "⚠️ Non riesco a preparare il nuovo formato.",
+                                )
+                                .await?;
+                            }
+                        }
+                    }
+                    Ok(Some(_)) => {
+                        bot.send_message(
+                            chat_id,
+                            "⚠️ Non hai il permesso di aggiungere formati a questo prodotto.",
+                        )
+                        .await?;
+                    }
+                    Ok(None) => {
+                        bot.send_message(chat_id, "Prodotto non disponibile.")
+                            .await?;
+                    }
+                    Err(error) => {
+                        tracing::error!(?error, product_id, "Errore prodotto per nuovo formato");
+                        bot.send_message(chat_id, "⚠️ Non riesco a leggere questo prodotto.")
+                            .await?;
+                    }
+                }
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:product:format:changeunit:") => {
+            let product_id = data
+                .strip_prefix("food:product:format:changeunit:")
+                .and_then(parse_positive_id);
+            match (product_id, sessions.get(chat_id.0)) {
+                (
+                    Some(product_id),
+                    Some(FoodConversationState::ProductFormatQuantity {
+                        product_id: state_product_id,
+                        ..
+                    }),
+                ) if product_id == state_product_id => {
+                    send_product_format_unit_choice(bot, chat_id, pool, product_id).await?;
+                }
+                _ => {
+                    bot.send_message(chat_id, "Inserimento formato non più attivo.")
+                        .await?;
+                }
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:product:format:unit:") => {
+            let raw = data
+                .strip_prefix("food:product:format:unit:")
+                .unwrap_or_default();
+            let mut parts = raw.split(':');
+            let product_id = parts.next().and_then(parse_positive_id);
+            let unit_id = parts.next().and_then(parse_positive_id);
+            if parts.next().is_some() {
+                return Ok(true);
+            }
+            match (product_id, unit_id, sessions.get(chat_id.0)) {
+                (
+                    Some(product_id),
+                    Some(unit_id),
+                    Some(FoodConversationState::ProductFormatQuantity {
+                        product_id: state_product_id,
+                        ..
+                    }),
+                ) if product_id == state_product_id => {
+                    match get_product_package_unit(pool, unit_id).await {
+                        Ok(Some(unit)) => {
+                            sessions.set(
+                                chat_id.0,
+                                FoodConversationState::ProductFormatQuantity {
+                                    product_id,
+                                    unit_id,
+                                },
+                            );
+                            send_product_format_quantity_prompt(bot, chat_id, product_id, &unit)
+                                .await?;
+                        }
+                        _ => {
+                            bot.send_message(chat_id, "⚠️ Unità formato non disponibile.")
+                                .await?;
+                        }
+                    }
+                }
+                _ => {
+                    bot.send_message(chat_id, "Inserimento formato non più attivo.")
+                        .await?;
+                }
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:format:view:") => {
+            let format_id = data
+                .strip_prefix("food:format:view:")
+                .and_then(parse_positive_id);
+            sessions.clear_chat(chat_id.0);
+            if let Some(format_id) = format_id {
+                send_product_format_detail(bot, chat_id, pool, format_id).await?;
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:format:edit:quantity:") => {
+            let format_id = data
+                .strip_prefix("food:format:edit:quantity:")
+                .and_then(parse_positive_id);
+            if let Some(format_id) = format_id {
+                match get_product_format(pool, format_id).await {
+                    Ok(Some(format)) => match get_product(pool, format.product_id).await {
+                        Ok(Some(product))
+                            if can_edit_food_current(pool, product.food_id)
+                                .await
+                                .unwrap_or(false) =>
+                        {
+                            match get_unit_by_id(pool, format.package_unit_id).await {
+                                Ok(Some(unit)) => {
+                                    sessions.set(
+                                        chat_id.0,
+                                        FoodConversationState::ProductFormatEditQuantity {
+                                            product_id: product.id,
+                                            format_id,
+                                            unit_id: unit.id,
+                                        },
+                                    );
+                                    send_product_format_edit_quantity_prompt(
+                                        bot, chat_id, format_id, &unit,
+                                    )
+                                    .await?;
+                                }
+                                _ => {
+                                    bot.send_message(chat_id, "⚠️ Unità formato non disponibile.")
+                                        .await?;
+                                }
+                            }
+                        }
+                        Ok(Some(_)) => {
+                            bot.send_message(
+                                chat_id,
+                                "⚠️ Non hai il permesso di modificare questo formato.",
+                            )
+                            .await?;
+                        }
+                        _ => {
+                            bot.send_message(chat_id, "Prodotto non disponibile.")
+                                .await?;
+                        }
+                    },
+                    Ok(None) => {
+                        bot.send_message(chat_id, "Formato non disponibile.")
+                            .await?;
+                    }
+                    Err(error) => {
+                        tracing::error!(?error, format_id, "Errore modifica formato");
+                        bot.send_message(chat_id, "⚠️ Non riesco a leggere questo formato.")
+                            .await?;
+                    }
+                }
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:format:edit:changeunit:") => {
+            let format_id = data
+                .strip_prefix("food:format:edit:changeunit:")
+                .and_then(parse_positive_id);
+            match (format_id, sessions.get(chat_id.0)) {
+                (
+                    Some(format_id),
+                    Some(FoodConversationState::ProductFormatEditQuantity {
+                        format_id: state_format_id,
+                        ..
+                    }),
+                ) if format_id == state_format_id => {
+                    send_product_format_edit_unit_choice(bot, chat_id, pool, format_id).await?;
+                }
+                _ => {
+                    bot.send_message(chat_id, "Modifica formato non più attiva.")
+                        .await?;
+                }
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:format:edit:unit:") => {
+            let raw = data
+                .strip_prefix("food:format:edit:unit:")
+                .unwrap_or_default();
+            let mut parts = raw.split(':');
+            let format_id = parts.next().and_then(parse_positive_id);
+            let unit_id = parts.next().and_then(parse_positive_id);
+            if parts.next().is_some() {
+                return Ok(true);
+            }
+            match (format_id, unit_id, sessions.get(chat_id.0)) {
+                (
+                    Some(format_id),
+                    Some(unit_id),
+                    Some(FoodConversationState::ProductFormatEditQuantity {
+                        product_id,
+                        format_id: state_format_id,
+                        ..
+                    }),
+                ) if format_id == state_format_id => {
+                    match get_product_package_unit(pool, unit_id).await {
+                        Ok(Some(unit)) => {
+                            sessions.set(
+                                chat_id.0,
+                                FoodConversationState::ProductFormatEditQuantity {
+                                    product_id,
+                                    format_id,
+                                    unit_id,
+                                },
+                            );
+                            send_product_format_edit_quantity_prompt(
+                                bot, chat_id, format_id, &unit,
+                            )
+                            .await?;
+                        }
+                        _ => {
+                            bot.send_message(chat_id, "⚠️ Unità formato non disponibile.")
+                                .await?;
+                        }
+                    }
+                }
+                _ => {
+                    bot.send_message(chat_id, "Modifica formato non più attiva.")
+                        .await?;
+                }
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:format:edit:ean:") => {
+            let format_id = data
+                .strip_prefix("food:format:edit:ean:")
+                .and_then(parse_positive_id);
+            if let Some(format_id) = format_id {
+                match get_product_format(pool, format_id).await {
+                    Ok(Some(format)) => match get_product(pool, format.product_id).await {
+                        Ok(Some(product))
+                            if can_edit_food_current(pool, product.food_id)
+                                .await
+                                .unwrap_or(false) =>
+                        {
+                            sessions.set(
+                                chat_id.0,
+                                FoodConversationState::ProductFormatEditEan {
+                                    product_id: product.id,
+                                    format_id,
+                                },
+                            );
+                            let current = format.ean.as_deref().unwrap_or("non impostato");
+                            bot.send_message(
+                                chat_id,
+                                format!(
+                                    "🔢 Barcode / EAN del formato\n\nValore attuale: {current}\n\nScrivi il nuovo codice oppure - per rimuoverlo."
+                                ),
+                            )
+                            .reply_markup(product_format_detail_keyboard(
+                                format_id,
+                                product.id,
+                                true,
+                            ))
+                            .await?;
+                        }
+                        Ok(Some(_)) => {
+                            bot.send_message(
+                                chat_id,
+                                "⚠️ Non hai il permesso di modificare questo formato.",
+                            )
+                            .await?;
+                        }
+                        _ => {
+                            bot.send_message(chat_id, "Prodotto non disponibile.")
+                                .await?;
+                        }
+                    },
+                    Ok(None) => {
+                        bot.send_message(chat_id, "Formato non disponibile.")
+                            .await?;
+                    }
+                    Err(error) => {
+                        tracing::error!(?error, format_id, "Errore EAN formato");
+                        bot.send_message(chat_id, "⚠️ Non riesco a leggere questo formato.")
+                            .await?;
+                    }
+                }
+            }
+            Ok(true)
+        }
         _ if data.starts_with("food:product:edit:brand:") => {
             let product_id = data
                 .strip_prefix("food:product:edit:brand:")
@@ -1951,115 +2344,14 @@ pub async fn handle_callback(
             let product_id = data
                 .strip_prefix("food:product:edit:quantity:")
                 .and_then(parse_positive_id);
+            sessions.clear_chat(chat_id.0);
             if let Some(product_id) = product_id {
-                match get_product(pool, product_id).await {
-                    Ok(Some(product))
-                        if can_edit_food_current(pool, product.food_id)
-                            .await
-                            .unwrap_or(false) =>
-                    {
-                        match get_unit_by_id(pool, product.package_unit_id).await {
-                            Ok(Some(unit)) => {
-                                sessions.set(
-                                    chat_id.0,
-                                    FoodConversationState::ProductEditQuantity {
-                                        product_id,
-                                        unit_id: unit.id,
-                                    },
-                                );
-                                send_product_edit_quantity_prompt(bot, chat_id, product_id, &unit)
-                                    .await?;
-                            }
-                            _ => {
-                                bot.send_message(chat_id, "⚠️ Unità confezione non disponibile.")
-                                    .await?;
-                            }
-                        }
-                    }
-                    Ok(Some(_)) => {
-                        bot.send_message(
-                            chat_id,
-                            "⚠️ Non hai il permesso di modificare questo prodotto.",
-                        )
-                        .await?;
-                    }
-                    Ok(None) => {
-                        bot.send_message(chat_id, "Prodotto non disponibile.")
-                            .await?;
-                    }
-                    Err(error) => {
-                        tracing::error!(?error, product_id, "Errore modifica confezione prodotto");
-                        bot.send_message(chat_id, "⚠️ Non riesco a leggere questo prodotto.")
-                            .await?;
-                    }
-                }
-            }
-            Ok(true)
-        }
-        _ if data.starts_with("food:product:edit:changeunit:") => {
-            let product_id = data
-                .strip_prefix("food:product:edit:changeunit:")
-                .and_then(parse_positive_id);
-            match (product_id, sessions.get(chat_id.0)) {
-                (
-                    Some(product_id),
-                    Some(FoodConversationState::ProductEditQuantity {
-                        product_id: state_product_id,
-                        ..
-                    }),
-                ) if product_id == state_product_id => {
-                    send_product_edit_unit_choice(bot, chat_id, pool, product_id).await?;
-                }
-                _ => {
-                    bot.send_message(chat_id, "Modifica confezione non più attiva.")
-                        .reply_markup(food_menu_keyboard())
-                        .await?;
-                }
-            }
-            Ok(true)
-        }
-        _ if data.starts_with("food:product:edit:unit:") => {
-            let raw = data
-                .strip_prefix("food:product:edit:unit:")
-                .unwrap_or_default();
-            let mut parts = raw.split(':');
-            let product_id = parts.next().and_then(parse_positive_id);
-            let unit_id = parts.next().and_then(parse_positive_id);
-            if parts.next().is_some() {
-                return Ok(true);
-            }
-            match (product_id, unit_id, sessions.get(chat_id.0)) {
-                (
-                    Some(product_id),
-                    Some(unit_id),
-                    Some(FoodConversationState::ProductEditQuantity {
-                        product_id: state_product_id,
-                        ..
-                    }),
-                ) if product_id == state_product_id => {
-                    match get_product_package_unit(pool, unit_id).await {
-                        Ok(Some(unit)) => {
-                            sessions.set(
-                                chat_id.0,
-                                FoodConversationState::ProductEditQuantity {
-                                    product_id,
-                                    unit_id,
-                                },
-                            );
-                            send_product_edit_quantity_prompt(bot, chat_id, product_id, &unit)
-                                .await?;
-                        }
-                        _ => {
-                            bot.send_message(chat_id, "⚠️ Unità confezione non disponibile.")
-                                .await?;
-                        }
-                    }
-                }
-                _ => {
-                    bot.send_message(chat_id, "Modifica confezione non più attiva.")
-                        .reply_markup(food_menu_keyboard())
-                        .await?;
-                }
+                bot.send_message(
+                    chat_id,
+                    "📦 Quantità, unità e barcode ora appartengono ai singoli formati.",
+                )
+                .await?;
+                send_product_formats(bot, chat_id, pool, product_id).await?;
             }
             Ok(true)
         }
@@ -2067,44 +2359,14 @@ pub async fn handle_callback(
             let product_id = data
                 .strip_prefix("food:product:edit:ean:")
                 .and_then(parse_positive_id);
+            sessions.clear_chat(chat_id.0);
             if let Some(product_id) = product_id {
-                match get_product(pool, product_id).await {
-                    Ok(Some(product))
-                        if can_edit_food_current(pool, product.food_id)
-                            .await
-                            .unwrap_or(false) =>
-                    {
-                        sessions.set(
-                            chat_id.0,
-                            FoodConversationState::ProductEditEan { product_id },
-                        );
-                        let current = product.ean.as_deref().unwrap_or("non impostato");
-                        bot.send_message(
-                            chat_id,
-                            format!(
-                                "🔢 Barcode / EAN\n\nValore attuale: {current}\n\nScrivi il nuovo codice oppure - per rimuoverlo."
-                            ),
-                        )
-                        .reply_markup(product_edit_cancel_keyboard(product_id))
-                        .await?;
-                    }
-                    Ok(Some(_)) => {
-                        bot.send_message(
-                            chat_id,
-                            "⚠️ Non hai il permesso di modificare questo prodotto.",
-                        )
-                        .await?;
-                    }
-                    Ok(None) => {
-                        bot.send_message(chat_id, "Prodotto non disponibile.")
-                            .await?;
-                    }
-                    Err(error) => {
-                        tracing::error!(?error, product_id, "Errore modifica EAN prodotto");
-                        bot.send_message(chat_id, "⚠️ Non riesco a leggere questo prodotto.")
-                            .await?;
-                    }
-                }
+                bot.send_message(
+                    chat_id,
+                    "🔢 Il barcode / EAN ora appartiene al singolo formato.",
+                )
+                .await?;
+                send_product_formats(bot, chat_id, pool, product_id).await?;
             }
             Ok(true)
         }
@@ -2530,8 +2792,18 @@ async fn send_food_list(
     refreshed: bool,
     page: i64,
 ) -> ResponseResult<()> {
-    let total = match list_foods(pool, None, None, 100_000).await {
-        Ok(foods) => foods.len(),
+    let actor = identity::current_actor();
+    tracing::info!(
+        chat_id = chat_id.0,
+        user_id = ?actor.utente_id,
+        space_id = actor.spazio_id,
+        view_all = actor.view_all,
+        page,
+        "Alimentazione: preparazione elenco"
+    );
+
+    let total = match count_foods(pool, None, None).await {
+        Ok(total) => total,
         Err(error) => {
             tracing::error!(?error, "Errore conteggio alimenti");
             bot.send_message(chat_id, "⚠️ Non riesco a leggere gli alimenti.")
@@ -2564,7 +2836,7 @@ async fn send_food_list(
             } else {
                 "📋 Alimenti"
             };
-            let current_user = identity::current_actor().utente_id;
+            let current_user = actor.utente_id;
             let mut text = format!(
                 "{title} · {}\nPagina {}/{}\n\n",
                 result_count_label(total),
@@ -2572,9 +2844,29 @@ async fn send_food_list(
                 total_pages(total)
             );
             append_food_lines(&mut text, &foods, current_user);
+            tracing::info!(
+                chat_id = chat_id.0,
+                user_id = ?actor.utente_id,
+                page,
+                rows = foods.len(),
+                total,
+                "Alimentazione: invio elenco"
+            );
             bot.send_message(chat_id, text)
-                .reply_markup(food_results_keyboard(&foods, page, has_next, total))
+                .reply_markup(food_results_keyboard(
+                    &foods,
+                    page,
+                    has_next,
+                    total,
+                    current_user,
+                ))
                 .await?;
+            tracing::info!(
+                chat_id = chat_id.0,
+                user_id = ?actor.utente_id,
+                page,
+                "Alimentazione: elenco inviato"
+            );
         }
         Err(error) => {
             tracing::error!(?error, "Errore elenco alimenti");
@@ -2601,8 +2893,8 @@ async fn send_search_results(
         return Ok(());
     }
 
-    let total = match list_foods(pool, Some(&normalized), None, 100_000).await {
-        Ok(foods) => foods.len(),
+    let total = match count_foods(pool, Some(&normalized), None).await {
+        Ok(total) => total,
         Err(error) => {
             tracing::error!(?error, "Errore conteggio ricerca alimenti");
             bot.send_message(chat_id, "⚠️ Non riesco a cercare gli alimenti.")
@@ -2642,7 +2934,13 @@ async fn send_search_results(
             );
             append_search_food_lines(pool, &mut text, &foods, current_user, &normalized).await;
             bot.send_message(chat_id, text)
-                .reply_markup(food_search_results_keyboard(&foods, page, has_next, total))
+                .reply_markup(food_search_results_keyboard(
+                    &foods,
+                    page,
+                    has_next,
+                    total,
+                    current_user,
+                ))
                 .await?;
         }
         Err(error) => {
@@ -2751,7 +3049,11 @@ async fn send_filtered_food_list(
             append_food_lines(&mut text, &foods, current_user);
             bot.send_message(chat_id, text)
                 .reply_markup(food_filtered_results_keyboard(
-                    &foods, page, has_next, total,
+                    &foods,
+                    page,
+                    has_next,
+                    total,
+                    current_user,
                 ))
                 .await?;
         }
@@ -3840,6 +4142,169 @@ async fn list_shareable_spaces(pool: &SqlitePool) -> Result<Vec<SpaceRecord>> {
     .context("Impossibile leggere gli spazi condivisibili")
 }
 
+async fn count_foods(
+    pool: &SqlitePool,
+    normalized_search: Option<&str>,
+    category_id: Option<i64>,
+) -> Result<usize> {
+    let actor = identity::current_actor();
+    let search = normalized_search
+        .map(normalize_name)
+        .filter(|value| !value.is_empty());
+
+    let total: i64 = if let Some(user_id) = actor.utente_id {
+        if actor.view_all {
+            sqlx::query_scalar(
+                "SELECT COUNT(*) \
+                 FROM alimenti a \
+                 WHERE a.archiviato = 0 \
+                   AND (\
+                        a.catalogo_globale = 1 \
+                        OR a.proprietario_utente_id = ? \
+                        OR EXISTS (\
+                            SELECT 1 \
+                            FROM alimento_spazi asp \
+                            JOIN membri_spazio ms ON ms.spazio_id = asp.spazio_id \
+                            WHERE asp.alimento_id = a.id \
+                              AND ms.utente_id = ?\
+                        )\
+                   ) \
+                   AND (\
+                        ? IS NULL \
+                        OR instr(a.nome_normalizzato, ?) > 0 \
+                        OR EXISTS (\
+                            SELECT 1 FROM alimento_alias aa \
+                            WHERE aa.alimento_id = a.id \
+                              AND instr(aa.alias_normalizzato, ?) > 0\
+                        )\
+                        OR EXISTS (\
+                            SELECT 1 FROM prodotti_alimentari p \
+                            WHERE p.alimento_id = a.id \
+                              AND p.attivo = 1 \
+                              AND instr(\
+                                    p.marca_normalizzata || ' ' || p.nome_commerciale_normalizzato, \
+                                    ?\
+                                  ) > 0\
+                        )\
+                   ) \
+                   AND (\
+                        ? IS NULL \
+                        OR EXISTS (\
+                            SELECT 1 FROM alimento_categorie ac \
+                            WHERE ac.alimento_id = a.id \
+                              AND ac.categoria_id = ?\
+                        )\
+                   )",
+            )
+            .bind(user_id)
+            .bind(user_id)
+            .bind(search.as_deref())
+            .bind(search.as_deref())
+            .bind(search.as_deref())
+            .bind(search.as_deref())
+            .bind(category_id)
+            .bind(category_id)
+            .fetch_one(pool)
+            .await
+        } else {
+            sqlx::query_scalar(
+                "SELECT COUNT(*) \
+                 FROM alimenti a \
+                 WHERE a.archiviato = 0 \
+                   AND (\
+                        a.catalogo_globale = 1 \
+                        OR a.proprietario_utente_id = ? \
+                        OR EXISTS (\
+                            SELECT 1 FROM alimento_spazi asp \
+                            WHERE asp.alimento_id = a.id \
+                              AND asp.spazio_id = ?\
+                        )\
+                   ) \
+                   AND (\
+                        ? IS NULL \
+                        OR instr(a.nome_normalizzato, ?) > 0 \
+                        OR EXISTS (\
+                            SELECT 1 FROM alimento_alias aa \
+                            WHERE aa.alimento_id = a.id \
+                              AND instr(aa.alias_normalizzato, ?) > 0\
+                        )\
+                        OR EXISTS (\
+                            SELECT 1 FROM prodotti_alimentari p \
+                            WHERE p.alimento_id = a.id \
+                              AND p.attivo = 1 \
+                              AND instr(\
+                                    p.marca_normalizzata || ' ' || p.nome_commerciale_normalizzato, \
+                                    ?\
+                                  ) > 0\
+                        )\
+                   ) \
+                   AND (\
+                        ? IS NULL \
+                        OR EXISTS (\
+                            SELECT 1 FROM alimento_categorie ac \
+                            WHERE ac.alimento_id = a.id \
+                              AND ac.categoria_id = ?\
+                        )\
+                   )",
+            )
+            .bind(user_id)
+            .bind(actor.spazio_id)
+            .bind(search.as_deref())
+            .bind(search.as_deref())
+            .bind(search.as_deref())
+            .bind(search.as_deref())
+            .bind(category_id)
+            .bind(category_id)
+            .fetch_one(pool)
+            .await
+        }
+    } else {
+        sqlx::query_scalar(
+            "SELECT COUNT(*) \
+             FROM alimenti a \
+             WHERE a.archiviato = 0 \
+               AND a.catalogo_globale = 1 \
+               AND (\
+                    ? IS NULL \
+                    OR instr(a.nome_normalizzato, ?) > 0 \
+                    OR EXISTS (\
+                        SELECT 1 FROM alimento_alias aa \
+                        WHERE aa.alimento_id = a.id \
+                          AND instr(aa.alias_normalizzato, ?) > 0\
+                    )\
+                    OR EXISTS (\
+                        SELECT 1 FROM prodotti_alimentari p \
+                        WHERE p.alimento_id = a.id \
+                          AND p.attivo = 1 \
+                          AND instr(\
+                                p.marca_normalizzata || ' ' || p.nome_commerciale_normalizzato, \
+                                ?\
+                              ) > 0\
+                    )\
+               ) \
+               AND (\
+                    ? IS NULL \
+                    OR EXISTS (\
+                        SELECT 1 FROM alimento_categorie ac \
+                        WHERE ac.alimento_id = a.id \
+                          AND ac.categoria_id = ?\
+                    )\
+               )",
+        )
+        .bind(search.as_deref())
+        .bind(search.as_deref())
+        .bind(search.as_deref())
+        .bind(search.as_deref())
+        .bind(category_id)
+        .bind(category_id)
+        .fetch_one(pool)
+        .await
+    }
+    .context("Impossibile contare il catalogo alimenti")?;
+
+    usize::try_from(total).context("Conteggio alimenti non rappresentabile in memoria")
+}
+
 async fn list_foods(
     pool: &SqlitePool,
     normalized_search: Option<&str>,
@@ -4296,8 +4761,9 @@ fn food_results_keyboard(
     page: i64,
     has_next: bool,
     total: usize,
+    current_user: Option<i64>,
 ) -> InlineKeyboardMarkup {
-    let mut rows = food_item_rows(foods);
+    let mut rows = food_item_rows(foods, current_user);
     push_pagination_row(&mut rows, page, has_next, total, "food:list:page");
     rows.push(vec![
         button("➕ Nuovo alimento", "food:new"),
@@ -4319,8 +4785,9 @@ fn food_search_results_keyboard(
     page: i64,
     has_next: bool,
     total: usize,
+    current_user: Option<i64>,
 ) -> InlineKeyboardMarkup {
-    let mut rows = food_item_rows(foods);
+    let mut rows = food_item_rows(foods, current_user);
     push_pagination_row(&mut rows, page, has_next, total, "food:search:page");
     rows.push(vec![
         button("🔎 Nuova ricerca", "food:search:list"),
@@ -4421,8 +4888,9 @@ fn food_filtered_results_keyboard(
     page: i64,
     has_next: bool,
     total: usize,
+    current_user: Option<i64>,
 ) -> InlineKeyboardMarkup {
-    let mut rows = food_item_rows(foods);
+    let mut rows = food_item_rows(foods, current_user);
     push_pagination_row(&mut rows, page, has_next, total, "food:filter:page");
     rows.push(vec![
         button("➕ Nuovo alimento", "food:new"),
@@ -4749,8 +5217,10 @@ async fn append_search_food_lines(
     }
 }
 
-fn food_item_rows(foods: &[FoodRecord]) -> Vec<Vec<InlineKeyboardButton>> {
-    let current_user = identity::current_actor().utente_id;
+fn food_item_rows(
+    foods: &[FoodRecord],
+    current_user: Option<i64>,
+) -> Vec<Vec<InlineKeyboardButton>> {
     foods
         .iter()
         .map(|food| {
@@ -4926,12 +5396,9 @@ async fn list_products_for_food(pool: &SqlitePool, food_id: i64) -> Result<Vec<P
             p.alimento_id AS food_id, \
             p.marca AS brand, \
             p.nome_commerciale AS product_name, \
-            p.quantita_confezione AS package_quantity, \
-            p.unita_confezione_id AS package_unit_id, \
-            um.simbolo AS package_unit_symbol, \
-            p.codice_ean AS ean \
+            (SELECT COUNT(*) FROM formati_prodotto_alimentare f \
+             WHERE f.prodotto_alimentare_id = p.id AND f.attivo = 1) AS format_count \
          FROM prodotti_alimentari p \
-         JOIN unita_misura um ON um.id = p.unita_confezione_id \
          WHERE p.alimento_id = ? AND p.attivo = 1 \
          ORDER BY p.marca COLLATE NOCASE, p.nome_commerciale COLLATE NOCASE, p.id",
     )
@@ -4948,12 +5415,9 @@ async fn get_product(pool: &SqlitePool, product_id: i64) -> Result<Option<Produc
             p.alimento_id AS food_id, \
             p.marca AS brand, \
             p.nome_commerciale AS product_name, \
-            p.quantita_confezione AS package_quantity, \
-            p.unita_confezione_id AS package_unit_id, \
-            um.simbolo AS package_unit_symbol, \
-            p.codice_ean AS ean \
+            (SELECT COUNT(*) FROM formati_prodotto_alimentare f \
+             WHERE f.prodotto_alimentare_id = p.id AND f.attivo = 1) AS format_count \
          FROM prodotti_alimentari p \
-         JOIN unita_misura um ON um.id = p.unita_confezione_id \
          WHERE p.id = ? AND p.attivo = 1",
     )
     .bind(product_id)
@@ -4970,6 +5434,52 @@ async fn get_product(pool: &SqlitePool, product_id: i64) -> Result<Option<Produc
     } else {
         Ok(None)
     }
+}
+
+async fn list_product_formats(
+    pool: &SqlitePool,
+    product_id: i64,
+) -> Result<Vec<ProductFormatRecord>> {
+    sqlx::query_as::<_, ProductFormatRecord>(
+        "SELECT \
+            f.id, \
+            f.prodotto_alimentare_id AS product_id, \
+            f.quantita_confezione AS package_quantity, \
+            f.unita_confezione_id AS package_unit_id, \
+            um.simbolo AS package_unit_symbol, \
+            f.codice_ean AS ean \
+         FROM formati_prodotto_alimentare f \
+         JOIN unita_misura um ON um.id = f.unita_confezione_id \
+         WHERE f.prodotto_alimentare_id = ? AND f.attivo = 1 \
+         ORDER BY f.quantita_confezione, um.simbolo, f.id",
+    )
+    .bind(product_id)
+    .fetch_all(pool)
+    .await
+    .context("Impossibile leggere i formati del prodotto")
+}
+
+async fn get_product_format(
+    pool: &SqlitePool,
+    format_id: i64,
+) -> Result<Option<ProductFormatRecord>> {
+    sqlx::query_as::<_, ProductFormatRecord>(
+        "SELECT \
+            f.id, \
+            f.prodotto_alimentare_id AS product_id, \
+            f.quantita_confezione AS package_quantity, \
+            f.unita_confezione_id AS package_unit_id, \
+            um.simbolo AS package_unit_symbol, \
+            f.codice_ean AS ean \
+         FROM formati_prodotto_alimentare f \
+         JOIN prodotti_alimentari p ON p.id = f.prodotto_alimentare_id AND p.attivo = 1 \
+         JOIN unita_misura um ON um.id = f.unita_confezione_id \
+         WHERE f.id = ? AND f.attivo = 1",
+    )
+    .bind(format_id)
+    .fetch_optional(pool)
+    .await
+    .context("Impossibile leggere il formato del prodotto")
 }
 
 fn product_history_name(brand: &str, product_name: &str) -> String {
@@ -5016,6 +5526,75 @@ async fn record_product_history_event(
     Ok(())
 }
 
+async fn find_product_by_identity(
+    pool: &SqlitePool,
+    food_id: i64,
+    brand: &str,
+    product_name: &str,
+) -> Result<Option<i64>> {
+    sqlx::query_scalar(
+        "SELECT id FROM prodotti_alimentari \
+         WHERE alimento_id = ? AND attivo = 1 \
+           AND marca_normalizzata = ? \
+           AND nome_commerciale_normalizzato = ? \
+         ORDER BY id LIMIT 1",
+    )
+    .bind(food_id)
+    .bind(normalize_name(brand))
+    .bind(normalize_name(product_name))
+    .fetch_optional(pool)
+    .await
+    .context("Impossibile cercare il prodotto commerciale")
+}
+
+async fn product_identity_duplicate_exists(
+    pool: &SqlitePool,
+    product_id: i64,
+    food_id: i64,
+    brand: &str,
+    product_name: &str,
+) -> Result<bool> {
+    sqlx::query_scalar(
+        "SELECT EXISTS(\
+            SELECT 1 FROM prodotti_alimentari \
+            WHERE alimento_id = ? AND attivo = 1 AND id <> ? \
+              AND marca_normalizzata = ? \
+              AND nome_commerciale_normalizzato = ?\
+         )",
+    )
+    .bind(food_id)
+    .bind(product_id)
+    .bind(normalize_name(brand))
+    .bind(normalize_name(product_name))
+    .fetch_one(pool)
+    .await
+    .context("Impossibile verificare i duplicati del prodotto")
+}
+
+async fn format_duplicate_exists(
+    pool: &SqlitePool,
+    product_id: i64,
+    excluded_format_id: Option<i64>,
+    quantity: f64,
+    unit_id: i64,
+) -> Result<bool> {
+    let excluded = excluded_format_id.unwrap_or(0);
+    sqlx::query_scalar(
+        "SELECT EXISTS(\
+            SELECT 1 FROM formati_prodotto_alimentare \
+            WHERE prodotto_alimentare_id = ? AND attivo = 1 \
+              AND id <> ? AND quantita_confezione = ? AND unita_confezione_id = ?\
+         )",
+    )
+    .bind(product_id)
+    .bind(excluded)
+    .bind(quantity)
+    .bind(unit_id)
+    .fetch_one(pool)
+    .await
+    .context("Impossibile verificare i duplicati del formato")
+}
+
 async fn create_product_association(
     pool: &SqlitePool,
     food_id: i64,
@@ -5035,31 +5614,15 @@ async fn create_product_association(
     if !quantity.is_finite() || quantity <= 0.0 {
         bail!("Quantità confezione non valida");
     }
-
     let unit = get_product_package_unit(pool, unit_id)
         .await?
         .context("Unità confezione non disponibile")?;
 
-    let duplicate: bool = sqlx::query_scalar(
-        "SELECT EXISTS(\
-            SELECT 1 FROM prodotti_alimentari \
-            WHERE alimento_id = ? AND attivo = 1 \
-              AND marca_normalizzata = ? \
-              AND nome_commerciale_normalizzato = ? \
-              AND quantita_confezione = ? \
-              AND unita_confezione_id = ?\
-         )",
-    )
-    .bind(food_id)
-    .bind(normalize_name(&brand))
-    .bind(normalize_name(&product_name))
-    .bind(quantity)
-    .bind(unit_id)
-    .fetch_one(pool)
-    .await
-    .context("Impossibile verificare il prodotto commerciale")?;
-    if duplicate {
-        bail!("Questo prodotto è già associato all'alimento");
+    if let Some(existing_product_id) =
+        find_product_by_identity(pool, food_id, &brand, &product_name).await?
+    {
+        create_product_format(pool, existing_product_id, quantity, unit_id).await?;
+        return Ok(existing_product_id);
     }
 
     let mut tx = pool
@@ -5070,8 +5633,8 @@ async fn create_product_association(
         "INSERT INTO prodotti_alimentari (\
             alimento_id, marca, marca_normalizzata, nome_commerciale, \
             nome_commerciale_normalizzato, quantita_confezione, \
-            unita_confezione_id, creato_da_utente_id\
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            unita_confezione_id, codice_ean, creato_da_utente_id\
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)",
     )
     .bind(food_id)
     .bind(&brand)
@@ -5085,6 +5648,18 @@ async fn create_product_association(
     .await
     .context("Impossibile associare il prodotto commerciale")?
     .last_insert_rowid();
+
+    sqlx::query(
+        "INSERT INTO formati_prodotto_alimentare (\
+            prodotto_alimentare_id, quantita_confezione, unita_confezione_id\
+         ) VALUES (?, ?, ?)",
+    )
+    .bind(id)
+    .bind(quantity)
+    .bind(unit_id)
+    .execute(&mut *tx)
+    .await
+    .context("Impossibile creare il formato iniziale del prodotto")?;
 
     let food_name: String =
         sqlx::query_scalar("SELECT nome FROM alimenti WHERE id = ? AND archiviato = 0")
@@ -5118,13 +5693,21 @@ async fn create_product_association(
                 valore_prima: None,
                 valore_dopo: Some(product_name.clone()),
             },
-            NewFieldChange {
-                campo: "confezione",
-                tipo_valore: "testo",
-                valore_prima: None,
-                valore_dopo: Some(package_history_value(quantity, &unit.simbolo)),
-            },
         ],
+    )
+    .await?;
+    record_product_history_event(
+        &mut tx,
+        id,
+        &product_label,
+        "modifica",
+        "formato_prodotto",
+        &[NewFieldChange {
+            campo: "confezione",
+            tipo_valore: "testo",
+            valore_prima: None,
+            valore_dopo: Some(package_history_value(quantity, &unit.simbolo)),
+        }],
     )
     .await?;
 
@@ -5134,34 +5717,64 @@ async fn create_product_association(
     Ok(id)
 }
 
-async fn product_duplicate_exists(
+async fn create_product_format(
     pool: &SqlitePool,
     product_id: i64,
-    product: &ProductRecord,
-    brand: &str,
-    product_name: &str,
     quantity: f64,
     unit_id: i64,
-) -> Result<bool> {
-    sqlx::query_scalar(
-        "SELECT EXISTS(\
-            SELECT 1 FROM prodotti_alimentari \
-            WHERE alimento_id = ? AND attivo = 1 AND id <> ? \
-              AND marca_normalizzata = ? \
-              AND nome_commerciale_normalizzato = ? \
-              AND quantita_confezione = ? \
-              AND unita_confezione_id = ?\
-         )",
+) -> Result<i64> {
+    let product = get_product(pool, product_id)
+        .await?
+        .context("Prodotto non disponibile")?;
+    if !can_edit_food_current(pool, product.food_id).await? {
+        bail!("Non hai il permesso di aggiungere formati a questo prodotto");
+    }
+    if !quantity.is_finite() || quantity <= 0.0 {
+        bail!("Quantità formato non valida");
+    }
+    let unit = get_product_package_unit(pool, unit_id)
+        .await?
+        .context("Unità formato non disponibile")?;
+    if format_duplicate_exists(pool, product_id, None, quantity, unit_id).await? {
+        bail!("Questo formato è già disponibile per il prodotto");
+    }
+
+    let mut tx = pool
+        .begin()
+        .await
+        .context("Impossibile iniziare il salvataggio del formato")?;
+    let format_id = sqlx::query(
+        "INSERT INTO formati_prodotto_alimentare (\
+            prodotto_alimentare_id, quantita_confezione, unita_confezione_id\
+         ) VALUES (?, ?, ?)",
     )
-    .bind(product.food_id)
     .bind(product_id)
-    .bind(normalize_name(brand))
-    .bind(normalize_name(product_name))
     .bind(quantity)
     .bind(unit_id)
-    .fetch_one(pool)
+    .execute(&mut *tx)
     .await
-    .context("Impossibile verificare i duplicati del prodotto")
+    .context("Impossibile aggiungere il formato")?
+    .last_insert_rowid();
+
+    let product_label = product_history_name(&product.brand, &product.product_name);
+    record_product_history_event(
+        &mut tx,
+        product_id,
+        &product_label,
+        "modifica",
+        "formato_prodotto",
+        &[NewFieldChange {
+            campo: "confezione",
+            tipo_valore: "testo",
+            valore_prima: None,
+            valore_dopo: Some(package_history_value(quantity, &unit.simbolo)),
+        }],
+    )
+    .await?;
+    tx.commit()
+        .await
+        .context("Impossibile completare il salvataggio del formato")?;
+    Ok(format_id)
 }
 
 async fn update_product_brand(pool: &SqlitePool, product_id: i64, raw_brand: &str) -> Result<()> {
@@ -5175,18 +5788,16 @@ async fn update_product_brand(pool: &SqlitePool, product_id: i64, raw_brand: &st
     if product.brand == brand {
         return Ok(());
     }
-    if product_duplicate_exists(
+    if product_identity_duplicate_exists(
         pool,
         product_id,
-        &product,
+        product.food_id,
         &brand,
         &product.product_name,
-        product.package_quantity,
-        product.package_unit_id,
     )
     .await?
     {
-        bail!("Esiste già un prodotto identico associato a questo alimento");
+        bail!("Esiste già lo stesso prodotto commerciale per questo alimento");
     }
 
     let mut tx = pool
@@ -5240,18 +5851,16 @@ async fn update_product_name(
     if product.product_name == product_name {
         return Ok(());
     }
-    if product_duplicate_exists(
+    if product_identity_duplicate_exists(
         pool,
         product_id,
-        &product,
+        product.food_id,
         &product.brand,
         &product_name,
-        product.package_quantity,
-        product.package_unit_id,
     )
     .await?
     {
-        bail!("Esiste già un prodotto identico associato a questo alimento");
+        bail!("Esiste già lo stesso prodotto commerciale per questo alimento");
     }
 
     let mut tx = pool
@@ -5291,69 +5900,64 @@ async fn update_product_name(
     Ok(())
 }
 
-async fn update_product_quantity(
+async fn update_product_format_quantity(
     pool: &SqlitePool,
-    product_id: i64,
+    format_id: i64,
     quantity: f64,
     unit_id: i64,
 ) -> Result<()> {
-    let product = get_product(pool, product_id)
+    let format = get_product_format(pool, format_id)
+        .await?
+        .context("Formato non disponibile")?;
+    let product = get_product(pool, format.product_id)
         .await?
         .context("Prodotto non disponibile")?;
     if !can_edit_food_current(pool, product.food_id).await? {
-        bail!("Non hai il permesso di modificare questo prodotto");
+        bail!("Non hai il permesso di modificare questo formato");
     }
     if !quantity.is_finite() || quantity <= 0.0 {
-        bail!("Quantità confezione non valida");
+        bail!("Quantità formato non valida");
     }
     let unit = get_product_package_unit(pool, unit_id)
         .await?
-        .context("Unità confezione non disponibile")?;
-    if product.package_quantity == quantity && product.package_unit_id == unit_id {
+        .context("Unità formato non disponibile")?;
+    if format.package_quantity == quantity && format.package_unit_id == unit_id {
         return Ok(());
     }
-    if product_duplicate_exists(
-        pool,
-        product_id,
-        &product,
-        &product.brand,
-        &product.product_name,
-        quantity,
-        unit_id,
-    )
-    .await?
-    {
-        bail!("Esiste già un prodotto identico associato a questo alimento");
+    if format_duplicate_exists(pool, format.product_id, Some(format_id), quantity, unit_id).await? {
+        bail!("Questo formato è già disponibile per il prodotto");
     }
 
     let mut tx = pool
         .begin()
         .await
-        .context("Impossibile iniziare la modifica della confezione")?;
+        .context("Impossibile iniziare la modifica del formato")?;
     sqlx::query(
-        "UPDATE prodotti_alimentari SET quantita_confezione = ?, unita_confezione_id = ?, \
-         aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
+        "UPDATE formati_prodotto_alimentare \
+         SET quantita_confezione = ?, unita_confezione_id = ?, \
+             aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
+         WHERE id = ?",
     )
     .bind(quantity)
     .bind(unit_id)
-    .bind(product_id)
+    .bind(format_id)
     .execute(&mut *tx)
     .await
-    .context("Impossibile aggiornare la confezione")?;
+    .context("Impossibile aggiornare il formato")?;
 
     let product_label = product_history_name(&product.brand, &product.product_name);
     record_product_history_event(
         &mut tx,
-        product_id,
+        product.id,
         &product_label,
         "modifica",
-        "prodotto_commerciale",
+        "formato_prodotto",
         &[NewFieldChange {
             campo: "confezione",
             tipo_valore: "testo",
             valore_prima: Some(package_history_value(
-                product.package_quantity,
-                &product.package_unit_symbol,
+                format.package_quantity,
+                &format.package_unit_symbol,
             )),
             valore_dopo: Some(package_history_value(quantity, &unit.simbolo)),
         }],
@@ -5361,7 +5965,7 @@ async fn update_product_quantity(
     .await?;
     tx.commit()
         .await
-        .context("Impossibile completare la modifica della confezione")?;
+        .context("Impossibile completare la modifica del formato")?;
     Ok(())
 }
 
@@ -5379,28 +5983,35 @@ fn parse_ean_input(raw: &str) -> Result<Option<String>> {
     Ok(Some(value.to_string()))
 }
 
-async fn update_product_ean(pool: &SqlitePool, product_id: i64, ean: Option<&str>) -> Result<()> {
-    let product = get_product(pool, product_id)
+async fn update_product_format_ean(
+    pool: &SqlitePool,
+    format_id: i64,
+    ean: Option<&str>,
+) -> Result<()> {
+    let format = get_product_format(pool, format_id)
+        .await?
+        .context("Formato non disponibile")?;
+    let product = get_product(pool, format.product_id)
         .await?
         .context("Prodotto non disponibile")?;
     if !can_edit_food_current(pool, product.food_id).await? {
-        bail!("Non hai il permesso di modificare questo prodotto");
+        bail!("Non hai il permesso di modificare questo formato");
     }
-    if product.ean.as_deref() == ean {
+    if format.ean.as_deref() == ean {
         return Ok(());
     }
     if let Some(ean) = ean {
         let duplicate: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM prodotti_alimentari \
+            "SELECT EXISTS(SELECT 1 FROM formati_prodotto_alimentare \
              WHERE codice_ean = ? AND attivo = 1 AND id <> ?)",
         )
         .bind(ean)
-        .bind(product_id)
+        .bind(format_id)
         .fetch_one(pool)
         .await
         .context("Impossibile verificare il barcode / EAN")?;
         if duplicate {
-            bail!("Questo barcode / EAN è già associato a un altro prodotto");
+            bail!("Questo barcode / EAN è già associato a un altro formato");
         }
     }
 
@@ -5409,26 +6020,26 @@ async fn update_product_ean(pool: &SqlitePool, product_id: i64, ean: Option<&str
         .await
         .context("Impossibile iniziare la modifica del barcode / EAN")?;
     sqlx::query(
-        "UPDATE prodotti_alimentari SET codice_ean = ?, \
+        "UPDATE formati_prodotto_alimentare SET codice_ean = ?, \
          aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
     )
     .bind(ean)
-    .bind(product_id)
+    .bind(format_id)
     .execute(&mut *tx)
     .await
-    .context("Impossibile aggiornare il barcode / EAN")?;
+    .context("Impossibile aggiornare il barcode / EAN del formato")?;
 
     let product_label = product_history_name(&product.brand, &product.product_name);
     record_product_history_event(
         &mut tx,
-        product_id,
+        product.id,
         &product_label,
         "modifica",
-        "prodotto_commerciale",
+        "formato_prodotto",
         &[NewFieldChange {
             campo: "barcode_ean",
             tipo_valore: "testo",
-            valore_prima: product.ean,
+            valore_prima: format.ean,
             valore_dopo: ean.map(str::to_string),
         }],
     )
@@ -5525,6 +6136,28 @@ async fn send_product_unit_choice(
     Ok(())
 }
 
+async fn default_product_format_unit(pool: &SqlitePool, product_id: i64) -> Result<UnitRecord> {
+    if let Some(unit) = sqlx::query_as::<_, UnitRecord>(
+        "SELECT um.id, um.nome, um.simbolo \
+         FROM formati_prodotto_alimentare f \
+         JOIN unita_misura um ON um.id = f.unita_confezione_id \
+         WHERE f.prodotto_alimentare_id = ? AND f.attivo = 1 AND um.attiva = 1 \
+         ORDER BY f.id LIMIT 1",
+    )
+    .bind(product_id)
+    .fetch_optional(pool)
+    .await
+    .context("Impossibile leggere l'unità dei formati")?
+    {
+        return Ok(unit);
+    }
+
+    let product = get_product(pool, product_id)
+        .await?
+        .context("Prodotto non disponibile")?;
+    default_product_package_unit(pool, product.food_id).await
+}
+
 async fn send_product_edit_menu(
     bot: &Bot,
     chat_id: ChatId,
@@ -5555,17 +6188,11 @@ async fn send_product_edit_menu(
         .await?;
         return Ok(());
     }
-    let ean = product.ean.as_deref().unwrap_or("non impostato");
     bot.send_message(
         chat_id,
         format!(
-            "✏️ Modifica prodotto\n\n{} · {}\n{} Confezione: {} {}\n🔢 Barcode / EAN: {}",
-            product.brand,
-            product.product_name,
-            unit_icon(&product.package_unit_symbol),
-            display_quantity(product.package_quantity),
-            product.package_unit_symbol,
-            ean,
+            "✏️ Modifica prodotto\n\n{} · {}\n\nMarca e nome commerciale appartengono al prodotto. Quantità, unità e barcode si modificano invece nei singoli 📦 formati.",
+            product.brand, product.product_name,
         ),
     )
     .reply_markup(product_edit_keyboard(product_id))
@@ -5573,7 +6200,7 @@ async fn send_product_edit_menu(
     Ok(())
 }
 
-async fn send_product_edit_quantity_prompt(
+async fn send_product_format_quantity_prompt(
     bot: &Bot,
     chat_id: ChatId,
     product_id: i64,
@@ -5582,17 +6209,17 @@ async fn send_product_edit_quantity_prompt(
     bot.send_message(
         chat_id,
         format!(
-            "⚖️ Modifica confezione\n\nUnità attuale: {} {}\n\nScrivi la nuova quantità come numero maggiore di zero.",
+            "📦 Nuovo formato\n\nUnità attuale: {} {}\n\nScrivi la quantità della confezione.\nEsempio: 350",
             unit_icon(&unit.simbolo),
             unit_display_label(&unit.nome, &unit.simbolo),
         ),
     )
-    .reply_markup(product_edit_quantity_keyboard(product_id))
+    .reply_markup(product_format_quantity_keyboard(product_id))
     .await?;
     Ok(())
 }
 
-async fn send_product_edit_unit_choice(
+async fn send_product_format_unit_choice(
     bot: &Bot,
     chat_id: ChatId,
     pool: &SqlitePool,
@@ -5606,18 +6233,185 @@ async fn send_product_edit_unit_choice(
                 .collect::<Vec<_>>();
             bot.send_message(
                 chat_id,
-                "📏 Unità confezione\n\nScegli l'unità e poi inserisci la nuova quantità.",
+                "📏 Unità formato\n\nScegli l'unità e poi inserisci la quantità.",
             )
-            .reply_markup(product_edit_unit_keyboard(product_id, &allowed))
+            .reply_markup(product_format_unit_keyboard(product_id, &allowed))
             .await?;
         }
         Err(error) => {
-            tracing::error!(?error, product_id, "Errore unità modifica prodotto");
+            tracing::error!(?error, product_id, "Errore unità nuovo formato");
             bot.send_message(chat_id, "⚠️ Non riesco a leggere le unità di misura.")
-                .reply_markup(product_edit_cancel_keyboard(product_id))
+                .reply_markup(product_format_cancel_keyboard(product_id))
                 .await?;
         }
     }
+    Ok(())
+}
+
+async fn send_product_format_edit_quantity_prompt(
+    bot: &Bot,
+    chat_id: ChatId,
+    format_id: i64,
+    unit: &UnitRecord,
+) -> ResponseResult<()> {
+    bot.send_message(
+        chat_id,
+        format!(
+            "📦 Modifica formato\n\nUnità attuale: {} {}\n\nScrivi la nuova quantità come numero maggiore di zero.",
+            unit_icon(&unit.simbolo),
+            unit_display_label(&unit.nome, &unit.simbolo),
+        ),
+    )
+    .reply_markup(product_format_edit_quantity_keyboard(format_id))
+    .await?;
+    Ok(())
+}
+
+async fn send_product_format_edit_unit_choice(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    format_id: i64,
+) -> ResponseResult<()> {
+    match list_units(pool).await {
+        Ok(units) => {
+            let allowed = units
+                .into_iter()
+                .filter(|unit| matches!(unit.simbolo.as_str(), "g" | "kg" | "ml" | "l" | "pz"))
+                .collect::<Vec<_>>();
+            bot.send_message(
+                chat_id,
+                "📏 Unità formato\n\nScegli l'unità e poi inserisci la nuova quantità.",
+            )
+            .reply_markup(product_format_edit_unit_keyboard(format_id, &allowed))
+            .await?;
+        }
+        Err(error) => {
+            tracing::error!(?error, format_id, "Errore unità modifica formato");
+            bot.send_message(chat_id, "⚠️ Non riesco a leggere le unità di misura.")
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+fn product_formats_summary(formats: &[ProductFormatRecord]) -> String {
+    if formats.is_empty() {
+        return "Nessun formato disponibile.".to_string();
+    }
+    let mut lines = formats
+        .iter()
+        .take(5)
+        .map(|format| {
+            let ean = format
+                .ean
+                .as_deref()
+                .map(|value| format!(" · EAN {value}"))
+                .unwrap_or_default();
+            format!(
+                "• {} {} {}{}",
+                unit_icon(&format.package_unit_symbol),
+                display_quantity(format.package_quantity),
+                format.package_unit_symbol,
+                ean
+            )
+        })
+        .collect::<Vec<_>>();
+    if formats.len() > 5 {
+        lines.push(format!("• … e altri {} formati", formats.len() - 5));
+    }
+    lines.join("\n")
+}
+
+async fn send_product_formats(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    product_id: i64,
+) -> ResponseResult<()> {
+    let Some(product) = (match get_product(pool, product_id).await {
+        Ok(product) => product,
+        Err(error) => {
+            tracing::error!(?error, product_id, "Errore prodotto per formati");
+            bot.send_message(chat_id, "⚠️ Non riesco a leggere questo prodotto.")
+                .await?;
+            return Ok(());
+        }
+    }) else {
+        bot.send_message(chat_id, "Prodotto non disponibile.")
+            .await?;
+        return Ok(());
+    };
+    let formats = match list_product_formats(pool, product_id).await {
+        Ok(formats) => formats,
+        Err(error) => {
+            tracing::error!(?error, product_id, "Errore elenco formati");
+            bot.send_message(chat_id, "⚠️ Non riesco a leggere i formati.")
+                .await?;
+            return Ok(());
+        }
+    };
+    let can_edit = can_edit_food_current(pool, product.food_id)
+        .await
+        .unwrap_or(false);
+    bot.send_message(
+        chat_id,
+        format!(
+            "📦 Formati disponibili\n{} · {}\n\n{}",
+            product.brand,
+            product.product_name,
+            product_formats_summary(&formats),
+        ),
+    )
+    .reply_markup(product_formats_keyboard(&product, &formats, can_edit))
+    .await?;
+    Ok(())
+}
+
+async fn send_product_format_detail(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    format_id: i64,
+) -> ResponseResult<()> {
+    let Some(format) = (match get_product_format(pool, format_id).await {
+        Ok(format) => format,
+        Err(error) => {
+            tracing::error!(?error, format_id, "Errore dettaglio formato");
+            bot.send_message(chat_id, "⚠️ Non riesco a leggere questo formato.")
+                .await?;
+            return Ok(());
+        }
+    }) else {
+        bot.send_message(chat_id, "Formato non disponibile.")
+            .await?;
+        return Ok(());
+    };
+    let Some(product) = get_product(pool, format.product_id).await.unwrap_or(None) else {
+        bot.send_message(chat_id, "Prodotto non disponibile.")
+            .await?;
+        return Ok(());
+    };
+    let can_edit = can_edit_food_current(pool, product.food_id)
+        .await
+        .unwrap_or(false);
+    let ean = format.ean.as_deref().unwrap_or("non impostato");
+    bot.send_message(
+        chat_id,
+        format!(
+            "📦 Formato\n{} · {}\n\n{} Confezione: {} {}\n🔢 Barcode / EAN: {}",
+            product.brand,
+            product.product_name,
+            unit_icon(&format.package_unit_symbol),
+            display_quantity(format.package_quantity),
+            format.package_unit_symbol,
+            ean,
+        ),
+    )
+    .reply_markup(product_format_detail_keyboard(
+        format_id, product.id, can_edit,
+    ))
+    .await?;
     Ok(())
 }
 
@@ -5644,21 +6438,17 @@ async fn send_product_detail(
     let can_edit = can_edit_food_current(pool, product.food_id)
         .await
         .unwrap_or(false);
-    let ean_line = product
-        .ean
-        .as_deref()
-        .map(|ean| format!("\n🔢 Barcode / EAN: {ean}"))
+    let formats = list_product_formats(pool, product_id)
+        .await
         .unwrap_or_default();
     bot.send_message(
         chat_id,
         format!(
-            "🛒 {} · {}\n\n{} Confezione: {} {}{}\n\nIl prodotto resta collegato all'alimento generico e potrà avere prezzi, punti vendita e valori nutrizionali propri.",
+            "🛒 {} · {}\n\n📦 Formati disponibili: {}\n{}\n\nIl prodotto commerciale è indipendente dal formato: Ricette e valori nutrizionali possono riferirsi al prodotto, mentre Lista spesa, barcode, disponibilità e futuri prezzi useranno il formato acquistabile.",
             product.brand,
             product.product_name,
-            unit_icon(&product.package_unit_symbol),
-            display_quantity(product.package_quantity),
-            product.package_unit_symbol,
-            ean_line
+            formats.len(),
+            product_formats_summary(&formats),
         ),
     )
     .reply_markup(product_detail_keyboard(&product, can_edit))
@@ -5696,7 +6486,28 @@ async fn default_nutrition_reference_unit(
     pool: &SqlitePool,
     product: &ProductRecord,
 ) -> Result<UnitRecord> {
-    let symbol = match product.package_unit_symbol.as_str() {
+    let format_symbol: Option<String> = sqlx::query_scalar(
+        "SELECT um.simbolo \
+         FROM formati_prodotto_alimentare f \
+         JOIN unita_misura um ON um.id = f.unita_confezione_id \
+         WHERE f.prodotto_alimentare_id = ? AND f.attivo = 1 \
+         ORDER BY f.id LIMIT 1",
+    )
+    .bind(product.id)
+    .fetch_optional(pool)
+    .await
+    .context("Impossibile leggere il formato per la nutrizione")?;
+    if let Some(format_symbol) = format_symbol.as_deref() {
+        let symbol = match format_symbol {
+            "ml" | "l" => "ml",
+            _ => "g",
+        };
+        return find_unit_by_text(pool, symbol)
+            .await?
+            .context("Unità nutrizionale di riferimento non disponibile");
+    }
+    let fallback = default_product_package_unit(pool, product.food_id).await?;
+    let symbol = match fallback.simbolo.as_str() {
         "ml" | "l" => "ml",
         _ => "g",
     };
@@ -6043,13 +6854,15 @@ fn food_products_keyboard(
 ) -> InlineKeyboardMarkup {
     let mut rows = Vec::new();
     for product in products {
+        let format_label = if product.format_count == 1 {
+            "1 formato".to_string()
+        } else {
+            format!("{} formati", product.format_count)
+        };
         rows.push(vec![button(
             format!(
-                "{} · {} · {} {}",
-                product.brand,
-                product.product_name,
-                display_quantity(product.package_quantity),
-                product.package_unit_symbol
+                "{} · {} · {format_label}",
+                product.brand, product.product_name
             ),
             format!("food:product:view:{}", product.id),
         )]);
@@ -6068,10 +6881,21 @@ fn food_products_keyboard(
 }
 
 fn product_detail_keyboard(product: &ProductRecord, can_edit: bool) -> InlineKeyboardMarkup {
-    let mut rows = vec![vec![button(
-        "🧮 Valori nutrizionali",
-        format!("food:product:nutrition:{}", product.id),
-    )]];
+    let format_label = if product.format_count == 1 {
+        "📦 Formati (1)".to_string()
+    } else {
+        format!("📦 Formati ({})", product.format_count)
+    };
+    let mut rows = vec![
+        vec![button(
+            format_label,
+            format!("food:product:formats:{}", product.id),
+        )],
+        vec![button(
+            "🧮 Valori nutrizionali",
+            format!("food:product:nutrition:{}", product.id),
+        )],
+    ];
     if can_edit {
         rows.push(vec![button(
             "✏️ Modifica prodotto",
@@ -6095,12 +6919,8 @@ fn product_edit_keyboard(product_id: i64) -> InlineKeyboardMarkup {
             ),
         ],
         vec![button(
-            "⚖️ Quantità e unità",
-            format!("food:product:edit:quantity:{product_id}"),
-        )],
-        vec![button(
-            "🔢 Barcode / EAN",
-            format!("food:product:edit:ean:{product_id}"),
+            "📦 Gestisci formati",
+            format!("food:product:formats:{product_id}"),
         )],
         vec![
             button("⬅️ Indietro", format!("food:product:view:{product_id}")),
@@ -6117,21 +6937,53 @@ fn product_edit_cancel_keyboard(product_id: i64) -> InlineKeyboardMarkup {
     ]])
 }
 
-fn product_edit_quantity_keyboard(product_id: i64) -> InlineKeyboardMarkup {
+fn product_formats_keyboard(
+    product: &ProductRecord,
+    formats: &[ProductFormatRecord],
+    can_edit: bool,
+) -> InlineKeyboardMarkup {
+    let mut rows = formats
+        .iter()
+        .map(|format| {
+            vec![button(
+                format!(
+                    "{} {} {}",
+                    unit_icon(&format.package_unit_symbol),
+                    display_quantity(format.package_quantity),
+                    format.package_unit_symbol
+                ),
+                format!("food:format:view:{}", format.id),
+            )]
+        })
+        .collect::<Vec<_>>();
+    if can_edit {
+        rows.push(vec![button(
+            "➕ Aggiungi formato",
+            format!("food:product:format:new:{}", product.id),
+        )]);
+    }
+    rows.push(vec![
+        button("⬅️ Indietro", format!("food:product:view:{}", product.id)),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
+    InlineKeyboardMarkup::new(rows)
+}
+
+fn product_format_quantity_keyboard(product_id: i64) -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
         vec![button(
             "📏 Cambia unità",
-            format!("food:product:edit:changeunit:{product_id}"),
+            format!("food:product:format:changeunit:{product_id}"),
         )],
         vec![
-            button("⬅️ Indietro", format!("food:product:edit:{product_id}")),
-            button("❌ Annulla", format!("food:product:view:{product_id}")),
+            button("⬅️ Indietro", format!("food:product:formats:{product_id}")),
+            button("❌ Annulla", format!("food:product:formats:{product_id}")),
             button("🏠 Menu principale", "menu:main"),
         ],
     ])
 }
 
-fn product_edit_unit_keyboard(product_id: i64, units: &[UnitRecord]) -> InlineKeyboardMarkup {
+fn product_format_unit_keyboard(product_id: i64, units: &[UnitRecord]) -> InlineKeyboardMarkup {
     let mut rows = Vec::new();
     for pair in units.chunks(2) {
         rows.push(
@@ -6139,18 +6991,84 @@ fn product_edit_unit_keyboard(product_id: i64, units: &[UnitRecord]) -> InlineKe
                 .map(|unit| {
                     button(
                         unit_display_label(&unit.nome, &unit.simbolo),
-                        format!("food:product:edit:unit:{product_id}:{}", unit.id),
+                        format!("food:product:format:unit:{product_id}:{}", unit.id),
                     )
                 })
                 .collect(),
         );
     }
     rows.push(vec![
-        button(
-            "⬅️ Indietro",
-            format!("food:product:edit:quantity:{product_id}"),
-        ),
+        button("⬅️ Indietro", format!("food:product:formats:{product_id}")),
+        button("❌ Annulla", format!("food:product:formats:{product_id}")),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
+    InlineKeyboardMarkup::new(rows)
+}
+
+fn product_format_cancel_keyboard(product_id: i64) -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![vec![
+        button("⬅️ Indietro", format!("food:product:formats:{product_id}")),
         button("❌ Annulla", format!("food:product:view:{product_id}")),
+        button("🏠 Menu principale", "menu:main"),
+    ]])
+}
+
+fn product_format_detail_keyboard(
+    format_id: i64,
+    product_id: i64,
+    can_edit: bool,
+) -> InlineKeyboardMarkup {
+    let mut rows = Vec::new();
+    if can_edit {
+        rows.push(vec![
+            button(
+                "⚖️ Quantità e unità",
+                format!("food:format:edit:quantity:{format_id}"),
+            ),
+            button(
+                "🔢 Barcode / EAN",
+                format!("food:format:edit:ean:{format_id}"),
+            ),
+        ]);
+    }
+    rows.push(vec![
+        button("⬅️ Indietro", format!("food:product:formats:{product_id}")),
+        button("🏠 Menu principale", "menu:main"),
+    ]);
+    InlineKeyboardMarkup::new(rows)
+}
+
+fn product_format_edit_quantity_keyboard(format_id: i64) -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![
+        vec![button(
+            "📏 Cambia unità",
+            format!("food:format:edit:changeunit:{format_id}"),
+        )],
+        vec![
+            button("⬅️ Indietro", format!("food:format:view:{format_id}")),
+            button("❌ Annulla", format!("food:format:view:{format_id}")),
+            button("🏠 Menu principale", "menu:main"),
+        ],
+    ])
+}
+
+fn product_format_edit_unit_keyboard(format_id: i64, units: &[UnitRecord]) -> InlineKeyboardMarkup {
+    let mut rows = Vec::new();
+    for pair in units.chunks(2) {
+        rows.push(
+            pair.iter()
+                .map(|unit| {
+                    button(
+                        unit_display_label(&unit.nome, &unit.simbolo),
+                        format!("food:format:edit:unit:{format_id}:{}", unit.id),
+                    )
+                })
+                .collect(),
+        );
+    }
+    rows.push(vec![
+        button("⬅️ Indietro", format!("food:format:view:{format_id}")),
+        button("❌ Annulla", format!("food:format:view:{format_id}")),
         button("🏠 Menu principale", "menu:main"),
     ]);
     InlineKeyboardMarkup::new(rows)
@@ -6607,6 +7525,23 @@ mod tests {
         assert_eq!(page_offset(3), 15);
     }
 
+    #[test]
+    fn callback_formati_restano_nel_limite_telegram() {
+        let id = i64::MAX;
+        let callbacks = [
+            format!("food:product:formats:{id}"),
+            format!("food:product:format:new:{id}"),
+            format!("food:product:format:changeunit:{id}"),
+            format!("food:product:format:unit:{id}:{id}"),
+            format!("food:format:view:{id}"),
+            format!("food:format:edit:quantity:{id}"),
+            format!("food:format:edit:changeunit:{id}"),
+            format!("food:format:edit:unit:{id}:{id}"),
+            format!("food:format:edit:ean:{id}"),
+        ];
+        assert!(callbacks.iter().all(|callback| callback.len() <= 64));
+    }
+
     #[tokio::test]
     async fn elenco_catalogo_base_puo_raggiungere_pagine_successive() {
         let pool = test_pool().await;
@@ -6616,6 +7551,45 @@ mod tests {
         let (foods, has_next) = split_food_page(rows);
         assert_eq!(foods.len(), FOOD_PAGE_SIZE);
         assert!(has_next);
+    }
+
+    #[tokio::test]
+    async fn secondo_utente_in_spazio_personale_legge_catalogo_e_pagine() {
+        let pool = test_pool().await;
+        let bootstrap_id = create_user(&pool, "Bootstrap").await;
+        add_membership(&pool, 1, bootstrap_id, "proprietario").await;
+
+        let user_id = create_user(&pool, "Secondo utente").await;
+        let personal_space = sqlx::query(
+            "INSERT INTO spazi (nome, tipo, creato_da_utente_id) \
+             VALUES ('Spazio personale secondo utente', 'personale', ?)",
+        )
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("spazio personale")
+        .last_insert_rowid();
+        add_membership(&pool, personal_space, user_id, "proprietario").await;
+
+        identity::with_actor(
+            actor(user_id, personal_space, false, "Secondo utente"),
+            async {
+                let total = count_foods(&pool, None, None)
+                    .await
+                    .expect("conteggio catalogo secondo utente");
+                assert_eq!(total, 418);
+
+                let rows =
+                    list_foods_with_offset(&pool, None, None, FOOD_PAGE_FETCH, page_offset(1))
+                        .await
+                        .expect("seconda pagina secondo utente");
+                let (foods, has_next) = split_food_page(rows);
+                assert_eq!(foods.len(), FOOD_PAGE_SIZE);
+                assert!(has_next);
+                assert!(foods.iter().all(|food| food.global_catalog == 1));
+            },
+        )
+        .await;
     }
 
     #[tokio::test]
@@ -6652,7 +7626,74 @@ mod tests {
         assert_eq!(products.len(), 1);
         assert_eq!(products[0].brand, "Philadelphia");
         assert_eq!(products[0].product_name, "Original");
-        assert_eq!(products[0].package_quantity, 200.0);
+        assert_eq!(products[0].format_count, 1);
+        let formats = list_product_formats(&pool, products[0].id)
+            .await
+            .expect("formati prodotto");
+        assert_eq!(formats.len(), 1);
+        assert_eq!(formats[0].package_quantity, 200.0);
+        assert_eq!(formats[0].package_unit_symbol, "g");
+    }
+
+    #[tokio::test]
+    async fn stesso_prodotto_puo_avere_piu_formati_senza_duplicarsi() {
+        let pool = test_pool().await;
+        let admin_id = create_user(&pool, "Admin formati").await;
+        add_membership(&pool, 1, admin_id, "proprietario").await;
+        sqlx::query("UPDATE utenti SET ruolo_sistema = 'admin' WHERE id = ?")
+            .bind(admin_id)
+            .execute(&pool)
+            .await
+            .expect("promozione admin");
+        let food_id: i64 = sqlx::query_scalar(
+            "SELECT id FROM alimenti WHERE catalogo_globale = 1 AND nome_normalizzato = 'formaggio spalmabile'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("formaggio spalmabile");
+        let grammi_id: i64 = sqlx::query_scalar("SELECT id FROM unita_misura WHERE simbolo = 'g'")
+            .fetch_one(&pool)
+            .await
+            .expect("grammi");
+        identity::with_actor(actor(admin_id, 1, true, "Admin formati"), async {
+            let first = create_product_association(
+                &pool,
+                food_id,
+                "Philadelphia",
+                "Original",
+                200.0,
+                grammi_id,
+            )
+            .await
+            .expect("primo formato");
+            let second = create_product_association(
+                &pool,
+                food_id,
+                "Philadelphia",
+                "Original",
+                350.0,
+                grammi_id,
+            )
+            .await
+            .expect("secondo formato");
+            assert_eq!(first, second);
+            assert!(create_product_format(&pool, first, 350.0, grammi_id)
+                .await
+                .is_err());
+        })
+        .await;
+
+        let products = list_products_for_food(&pool, food_id)
+            .await
+            .expect("prodotti");
+        assert_eq!(products.len(), 1);
+        assert_eq!(products[0].format_count, 2);
+        let formats = list_product_formats(&pool, products[0].id)
+            .await
+            .expect("formati");
+        assert_eq!(formats.len(), 2);
+        assert_eq!(formats[0].package_quantity, 200.0);
+        assert_eq!(formats[1].package_quantity, 350.0);
     }
 
     #[tokio::test]
@@ -6730,21 +7771,32 @@ mod tests {
             update_product_name(&pool, product_id, "Original Light")
                 .await
                 .expect("nome");
-            update_product_quantity(&pool, product_id, 175.0, grammi_id)
+            let format_id = list_product_formats(&pool, product_id)
                 .await
-                .expect("quantità");
-            update_product_ean(&pool, product_id, Some("1234567890123"))
+                .expect("formati")
+                .first()
+                .expect("formato iniziale")
+                .id;
+            update_product_format_quantity(&pool, format_id, 175.0, grammi_id)
                 .await
-                .expect("ean");
+                .expect("quantità formato");
+            update_product_format_ean(&pool, format_id, Some("1234567890123"))
+                .await
+                .expect("ean formato");
             let product = get_product(&pool, product_id)
                 .await
                 .expect("lettura")
                 .expect("prodotto presente");
+            let format = get_product_format(&pool, format_id)
+                .await
+                .expect("lettura formato")
+                .expect("formato presente");
             assert_eq!(product.food_id, food_id);
             assert_eq!(product.brand, "Philadelphia");
             assert_eq!(product.product_name, "Original Light");
-            assert_eq!(product.package_quantity, 175.0);
-            assert_eq!(product.ean.as_deref(), Some("1234567890123"));
+            assert_eq!(product.format_count, 1);
+            assert_eq!(format.package_quantity, 175.0);
+            assert_eq!(format.ean.as_deref(), Some("1234567890123"));
         })
         .await;
     }
@@ -6876,14 +7928,16 @@ mod tests {
         .await
         .expect("eventi prodotto");
 
-        assert_eq!(events.len(), 4);
+        assert_eq!(events.len(), 5);
         assert_eq!(events[0].0.as_str(), "alimentazione");
         assert_eq!(events[0].1.as_str(), "prodotto_commerciale");
         assert_eq!(events[0].2.as_str(), "creazione");
-        assert_eq!(events[1].1.as_str(), "prodotto_commerciale");
+        assert_eq!(events[1].1.as_str(), "formato_prodotto");
         assert_eq!(events[1].2.as_str(), "modifica");
-        assert_eq!(events[2].1.as_str(), "valori_nutrizionali");
+        assert_eq!(events[2].1.as_str(), "prodotto_commerciale");
+        assert_eq!(events[2].2.as_str(), "modifica");
         assert_eq!(events[3].1.as_str(), "valori_nutrizionali");
+        assert_eq!(events[4].1.as_str(), "valori_nutrizionali");
 
         let fields: Vec<String> = sqlx::query_scalar(
             "SELECT sc.campo \
@@ -6898,6 +7952,7 @@ mod tests {
         .expect("cambiamenti prodotto");
         assert!(fields.iter().any(|field| field == "alimento_associato"));
         assert!(fields.iter().any(|field| field == "marca"));
+        assert!(fields.iter().any(|field| field == "confezione"));
         assert!(fields.iter().any(|field| field == "energia_kcal"));
         assert!(fields
             .iter()

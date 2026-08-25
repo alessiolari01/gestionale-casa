@@ -1,3 +1,40 @@
+## Step 7.2E — accesso controllato e Miglioramenti — 2026-08-25
+
+- `ALLOWED_CHAT_IDS` diventa whitelist di bootstrap/emergenza e non più il modello ordinario di autorizzazione;
+- gli account Telegram già approvati vengono autorizzati tramite `account_telegram` + `utenti.stato`;
+- un account sconosciuto può inviare una richiesta di accesso dal bot;
+- introdotto `amministratore_principale`, distinto dal normale ruolo di sistema `admin`;
+- solo l'amministratore principale può approvare/rifiutare le richieste;
+- l'approvazione crea un utente normale e uno spazio personale senza concedere accesso agli spazi altrui;
+- aggiunta la sezione `💡 Miglioramenti` per tutti gli utenti approvati;
+- miglioramenti con autore, stato e più screenshot/allegati locali;
+- gli admin possono leggere tutti i miglioramenti e cambiarne lo stato;
+- introdotta la regola di sviluppo “macro-struttura prima, rifiniture UX nel backlog Miglioramenti”;
+- aggiornata la procedura di handoff: una nuova persona può partire semplicemente da `docs/HANDOFF_COMPLETO.md`.
+
+**Stato:** patch da verificare su S9/Termux prima del commit.
+
+
+## Step 7.2F.0 — prodotti commerciali con più formati
+
+- separata l'identità del prodotto commerciale dalla confezione acquistabile;
+- aggiunta `formati_prodotto_alimentare` con quantità, unità, EAN e stato;
+- migrati automaticamente i formati già esistenti senza perdere i prodotti;
+- un prodotto come `Philadelphia · Original` può ora avere più formati, ad
+  esempio 175 g, 200 g e 350 g, senza creare prodotti duplicati;
+- barcode/EAN spostato logicamente sul formato;
+- aggiunta la vista `v_prodotti_formati_attivi` per future Lista spesa,
+  disponibilità e prezzi per punto vendita;
+- Ricette continuano a referenziare il prodotto commerciale opzionale e non il
+  formato: la scelta della confezione resta responsabilità della futura Lista
+  spesa;
+- aggiunti elenco, dettaglio, creazione e modifica dei formati nella UI
+  Telegram;
+- esteso lo storico del prodotto agli eventi `formato_prodotto`;
+- `/status` verifica anche la presenza della migration dei formati;
+- confermata la navigazione del secondo account approvato anche nel modulo
+  Alimentazione dopo il rinforzo dello stack Tokio introdotto durante 7.2E.
+
 ## Step 7.2D.0.2–0.3 — prodotti commerciali, paginazione e nutrizione — 2026-08-25
 
 - aggiunta paginazione reale del catalogo alimenti con conteggio totale e pagina X/Y;

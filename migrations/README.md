@@ -126,13 +126,10 @@ dell'etichetta reale per allergie o intolleranze.
 ## Step 7.2D.0.2 — prodotti commerciali e catalogo paginato
 
 `20260825101500_prodotti_alimentari.sql` separa l'alimento generico usato
-nelle Ricette dal prodotto commerciale acquistabile. Un prodotto conserva
-marca, nome commerciale e formato della confezione ed è collegato a un solo
-`alimenti.id`.
-
-Il futuro tracciamento prezzi dovrà referenziare `prodotti_alimentari.id`, così
-lo stesso alimento potrà avere più marche/formati e più rilevazioni per punto
-vendita senza alterare le Ricette.
+nelle Ricette dal prodotto commerciale acquistabile. Nello schema storico di
+questa migration marca, nome commerciale e prima confezione erano ancora sulla
+stessa riga. Lo Step 7.2F.0 separa successivamente i formati senza riscrivere
+questa migration già applicata.
 
 ## Step 7.2D.0.3 — nutrizione prodotti e prodotto specifico nelle Ricette
 
@@ -146,3 +143,35 @@ La stessa migration aggiunge a `ricetta_ingredienti` il riferimento opzionale
 scelto un prodotto reale, un trigger verifica che appartenga allo stesso
 alimento. Questo permette alle future Ricette di scegliere tra ingrediente
 generico e prodotto specifico senza legare il modello ricetta a una marca.
+
+## Step 7.2E — accesso controllato e Miglioramenti
+
+`20260825153000_accesso_miglioramenti.sql` introduce il modello applicativo di
+accesso Telegram approvato e il backlog interno `💡 Miglioramenti`.
+
+La migration:
+
+- aggiunge `utenti.amministratore_principale` con unicità sul solo valore attivo;
+- inizializza come amministratore principale il proprietario/bootstrap già admin;
+- crea `richieste_accesso` con stati `pendente`, `approvata`, `rifiutata`;
+- crea `miglioramenti` con autore e stato;
+- crea `miglioramento_allegati` per screenshot/foto multiple.
+
+`ALLOWED_CHAT_IDS` resta bootstrap/emergenza. L'approvazione di una richiesta
+crea un utente normale e il suo spazio personale ma non concede membership ad
+altri spazi né permessi su risorse esistenti.
+
+## Step 7.2F.0 — formati dei prodotti commerciali
+
+`20260825220000_formati_prodotti_alimentari.sql` separa l'identità stabile del
+prodotto commerciale dai suoi formati acquistabili. Esempio: `Philadelphia ·
+Original` resta un solo prodotto, mentre `175 g`, `200 g` e `350 g` diventano
+righe distinte in `formati_prodotto_alimentare`.
+
+La migration migra automaticamente ogni confezione già presente in
+`prodotti_alimentari` come primo formato, sposta il significato autorevole del
+barcode/EAN sul formato e aggiunge la vista `v_prodotti_formati_attivi`, pensata
+come base per Lista spesa, prezzi e disponibilità per punto vendita. Le vecchie
+colonne confezione presenti in `prodotti_alimentari` restano temporaneamente
+solo per compatibilità con le migration già applicate e non vanno più usate
+come fonte autorevole dal codice nuovo.

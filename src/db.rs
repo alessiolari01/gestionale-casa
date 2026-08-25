@@ -25,6 +25,8 @@ pub struct DatabaseStatus {
     pub operational_spaces_present: bool,
     pub multi_space_view_present: bool,
     pub system_roles_present: bool,
+    pub access_improvements_present: bool,
+    pub product_formats_present: bool,
 }
 
 /// Apre SQLite, crea il file se necessario e applica tutte le migration.
@@ -121,6 +123,26 @@ pub async fn status(pool: &SqlitePool) -> Result<DatabaseStatus> {
     .await
     .context("Impossibile verificare la migration dei ruoli di sistema")?;
 
+    let access_improvements: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(\
+            SELECT 1 FROM _sqlx_migrations \
+            WHERE version = 20260825153000 AND success = 1\
+         )",
+    )
+    .fetch_one(pool)
+    .await
+    .context("Impossibile verificare la migration accesso e miglioramenti")?;
+
+    let product_formats: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(\
+            SELECT 1 FROM _sqlx_migrations \
+            WHERE version = 20260825220000 AND success = 1\
+         )",
+    )
+    .fetch_one(pool)
+    .await
+    .context("Impossibile verificare la migration dei formati prodotto")?;
+
     Ok(DatabaseStatus {
         foreign_keys_enabled: foreign_keys == 1,
         applied_migrations,
@@ -129,6 +151,8 @@ pub async fn status(pool: &SqlitePool) -> Result<DatabaseStatus> {
         operational_spaces_present: operational_spaces == 1,
         multi_space_view_present: multi_space_view == 1,
         system_roles_present: system_roles == 1,
+        access_improvements_present: access_improvements == 1,
+        product_formats_present: product_formats == 1,
     })
 }
 

@@ -112,6 +112,103 @@ pub(crate) async fn resolve_telegram_actor(
     resolve_telegram_profile(pool, &profile).await
 }
 
+pub(crate) async fn lookup_telegram_actor(
+    pool: &SqlitePool,
+    chat_id: i64,
+    telegram_user: &User,
+) -> Result<Option<AuditActor>> {
+    let telegram_user_id = i64::try_from(telegram_user.id.0)
+        .context("Telegram user ID non rappresentabile come INTEGER SQLite")?;
+
+    let mut tx = pool
+        .begin()
+        .await
+        .context("Impossibile aprire la transazione identità Telegram")?;
+
+    let existing: Option<(i64, String)> = sqlx::query_as(
+        "SELECT u.id, u.stato \
+         FROM account_telegram at \
+         JOIN utenti u ON u.id = at.utente_id \
+         WHERE at.telegram_user_id = ?",
+    )
+    .bind(telegram_user_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .context("Impossibile cercare l'account Telegram esistente")?;
+
+    let Some((user_id, status)) = existing else {
+        tx.rollback().await.ok();
+        return Ok(None);
+    };
+
+    if status != "attivo" {
+        bail!("Utente interno disabilitato");
+    }
+
+    let display_name = telegram_user.full_name().trim().to_string();
+    if display_name.is_empty() {
+        bail!("Telegram non ha fornito un nome utilizzabile per l'autore");
+    }
+
+    sqlx::query(
+        "UPDATE utenti \
+         SET nome_visualizzato = ?, aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
+         WHERE id = ?",
+    )
+    .bind(&display_name)
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await
+    .context("Impossibile aggiornare il nome dell'utente")?;
+
+    sqlx::query(
+        "UPDATE account_telegram \
+         SET chat_id = ?, username_snapshot = ?, nome_snapshot = ?, cognome_snapshot = ?, \
+             aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
+         WHERE telegram_user_id = ?",
+    )
+    .bind(chat_id)
+    .bind(telegram_user.username.as_deref())
+    .bind(&telegram_user.first_name)
+    .bind(telegram_user.last_name.as_deref())
+    .bind(telegram_user_id)
+    .execute(&mut *tx)
+    .await
+    .context("Impossibile aggiornare lo snapshot Telegram")?;
+
+    ensure_initial_space(&mut tx, user_id, &display_name).await?;
+    ensure_system_admin_exists(&mut tx).await?;
+    ensure_primary_admin_exists(&mut tx).await?;
+
+    let (space_id, space_name, view_mode): (i64, String, String) = sqlx::query_as(
+        "SELECT s.id, s.nome, p.vista_spazi \
+         FROM preferenze_utente p \
+         JOIN membri_spazio ms \
+           ON ms.utente_id = p.utente_id AND ms.spazio_id = p.spazio_attivo_id \
+         JOIN spazi s ON s.id = p.spazio_attivo_id \
+         WHERE p.utente_id = ?",
+    )
+    .bind(user_id)
+    .fetch_one(&mut *tx)
+    .await
+    .context("Impossibile leggere lo spazio attivo")?;
+
+    tx.commit()
+        .await
+        .context("Impossibile salvare lo snapshot dell'identità Telegram")?;
+
+    Ok(Some(AuditActor {
+        utente_id: Some(user_id),
+        nome_snapshot: display_name,
+        spazio_id: space_id,
+        spazio_nome_snapshot: space_name,
+        view_all: view_mode == "tutti",
+        origine: "telegram",
+        telegram_user_id: Some(telegram_user_id),
+        telegram_username: telegram_user.username.clone(),
+    }))
+}
+
 async fn resolve_telegram_profile(
     pool: &SqlitePool,
     profile: &TelegramIdentityInput,
@@ -199,6 +296,7 @@ async fn resolve_telegram_profile(
 
     ensure_initial_space(&mut tx, user_id, display_name).await?;
     ensure_system_admin_exists(&mut tx).await?;
+    ensure_primary_admin_exists(&mut tx).await?;
 
     let (space_id, space_name, view_mode): (i64, String, String) = sqlx::query_as(
         "SELECT s.id, s.nome, p.vista_spazi \
@@ -245,6 +343,74 @@ async fn ensure_system_admin_exists(tx: &mut Transaction<'_, sqlx::Sqlite>) -> R
     .await
     .context("Impossibile inizializzare il ruolo amministratore")?;
     Ok(())
+}
+
+async fn ensure_primary_admin_exists(tx: &mut Transaction<'_, sqlx::Sqlite>) -> Result<()> {
+    sqlx::query(
+        "UPDATE utenti \
+         SET amministratore_principale = 1, \
+             aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
+         WHERE id = COALESCE(\
+             (SELECT creato_da_utente_id FROM spazi \
+              WHERE bootstrap_legacy = 1 AND creato_da_utente_id IS NOT NULL LIMIT 1),\
+             (SELECT id FROM utenti WHERE ruolo_sistema = 'admin' ORDER BY creato_il, id LIMIT 1)\
+         ) \
+           AND NOT EXISTS (SELECT 1 FROM utenti WHERE amministratore_principale = 1)",
+    )
+    .execute(&mut **tx)
+    .await
+    .context("Impossibile inizializzare l'amministratore principale")?;
+    Ok(())
+}
+
+pub(crate) async fn provision_approved_telegram_account(
+    tx: &mut Transaction<'_, sqlx::Sqlite>,
+    telegram_user_id: i64,
+    chat_id: i64,
+    display_name: &str,
+    first_name: &str,
+    last_name: Option<&str>,
+    username: Option<&str>,
+) -> Result<i64> {
+    if display_name.trim().is_empty() {
+        bail!("Nome Telegram non valido");
+    }
+
+    let existing: Option<i64> =
+        sqlx::query_scalar("SELECT utente_id FROM account_telegram WHERE telegram_user_id = ?")
+            .bind(telegram_user_id)
+            .fetch_optional(&mut **tx)
+            .await
+            .context("Impossibile verificare l'account Telegram da approvare")?;
+
+    if let Some(user_id) = existing {
+        return Ok(user_id);
+    }
+
+    let result = sqlx::query("INSERT INTO utenti (nome_visualizzato) VALUES (?)")
+        .bind(display_name.trim())
+        .execute(&mut **tx)
+        .await
+        .context("Impossibile creare l'utente approvato")?;
+    let user_id = result.last_insert_rowid();
+
+    sqlx::query(
+        "INSERT INTO account_telegram (\
+            utente_id, telegram_user_id, chat_id, username_snapshot, nome_snapshot, cognome_snapshot\
+         ) VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .bind(user_id)
+    .bind(telegram_user_id)
+    .bind(chat_id)
+    .bind(username)
+    .bind(first_name)
+    .bind(last_name)
+    .execute(&mut **tx)
+    .await
+    .context("Impossibile collegare l'account Telegram approvato")?;
+
+    ensure_initial_space(tx, user_id, display_name.trim()).await?;
+    Ok(user_id)
 }
 
 async fn ensure_initial_space(
@@ -374,6 +540,37 @@ pub(crate) async fn is_system_admin(pool: &SqlitePool, actor: &AuditActor) -> Re
     .fetch_one(pool)
     .await
     .context("Impossibile verificare il ruolo di sistema")
+}
+
+pub(crate) async fn is_primary_admin(pool: &SqlitePool, actor: &AuditActor) -> Result<bool> {
+    let Some(user_id) = actor.utente_id else {
+        return Ok(false);
+    };
+    sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(\
+            SELECT 1 FROM utenti \
+            WHERE id = ? AND stato = 'attivo' \
+              AND ruolo_sistema = 'admin' AND amministratore_principale = 1\
+         )",
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await
+    .context("Impossibile verificare l'amministratore principale")
+}
+
+pub(crate) async fn list_primary_admin_chat_ids(pool: &SqlitePool) -> Result<Vec<i64>> {
+    sqlx::query_scalar(
+        "SELECT DISTINCT at.chat_id \
+         FROM account_telegram at \
+         JOIN utenti u ON u.id = at.utente_id \
+         WHERE u.stato = 'attivo' AND u.ruolo_sistema = 'admin' \
+           AND u.amministratore_principale = 1 \
+         ORDER BY at.chat_id",
+    )
+    .fetch_all(pool)
+    .await
+    .context("Impossibile leggere la chat dell'amministratore principale")
 }
 
 pub(crate) async fn list_system_admin_chat_ids(pool: &SqlitePool) -> Result<Vec<i64>> {
