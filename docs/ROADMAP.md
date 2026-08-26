@@ -1,5 +1,34 @@
 # Roadmap funzionale
 
+<!-- STEP_7_2G_CHIUSURA_DOCS -->
+## Checkpoint Step 7.2G — workflow Miglioramenti
+
+**Stato:** implementato e verificato sul Galaxy S9 il 26 agosto 2026.
+
+Completato:
+
+- workflow `da_approvare / da_fare / scartato`;
+- stato di lettura admin separato tramite `letto_admin_il`;
+- archivio separato dei completati con conservazione allegati;
+- backfill dei vecchi stati;
+- `🆕` amministrativo predisposto anche per le richieste di accesso;
+- migration append-only `20260826024500_miglioramenti_workflow_admin.sql`;
+- pipeline Rust **142/142 test**;
+- migration reale, integrity e foreign key verificati;
+- completamento → archivio verificato anche direttamente sul DB.
+
+Verifica manuale ancora pendente, non bloccante per il checkpoint:
+
+- smoke Telegram con secondo account per `da_approvare`, `🆕`,
+  approvazione/scarto e nuove richieste di accesso.
+
+**Regola di prosecuzione:** la migration 7.2G è ormai applicata al DB reale e va
+considerata immutabile. Dopo commit/push riprendere dal prossimo elemento già
+previsto nella roadmap Step 7.2, senza ricostruire le fondamenta già concluse.
+
+---
+
+
 ## Stato corrente
 
 Gli Step 1→6C sono chiusi e confluiti in `main` con il merge `219caba`.

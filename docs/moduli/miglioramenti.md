@@ -1,5 +1,136 @@
 # Modulo Miglioramenti
 
+<!-- STEP_7_2G_CHIUSURA_DOCS -->
+## Step 7.2G — workflow operativo
+
+Il modulo Miglioramenti usa ora un backlog amministrativo semplice.
+
+### Stati attivi
+
+| Stato DB | Significato |
+|---|---|
+| `da_approvare` | proposta di un utente normale in attesa di decisione |
+| `da_fare` | miglioramento approvato o creato direttamente da un admin |
+| `scartato` | proposta rifiutata, ancora consultabile finché non viene eliminata |
+
+`fatto` non è più uno stato del backlog: quando un elemento viene completato,
+viene trasferito nell'archivio.
+
+### Lettura amministrativa e `🆕`
+
+`letto_admin_il` è separato da `stato`.
+
+Questo consente, per esempio:
+
+```text
+da_approvare + letto_admin_il NULL
+→ 🆕 Da approvare
+
+da_approvare + letto_admin_il valorizzato
+→ Da approvare
+```
+
+Aprire il dettaglio rimuove quindi il flag `🆕` senza approvare automaticamente
+la proposta.
+
+### Creazione
+
+Admin:
+
+```text
+nuovo miglioramento
+→ da_fare
+→ già letto
+```
+
+Utente normale:
+
+```text
+nuovo miglioramento
+→ da_approvare
+→ non letto
+→ 🆕 lato admin
+```
+
+### Decisioni admin
+
+```text
+Approva
+→ da_fare
+
+Scarta
+→ scartato
+
+Completa
+→ archivio
+→ rimozione dal backlog
+```
+
+Uno `scartato` può essere eliminato; il backend elimina le righe relazionali
+degli allegati e tenta anche la pulizia dei file fisici.
+
+### Archivio
+
+Tabelle:
+
+```text
+miglioramenti_archivio
+miglioramento_archivio_allegati
+```
+
+L'archivio conserva:
+
+- ID archivio;
+- ID del miglioramento originario;
+- autore;
+- descrizione;
+- modulo opzionale;
+- data creazione;
+- data completamento;
+- data archiviazione;
+- admin che ha archiviato, se disponibile;
+- screenshot/allegati.
+
+La migration sposta nell'archivio anche gli elementi legacy con stato `fatto`.
+
+### Richieste di accesso
+
+`richieste_accesso` dispone ora di `letto_admin_il`.
+
+Le richieste nuove possono quindi essere evidenziate con `🆕` senza confondere
+la lettura con `pendente / approvata / rifiutata`.
+
+Le richieste già decise prima dello Step 7.2G vengono backfillate come già lette.
+
+### Migration
+
+```text
+20260826024500_miglioramenti_workflow_admin.sql
+```
+
+È una migration append-only già applicata al DB reale: **non modificarla**.
+
+### Verifiche
+
+Sul Galaxy S9:
+
+```text
+142 test passati
+0 falliti
+Clippy -D warnings OK
+integrity_check = ok
+foreign_key_check = nessuna riga
+```
+
+Il flusso completamento → archivio è stato verificato anche direttamente nel DB
+reale con un record di prova.
+
+Resta da eseguire, quando disponibile un secondo account, lo smoke live dei
+flussi utente normale e delle nuove richieste di accesso.
+
+---
+
+
 ## Scopo
 
 `💡 Miglioramenti` è il backlog interno del gestionale. Serve a registrare

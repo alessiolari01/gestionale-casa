@@ -191,6 +191,117 @@ ma non dovrà rappresentare il modello applicativo definitivo.
 - dettaglio storico multi-spazio: lo spazio proprietario dell'entità resta distinto dallo spazio della posizione e i cambi luogo mostrano `Da`/`A` con lo spazio; gli eventi esistenti vengono backfillati dalla relativa identità storica della casa.
 # Diario di sviluppo
 
+<!-- STEP_7_2G_CHIUSURA_DOCS -->
+## Step 7.2G — workflow Miglioramenti e coda amministrativa — 2026-08-26
+
+### Obiettivo
+
+Lo Step 7.2G rende operativo il workflow semplificato dei miglioramenti definito
+nel checkpoint documentale `ccb110a` (`Step 7.2G.0: definisce workflow
+miglioramenti semplificato`), mantenendo separati stato operativo e stato di
+lettura amministrativa.
+
+### Implementazione
+
+- nuova migration append-only
+  `20260826024500_miglioramenti_workflow_admin.sql`;
+- le migration precedenti restano immutabili;
+- stati attivi dei miglioramenti:
+  - `da_approvare`;
+  - `da_fare`;
+  - `scartato`;
+- `letto_admin_il` gestisce il flag amministrativo `🆕` senza modificare lo
+  stato operativo;
+- miglioramento creato da admin → `da_fare`, già letto;
+- miglioramento creato da utente normale → `da_approvare`, non letto;
+- apertura del dettaglio admin → marca letto senza cambiare lo stato;
+- approvazione → `da_approvare -> da_fare`;
+- scarto → `scartato`;
+- completamento → spostamento in `miglioramenti_archivio` e rimozione dal
+  backlog attivo;
+- gli allegati dei completati vengono conservati in
+  `miglioramento_archivio_allegati`;
+- gli elementi legacy `fatto` vengono archiviati durante la migration;
+- gli elementi legacy admin aperti/pianificati diventano `da_fare`;
+- gli elementi legacy non-admin aperti/pianificati diventano `da_approvare`;
+- gli elementi legacy `scartato` restano scartati e risultano già letti;
+- `richieste_accesso.letto_admin_il` applica lo stesso concetto `🆕` alle
+  richieste di accesso;
+- le richieste di accesso già approvate/rifiutate prima della migration vengono
+  considerate già lette;
+- eliminando uno `scartato` vengono eliminate anche le righe allegato e il
+  backend tenta la rimozione dei file fisici.
+
+File applicativi modificati:
+
+- `src/modules/miglioramenti.rs`;
+- `src/access_control.rs`;
+- `src/main.rs`.
+
+### Verifiche sul Galaxy S9 / Termux
+
+Pipeline completata con esito positivo:
+
+- `cargo fmt --all`;
+- `cargo fmt --all -- --check`;
+- `cargo check --locked`;
+- `git diff --check`;
+- `cargo clippy --all-targets --locked -- -D warnings`;
+- `cargo test --locked -- --test-threads=1` → **142 passed, 0 failed**.
+
+Database reale:
+
+- backup pre-migration creato:
+  `~/gestionale_pre_step7_2g_20260826_030715.db`;
+- migration `20260826024500` → `success = 1`;
+- `PRAGMA integrity_check` → `ok`;
+- `PRAGMA foreign_key_check` → nessuna riga;
+- dopo il backfill osservati `9` miglioramenti `da_fare` e `4` `scartato`.
+
+Archivio verificato anche direttamente sul DB:
+
+- il miglioramento di prova `prova` è stato completato;
+- è stato creato `miglioramenti_archivio.id = 1`;
+- `miglioramento_origine_id = 14`;
+- l'elemento non è più presente nel backlog attivo;
+- integrity e foreign key sono rimasti corretti.
+
+Il warning di future incompatibility di `proc-macro-error2 v2.0.1` resta noto,
+proviene da una dipendenza esterna e non blocca il checkpoint.
+
+### Smoke Telegram
+
+Le funzioni verificabili con il solo account amministratore sono state
+dichiarate funzionanti dall'utente; il passaggio completamento → archivio è
+stato inoltre verificato direttamente nel database.
+
+Resta intenzionalmente **pendente** lo smoke manuale multi-account, da eseguire
+quando sarà disponibile un secondo account:
+
+1. utente normale crea un miglioramento → `da_approvare`;
+2. comparsa `🆕` lato admin;
+3. apertura dettaglio → rimozione `🆕` senza cambio stato;
+4. approvazione → `da_fare`;
+5. scarto/eliminazione;
+6. nuova richiesta di accesso → `🆕`;
+7. apertura/decisione richiesta → rimozione del flag.
+
+Questa verifica pendente non invalida i test automatici né le verifiche DB già
+completate, ma deve restare documentata finché non viene eseguita live.
+
+### Stato del checkpoint
+
+Lo Step **7.2G è pronto per commit/push** sul branch
+`step-7-alimentazione`. Dopo il consolidamento non riaprire o riscrivere la
+migration `20260826024500_miglioramenti_workflow_admin.sql`.
+
+Il prossimo sviluppo deve riprendere dal prossimo elemento già previsto nella
+roadmap corrente dello Step 7.2; non introdurre un nuovo sottostep numerato
+senza prima rileggere `docs/step7/roadmap.md` e l'handoff aggiornato.
+
+---
+
+
 ## Step 7.1 — spazi operativi e isolamento reale — 2026-08-23
 
 ### Implementazione

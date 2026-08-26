@@ -1,5 +1,187 @@
 # Handoff completo — Gestionale Casa
 
+<!-- STEP_7_2G_CHIUSURA_DOCS -->
+## Aggiornamento corrente — Step 7.2G verificato e pronto al consolidamento
+
+Repository: `alessiolari01/gestionale-casa`
+Branch: `step-7-alimentazione`
+Baseline dello Step 7.2G: `ccb110a` — `Step 7.2G.0: definisce workflow miglioramenti semplificato`.
+
+### Stato reale
+
+Lo Step 7.2G applicativo è stato implementato sopra `ccb110a`.
+
+Nuova migration:
+
+```text
+20260826024500_miglioramenti_workflow_admin.sql
+```
+
+**Regola assoluta:** questa migration è già stata applicata al database reale e,
+come tutte le migration precedentemente applicate, deve essere considerata
+immutabile.
+
+File applicativi modificati:
+
+```text
+src/access_control.rs
+src/main.rs
+src/modules/miglioramenti.rs
+migrations/20260826024500_miglioramenti_workflow_admin.sql
+```
+
+### Semantica corrente dei Miglioramenti
+
+Backlog attivo:
+
+```text
+da_approvare
+da_fare
+scartato
+```
+
+Stato di lettura admin:
+
+```text
+letto_admin_il
+```
+
+Il flag `🆕` deriva dalla mancata lettura amministrativa e **non** rappresenta
+uno stato del workflow.
+
+Regole:
+
+```text
+admin crea
+→ da_fare
+→ già letto
+
+utente normale crea
+→ da_approvare
+→ non letto / 🆕
+
+admin apre dettaglio
+→ marca letto
+→ stato invariato
+
+admin approva
+→ da_fare
+
+admin scarta
+→ scartato
+
+admin completa
+→ copia in miglioramenti_archivio
+→ copia allegati in miglioramento_archivio_allegati
+→ rimozione dal backlog attivo
+```
+
+Gli elementi completati non rimangono quindi come `fatto` nel backlog.
+
+La stessa idea di lettura amministrativa viene applicata alle richieste di
+accesso tramite:
+
+```text
+richieste_accesso.letto_admin_il
+```
+
+### Backfill della migration 7.2G
+
+- legacy `fatto` → archivio;
+- legacy aperto/pianificato creato da admin → `da_fare`, già letto;
+- legacy aperto/pianificato creato da non-admin → `da_approvare`, non letto;
+- legacy `scartato` → `scartato`, già letto;
+- richieste accesso già approvate/rifiutate → già lette.
+
+### Verifiche completate sul Galaxy S9
+
+Pipeline Rust:
+
+```text
+cargo fmt                    OK
+cargo fmt --check            OK
+cargo check --locked         OK
+git diff --check             OK
+cargo clippy -D warnings     OK
+cargo test                   142 passed / 0 failed
+```
+
+Database reale:
+
+```text
+DB: ./data/db/gestionale.db
+migration 20260826024500: success = 1
+PRAGMA integrity_check: ok
+PRAGMA foreign_key_check: nessuna riga
+```
+
+Backup prima della migration:
+
+```text
+~/gestionale_pre_step7_2g_20260826_030715.db
+```
+
+Backfill osservato dopo migration:
+
+```text
+da_fare: 9
+scartato: 4
+```
+
+Test archivio reale:
+
+```text
+miglioramento "prova"
+origine id: 14
+archivio id: 1
+```
+
+L'elemento è scomparso dal backlog attivo ed è rimasto nell'archivio; integrity
+e foreign key sono rimasti corretti.
+
+Il warning:
+
+```text
+proc-macro-error2 v2.0.1
+future incompatibility
+```
+
+è noto, proviene da una dipendenza esterna e non blocca il checkpoint.
+
+### Smoke Telegram
+
+Con il solo account admin le funzioni disponibili sono state dichiarate
+funzionanti dall'utente. Il passaggio completamento → archivio è stato
+confermato anche a livello SQLite.
+
+**Pendono solo i test che richiedono un secondo account Telegram:**
+
+- creazione da utente normale → `da_approvare`;
+- `🆕` lato admin;
+- apertura dettaglio → rimozione `🆕`;
+- approvazione;
+- scarto/eliminazione;
+- nuova richiesta di accesso con `🆕`;
+- rimozione `🆕` dopo apertura/decisione.
+
+Non dichiarare questi casi “testati live” finché il secondo account non sarà
+disponibile.
+
+### Punto da cui ripartire dopo il commit
+
+1. consolidare Step 7.2G con commit/push;
+2. verificare che il working tree torni pulito;
+3. quando disponibile, completare lo smoke multi-account senza modificare la
+   migration;
+4. per il nuovo sviluppo, leggere il prossimo elemento **già previsto** in
+   `docs/step7/roadmap.md`;
+5. non ricostruire da zero Alimentazione, Ricette, access control o
+   Miglioramenti;
+6. non modificare migration già applicate.
+
+---
+
+
 > Documento di continuità tecnica e funzionale destinato a chi deve proseguire il progetto senza conoscere le conversazioni precedenti.
 >
 > **Regola di manutenzione:** questo file va aggiornato dopo ogni checkpoint che modifica in modo significativo architettura, schema dati, sicurezza, flussi applicativi o interfaccia utente.

@@ -85,10 +85,17 @@ struct ImprovementRecord {
     descrizione: String,
     modulo: Option<String>,
     stato: String,
+    letto_admin_il: Option<String>,
     creato_il: String,
     allegati: i64,
 }
-
+#[derive(Debug, Clone, FromRow)]
+struct ArchivedImprovementRecord {
+    autore_nome: String,
+    descrizione: String,
+    archiviato_il: String,
+    allegati: i64,
+}
 #[derive(Debug, Clone, FromRow)]
 struct AttachmentRecord {
     id: i64,
@@ -331,15 +338,18 @@ pub async fn handle_callback(
             }
             return Ok(true);
         }
+        "improve:archive:list" => {
+            sessions.clear_chat(chat_id.0);
+            show_archive(bot, chat_id, pool).await?;
+            return Ok(true);
+        }
         _ => {}
     }
-
     if let Some(id) = parse_id(data, "improve:view:") {
         sessions.clear_chat(chat_id.0);
         show_detail(bot, chat_id, pool, id).await?;
         return Ok(true);
     }
-
     if let Some(id) = parse_id(data, "improve:add_photo:") {
         if can_view(pool, id).await.unwrap_or(false) {
             sessions.set(
@@ -358,12 +368,42 @@ pub async fn handle_callback(
         }
         return Ok(true);
     }
-
     if let Some(id) = parse_id(data, "improve:photos:") {
         show_attachments(bot, chat_id, pool, id).await?;
         return Ok(true);
     }
-
+    if let Some(id) = parse_id(data, "improve:archive:") {
+        if !is_admin(pool).await.unwrap_or(false) {
+            bot.send_message(chat_id, "⚠️ Comando non disponibile.")
+                .await?;
+        } else if let Err(error) = archive_completed_improvement(pool, id).await {
+            tracing::warn!(?error, id, "Archiviazione miglioramento non riuscita");
+            bot.send_message(chat_id, format!("⚠️ {error}")).await?;
+        } else {
+            bot.send_message(chat_id, "✅ Miglioramento completato e archiviato.")
+                .reply_markup(menu_keyboard(true))
+                .await?;
+        }
+        return Ok(true);
+    }
+    if let Some(id) = parse_id(data, "improve:delete_discarded:") {
+        if !is_admin(pool).await.unwrap_or(false) {
+            bot.send_message(chat_id, "⚠️ Comando non disponibile.")
+                .await?;
+        } else if let Err(error) = delete_discarded_improvement(pool, id).await {
+            tracing::warn!(
+                ?error,
+                id,
+                "Eliminazione miglioramento scartato non riuscita"
+            );
+            bot.send_message(chat_id, format!("⚠️ {error}")).await?;
+        } else {
+            bot.send_message(chat_id, "🗑️ Miglioramento scartato eliminato.")
+                .reply_markup(menu_keyboard(true))
+                .await?;
+        }
+        return Ok(true);
+    }
     if let Some(rest) = data.strip_prefix("improve:status:") {
         let mut parts = rest.split(':');
         let id = parts.next().and_then(|value| value.parse::<i64>().ok());
@@ -383,10 +423,8 @@ pub async fn handle_callback(
             }
         }
     }
-
     Ok(false)
 }
-
 pub async fn show_menu(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> ResponseResult<()> {
     let admin = is_admin(pool).await.unwrap_or(false);
     bot.send_message(
@@ -411,11 +449,10 @@ async fn show_list(bot: &Bot, chat_id: ChatId, pool: &SqlitePool, all: bool) -> 
             .await?;
         return Ok(());
     }
-
     let rows: Result<Vec<ImprovementRecord>, sqlx::Error> = if all {
         sqlx::query_as(
             "SELECT m.id, u.nome_visualizzato AS autore_nome, \
-                    m.descrizione, m.modulo, m.stato, \
+                    m.descrizione, m.modulo, m.stato, m.letto_admin_il, \
                     strftime('%d/%m/%Y %H:%M', m.creato_il, 'localtime') AS creato_il, \
                     COUNT(a.id) AS allegati \
              FROM miglioramenti m \
@@ -430,7 +467,7 @@ async fn show_list(bot: &Bot, chat_id: ChatId, pool: &SqlitePool, all: bool) -> 
     } else {
         sqlx::query_as(
             "SELECT m.id, u.nome_visualizzato AS autore_nome, \
-                    m.descrizione, m.modulo, m.stato, \
+                    m.descrizione, m.modulo, m.stato, m.letto_admin_il, \
                     strftime('%d/%m/%Y %H:%M', m.creato_il, 'localtime') AS creato_il, \
                     COUNT(a.id) AS allegati \
              FROM miglioramenti m \
@@ -445,7 +482,6 @@ async fn show_list(bot: &Bot, chat_id: ChatId, pool: &SqlitePool, all: bool) -> 
         .fetch_all(pool)
         .await
     };
-
     match rows {
         Ok(rows) if rows.is_empty() => {
             bot.send_message(
@@ -467,11 +503,17 @@ async fn show_list(bot: &Bot, chat_id: ChatId, pool: &SqlitePool, all: bool) -> 
             }];
             let mut buttons = Vec::new();
             for item in rows {
+                let unread_suffix = if all && item.letto_admin_il.is_none() {
+                    " 🆕"
+                } else {
+                    ""
+                };
                 lines.push(String::new());
                 lines.push(format!(
-                    "{} {}\n{}{}",
+                    "{} {}{}\n{}{}",
                     status_icon(&item.stato),
                     truncate(&item.descrizione, 90),
+                    unread_suffix,
                     if all {
                         format!("👤 {} · ", item.autore_nome)
                     } else {
@@ -485,9 +527,10 @@ async fn show_list(bot: &Bot, chat_id: ChatId, pool: &SqlitePool, all: bool) -> 
                 ));
                 buttons.push(vec![InlineKeyboardButton::callback(
                     format!(
-                        "{} {}",
+                        "{} {}{}",
                         status_icon(&item.stato),
-                        truncate(&item.descrizione, 42)
+                        truncate(&item.descrizione, 42),
+                        unread_suffix
                     ),
                     format!("improve:view:{}", item.id),
                 )]);
@@ -513,6 +556,64 @@ async fn show_list(bot: &Bot, chat_id: ChatId, pool: &SqlitePool, all: bool) -> 
     Ok(())
 }
 
+async fn show_archive(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> ResponseResult<()> {
+    if !is_admin(pool).await.unwrap_or(false) {
+        bot.send_message(chat_id, "⚠️ Comando non disponibile.")
+            .await?;
+        return Ok(());
+    }
+    let rows: Result<Vec<ArchivedImprovementRecord>, sqlx::Error> = sqlx::query_as(
+        "SELECT u.nome_visualizzato AS autore_nome, a.descrizione, \
+                strftime('%d/%m/%Y %H:%M', a.archiviato_il, 'localtime') AS archiviato_il, \
+                COUNT(aa.id) AS allegati \
+         FROM miglioramenti_archivio a \
+         JOIN utenti u ON u.id = a.autore_utente_id \
+         LEFT JOIN miglioramento_archivio_allegati aa ON aa.miglioramento_archivio_id = a.id \
+         GROUP BY a.id \
+         ORDER BY a.archiviato_il DESC, a.id DESC LIMIT ?",
+    )
+    .bind(LIST_LIMIT)
+    .fetch_all(pool)
+    .await;
+
+    match rows {
+        Ok(rows) if rows.is_empty() => {
+            bot.send_message(chat_id, "📦 L'archivio dei miglioramenti è vuoto.")
+                .reply_markup(menu_keyboard(true))
+                .await?;
+        }
+        Ok(rows) => {
+            let mut lines = vec!["📦 Archivio miglioramenti completati".to_string()];
+            for item in rows {
+                lines.push(String::new());
+                lines.push(format!(
+                    "✅ {}\n👤 {} · Archiviato: {}{}",
+                    truncate(&item.descrizione, 100),
+                    item.autore_nome,
+                    item.archiviato_il,
+                    if item.allegati > 0 {
+                        format!(" · 📷 {}", item.allegati)
+                    } else {
+                        String::new()
+                    }
+                ));
+            }
+            bot.send_message(chat_id, lines.join("\n"))
+                .reply_markup(menu_keyboard(true))
+                .await?;
+        }
+        Err(error) => {
+            tracing::error!(?error, "Errore archivio miglioramenti");
+            bot.send_message(
+                chat_id,
+                "⚠️ Non riesco a leggere l'archivio dei miglioramenti.",
+            )
+            .reply_markup(menu_keyboard(true))
+            .await?;
+        }
+    }
+    Ok(())
+}
 async fn show_detail(
     bot: &Bot,
     chat_id: ChatId,
@@ -530,7 +631,16 @@ async fn show_detail(
             .await?;
         return Ok(());
     };
-
+    let admin = is_admin(pool).await.unwrap_or(false);
+    if admin && item.letto_admin_il.is_none() {
+        if let Err(error) = mark_read(pool, improvement_id).await {
+            tracing::warn!(
+                ?error,
+                improvement_id,
+                "Lettura miglioramento non registrata"
+            );
+        }
+    }
     let module_line = item
         .modulo
         .as_deref()
@@ -546,14 +656,16 @@ async fn show_detail(
         module_line,
         item.allegati
     );
-
-    let admin = is_admin(pool).await.unwrap_or(false);
     bot.send_message(chat_id, message)
-        .reply_markup(detail_keyboard(improvement_id, item.allegati, admin))
+        .reply_markup(detail_keyboard(
+            improvement_id,
+            item.allegati,
+            admin,
+            &item.stato,
+        ))
         .await?;
     Ok(())
 }
-
 async fn show_attachments(
     bot: &Bot,
     chat_id: ChatId,
@@ -623,16 +735,22 @@ async fn create_improvement(pool: &SqlitePool, description: &str) -> Result<i64>
     let user_id = actor
         .utente_id
         .context("Miglioramento non disponibile per un attore di sistema")?;
-    let result =
-        sqlx::query("INSERT INTO miglioramenti (autore_utente_id, descrizione) VALUES (?, ?)")
-            .bind(user_id)
-            .bind(description.trim())
-            .execute(pool)
-            .await
-            .context("Impossibile creare il miglioramento")?;
+    let admin = identity::is_system_admin(pool, &actor).await?;
+    let state = if admin { "da_fare" } else { "da_approvare" };
+    let result = sqlx::query(
+        "INSERT INTO miglioramenti \
+         (autore_utente_id, descrizione, stato, letto_admin_il) \
+         VALUES (?, ?, ?, CASE WHEN ? = 1 THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') ELSE NULL END)",
+    )
+    .bind(user_id)
+    .bind(description.trim())
+    .bind(state)
+    .bind(if admin { 1_i64 } else { 0_i64 })
+    .execute(pool)
+    .await
+    .context("Impossibile creare il miglioramento")?;
     Ok(result.last_insert_rowid())
 }
-
 async fn delete_improvement(pool: &SqlitePool, improvement_id: i64) -> Result<()> {
     let actor = identity::current_actor();
     let user_id = actor
@@ -717,7 +835,7 @@ async fn visible_improvement(
     let admin = identity::is_system_admin(pool, &actor).await?;
     let sql = if admin {
         "SELECT m.id, u.nome_visualizzato AS autore_nome, \
-                m.descrizione, m.modulo, m.stato, \
+                m.descrizione, m.modulo, m.stato, m.letto_admin_il, \
                 strftime('%d/%m/%Y %H:%M', m.creato_il, 'localtime') AS creato_il, \
                 COUNT(a.id) AS allegati \
          FROM miglioramenti m \
@@ -726,7 +844,7 @@ async fn visible_improvement(
          WHERE m.id = ? GROUP BY m.id"
     } else {
         "SELECT m.id, u.nome_visualizzato AS autore_nome, \
-                m.descrizione, m.modulo, m.stato, \
+                m.descrizione, m.modulo, m.stato, m.letto_admin_il, \
                 strftime('%d/%m/%Y %H:%M', m.creato_il, 'localtime') AS creato_il, \
                 COUNT(a.id) AS allegati \
          FROM miglioramenti m \
@@ -748,21 +866,36 @@ async fn visible_improvement(
             .context("Impossibile leggere il miglioramento")
     }
 }
-
 async fn can_view(pool: &SqlitePool, improvement_id: i64) -> Result<bool> {
     Ok(visible_improvement(pool, improvement_id).await?.is_some())
 }
-
+async fn mark_read(pool: &SqlitePool, improvement_id: i64) -> Result<()> {
+    if !is_admin(pool).await? {
+        bail!("Operazione riservata agli amministratori");
+    }
+    sqlx::query(
+        "UPDATE miglioramenti \
+         SET letto_admin_il = COALESCE(letto_admin_il, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
+         WHERE id = ?",
+    )
+    .bind(improvement_id)
+    .execute(pool)
+    .await
+    .context("Impossibile segnare il miglioramento come letto")?;
+    Ok(())
+}
 async fn set_status(pool: &SqlitePool, improvement_id: i64, state: &str) -> Result<()> {
     if !is_admin(pool).await? {
         bail!("Operazione riservata agli amministratori");
     }
-    if !matches!(state, "aperto" | "pianificato" | "fatto" | "scartato") {
+    if !matches!(state, "da_fare" | "scartato") {
         bail!("Stato miglioramento non valido");
     }
     let affected = sqlx::query(
         "UPDATE miglioramenti \
-         SET stato = ?, aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
+         SET stato = ?, \
+             letto_admin_il = COALESCE(letto_admin_il, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), \
+             aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
          WHERE id = ?",
     )
     .bind(state)
@@ -776,7 +909,100 @@ async fn set_status(pool: &SqlitePool, improvement_id: i64, state: &str) -> Resu
     }
     Ok(())
 }
-
+async fn archive_completed_improvement(pool: &SqlitePool, improvement_id: i64) -> Result<()> {
+    if !is_admin(pool).await? {
+        bail!("Operazione riservata agli amministratori");
+    }
+    let actor = identity::current_actor();
+    let admin_user_id = actor
+        .utente_id
+        .context("Amministratore privo di identità interna")?;
+    let mut tx = pool
+        .begin()
+        .await
+        .context("Impossibile aprire la transazione di archiviazione")?;
+    let inserted = sqlx::query(
+        "INSERT INTO miglioramenti_archivio (\
+            miglioramento_origine_id, autore_utente_id, descrizione, modulo, creato_il, \
+            completato_il, archiviato_da_utente_id\
+         ) \
+         SELECT id, autore_utente_id, descrizione, modulo, creato_il, \
+                strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ? \
+         FROM miglioramenti WHERE id = ? AND stato = 'da_fare'",
+    )
+    .bind(admin_user_id)
+    .bind(improvement_id)
+    .execute(&mut *tx)
+    .await
+    .context("Impossibile archiviare il miglioramento")?;
+    if inserted.rows_affected() != 1 {
+        bail!("Il miglioramento deve essere nello stato Da fare prima dell'archiviazione");
+    }
+    let archive_id = inserted.last_insert_rowid();
+    sqlx::query(
+        "INSERT INTO miglioramento_archivio_allegati (\
+            miglioramento_archivio_id, tipo, percorso_file, descrizione, creato_il\
+         ) \
+         SELECT ?, tipo, percorso_file, descrizione, creato_il \
+         FROM miglioramento_allegati WHERE miglioramento_id = ?",
+    )
+    .bind(archive_id)
+    .bind(improvement_id)
+    .execute(&mut *tx)
+    .await
+    .context("Impossibile archiviare gli allegati del miglioramento")?;
+    sqlx::query("DELETE FROM miglioramenti WHERE id = ? AND stato = 'da_fare'")
+        .bind(improvement_id)
+        .execute(&mut *tx)
+        .await
+        .context("Impossibile rimuovere il miglioramento dal backlog attivo")?;
+    tx.commit()
+        .await
+        .context("Impossibile salvare l'archiviazione")?;
+    Ok(())
+}
+async fn delete_discarded_improvement(pool: &SqlitePool, improvement_id: i64) -> Result<()> {
+    if !is_admin(pool).await? {
+        bail!("Operazione riservata agli amministratori");
+    }
+    let paths: Vec<String> = sqlx::query_scalar(
+        "SELECT a.percorso_file \
+         FROM miglioramento_allegati a \
+         JOIN miglioramenti m ON m.id = a.miglioramento_id \
+         WHERE m.id = ? AND m.stato = 'scartato'",
+    )
+    .bind(improvement_id)
+    .fetch_all(pool)
+    .await
+    .context("Impossibile leggere gli allegati da eliminare")?;
+    let affected = sqlx::query("DELETE FROM miglioramenti WHERE id = ? AND stato = 'scartato'")
+        .bind(improvement_id)
+        .execute(pool)
+        .await
+        .context("Impossibile eliminare il miglioramento scartato")?
+        .rows_affected();
+    if affected != 1 {
+        bail!("Il miglioramento non è scartato o non esiste");
+    }
+    for path in paths {
+        if let Err(error) = tokio::fs::remove_file(&path).await {
+            if Path::new(&path).exists() {
+                tracing::warn!(?error, %path, "File allegato scartato non eliminato");
+            }
+        }
+    }
+    let directory = PathBuf::from(MEDIA_ROOT).join(improvement_id.to_string());
+    if directory.exists() {
+        if let Err(error) = tokio::fs::remove_dir_all(&directory).await {
+            tracing::warn!(
+                ?error,
+                ?directory,
+                "Cartella allegati scartati non eliminata"
+            );
+        }
+    }
+    Ok(())
+}
 async fn is_admin(pool: &SqlitePool) -> Result<bool> {
     identity::is_system_admin(pool, &identity::current_actor()).await
 }
@@ -797,6 +1023,10 @@ fn menu_keyboard(admin: bool) -> InlineKeyboardMarkup {
             "🗂️ Tutti i miglioramenti".to_string(),
             "improve:all".to_string(),
         )]);
+        rows.push(vec![InlineKeyboardButton::callback(
+            "📦 Archivio completati".to_string(),
+            "improve:archive:list".to_string(),
+        )]);
     }
     rows.push(vec![InlineKeyboardButton::callback(
         "🏠 Menu principale".to_string(),
@@ -804,7 +1034,6 @@ fn menu_keyboard(admin: bool) -> InlineKeyboardMarkup {
     )]);
     InlineKeyboardMarkup::new(rows)
 }
-
 fn flow_cancel_keyboard() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![vec![
         InlineKeyboardButton::callback("❌ Annulla".to_string(), "improve:cancel".to_string()),
@@ -847,7 +1076,12 @@ fn after_save_keyboard(improvement_id: i64) -> InlineKeyboardMarkup {
     ])
 }
 
-fn detail_keyboard(improvement_id: i64, attachments: i64, admin: bool) -> InlineKeyboardMarkup {
+fn detail_keyboard(
+    improvement_id: i64,
+    attachments: i64,
+    admin: bool,
+    state: &str,
+) -> InlineKeyboardMarkup {
     let mut rows = vec![vec![InlineKeyboardButton::callback(
         "📷 Aggiungi screenshot".to_string(),
         format!("improve:add_photo:{improvement_id}"),
@@ -859,26 +1093,33 @@ fn detail_keyboard(improvement_id: i64, attachments: i64, admin: bool) -> Inline
         )]);
     }
     if admin {
-        rows.push(vec![
-            InlineKeyboardButton::callback(
-                "🟡 Aperto".to_string(),
-                format!("improve:status:{improvement_id}:aperto"),
-            ),
-            InlineKeyboardButton::callback(
-                "🔵 Pianificato".to_string(),
-                format!("improve:status:{improvement_id}:pianificato"),
-            ),
-        ]);
-        rows.push(vec![
-            InlineKeyboardButton::callback(
-                "✅ Fatto".to_string(),
-                format!("improve:status:{improvement_id}:fatto"),
-            ),
-            InlineKeyboardButton::callback(
-                "❌ Scartato".to_string(),
-                format!("improve:status:{improvement_id}:scartato"),
-            ),
-        ]);
+        match state {
+            "da_approvare" => rows.push(vec![
+                InlineKeyboardButton::callback(
+                    "✅ Approva".to_string(),
+                    format!("improve:status:{improvement_id}:da_fare"),
+                ),
+                InlineKeyboardButton::callback(
+                    "❌ Scarta".to_string(),
+                    format!("improve:status:{improvement_id}:scartato"),
+                ),
+            ]),
+            "da_fare" => rows.push(vec![
+                InlineKeyboardButton::callback(
+                    "✅ Archivia completato".to_string(),
+                    format!("improve:archive:{improvement_id}"),
+                ),
+                InlineKeyboardButton::callback(
+                    "❌ Scarta".to_string(),
+                    format!("improve:status:{improvement_id}:scartato"),
+                ),
+            ]),
+            "scartato" => rows.push(vec![InlineKeyboardButton::callback(
+                "🗑️ Elimina scartato".to_string(),
+                format!("improve:delete_discarded:{improvement_id}"),
+            )]),
+            _ => {}
+        }
     }
     rows.push(vec![
         InlineKeyboardButton::callback("⬅️ Miglioramenti".to_string(), "improve:menu".to_string()),
@@ -886,12 +1127,10 @@ fn detail_keyboard(improvement_id: i64, attachments: i64, admin: bool) -> Inline
     ]);
     InlineKeyboardMarkup::new(rows)
 }
-
 fn status_icon(value: &str) -> &'static str {
     match value {
-        "aperto" => "🟡",
-        "pianificato" => "🔵",
-        "fatto" => "✅",
+        "da_approvare" => "🟡",
+        "da_fare" => "🟢",
         "scartato" => "❌",
         _ => "•",
     }
@@ -899,14 +1138,12 @@ fn status_icon(value: &str) -> &'static str {
 
 fn status_label(value: &str) -> &'static str {
     match value {
-        "aperto" => "Aperto",
-        "pianificato" => "Pianificato",
-        "fatto" => "Fatto",
+        "da_approvare" => "Da approvare",
+        "da_fare" => "Da fare",
         "scartato" => "Scartato",
         _ => "Sconosciuto",
     }
 }
-
 fn truncate(value: &str, max_chars: usize) -> String {
     let mut chars = value.chars();
     let prefix: String = chars.by_ref().take(max_chars).collect();
@@ -1005,7 +1242,8 @@ mod tests {
 
     #[test]
     fn stati_e_troncamento_sono_stabili() {
-        assert_eq!(status_label("pianificato"), "Pianificato");
+        assert_eq!(status_label("da_approvare"), "Da approvare");
+        assert_eq!(status_label("da_fare"), "Da fare");
         assert_eq!(truncate("abcdef", 3), "abc…");
         assert_eq!(truncate("abc", 3), "abc");
     }

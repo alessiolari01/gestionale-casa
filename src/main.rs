@@ -1614,12 +1614,17 @@ async fn send_admin_access_requests(
                     .as_deref()
                     .map(|value| format!("@{value}"))
                     .unwrap_or_else(|| "senza username".to_string());
+                let unread_suffix = if request.letto_admin_il.is_none() {
+                    " 🆕"
+                } else {
+                    ""
+                };
                 lines.push(format!(
-                    "\n👤 {} · {}\nRichiesta: {}",
-                    request.nome_snapshot, username, request.richiesta_il
+                    "\n👤 {} · {}{}\nRichiesta: {}",
+                    request.nome_snapshot, username, unread_suffix, request.richiesta_il
                 ));
                 rows.push(vec![InlineKeyboardButton::callback(
-                    format!("👤 {}", request.nome_snapshot),
+                    format!("👤 {}{}", request.nome_snapshot, unread_suffix),
                     format!("admin:access:view:{}", request.id),
                 )]);
             }
@@ -1655,6 +1660,17 @@ async fn send_admin_access_request_detail(
     request_id: i64,
 ) -> ResponseResult<()> {
     if !ensure_primary_admin_access(bot, chat_id, pool, actor).await? {
+        return Ok(());
+    }
+    if let Err(error) = access_control::mark_read(pool, actor, request_id).await {
+        tracing::error!(
+            ?error,
+            request_id,
+            "Errore marcatura lettura richiesta accesso"
+        );
+        bot.send_message(chat_id, "⚠️ Non riesco ad aprire la richiesta.")
+            .reply_markup(admin_back_keyboard())
+            .await?;
         return Ok(());
     }
     match access_control::get_request(pool, request_id).await {

@@ -27,6 +27,7 @@ pub(crate) struct AccessRequestSummary {
     pub(crate) nome_snapshot: String,
     pub(crate) cognome_snapshot: Option<String>,
     pub(crate) stato: String,
+    pub(crate) letto_admin_il: Option<String>,
     pub(crate) richiesta_il: String,
 }
 
@@ -111,6 +112,10 @@ pub(crate) async fn submit_request(pool: &SqlitePool, chat_id: i64, user: &User)
             decisa_da_utente_id = CASE \
                 WHEN richieste_accesso.stato = 'approvata' THEN richieste_accesso.decisa_da_utente_id \
                 ELSE NULL \
+            END, \
+            letto_admin_il = CASE \
+                WHEN richieste_accesso.stato = 'rifiutata' THEN NULL \
+                ELSE richieste_accesso.letto_admin_il \
             END",
     )
     .bind(telegram_user_id)
@@ -139,7 +144,7 @@ pub(crate) async fn pending_count(pool: &SqlitePool) -> Result<i64> {
 pub(crate) async fn list_pending(pool: &SqlitePool) -> Result<Vec<AccessRequestSummary>> {
     sqlx::query_as::<_, AccessRequestSummary>(
         "SELECT id, telegram_user_id, chat_id, username_snapshot, nome_snapshot, \
-                cognome_snapshot, stato, \
+                cognome_snapshot, stato, letto_admin_il, \
                 strftime('%d/%m/%Y %H:%M', richiesta_il, 'localtime') AS richiesta_il \
          FROM richieste_accesso \
          WHERE stato = 'pendente' \
@@ -156,7 +161,7 @@ pub(crate) async fn get_request(
 ) -> Result<Option<AccessRequestSummary>> {
     sqlx::query_as::<_, AccessRequestSummary>(
         "SELECT id, telegram_user_id, chat_id, username_snapshot, nome_snapshot, \
-                cognome_snapshot, stato, \
+                cognome_snapshot, stato, letto_admin_il, \
                 strftime('%d/%m/%Y %H:%M', richiesta_il, 'localtime') AS richiesta_il \
          FROM richieste_accesso WHERE id = ?",
     )
@@ -166,6 +171,29 @@ pub(crate) async fn get_request(
     .context("Impossibile leggere la richiesta di accesso")
 }
 
+pub(crate) async fn mark_read(
+    pool: &SqlitePool,
+    actor: &identity::AuditActor,
+    request_id: i64,
+) -> Result<()> {
+    if !identity::is_primary_admin(pool, actor).await? {
+        bail!("Operazione riservata all'amministratore principale");
+    }
+    let affected = sqlx::query(
+        "UPDATE richieste_accesso \
+         SET letto_admin_il = COALESCE(letto_admin_il, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
+         WHERE id = ?",
+    )
+    .bind(request_id)
+    .execute(pool)
+    .await
+    .context("Impossibile segnare la richiesta come letta")?
+    .rows_affected();
+    if affected != 1 {
+        bail!("Richiesta di accesso non trovata");
+    }
+    Ok(())
+}
 pub(crate) async fn approve_request(
     pool: &SqlitePool,
     actor: &identity::AuditActor,
@@ -185,7 +213,7 @@ pub(crate) async fn approve_request(
 
     let request = sqlx::query_as::<_, AccessRequestSummary>(
         "SELECT id, telegram_user_id, chat_id, username_snapshot, nome_snapshot, \
-                cognome_snapshot, stato, richiesta_il \
+                cognome_snapshot, stato, letto_admin_il, richiesta_il \
          FROM richieste_accesso WHERE id = ?",
     )
     .bind(request_id)
@@ -221,7 +249,8 @@ pub(crate) async fn approve_request(
         "UPDATE richieste_accesso \
          SET stato = 'approvata', \
              decisa_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
-             decisa_da_utente_id = ? \
+             decisa_da_utente_id = ?, \
+             letto_admin_il = COALESCE(letto_admin_il, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
          WHERE id = ? AND stato = 'pendente'",
     )
     .bind(admin_user_id)
@@ -264,7 +293,8 @@ pub(crate) async fn reject_request(
         "UPDATE richieste_accesso \
          SET stato = 'rifiutata', \
              decisa_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
-             decisa_da_utente_id = ? \
+             decisa_da_utente_id = ?, \
+             letto_admin_il = COALESCE(letto_admin_il, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
          WHERE id = ? AND stato = 'pendente'",
     )
     .bind(admin_user_id)
