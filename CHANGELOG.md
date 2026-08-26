@@ -1,3 +1,16 @@
+## Decisione Step 7.2G — workflow Miglioramenti semplificato — 2026-08-26
+
+- consolidato `6449f70` come checkpoint funzionale verificato dello Step 7.2F.1;
+- semplificato il workflow futuro di `💡 Miglioramenti`: `🟡 Da approvare`, `🟢 Da fare`, `❌ Scartato`;
+- eliminata la distinzione futura fra `verificato` e `pianificato`: un miglioramento approvato entra direttamente in `da_fare`;
+- i miglioramenti creati da admin nasceranno `da_fare`, quelli creati da utenti normali `da_approvare`;
+- `🆕` viene definito come flag di lettura amministrativo separato dallo stato e verrà applicato anche alle richieste di accesso;
+- aprire o decidere un elemento lo marca come letto;
+- durante una revisione, i `da_fare` devono essere realizzati direttamente, i `da_approvare` non vanno implementati prima dell'approvazione e gli `scartato` vanno eliminati con i relativi allegati;
+- dopo implementazione, test e documentazione, un miglioramento completato viene archiviato e rimosso dall'elenco attivo; gli allegati non più necessari possono essere eliminati all'archiviazione;
+- il futuro backfill mapperà gli stati legacy admin `aperto/pianificato` a `da_fare`, `fatto` ad archivio e manterrà temporaneamente `scartato` fino alla prima revisione;
+- il prossimo intervento applicativo è Step 7.2G e userà una nuova migration append-only.
+
 ## Step 7.2F.1 — Ricette operative con procedimento guidato — 2026-08-25
 
 - attivato il menu `🍳 Ricette` dentro Alimentazione;
@@ -15,9 +28,9 @@
 - i vecchi procedimenti testuali vengono migrati conservativamente nello Step 1;
 - aggiunti test di regressione per salvataggio, ricerca OR, prodotto/formati, permessi, riordino/rinumerazione step, callback e testi lunghi.
 - confermata la politica di sviluppo: macro-struttura prima, rifiniture UX nel backlog `💡 Miglioramenti`;
-- approvato come step successivo il workflow `da_approvare`/`verificato` e l'indicatore amministrativo `🆕` separato dallo stato.
+- approvato come step successivo il workflow semplificato `da_approvare`/`da_fare` con archivio dei completati e indicatore amministrativo `🆕` separato dallo stato.
 
-**Stato:** verificato su S9; compilazione/avvio e smoke Telegram strutturale completati con esito positivo. Pronto per il checkpoint.
+**Stato:** verificato su S9; compilazione/avvio e smoke Telegram strutturale completati con esito positivo. Consolidato nel checkpoint `6449f70`.
 
 ## Step 7.2E — accesso controllato e Miglioramenti — 2026-08-25
 

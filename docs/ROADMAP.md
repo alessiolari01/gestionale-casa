@@ -84,7 +84,7 @@ Specifica: `docs/moduli/alimentazione/README.md`.
 
 ### 7.2F.1 — Ricette operative Telegram
 
-**Stato: IMPLEMENTATO NEL PACCHETTO — da verificare su S9 prima del commit.**
+**Stato: VERIFICATO SU S9 E CONSOLIDATO IN `6449f70`.**
 
 - creazione e modifica ricetta;
 - proprietario e visibilità sugli spazi;
@@ -99,7 +99,23 @@ Specifica: `docs/moduli/alimentazione/README.md`.
 - ricerca per più ingredienti con semantica OR e ordinamento per numero di
   corrispondenze;
 - compatibilità alimentare derivata;
-- test backend e smoke Telegram da completare sull'S9.
+- test backend e smoke Telegram completati con esito positivo sull'S9.
+
+### 7.2G — Workflow Miglioramenti e coda amministrativa
+
+**Stato: PROSSIMO STEP.**
+
+- sostituire il workflow legacy `aperto/pianificato/fatto/scartato` con il modello semplificato `da_approvare/da_fare/scartato`;
+- un miglioramento creato da admin nasce direttamente `da_fare`;
+- un miglioramento creato da un utente normale nasce `da_approvare`;
+- introdurre il flag/timestamp amministrativo di non-letto con icona `🆕` separata dallo stato;
+- applicare la stessa semantica `🆕` alle richieste di accesso;
+- aprire o decidere un elemento lo marca come letto;
+- approvare un miglioramento lo porta direttamente a `da_fare`, senza stato intermedio di pianificazione;
+- durante una revisione, i `da_fare` vengono realizzati direttamente;
+- i completati vengono archiviati e rimossi dall'elenco attivo;
+- gli `scartato` vengono eliminati durante la revisione insieme agli allegati fisici;
+- migrare gli stati legacy tramite nuova migration append-only senza modificare `20260825153000_accesso_miglioramenti.sql`.
 
 ### 7.3 — Condivisione operativa e integrazioni
 

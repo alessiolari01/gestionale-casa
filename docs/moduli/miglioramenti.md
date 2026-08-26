@@ -23,7 +23,8 @@ Tabella `miglioramenti`:
 - autore interno;
 - descrizione;
 - modulo/sezione opzionale predisposto per uso futuro;
-- stato: `aperto`, `pianificato`, `fatto`, `scartato`;
+- stato legacy attuale: `aperto`, `pianificato`, `fatto`, `scartato`;
+- il prossimo step introdurrà il workflow semplificato documentato sotto;
 - timestamp di creazione/aggiornamento.
 
 Tabella `miglioramento_allegati`:
@@ -65,27 +66,50 @@ funzionalità principali, poi fase dedicata di rifinitura UX.
 
 ## Workflow approvato da implementare
 
-Lo stato del miglioramento e la lettura da parte dell'amministratore devono essere separati.
+Lo stato operativo del miglioramento e la lettura da parte dell'amministratore
+sono concetti separati. Il workflow deve restare volutamente semplice: se un
+miglioramento è approvato e va fatto, non esiste una fase intermedia di
+“verifica” o “pianificazione”.
 
-Stati previsti:
+Stati operativi previsti:
 
 ```text
 🟡 Da approvare
-🟢 Verificato
-🔵 Pianificato
-✅ Fatto
+🟢 Da fare
 ❌ Scartato
 ```
 
+I miglioramenti completati non restano nell'elenco attivo: dopo
+implementazione, test e aggiornamento della documentazione vengono
+**archiviati**. L'archivio è consultabile solo come storico e non rappresenta
+un backlog operativo. Gli allegati usati soltanto per descrivere il problema
+possono essere eliminati al momento dell'archiviazione, conservando il record
+testuale minimo.
+
 Regole:
 
-- autore admin → nuovo miglioramento `verificato`;
-- autore non admin → nuovo miglioramento `da_approvare`;
+- autore con `ruolo_sistema = admin` → nuovo miglioramento `da_fare` e già letto;
+- autore non admin → nuovo miglioramento `da_approvare` e non letto;
 - `🆕` in fondo alla riga indica esclusivamente che l'admin non ha ancora letto l'elemento;
 - aprire il dettaglio rimuove `🆕`; una decisione esplicita lo rimuove comunque;
-- la stessa semantica `🆕` va usata per le richieste di accesso in Amministrazione;
-- `fatto` e `scartato` non entrano nel lavoro da implementare;
-- durante una revisione dei miglioramenti richiesta dall'utente, i record `scartato` devono essere eliminati insieme ai file allegati;
-- `da_approvare` deve essere verificato dall'admin prima di diventare backlog operativo.
+- approvare un miglioramento `da_approvare` lo porta direttamente a `da_fare`;
+- durante una revisione richiesta dall'utente, i miglioramenti `da_fare` vanno presi in carico e realizzati, non semplicemente ripianificati;
+- dopo implementazione, test e documentazione, il miglioramento viene archiviato e sparisce dall'elenco attivo;
+- i record `scartato` vengono eliminati durante la revisione insieme ai relativi allegati fisici;
+- un `da_approvare` non va implementato finché l'admin non lo approva;
+- la stessa semantica `🆕` va usata per le richieste di accesso in Amministrazione; aprire, approvare o rifiutare una richiesta la marca come letta.
 
-Implementare queste regole tramite una nuova migration append-only, senza modificare la migration originale di Step 7.2E.
+### Migrazione dei dati legacy
+
+La futura migration append-only deve ricondurre gli stati esistenti al nuovo
+modello senza modificare `20260825153000_accesso_miglioramenti.sql`:
+
+```text
+aperto/pianificato creato da admin  → da_fare
+aperto/pianificato non admin        → da_approvare, salvo decisioni già prese
+fatto                                → archiviato
+scartato                             → resta scartato fino alla prima revisione
+```
+
+Le richieste di accesso già approvate/rifiutate e i miglioramenti sui quali
+l'admin ha già preso una decisione devono risultare letti nel backfill.

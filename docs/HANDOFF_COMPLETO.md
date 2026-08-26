@@ -18,13 +18,13 @@ deve aprire il repository `alessiolari01/gestionale-casa`, usare il branch `step
 
 Repository GitHub: `alessiolari01/gestionale-casa`
 Branch di sviluppo corrente: `step-7-alimentazione`
-Ultimo checkpoint consolidato: `43dbc95` — `Step 7.2E-7.2F.0: aggiunge accesso controllato, miglioramenti e formati prodotto`.
+Ultimo checkpoint funzionale consolidato: `6449f70` — `Step 7.2F.1: rende operative le ricette con procedimento guidato`.
 
-Lo Step **7.2E — Accesso controllato + Miglioramenti** e lo Step **7.2F.0 — Formati dei prodotti commerciali** sono consolidati nel checkpoint `43dbc95`. Il secondo account Telegram approvato è stato verificato anche in Alimentazione dopo il rinforzo dello stack Tokio e la navigazione risulta operativa.
+Gli Step **7.2E — Accesso controllato + Miglioramenti**, **7.2F.0 — Formati dei prodotti commerciali** e **7.2F.1 — Ricette operative con procedimento guidato** sono consolidati nel checkpoint `6449f70`. Il secondo account Telegram approvato è stato verificato anche in Alimentazione dopo il rinforzo dello stack Tokio e la navigazione risulta operativa.
 
-Lo Step **7.2F.1 — Ricette operative con procedimento guidato** è stato verificato su S9 e nello smoke Telegram strutturale: creazione ricetta, ingredienti, prodotto commerciale opzionale, procedimento completo, procedura guidata, modifica/riordino/eliminazione step, ricerca e navigazione risultano operativi. La migration append-only `20260825231500_ricette_procedimento_guidato.sql` è applicata al database reale e non deve più essere modificata. Questo documento accompagna il checkpoint di chiusura dello Step 7.2F.1.
+Lo Step **7.2F.1** è stato verificato su S9 e nello smoke Telegram strutturale: creazione ricetta, ingredienti, prodotto commerciale opzionale, procedimento completo, procedura guidata, modifica/riordino/eliminazione step, ricerca e navigazione risultano operativi. La migration append-only `20260825231500_ricette_procedimento_guidato.sql` è applicata al database reale e non deve più essere modificata.
 
-Baseline `43dbc95`:
+Baseline funzionale `6449f70`:
 
 - accesso Telegram approvato via database operativo;
 - backlog `💡 Miglioramenti` operativo;
@@ -33,7 +33,7 @@ Baseline `43dbc95`:
 - formati multipli verificati sul database reale;
 - secondo account approvato capace di navigare Alimentazione e le altre funzioni;
 - `PRAGMA integrity_check` → `ok` e `PRAGMA foreign_key_check` → nessuna violazione al checkpoint;
-- working tree pulito dopo il push di `43dbc95`.
+- working tree pulito dopo il push di `6449f70`.
 
 Le migration `20260825153000_accesso_miglioramenti.sql`, `20260825220000_formati_prodotti_alimentari.sql` e `20260825231500_ricette_procedimento_guidato.sql` sono applicate al database reale e non devono essere modificate.
 
@@ -255,7 +255,7 @@ Flusso iniziale:
 
 Gli screenshot sono salvati localmente sotto `data/media/miglioramenti/<id>/` e registrati in `miglioramento_allegati`, quindi rientrano nel modello di backup dei media. La struttura DB supporta più allegati per miglioramento anche se l'UX iniziale rimane volutamente semplice.
 
-Stati iniziali:
+Stati attualmente implementati prima dello Step 7.2G (legacy):
 
 ```text
 🟡 Aperto
@@ -264,7 +264,7 @@ Stati iniziali:
 ❌ Scartato
 ```
 
-L'autore vede i propri miglioramenti. Gli admin possono vedere tutti i miglioramenti e cambiarne lo stato.
+L'autore vede i propri miglioramenti. Gli admin possono vedere tutti i miglioramenti e cambiarne lo stato. Il workflow legacy verrà migrato al modello semplificato `da_approvare` / `da_fare` / `scartato` con archivio dei completati.
 
 **Nuova regola di sviluppo:** il progetto procede prima per macro-struttura e funzionalità principali; le osservazioni UX non bloccanti vanno registrate nella sezione `💡 Miglioramenti` e vengono raffinate in una fase successiva.
 
@@ -1700,39 +1700,67 @@ Quando non sono presenti valori nutrizionali, mostrare un messaggio guidato che 
 
 ## 39-bis. Workflow approvato per `💡 Miglioramenti` e amministrazione
 
-Il backlog deve distinguere **stato operativo** e **stato di lettura**. Sono due concetti diversi e non vanno fusi.
+Il backlog deve distinguere **stato operativo** e **stato di lettura**. Sono due
+concetti diversi e non vanno fusi. Il workflow operativo viene mantenuto
+intenzionalmente minimo: quando un miglioramento è approvato, è semplicemente
+“da fare”. Non esistono più gli stati separati `verificato` e `pianificato`.
 
-Stati approvati per i miglioramenti:
+Stati attivi approvati:
 
 ```text
 🟡 Da approvare
-🟢 Verificato
-🔵 Pianificato
-✅ Fatto
+🟢 Da fare
 ❌ Scartato
 ```
 
+Il completamento non rimane come stato nell'elenco attivo: dopo
+implementazione, test e aggiornamento della documentazione il miglioramento
+viene **archiviato** e sparisce dal backlog operativo. L'archivio conserva una
+traccia minima utile a capire perché una modifica è stata introdotta; gli
+allegati non più utili possono essere eliminati all'archiviazione.
+
 Regole approvate:
 
-- miglioramento creato da un utente con ruolo di sistema `admin` → nasce `verificato`;
-- miglioramento creato da un utente non admin → nasce `da_approvare`;
-- `da leggere` non è uno stato del miglioramento: è un flag/timestamp amministrativo separato;
-- un nuovo miglioramento non admin deve mostrare `🆕` in fondo alla riga nell'elenco admin;
-- una nuova richiesta di accesso deve usare la stessa semantica `🆕`;
+- miglioramento creato da un utente con `ruolo_sistema = admin` → nasce `da_fare` ed è già letto;
+- miglioramento creato da un utente non admin → nasce `da_approvare` e non letto;
+- `da leggere` non è uno stato: è un flag/timestamp amministrativo separato;
+- un nuovo miglioramento non admin mostra `🆕` in fondo alla riga nell'elenco admin;
+- una nuova richiesta di accesso usa la stessa semantica `🆕`;
 - aprire il dettaglio marca l'elemento come letto e rimuove `🆕`;
-- qualsiasi decisione esplicita (`verificato`, `scartato`, approvazione/rifiuto richiesta) marca comunque l'elemento come letto;
-- `fatto` e `scartato` non devono essere proposti durante la pianificazione del lavoro;
-- quando l'utente chiede esplicitamente una **revisione dei miglioramenti**, tutti i miglioramenti `scartato` devono essere eliminati insieme ai relativi allegati fisici;
-- `da_approvare` deve essere valutato dall'admin prima di entrare nel backlog operativo;
-- la lettura `🆕` è amministrativa: l'autore normale continua a vedere il proprio stato (`da_approvare`, ecc.) senza bisogno di un proprio flag non-letto.
+- approvare/rifiutare una richiesta o approvare/scartare un miglioramento lo marca comunque come letto;
+- approvare un `da_approvare` lo porta direttamente a `da_fare`;
+- quando l'utente chiede una **revisione dei miglioramenti**, un `da_fare` deve essere preso in carico e realizzato, non spostato in un ulteriore stato di pianificazione;
+- dopo implementazione, test e documentazione, il miglioramento viene archiviato e rimosso dall'elenco attivo;
+- durante la revisione tutti i miglioramenti `scartato` vengono eliminati insieme ai relativi allegati fisici;
+- un `da_approvare` non deve essere implementato finché l'admin non lo approva;
+- la lettura `🆕` è amministrativa: l'autore normale vede il proprio stato senza un flag personale di non-letto.
 
-Queste regole sono il prossimo step trasversale da implementare con una nuova migration append-only; non riscrivere `20260825153000_accesso_miglioramenti.sql`.
+### Backfill approvato per gli stati legacy
+
+La futura migration append-only deve ricondurre gli stati esistenti al nuovo
+modello senza riscrivere `20260825153000_accesso_miglioramenti.sql`:
+
+```text
+aperto/pianificato creato da admin  → da_fare
+aperto/pianificato non admin        → da_approvare, salvo decisioni già prese
+fatto                                → archiviato
+scartato                             → resta scartato fino alla prima revisione
+```
+
+Le richieste di accesso già approvate/rifiutate e i miglioramenti sui quali
+l'admin ha già preso una decisione devono risultare letti. Nei dati reali
+osservati prima dello Step 7.2G, i miglioramenti admin `pianificato` e
+`aperto` sono quindi candidati al backfill `da_fare`, mentre gli elementi già
+`scartato` verranno eliminati alla prima revisione operativa.
+
+Queste regole sono il prossimo step trasversale da implementare con una nuova
+migration append-only.
 
 # PROSSIMA DIREZIONE
 
 ## 40. Direzione dopo Step 7.2F.1
 
-Lo Step **7.2F.1 — Ricette operative con procedimento guidato** è verificato e pronto per il checkpoint. Il prossimo intervento trasversale riguarda il workflow del backlog `💡 Miglioramenti` e gli indicatori amministrativi di elementi non letti.
+Lo Step **7.2F.1 — Ricette operative con procedimento guidato** è verificato e consolidato nel checkpoint `6449f70`. Il prossimo intervento trasversale è **Step 7.2G — Workflow Miglioramenti e coda amministrativa**, con stati semplificati `da_approvare` / `da_fare` / `scartato`, archivio dei completati e indicatore amministrativo `🆕` separato dallo stato.
 
 Smoke strutturale completato con esito positivo. La stessa sequenza resta il test di regressione consigliato:
 
@@ -1791,8 +1819,8 @@ Il documento deve permettere a una terza persona di capire:
 
 ## 42. Sintesi finale per il prossimo sviluppatore
 
-Il progetto è un gestionale multiutente/multispazio con Telegram come frontend corrente. Oggetti, luoghi, contenitori, foto e storico sono operativi; Alimentazione dispone di catalogo globale, categorie, ownership/condivisione, permessi generici, compatibilità alimentare, prodotti commerciali, formati di vendita, nutrizione e audit. La baseline consolidata precedente è `43dbc95`; lo Step 7.2F.1 è ora verificato su S9 e rende operative le Ricette su Telegram con ingredienti strutturati, prodotto commerciale opzionale, ricerca, condivisione e procedimento guidato a step con foto/video. Il checkpoint che contiene questo documento deve essere considerato la nuova base operativa verificando `git log -5 --oneline --decorate`.
+Il progetto è un gestionale multiutente/multispazio con Telegram come frontend corrente. Oggetti, luoghi, contenitori, foto e storico sono operativi; Alimentazione dispone di catalogo globale, categorie, ownership/condivisione, permessi generici, compatibilità alimentare, prodotti commerciali, formati di vendita, nutrizione e audit. La baseline funzionale consolidata è `6449f70`; lo Step 7.2F.1 è verificato su S9 e rende operative le Ricette su Telegram con ingredienti strutturati, prodotto commerciale opzionale, ricerca, condivisione e procedimento guidato a step con foto/video. Gli aggiornamenti documentali successivi possono avere un hash differente, ma `6449f70` resta il checkpoint funzionale da cui deriva lo Step 7.2G.
 
 Lo Step 7.2E aggiunge due fondazioni trasversali: **accesso Telegram approvato dal database** e **backlog `💡 Miglioramenti` con screenshot**. `ALLOWED_CHAT_IDS` resta solo bootstrap/emergenza. Un nuovo account richiede accesso; solo l'amministratore principale approva/rifiuta; l'approvazione crea un utente normale e uno spazio personale senza concedere accesso alle risorse altrui.
 
-La strategia di sviluppo attuale è completare prima la macro-struttura e usare `💡 Miglioramenti` per raccogliere dettagli UX emersi durante gli smoke test. Le priorità tecniche restano: backend fail-closed, separazione ownership/visibilità/permessi, niente ID tecnici in UI, migration già applicate immutabili, Telegram come frontend e non come dominio applicativo, aggiornamento di questo handoff dopo ogni checkpoint strutturale.
+La strategia di sviluppo attuale è completare prima la macro-struttura e usare `💡 Miglioramenti` per raccogliere dettagli UX emersi durante gli smoke test. Quando viene richiesta una revisione, gli elementi `da_fare` vengono realizzati direttamente, quelli `da_approvare` richiedono prima decisione admin, gli `scartato` vengono eliminati e i completati vengono archiviati. Le priorità tecniche restano: backend fail-closed, separazione ownership/visibilità/permessi, niente ID tecnici in UI, migration già applicate immutabili, Telegram come frontend e non come dominio applicativo, aggiornamento di questo handoff dopo ogni checkpoint strutturale.
