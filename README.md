@@ -7,31 +7,31 @@ un'app dedicata.
 ## Stato corrente — Step 7
 
 Gli Step 1→6C sono chiusi e presenti in `main` tramite il merge `219caba`.
-
-Lo sviluppo corrente avviene sul branch:
+Lo sviluppo corrente resta sul branch:
 
 ```text
 step-7-alimentazione
 ```
 
-Lo **Step 7 — Fondazioni condivise e Alimentazione** ha completato le
-fondazioni operative di utenti/spazi e sta sviluppando la macro-fase 7.2.
-Il checkpoint corrente completa il catalogo Alimenti, categorie e permessi
-riutilizzabili, prepara le fondazioni Ricette, pulisce la UI dagli ID tecnici e
-introduce i ruoli di sistema `utente/admin` con area amministrativa protetta.
-Il prossimo blocco è **Step 7.2D — Ricette operative su Telegram**.
+La baseline committata prima dell'ultimo blocco è `54dc4dd` (`Step 7.2G: completa workflow miglioramenti e coda amministrativa`). Sul working tree sono stati completati e collaudati gli incrementi **7.2G.1 → 7.2G.6**, che chiudono la fase di rifinitura del modulo Miglioramenti e consolidano la UI Telegram.
 
-Il vecchio `gestionale_step7_prototipo_bundle` è superato e non va usato come
-base di sviluppo.
+Stato verificato sul Galaxy S9:
 
-### Macro-fasi Step 7
+- pipeline Rust finale: **153/153 test**;
+- `cargo check --locked` e Clippy `-D warnings` verdi;
+- migration reali applicate fino a `20260827123000_esporta_miglioramenti_bot.sql`;
+- `PRAGMA integrity_check = ok` e nessuna violazione foreign key nei controlli eseguiti prima delle migration;
+- UI Telegram a schermata singola con stato persistente tra riavvii;
+- spegnimento controllato da `🛠️ Amministrazione`;
+- `💡 Migliora` contestuale con sezione e azioni recenti;
+- export ZIP dei Miglioramenti direttamente dal bot, verificato end-to-end compresa la cancellazione della copia temporanea dall'S9 dopo `✅ Ho scaricato il file`.
 
-- [x] **7.0 — Specifica e organizzazione** — documentazione e decisioni;
-- [ ] **7.1 — Fondazioni condivise** — **IN SVILUPPO**: utenti, spazi, ruoli, inviti, audit e reminder;
-- [ ] **7.2 — Alimentazione completa** — alimenti, ricette, profili, turni, planner e spesa;
-- [ ] **7.3 — Integrazioni** — condivisione operativa, Google Calendar ed email.
+Il backlog Miglioramenti attivo, al momento della chiusura documentale, contiene soltanto:
 
-Dettagli: **[docs/step7/README.md](docs/step7/README.md)**.
+- **#7** — gestione amministrativa di eliminazione/reset/revoca account: da progettare separatamente per non compromettere ownership, membership, permessi e storico;
+- **#9** — ambiente `🧪 Zona test` e aggiornamenti quasi zero-downtime: funzione infrastrutturale futura, intenzionalmente rimandata alla fase finale del progetto.
+
+La prossima area funzionale dello Step 7 è **Profili alimentari e porzioni**, seguita da override per ingrediente, turni/routine, planner pasti e lista della spesa.
 
 ## Alimentazione
 
@@ -74,17 +74,24 @@ Prima di modificare il progetto, leggere nell'ordine:
 
 - [x] Step 1 — Scheletro
 - [x] Step 2 — Schema dati core
-- [x] Step 3/3.1 — Telegram, whitelist, Git/CI
+- [x] Step 3/3.1 — Telegram, bootstrap accesso, Git/CI
 - [x] Step 4 — SQLite runtime + migration
 - [x] Step 5 — Oggetti, foto, modifica/eliminazione
 - [x] Step 6A — Case e stanze
 - [x] Step 6B — Storico trasversale
 - [x] Step 6C — Contenitori, navigazione gerarchica e storico container-aware
 - [ ] Step 7 — Fondazioni condivise + Alimentazione
+  - [x] fondazioni utenti/spazi, vista multi-spazio e ruoli;
+  - [x] Alimenti, categorie, prodotti commerciali, formati e nutrizione;
+  - [x] Ricette operative e procedimento guidato;
+  - [x] accesso Telegram approvato, amministrazione e workflow Miglioramenti;
+  - [x] rifiniture UI Telegram 7.2G.1→7.2G.6;
+  - [ ] profili alimentari e porzioni;
+  - [ ] turni/routine;
+  - [ ] planner e lista della spesa;
+  - [ ] reminder/export/integrazioni residue.
 
-Il checkpoint corrente è stato verificato sull'S9 con **109/109 test**,
-Clippy `-D warnings`, smoke Telegram, migration reale dei ruoli di sistema,
-`PRAGMA integrity_check = ok` e nessuna violazione delle foreign key.
+Il checkpoint runtime corrente è stato verificato sull'S9 con **153/153 test** e con collaudo reale dell'export Miglioramenti dal bot.
 
 ## Fonte ufficiale e workflow corrente
 
@@ -175,17 +182,18 @@ La topologia completa, i comandi di diagnostica e le regole sui segreti sono in 
 
 ## Principi dello Step 7
 
-- il database resta centrale e SQLite non viene condiviso fra account;
-- utenti interni separati da Telegram/Google;
-- dati condivisi organizzati in spazi;
+- SQLite resta il database centrale e non viene condiviso fra account;
+- l'identità interna è separata dall'account Telegram;
+- l'accesso ordinario al bot è deciso dal database tramite richiesta e approvazione amministrativa; `ALLOWED_CHAT_IDS` resta solo bootstrap/emergenza;
+- utenti e dati condivisi sono organizzati in spazi;
+- proprietà, visibilità, membership e permessi sono concetti distinti;
 - condividere ≠ copiare;
-- storico con autore e distinzione degli effetti automatici;
+- lo storico conserva autore e distingue gli effetti automatici;
+- gli ID tecnici non devono comparire nella UI Telegram;
+- la UI Telegram tende a una sola schermata attiva per chat;
+- le migration applicate al DB reale sono immutabili: ogni evoluzione è append-only;
 - reminder Step 7 via Telegram/email, senza SMS;
-- nessun reset generale dentro il bot;
-- il DB corrente è ancora di sviluppo e può essere azzerato manualmente solo
-  prima del go-live;
-- Acquisti, Viaggi e Spese devono riusare le stesse fondamenta invece di creare
-  sistemi paralleli.
+- Acquisti, Viaggi e Spese devono riusare le stesse fondamenta invece di creare sistemi paralleli.
 
 ## Requisiti
 
@@ -294,8 +302,19 @@ PREVISTO o RIMANDATO.
 
 ## UX Telegram compatta
 
-Le tastiere inline raggruppano le azioni simili, usano `⚙️ Gestisci` per rinomina/modifica/eliminazione e mantengono `🗑 Elimina` isolato. Le azioni frequenti, come lo spostamento degli oggetti, restano direttamente accessibili. I figli gerarchici vengono mostrati prima dei comandi; le righe di creazione usano etichette compatte come `➕🚪 Stanza`, `➕📦 Contenitore`, `➕🏷️ Oggetto`, mentre gli elenchi usano `📋` + simbolo dell'entità.
+La UI corrente usa Telegram come frontend applicativo: una chat mantiene, quando possibile, **un solo messaggio UI principale attivo**. La navigazione modifica/sostituisce la schermata corrente, elimina media temporanei e rende non più validi i callback delle vecchie schermate.
 
-### Step 7.1B — vista multi-spazio (in sviluppo)
+Regole consolidate:
 
-Lo spazio selezionato è lo **spazio predefinito**; tramite Profilo/Spazi è possibile passare fra `🎯 Solo spazio predefinito` e `🌐 Tutti i miei spazi`. Gli oggetti mantengono il proprio spazio proprietario anche quando vengono collocati in una casa di un altro spazio accessibile. Dettagli in `docs/step7/`.
+- massimo 5 elementi per pagina nelle liste operative;
+- pulsante centrale pagina/totale informativo dove previsto;
+- riga di navigazione standard con `⬅️ Indietro`, `🏠 Menù principale` e `💡 Migliora` quando il contesto lo consente;
+- nessun ID tecnico in UI;
+- niente elenco di comandi stringa esposto come interfaccia principale;
+- `💡 Migliora` conserva sezione, schermata e azioni recenti, con la più recente in cima;
+- gli input temporanei dell'utente vengono eliminati dopo acquisizione riuscita nei wizard compatibili;
+- lo stato del messaggio UI attivo è persistito in SQLite così riavvio e schermata offline/online non lasciano tastiere obsolete;
+- l'amministratore principale dispone di `⏻ Spegni gestionale` con seconda conferma;
+- il modulo Miglioramenti può generare e inviare lo ZIP di handoff direttamente da Telegram.
+
+La vista multi-spazio resta separata dallo spazio predefinito: `🌐 Tutti i miei spazi` amplia la lettura alle membership accessibili senza trasferire proprietà o aggirare i permessi.

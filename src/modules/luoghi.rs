@@ -16,6 +16,8 @@ use teloxide::{
     types::{InlineKeyboardButton, InlineKeyboardMarkup},
 };
 
+type Bot = crate::context_bot::ContextBot;
+
 const MAX_LIST_RESULTS: i64 = 30;
 
 #[derive(Clone, Default)]
@@ -260,7 +262,7 @@ pub async fn handle_message(
                 Ok(None) => {
                     bot.send_message(
                         msg.chat.id,
-                        "⚠️ Questo comando non corrisponde più a un luogo visibile. Apri /struttura per vedere i comandi aggiornati.",
+                        "⚠️ Questo comando non corrisponde più a un luogo visibile. Apri 🗺 Struttura per vedere i luoghi aggiornati.",
                     )
                     .await?;
                 }
@@ -272,7 +274,7 @@ pub async fn handle_message(
                     );
                     bot.send_message(
                         msg.chat.id,
-                        "⚠️ Non riesco a risolvere questo comando luogo. Riprova da /struttura.",
+                        "⚠️ Non riesco a risolvere questo comando luogo. Riapri 🗺 Struttura e riprova.",
                     )
                     .await?;
                 }
@@ -321,7 +323,7 @@ pub async fn handle_message(
                 if let Some(id) = parse_positive_id(args) {
                     show_home_detail(bot, msg.chat.id, pool, id).await?;
                 } else {
-                    bot.send_message(msg.chat.id, "Apri /luoghi e scegli la casa dall'elenco.")
+                    bot.send_message(msg.chat.id, "Apri Luoghi e scegli la casa dall'elenco.")
                         .await?;
                 }
                 return Ok(true);
@@ -348,7 +350,7 @@ pub async fn handle_message(
                 } else {
                     bot.send_message(
                         msg.chat.id,
-                        "Apri la casa da /luoghi e usa ⚙️ Gestisci → ✏️ Rinomina.",
+                        "Apri la casa da Luoghi e usa ⚙️ Gestisci → ✏️ Rinomina.",
                     )
                     .await?;
                 }
@@ -361,7 +363,7 @@ pub async fn handle_message(
                 } else {
                     bot.send_message(
                         msg.chat.id,
-                        "Apri la casa da /luoghi e usa ⚙️ Gestisci → 🗑 Elimina.",
+                        "Apri la casa da Luoghi e usa ⚙️ Gestisci → 🗑 Elimina.",
                     )
                     .await?;
                 }
@@ -395,7 +397,7 @@ pub async fn handle_message(
                         .await?;
                     }
                 } else {
-                    bot.send_message(msg.chat.id, "Apri la casa da /luoghi e usa ➕🚪 Stanza.")
+                    bot.send_message(msg.chat.id, "Apri la casa da Luoghi e usa ➕🚪 Stanza.")
                         .await?;
                 }
                 return Ok(true);
@@ -405,7 +407,7 @@ pub async fn handle_message(
                 if let Some(id) = parse_positive_id(args) {
                     show_room_detail(bot, msg.chat.id, pool, id).await?;
                 } else {
-                    bot.send_message(msg.chat.id, "Apri /luoghi e scegli la stanza dall'elenco.")
+                    bot.send_message(msg.chat.id, "Apri Luoghi e scegli la stanza dall'elenco.")
                         .await?;
                 }
                 return Ok(true);
@@ -449,7 +451,7 @@ pub async fn handle_message(
                 } else {
                     bot.send_message(
                         msg.chat.id,
-                        "Apri la stanza da /luoghi e usa ⚙️ Gestisci → ✏️ Rinomina.",
+                        "Apri la stanza da Luoghi e usa ⚙️ Gestisci → ✏️ Rinomina.",
                     )
                     .await?;
                 }
@@ -462,7 +464,7 @@ pub async fn handle_message(
                 } else {
                     bot.send_message(
                         msg.chat.id,
-                        "Apri la stanza da /luoghi e usa ⚙️ Gestisci → 🗑 Elimina.",
+                        "Apri la stanza da Luoghi e usa ⚙️ Gestisci → 🗑 Elimina.",
                     )
                     .await?;
                 }
@@ -475,7 +477,7 @@ pub async fn handle_message(
                 } else {
                     bot.send_message(
                         msg.chat.id,
-                        "Apri l'oggetto da /oggetti e usa il pulsante per assegnare o spostare il luogo.",
+                        "Apri l'oggetto da Oggetti e usa il pulsante per assegnare o spostare il luogo.",
                     )
                     .await?;
                 }
@@ -874,21 +876,12 @@ async fn send_location_tree(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> Re
             Vec::new()
         }
     };
-    let home_commands = friendly_command_map(&friendly_commands, 'h');
     let room_commands = friendly_command_map(&friendly_commands, 'r');
     let container_commands = friendly_command_map(&friendly_commands, 'c');
 
     let mut text = "🌳 Struttura completa dei luoghi\n\n".to_string();
     for home in &homes {
-        let command = home_commands
-            .get(&home.id)
-            .map(String::as_str)
-            .unwrap_or("");
-        if command.is_empty() {
-            text.push_str(&format!("🏠 {}\n", home.name));
-        } else {
-            text.push_str(&format!("🏠 {} · {}\n", home.name, command));
-        }
+        text.push_str(&format!("🏠 {}\n", home.name));
         let nodes = build_home_nodes(
             home.id,
             &rooms,
@@ -1002,14 +995,8 @@ fn render_tree_nodes(nodes: &[LocationTreeNode], prefix: &str, text: &mut String
     for (index, node) in nodes.iter().enumerate() {
         let last = index + 1 == nodes.len();
         let branch = if last { "└── " } else { "├── " };
-        if node.command.is_empty() {
-            text.push_str(&format!("{prefix}{branch}{}\n", node.label));
-        } else {
-            text.push_str(&format!(
-                "{prefix}{branch}{} · {}\n",
-                node.label, node.command
-            ));
-        }
+        let _has_hidden_command = !node.command.is_empty();
+        text.push_str(&format!("{prefix}{branch}{}\n", node.label));
         let child_prefix = format!("{prefix}{}", if last { "    " } else { "│   " });
         render_tree_nodes(&node.children, &child_prefix, text, depth + 1);
         if text.chars().count() > 3500 {
@@ -1252,9 +1239,9 @@ fn parse_location_command(command: &str) -> Option<(char, i64)> {
 
 async fn ask_home_name(bot: &Bot, chat_id: ChatId, rename: bool) -> ResponseResult<()> {
     let text = if rename {
-        "✏️ Scrivi il nuovo nome della casa.\n\n/annulla per uscire."
+        "✏️ Scrivi il nuovo nome della casa.\n\nPremi ❌ Annulla per uscire."
     } else {
-        "➕ Nuova casa\n\nScrivi il nome dell'abitazione.\nEsempio: Casa principale\n\n/annulla per uscire."
+        "➕ Nuova casa\n\nScrivi il nome dell'abitazione.\nEsempio: Casa principale\n\nPremi ❌ Annulla per uscire."
     };
     bot.send_message(chat_id, text)
         .reply_markup(location_navigation_keyboard())
@@ -1264,9 +1251,9 @@ async fn ask_home_name(bot: &Bot, chat_id: ChatId, rename: bool) -> ResponseResu
 
 async fn ask_room_name(bot: &Bot, chat_id: ChatId, rename: bool) -> ResponseResult<()> {
     let text = if rename {
-        "✏️ Scrivi il nuovo nome della stanza.\n\n/annulla per uscire."
+        "✏️ Scrivi il nuovo nome della stanza.\n\nPremi ❌ Annulla per uscire."
     } else {
-        "➕ Nuova stanza\n\nScrivi il nome della stanza.\nEsempio: Garage\n\n/annulla per uscire."
+        "➕ Nuova stanza\n\nScrivi il nome della stanza.\nEsempio: Garage\n\nPremi ❌ Annulla per uscire."
     };
     bot.send_message(chat_id, text)
         .reply_markup(location_navigation_keyboard())
@@ -1284,7 +1271,7 @@ async fn create_home_from_input(
     let Some(name) = clean_name(input) else {
         bot.send_message(
             chat_id,
-            "Il nome della casa non può essere vuoto e deve restare entro 120 caratteri. Riprova oppure usa /annulla.",
+            "Il nome della casa non può essere vuoto e deve restare entro 120 caratteri. Riprova oppure premi ❌ Annulla.",
         )
         .await?;
         return Ok(());
@@ -1320,7 +1307,7 @@ async fn rename_home_from_input(
     let Some(name) = clean_name(input) else {
         bot.send_message(
             chat_id,
-            "Il nome della casa non può essere vuoto e deve restare entro 120 caratteri. Riprova oppure usa /annulla.",
+            "Il nome della casa non può essere vuoto e deve restare entro 120 caratteri. Riprova oppure premi ❌ Annulla.",
         )
         .await?;
         return Ok(());
@@ -1362,7 +1349,7 @@ async fn create_room_from_input(
     let Some(name) = clean_name(input) else {
         bot.send_message(
             chat_id,
-            "Il nome della stanza non può essere vuoto e deve restare entro 120 caratteri. Riprova oppure usa /annulla.",
+            "Il nome della stanza non può essere vuoto e deve restare entro 120 caratteri. Riprova oppure premi ❌ Annulla.",
         )
         .await?;
         return Ok(());
@@ -1398,7 +1385,7 @@ async fn rename_room_from_input(
     let Some(name) = clean_name(input) else {
         bot.send_message(
             chat_id,
-            "Il nome della stanza non può essere vuoto e deve restare entro 120 caratteri. Riprova oppure usa /annulla.",
+            "Il nome della stanza non può essere vuoto e deve restare entro 120 caratteri. Riprova oppure premi ❌ Annulla.",
         )
         .await?;
         return Ok(());
@@ -1434,7 +1421,7 @@ async fn send_home_list(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> Respon
         Ok(homes) if homes.is_empty() => {
             bot.send_message(
                 chat_id,
-                "🏠 Non ci sono ancora case registrate.\n\nUsa ➕ Nuova casa oppure /casa_nuova.",
+                "🏠 Non ci sono ancora case registrate.\n\nUsa il pulsante ➕ Nuova casa.",
             )
             .reply_markup(locations_menu_keyboard())
             .await?;
@@ -1500,7 +1487,7 @@ async fn send_room_list(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> Respon
             }
             rows.push(vec![
                 button("↩️ Case, stanze e contenitori", "loc:menu"),
-                button("🏠 Menu principale", "menu:main"),
+                button("🏠 Menù principale", "menu:main"),
             ]);
             bot.send_message(chat_id, text)
                 .reply_markup(InlineKeyboardMarkup::new(rows))
@@ -1526,7 +1513,7 @@ async fn show_create_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
             ],
             vec![
                 button("↩️ Case, stanze e contenitori", "loc:menu"),
-                button("🏠 Menu principale", "menu:main"),
+                button("🏠 Menù principale", "menu:main"),
             ],
         ]))
         .await?;
@@ -1545,7 +1532,7 @@ async fn show_home_picker_for_new_room(
                 vec![button("➕ Crea una casa", "loc:home:new")],
                 vec![
                     button("↩️ Crea…", "loc:create"),
-                    button("🏠 Menu principale", "menu:main"),
+                    button("🏠 Menù principale", "menu:main"),
                 ],
             ]))
             .await?;
@@ -1564,7 +1551,7 @@ async fn show_home_picker_for_new_room(
         .collect::<Vec<_>>();
     rows.push(vec![
         button("↩️ Crea…", "loc:create"),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     bot.send_message(chat_id, "🚪 Nuova stanza\n\nScegli la casa.")
         .reply_markup(InlineKeyboardMarkup::new(rows))
@@ -1667,7 +1654,7 @@ async fn show_home_manage(
             )],
             vec![
                 button("↩️ Torna alla casa", &format!("loc:home:{id}")),
-                button("🏠 Menu principale", "menu:main"),
+                button("🏠 Menù principale", "menu:main"),
             ],
         ]))
         .await?;
@@ -1702,7 +1689,7 @@ async fn show_room_manage(
         )],
         vec![
             button("↩️ Torna alla stanza", &format!("loc:room:{id}")),
-            button("🏠 Menu principale", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
         ],
     ]))
     .await?;
@@ -1977,7 +1964,7 @@ async fn show_home_destination_picker(
 
     rows.push(vec![
         button("↩️ Scegli un'altra casa", &format!("loc:item:{item_id}")),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
 
     bot.send_message(
@@ -2054,7 +2041,7 @@ async fn show_room_destination_picker(
             "↩️ Torna alla casa scelta",
             &format!("loc:item:home:{item_id}:{}", room.home_id),
         ),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
 
     let action = if is_move {
@@ -2155,7 +2142,7 @@ async fn show_container_destination_picker(
     };
     rows.push(vec![
         button("↩️ Livello precedente", &back_callback),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
 
     let action = if is_move {
@@ -2245,7 +2232,7 @@ async fn send_filtered_objects(
         bot.send_message(chat_id, format!("🏷️ Nessun oggetto in:\n{title}"))
             .reply_markup(InlineKeyboardMarkup::new(vec![vec![
                 button("↩️ Indietro", &back_callback),
-                button("🏠 Menu principale", "menu:main"),
+                button("🏠 Menù principale", "menu:main"),
             ]]))
             .await?;
         return Ok(());
@@ -3710,14 +3697,14 @@ fn locations_menu_keyboard() -> InlineKeyboardMarkup {
             button("🌳 Struttura", "loc:tree"),
         ],
         vec![button("➕ Crea…", "loc:create")],
-        vec![button("🏠 Menu principale", "menu:main")],
+        vec![button("🏠 Menù principale", "menu:main")],
     ])
 }
 
 pub(crate) fn location_navigation_keyboard() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![vec![
         button("↩️ Case, stanze e contenitori", "loc:menu"),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]])
 }
 
@@ -3734,7 +3721,7 @@ fn home_list_keyboard(homes: &[HomeRecord]) -> InlineKeyboardMarkup {
     rows.push(vec![button("➕🏠 Casa", "loc:home:new")]);
     rows.push(vec![
         button("↩️ Case, stanze e contenitori", "loc:menu"),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     InlineKeyboardMarkup::new(rows)
 }
@@ -3778,7 +3765,7 @@ fn home_detail_keyboard(home_id: i64, rooms: &[RoomRecord]) -> InlineKeyboardMar
     )]);
     rows.push(vec![
         button("↩️ Elenco case", "loc:home:list"),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     InlineKeyboardMarkup::new(rows)
 }
@@ -3812,7 +3799,7 @@ fn room_detail_keyboard(room: &RoomRecord) -> InlineKeyboardMarkup {
         )],
         vec![
             button("↩️ Torna alla casa", &format!("loc:home:{}", room.home_id)),
-            button("🏠 Menu principale", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
         ],
     ])
 }
@@ -3825,7 +3812,7 @@ fn home_delete_keyboard(id: i64) -> InlineKeyboardMarkup {
         )],
         vec![
             button("↩️ Annulla", &format!("loc:home:{id}")),
-            button("🏠 Menu principale", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
         ],
     ])
 }
@@ -3838,7 +3825,7 @@ fn room_delete_keyboard(room: &RoomRecord) -> InlineKeyboardMarkup {
         )],
         vec![
             button("↩️ Annulla", &format!("loc:room:{}", room.id)),
-            button("🏠 Menu principale", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
         ],
     ])
 }
@@ -3860,7 +3847,7 @@ fn item_home_picker_keyboard(item_id: i64, homes: &[HomeRecord]) -> InlineKeyboa
     )]);
     rows.push(vec![
         button("↩️ Scheda oggetto", &format!("oggetti:view:{item_id}")),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     InlineKeyboardMarkup::new(rows)
 }
@@ -3890,7 +3877,7 @@ fn filtered_objects_keyboard(
         .collect::<Vec<_>>();
     rows.push(vec![
         button("↩️ Indietro", back_callback),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     InlineKeyboardMarkup::new(rows)
 }

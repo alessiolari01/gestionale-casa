@@ -19,6 +19,8 @@ use teloxide::{
 };
 use tokio::fs::File;
 
+type Bot = crate::context_bot::ContextBot;
+
 const MEDIA_ROOT: &str = "data/media/oggetti";
 
 pub async fn remove_object_media(item_id: i64) -> std::io::Result<()> {
@@ -93,7 +95,7 @@ pub async fn handle_message(
                     if let Some(item_id) = parse_id(args) {
                         show_photo_menu(bot, msg.chat.id, pool, item_id).await?;
                     } else {
-                        bot.send_message(msg.chat.id, "Apri l'oggetto da /oggetti e usa 📷 Foto.")
+                        bot.send_message(msg.chat.id, "Apri l'oggetto da Oggetti e usa 📷 Foto.")
                             .await?;
                     }
                     return Ok(true);
@@ -104,7 +106,7 @@ pub async fn handle_message(
                     } else {
                         bot.send_message(
                             msg.chat.id,
-                            "Apri l'oggetto da /oggetti, entra in 📷 Foto e scegli ➕ Aggiungi foto.",
+                            "Apri l'oggetto da Oggetti, entra in 📷 Foto e scegli ➕ Aggiungi foto.",
                         )
                         .await?;
                     }
@@ -130,7 +132,7 @@ pub async fn handle_message(
     let Some(photo_sizes) = msg.photo() else {
         bot.send_message(
             msg.chat.id,
-            "📷 Sto aspettando una foto. Invia un'immagine oppure usa /annulla.",
+            "📷 Sto aspettando una foto. Invia un'immagine oppure premi ❌ Annulla.",
         )
         .await?;
         return Ok(true);
@@ -221,6 +223,7 @@ pub async fn handle_message(
     };
 
     sessions.clear_chat(chat_id);
+    bot.delete_user_input(msg.chat.id, msg.id).await;
     let count = count_photos(pool, item_id).await.unwrap_or(1);
     let role_label = if role == "principale" {
         "⭐ Foto principale"
@@ -318,7 +321,7 @@ async fn begin_add_photo(
             bot.send_message(
                 chat_id,
                 format!(
-                    "📷 Inviami ora una foto per \"{name}\".\n\nPuoi aggiungere una didascalia: verrà salvata come descrizione della foto.\n\n/annulla per uscire."
+                    "📷 Inviami ora una foto per \"{name}\".\n\nPuoi aggiungere una didascalia: verrà salvata come descrizione della foto.\n\nPremi ❌ Annulla per uscire."
                 ),
             )
             .reply_markup(cancel_photo_keyboard(item_id))
@@ -586,7 +589,7 @@ fn photo_menu_keyboard(item_id: i64, count: i64) -> InlineKeyboardMarkup {
         "⬅️ Torna all'oggetto",
         &format!("oggetti:view:{item_id}"),
     )]);
-    rows.push(vec![button("🏠 Menu principale", "menu:main")]);
+    rows.push(vec![button("🏠 Menù principale", "menu:main")]);
     InlineKeyboardMarkup::new(rows)
 }
 

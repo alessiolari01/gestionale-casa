@@ -1,60 +1,65 @@
 # Alimenti e unità
 
-**Stato: PREVISTO.**
+**Stato: OPERATIVO E VERIFICATO.**
 
 ## Alimento
 
-Entità culinaria riutilizzabile nelle ricette.
+Entità culinaria riutilizzabile nelle ricette. È distinta da prodotto commerciale, formato acquistabile e scorta fisica.
 
-Esempi:
+Il catalogo base è globale; gli utenti possono possedere alimenti personali e renderli visibili nei propri spazi senza trasferirne la proprietà.
 
-- pasta;
-- pollo;
-- uovo;
-- latte.
+## Proprietà, visibilità e permessi
 
-Gli alimenti comuni possono essere globali all'installazione. Uno spazio può
-avere alimenti personalizzati quando il catalogo globale non basta.
+- il creatore resta proprietario dell'alimento;
+- la visibilità in uno spazio non concede automaticamente modifica;
+- i collaboratori usano `inviti_risorsa` / `permessi_risorsa`;
+- perdere una membership non elimina l'alimento posseduto;
+- il catalogo base è gestibile soltanto dagli admin secondo le regole applicative.
 
-## Cosa non è un alimento
+## Categorie
 
-Un alimento non è:
+`categorie_alimento` + `alimento_categorie` permettono più categorie per alimento. Il filtro multi-categoria usa semantica **OR**.
 
-- una confezione specifica acquistabile;
-- una scorta fisica presente in frigorifero;
-- un oggetto del modulo Oggetti.
-
-Questa separazione permette di usare `pollo` nella ricetta anche se viene
-acquistato in confezioni/marche differenti.
+La categoria viene scelta durante la creazione; `Altro` rimane un fallback di schema, non un passaggio obbligatorio del wizard.
 
 ## Alias e ricerca
 
-Il modello dovrà poter gestire alias/sinonimi senza creare duplicati inutili.
-L'implementazione esatta verrà definita nella migration 7.2.
+Gli alias normalizzati evitano duplicati e supportano ricerca umana. La ricerca Alimenti considera anche marca/nome dei prodotti commerciali collegati: cercare `Philadelphia` può restituire l'alimento generico collegato, non una riga prodotto separata nella lista alimenti.
 
 ## Unità
 
-Le quantità sono strutturate come valore + unità.
+Quantità = valore + unità strutturata.
 
-Famiglie convertibili candidate:
+Famiglie convertibili:
 
-- massa: g, kg;
-- volume: ml, l.
+- massa: `g`, `kg`;
+- volume: `ml`, `l`.
 
-Unità discrete/non convertibili universalmente:
+Unità discrete:
 
-- pezzo;
-- cucchiaino;
-- cucchiaio;
-- `q.b.`;
-- altre unità personalizzate se necessarie.
+- pezzi;
+- cucchiaino/cucchiaio;
+- altre unità non convertibili universalmente.
 
-Non si devono inventare conversioni tra volume e massa senza un'informazione
-specifica dell'alimento.
+La UI usa etichette descrittive, ad esempio:
+
+```text
+⚖️ Unità predefinita: grammi (g)
+```
+
+Non vengono inventate conversioni massa↔volume senza dati specifici dell'alimento.
+
+## Prodotti e formati
+
+Un alimento può avere più prodotti commerciali; ogni prodotto può avere più formati acquistabili. Il prodotto conserva identità commerciale/nutrizione, il formato conserva quantità/unità/barcode.
+
+I formati sono modificabili ed eliminabili senza cambiare l'identità dell'alimento o del prodotto.
+
+## Storico
+
+Creazione/modifica dei prodotti commerciali, marca/nome, nutrizione e altre operazioni rilevanti vengono registrate nello storico trasversale con nomi umani, non ID tecnici.
 
 ## Futuro collegamento alle scorte
-
-La futura dispensa dovrà mantenere separato il concetto di scorta:
 
 ```text
 ALIMENTO: Pollo
@@ -64,4 +69,4 @@ PIANO: martedì Pollo
 SPESA: quantità mancante
 ```
 
-La dispensa è RIMANDATA e non blocca Step 7.
+La dispensa resta RIMANDATA e non blocca lo Step 7 corrente.

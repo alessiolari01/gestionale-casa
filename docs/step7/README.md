@@ -1,134 +1,80 @@
 # Step 7 — Fondazioni condivise e Alimentazione
 
-**Stato:** IN SVILUPPO — checkpoint 7.0 chiuso, 7.1 tecnico in corso.
+**Stato: IN SVILUPPO — fondazioni, Alimenti, Ricette e rifinitura UI operative; prossimo blocco Profili e porzioni.**
 
 **Branch di lavoro:** `step-7-alimentazione`.
 
-**Checkpoint tecnico verificato:** `a650bc8` sul branch
-`step-7-alimentazione`, derivato dal 7.0 documentale `135dd33` e dal merge
-Step 6C `219caba`.
-
-Lo Step 7 nasce dopo la chiusura dello Step 6C e sostituisce la precedente
-idea di usare lo Step 7 per documenti/garanzie. La priorità attuale è costruire
-le fondamenta multiutente/condivise necessarie ai moduli futuri e, sopra di
-esse, il primo grande dominio applicativo: **Alimentazione**.
-
-Il vecchio prototipo `gestionale_step7_prototipo_bundle` non è una sorgente di
-verità e non va applicato al repository. Questa documentazione è la specifica
-corrente approvata.
+La baseline committata precedente al blocco finale Miglioramenti è `54dc4dd`. Il working tree 7.2G.1→7.2G.6 è stato verificato sull'S9 con **153/153 test** e deve essere committato insieme alla chiusura documentale.
 
 ## Macro-fasi
 
-Lo Step 7 viene mantenuto intenzionalmente in pochi blocchi grandi.
-
 | Macro-fase | Stato | Contenuto |
 |---|---|---|
-| 7.0 — Specifica e organizzazione | VERIFICATO | documentazione, confini, decisioni e piano migration |
-| 7.1 — Fondazioni condivise | IN SVILUPPO | utenti, spazi, membri, ruoli, inviti, proprietà dati, condivisione/copia, audit con autore, reminder trasversali |
-| 7.2 — Alimentazione completa | PREVISTO | alimenti, unità, ricette, profili, porzioni, turni/routine, planner, lista spesa, export |
-| 7.3 — Integrazioni e condivisione operativa | PREVISTO | inviti Telegram, Google Calendar, email, account Google e rifiniture multiutente |
+| 7.0 — Specifica e organizzazione | VERIFICATO | decisioni, confini e piano migration |
+| 7.1 — Fondazioni condivise | OPERATIVE | utenti, spazi, membership, ruoli, vista multi-spazio, audit, accesso DB-driven |
+| 7.2 — Alimentazione completa | IN SVILUPPO | Alimenti e Ricette operative; profili/turni/planner/spesa da fare |
+| 7.3 — Integrazioni | PREVISTO | Google Calendar, email, inviti/rifiniture multiutente |
 
-I checkpoint possono diventare commit intermedi sullo stesso branch; non sono
-obbligatoriamente branch o Pull Request separati.
+## Fondazioni operative
 
+- identità interna separata da Telegram;
+- spazi personali/condivisi e membership;
+- spazio predefinito + vista tutti i propri spazi;
+- ruoli globali `utente/admin` separati dai ruoli nello spazio;
+- proprietà delle risorse separata da visibilità e permessi;
+- audit con autore/origine;
+- accesso tramite richiesta approvata dall'amministratore principale;
+- `ALLOWED_CHAT_IDS` soltanto bootstrap/emergenza.
 
-## Checkpoint tecnico corrente — 7.1
+## 7.2 — stato Alimentazione
 
-Il checkpoint `a650bc8` ha introdotto schema condiviso, identità Telegram,
-spazio bootstrap, `/profilo` e audit autore.
+### Completato
 
-Il blocco corrente aggiunge:
+- Alimenti e unità;
+- catalogo base, categorie e compatibilità alimentare;
+- ownership/condivisione/permessi;
+- prodotti commerciali, formati e nutrizione;
+- Ricette con ingredienti strutturati;
+- procedimento guidato con foto/video;
+- ricerca nome/categoria/ingredienti;
+- rifiniture UX raccolte e chiuse tramite Miglioramenti.
 
-- migration `20260823174500_spazi_operativi.sql`;
-- unicità `abitazioni(spazio_id, nome)` e `tag(spazio_id, nome)`;
-- `/spazi`, `/spazio_nuovo <nome>` e `/spazio_rinomina <nome>`;
-- cambio spazio tramite pulsanti inline;
-- spazio personale automatico per i nuovi utenti successivi al bootstrap;
-- scoping di oggetti, luoghi, contenitori, foto e storico;
-- blocco delle scritture principali per il ruolo `lettura`;
-- invalidazione delle sessioni temporanee al cambio spazio;
-- test espliciti contro letture e mutazioni cross-space tramite ID;
-- coerenza membership/spazio attivo con fallback automatico e autoriparazione legacy;
-- contesto `AuditActor` obbligatorio in produzione per le operazioni space-aware.
+### Prossimo ordine
 
-Gli eventi Step 6 già presenti restano nello spazio bootstrap con autore
-sconosciuto/origine `legacy`: non viene inventato nulla retroattivamente.
+1. profili alimentari separati dagli account Telegram;
+2. porzioni personali e override ingrediente;
+3. turni/routine;
+4. planner pasti;
+5. lista della spesa;
+6. reminder/export e integrazioni residue.
 
-### Limite corrente intenzionale
+## Step 7.2G — Miglioramenti e UI Telegram
 
-Gli spazi diventano operativi, ma **inviti e gestione completa dei membri non
-sono ancora esposti**. Creare uno spazio non trasferisce dati esistenti e non
-condivide automaticamente nulla. Uscita/eliminazione degli spazi verranno
-aggiunte solo dopo aver definito in modo sicuro proprietà e destino dei dati.
+Chiuso funzionalmente con:
 
-## Obiettivi architetturali
+- workflow `da_approvare → da_fare → fatto → verificato → archivio`;
+- paginazione e ritorno contestuale;
+- descrizioni lunghe/multimessaggio;
+- `💡 Migliora` globale con sezione e azioni recenti;
+- UI a schermata singola;
+- stato UI persistente tra riavvii;
+- spegnimento amministrativo;
+- export ZIP del backlog direttamente dal bot.
 
-1. Il database resta **centrale**: non si condivide il file SQLite tra persone.
-2. L'identità interna di una persona è separata dagli account Telegram/Google.
-3. I dati condivisibili appartengono a uno **spazio** personale o condiviso.
-4. Condividere e copiare sono operazioni differenti.
-5. Lo storico deve sempre sapere **chi ha fatto cosa**, salvo azioni marcate
-   esplicitamente come automatiche/sistema.
-6. Le funzioni trasversali vanno riusate dai moduli invece di essere replicate.
-7. Le nuove scelte non devono rompere case, stanze, contenitori, oggetti,
-   foto e storico già esistenti.
-8. Le migration di sviluppo vengono provate anche sul DB di test esistente;
-   prima del go-live è ammesso un reset manuale del solo DB di sviluppo.
+Restano fuori dalla chiusura:
 
-## Moduli influenzati dalla progettazione
-
-### Implementazione nello Step 7
-
-- [Alimentazione](../moduli/alimentazione/README.md)
-- utenti/spazi/condivisione;
-- storico/audit;
-- reminder trasversali;
-- integrazioni Google/email necessarie all'Alimentazione.
-
-### Specificati ora, implementati dopo lo Step 7
-
-- [Acquisti e prezzi](../moduli/acquisti/README.md)
-- [Viaggi](../moduli/viaggi/README.md)
-- [Spese](../moduli/spese/README.md)
-
-Sono documentati adesso perché influenzano i confini del modello dati e aiutano
-ad evitare scelte Step 7 che li renderebbero difficili in futuro.
+- #7 gestione distruttiva/reset account;
+- #9 Zona test / aggiornamenti quasi zero-downtime, funzione infrastrutturale futura.
 
 ## Documenti Step 7
 
-- [Roadmap interna](roadmap.md)
+- [Roadmap](roadmap.md)
 - [Decisioni architetturali](decisioni-architetturali.md)
 - [Modello di condivisione](modello-condivisione.md)
 - [Storico e audit](storico-e-audit.md)
-- [Database e migration](database-e-migrazioni.md)
+- [Database e migrazioni](database-e-migrazioni.md)
+- [Alimentazione](../moduli/alimentazione/README.md)
 
-## Regola di stato della documentazione
+## Regola di stato
 
-Le funzionalità usano uno dei seguenti stati:
-
-- **PREVISTO** — approvato ma non implementato;
-- **IN SVILUPPO** — implementazione in corso;
-- **IMPLEMENTATO** — codice presente ma non ancora completamente verificato;
-- **VERIFICATO** — test automatici e verifiche runtime previste superati;
-- **RIMANDATO** — decisione conservata ma fuori dal perimetro corrente.
-
-Nessuna funzionalità va descritta come implementata solo perché è stata
-specificata in questi documenti.
-
-
-## Checkpoint 7.1B — vista multi-spazio
-
-**Stato: IN SVILUPPO.**
-
-Lo spazio selezionato viene reinterpretato come **spazio predefinito**: stabilisce dove vengono creati normalmente i nuovi dati, ma l'utente può attivare una vista globale sui propri spazi. La vista globale non amplia i permessi: include esclusivamente gli spazi per cui esiste una membership reale.
-
-Modalità previste nella UI Telegram:
-
-- `🎯 Solo spazio predefinito`;
-- `🌐 Tutti i miei spazi`.
-
-La proprietà e la posizione fisica di un oggetto sono ora concetti distinti. Un item può restare personale e trovarsi temporaneamente in una casa condivisa, purché chi esegue lo spostamento possa modificare sia lo spazio proprietario sia lo spazio della destinazione.
-
-La migration 7.1B introduce inoltre `item_condivisioni`: è la fondazione per condividere la stessa entità, comprese le future ricette, con altri spazi senza crearne automaticamente una copia. L'interfaccia completa di condivisione resta successiva.
-
-Per evitare ambiguità quando spazi differenti contengono luoghi con lo stesso nome, la UI usa il contesto dello spazio: in vista `🌐 Tutti i miei spazi` i percorsi mostrano ad esempio `Casa principale · Spazio principale` e `Casa principale · Casa condivisa`. Nei messaggi di assegnazione/spostamento lo spazio della posizione viene mostrato sempre, così un trasferimento cross-space resta leggibile anche con nomi identici.
+Usare sempre una delle etichette: **PREVISTO**, **IN SVILUPPO**, **IMPLEMENTATO**, **VERIFICATO**, **RIMANDATO**. Le verifiche runtime devono riferirsi a prove realmente eseguite sull'S9.

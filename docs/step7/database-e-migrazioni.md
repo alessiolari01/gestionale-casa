@@ -194,3 +194,29 @@ Aggiunge snapshot separati dello spazio della posizione allo storico:
 - backfill degli eventi esistenti usando `storico_entita` della casa, senza inventare cronologia.
 
 Questo permette di distinguere correttamente, per esempio, un oggetto di `Spazio principale` spostato da `Casa principale · Spazio principale` a `Casa principale · Test isolamento`.
+
+## Step 7.2G — Miglioramenti e runtime Telegram
+
+Le seguenti migration sono state applicate sul database reale durante la rifinitura 7.2G e sono **immutabili**:
+
+```text
+20260826024500_miglioramenti_workflow_admin.sql
+20260826123000_miglioramenti_verifica_guidata.sql
+20260826223000_miglioramenti_contesto_rifiniture.sql
+20260827003000_miglioramenti_ultimo_passaggio.sql
+20260827014500_miglioramenti_finalissimi.sql
+20260827104500_runtime_ui_persistente.sql
+20260827123000_esporta_miglioramenti_bot.sql
+```
+
+Evoluzione principale:
+
+- workflow amministrativo e archivio;
+- stato `fatto` nuovamente attivo come “implementato da verificare”;
+- dati/piani/allegati di verifica;
+- persistenza UI Telegram in `telegram_ui_state`;
+- stato del miglioramento Export #8 aggiornato dalla migration 7.2G.6 quando compatibile con i dati presenti.
+
+L'export ZIP è una funzione applicativa in sola lettura e non richiede una tabella runtime dedicata: i file temporanei restano sotto `data/tmp/miglioramenti_export/` e non sono parte del database.
+
+La suite finale dopo 7.2G.6 è **153/153 test**.

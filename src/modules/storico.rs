@@ -328,6 +328,8 @@ pub(crate) async fn record_location_change(
     Ok(())
 }
 
+type Bot = crate::context_bot::ContextBot;
+
 const HISTORY_PAGE_SIZE: i64 = 5;
 
 #[derive(Debug, Clone, FromRow)]
@@ -631,7 +633,7 @@ async fn show_history_filter_menu(
         "✅ Mostra risultati",
         &format!("h:g:0:{token}"),
     )]);
-    rows.push(vec![button("🏠 Menu principale", "menu:main")]);
+    rows.push(vec![button("🏠 Menù principale", "menu:main")]);
 
     bot.send_message(chat_id, text)
         .reply_markup(InlineKeyboardMarkup::new(rows))
@@ -1131,7 +1133,7 @@ fn global_history_keyboard(
     rows.push(filter_row);
     rows.push(vec![
         button("⬅️ Indietro", "menu:main"),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     InlineKeyboardMarkup::new(rows)
 }
@@ -1144,7 +1146,7 @@ fn global_event_detail_keyboard(page: i64, filters: HistoryFilters) -> InlineKey
             &format!("h:g:{}:{token}", base62_encode(page)),
         )],
         vec![button("🔎 Filtri", &format!("h:f:{token}"))],
-        vec![button("🏠 Menu principale", "menu:main")],
+        vec![button("🏠 Menù principale", "menu:main")],
     ])
 }
 
@@ -2036,13 +2038,13 @@ fn history_list_keyboard(
     }
 
     match scope {
-        HistoryScope::Global => rows.push(vec![button("🏠 Menu principale", "menu:main")]),
+        HistoryScope::Global => rows.push(vec![button("🏠 Menù principale", "menu:main")]),
         HistoryScope::Item(item_id) => {
             rows.push(vec![button(
                 "⬅️ Torna all'oggetto",
                 &format!("oggetti:view:{item_id}"),
             )]);
-            rows.push(vec![button("🏠 Menu principale", "menu:main")]);
+            rows.push(vec![button("🏠 Menù principale", "menu:main")]);
         }
     }
 
@@ -2057,12 +2059,12 @@ fn event_detail_keyboard(scope: HistoryScope, page: i64) -> InlineKeyboardMarkup
 
     InlineKeyboardMarkup::new(vec![
         vec![button("⬅️ Torna allo storico", &back)],
-        vec![button("🏠 Menu principale", "menu:main")],
+        vec![button("🏠 Menù principale", "menu:main")],
     ])
 }
 
 fn history_home_keyboard() -> InlineKeyboardMarkup {
-    InlineKeyboardMarkup::new(vec![vec![button("🏠 Menu principale", "menu:main")]])
+    InlineKeyboardMarkup::new(vec![vec![button("🏠 Menù principale", "menu:main")]])
 }
 
 fn item_return_keyboard(item_id: i64) -> InlineKeyboardMarkup {
@@ -2071,7 +2073,7 @@ fn item_return_keyboard(item_id: i64) -> InlineKeyboardMarkup {
             "⬅️ Torna all'oggetto",
             &format!("oggetti:view:{item_id}"),
         )],
-        vec![button("🏠 Menu principale", "menu:main")],
+        vec![button("🏠 Menù principale", "menu:main")],
     ])
 }
 

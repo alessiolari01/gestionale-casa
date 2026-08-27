@@ -14,6 +14,8 @@ use teloxide::{
     types::{InlineKeyboardButton, InlineKeyboardMarkup},
 };
 
+type Bot = crate::context_bot::ContextBot;
+
 const PAGE_SIZE: i64 = 8;
 const MAX_SEARCH_RESULTS: i64 = 12;
 
@@ -301,7 +303,7 @@ pub fn main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup {
 pub async fn show_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
-        "🏷️ Oggetti generici\n\nScegli cosa vuoi fare. I pulsanti e i /comandi usano la stessa logica.",
+        "🏷️ Oggetti generici\n\nScegli cosa vuoi fare. Usa i pulsanti per scegliere cosa fare.",
     )
     .reply_markup(objects_menu_keyboard())
     .await?;
@@ -338,7 +340,7 @@ pub async fn handle_message(
                     sessions.set(chat_id, ConversationState::AwaitingSearch);
                     bot.send_message(
                         msg.chat.id,
-                        "🔎 Cerca oggetto\n\nScrivi nome, marca, modello, casa, stanza, contenitore, seriale o una parola presente nelle note.\n\n/annulla per uscire.",
+                        "🔎 Cerca oggetto\n\nScrivi nome, marca, modello, casa, stanza, contenitore, seriale o una parola presente nelle note.\n\nPremi ❌ Annulla per uscire.",
                     )
                     .await?;
                 } else {
@@ -354,7 +356,7 @@ pub async fn handle_message(
                 } else {
                     bot.send_message(
                         msg.chat.id,
-                        "Apri l'elenco con /oggetti e scegli l'oggetto dai pulsanti.",
+                        "Apri l'elenco Oggetti e scegli l'oggetto dai pulsanti.",
                     )
                     .await?;
                 }
@@ -432,7 +434,7 @@ pub async fn handle_message(
             } else {
                 bot.send_message(
                     msg.chat.id,
-                    "Il nome non può essere vuoto e deve restare entro 120 caratteri. Riprova oppure usa /annulla.",
+                    "Il nome non può essere vuoto e deve restare entro 120 caratteri. Riprova oppure premi ❌ Annulla.",
                 )
                 .await?;
             }
@@ -452,7 +454,7 @@ pub async fn handle_message(
             let Some(field) = field else {
                 bot.send_message(
                     msg.chat.id,
-                    "Usa i pulsanti del pannello dettagli, oppure /annulla per uscire.",
+                    "Usa i pulsanti del pannello dettagli, oppure Premi ❌ Annulla per uscire.",
                 )
                 .await?;
                 return Ok(true);
@@ -492,7 +494,7 @@ pub async fn handle_callback(
             sessions.set(raw_chat_id, ConversationState::AwaitingSearch);
             bot.send_message(
                 chat_id,
-                "🔎 Cerca oggetto\n\nScrivi cosa vuoi cercare.\n\n/annulla per uscire.",
+                "🔎 Cerca oggetto\n\nScrivi cosa vuoi cercare.\n\nPremi ❌ Annulla per uscire.",
             )
             .await?;
         }
@@ -751,7 +753,7 @@ async fn start_new_object(
         );
         bot.send_message(
             telegram_chat_id,
-            "🏷️ Nuovo oggetto\n\nCome vuoi chiamarlo?\n\nEsempio: Trapano Bosch\n/annulla per uscire.",
+            "🏷️ Nuovo oggetto\n\nCome vuoi chiamarlo?\n\nEsempio: Trapano Bosch\nPremi ❌ Annulla per uscire.",
         )
         .reply_markup(cancel_keyboard())
         .await?;
@@ -812,7 +814,7 @@ async fn handle_new_object_here_callback(
             bot.send_message(
                 chat_id,
                 format!(
-                    "🏷️ Nuovo oggetto qui\n\n📍 {} ✅\n\nCome vuoi chiamarlo?\n\n/annulla per uscire.",
+                    "🏷️ Nuovo oggetto qui\n\n📍 {} ✅\n\nCome vuoi chiamarlo?\n\nPremi ❌ Annulla per uscire.",
                     preset_display_label(&preset)
                 ),
             )
@@ -840,7 +842,7 @@ async fn handle_new_object_here_callback(
         );
         bot.send_message(
             chat_id,
-            "🏷️ Nuovo oggetto\n\nCome vuoi chiamarlo? Dopo il nome sceglierai un'altra posizione.\n\n/annulla per uscire.",
+            "🏷️ Nuovo oggetto\n\nCome vuoi chiamarlo? Dopo il nome sceglierai un'altra posizione.\n\nPremi ❌ Annulla per uscire.",
         )
         .reply_markup(cancel_keyboard())
         .await?;
@@ -882,7 +884,7 @@ async fn handle_new_object_here_callback(
         )],
         vec![
             button("↩️ Indietro", &back_callback),
-            button("🏠 Menu principale", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
         ],
     ]))
     .await?;
@@ -1281,7 +1283,7 @@ async fn apply_field_input(
             } else {
                 bot.send_message(
                     chat_id,
-                    "Il nome non può essere vuoto e deve restare entro 120 caratteri. Riprova oppure usa /salta per mantenere quello attuale.",
+                    "Il nome non può essere vuoto e deve restare entro 120 caratteri. Riprova oppure premi ⏭ Salta per mantenere quello attuale.",
                 )
                 .await?;
             }
@@ -1322,7 +1324,7 @@ async fn apply_field_input(
             None => {
                 bot.send_message(
                     chat_id,
-                    "Data non valida. Usa GG/MM/AAAA oppure AAAA-MM-GG. Esempio: 14/05/2025.\nUsa /salta per non modificare il valore.",
+                    "Data non valida. Usa GG/MM/AAAA oppure AAAA-MM-GG. Esempio: 14/05/2025.\nPremi ⏭ Salta per non modificare il valore.",
                 )
                 .await?;
             }
@@ -1343,7 +1345,7 @@ async fn apply_field_input(
             None => {
                 bot.send_message(
                     chat_id,
-                    "Prezzo non valido. Esempi validi: 89,90 oppure 89.90 oppure 89.\nUsa /salta per non modificare il valore.",
+                    "Prezzo non valido. Esempi validi: 89,90 oppure 89.90 oppure 89.\nPremi ⏭ Salta per non modificare il valore.",
                 )
                 .await?;
             }
@@ -1368,7 +1370,7 @@ async fn apply_field_input(
             None => {
                 bot.send_message(
                     chat_id,
-                    "Valore non valido. Esempi validi: 250 oppure 250,00.\nUsa /salta per non modificare il valore.",
+                    "Valore non valido. Esempi validi: 250 oppure 250,00.\nPremi ⏭ Salta per non modificare il valore.",
                 )
                 .await?;
             }
@@ -1457,7 +1459,7 @@ async fn remove_current_field(
 
     match field {
         DraftField::Name => {
-            bot.send_message(chat_id, "Il nome è obbligatorio e non può essere rimosso. Usa /salta per mantenerlo oppure scrivi un nuovo nome.")
+            bot.send_message(chat_id, "Il nome è obbligatorio e non può essere rimosso. Premi ⏭ Salta per mantenerlo oppure scrivi un nuovo nome.")
                 .await?;
             return Ok(());
         }
@@ -1573,7 +1575,7 @@ async fn save_current_draft(
             );
             bot.send_message(
                 chat_id,
-                "⚠️ Non sono riuscito a salvare. La bozza resta aperta: puoi riprovare oppure usare /annulla.",
+                "⚠️ Non sono riuscito a salvare. La bozza resta aperta: puoi riprovare oppure premi ❌ Annulla.",
             )
             .await?;
         }
@@ -1600,7 +1602,7 @@ async fn send_object_list(
             if objects.is_empty() {
                 bot.send_message(
                     chat_id,
-                    "📋 Non ci sono ancora oggetti registrati.\n\nPuoi crearne uno con ➕ Nuovo oggetto oppure /oggetto_nuovo.",
+                    "📋 Non ci sono ancora oggetti registrati.\n\nPuoi crearne uno con ➕ Nuovo oggetto oppure usa il pulsante ➕ Nuovo oggetto.",
                 )
                 .reply_markup(objects_menu_keyboard())
                 .await?;
@@ -1680,7 +1682,7 @@ async fn send_object_manage(
                 )],
                 vec![
                     button("↩️ Torna all'oggetto", &format!("oggetti:view:{id}")),
-                    button("🏠 Menu principale", "menu:main"),
+                    button("🏠 Menù principale", "menu:main"),
                 ],
             ]))
             .await?;
@@ -2583,7 +2585,7 @@ fn format_draft(draft: &ObjectDraft) -> String {
     lines.push(String::new());
     if draft.is_update() {
         lines.push(
-            "Modifica solo ciò che serve. /salta mantiene il valore attuale; /rimuovi cancella il campo aperto. Poi premi 💾 Salva modifiche."
+            "Modifica solo ciò che serve. ⏭ Salta mantiene il valore attuale; 🗑 Rimuovi cancella il campo aperto. Poi premi 💾 Salva modifiche."
                 .to_string(),
         );
     } else {
@@ -2651,7 +2653,7 @@ fn objects_menu_keyboard() -> InlineKeyboardMarkup {
             button("🔎 Cerca", "oggetti:search"),
         ],
         vec![button("🏠 Filtra per casa / stanza", "loc:home:list")],
-        vec![button("🏠 Menu principale", "menu:main")],
+        vec![button("🏠 Menù principale", "menu:main")],
     ])
 }
 
@@ -2705,7 +2707,7 @@ fn draft_keyboard(draft: &ObjectDraft) -> InlineKeyboardMarkup {
         ),
         button("❌ Annulla", "oggetti:draft:cancel"),
     ]);
-    rows.push(vec![button("🏠 Menu principale", "menu:main")]);
+    rows.push(vec![button("🏠 Menù principale", "menu:main")]);
     InlineKeyboardMarkup::new(rows)
 }
 
@@ -2726,7 +2728,7 @@ fn new_object_home_picker_keyboard(
         "oggetti:draft:location:skip-home",
     )]);
     rows.push(vec![button("↩️ Torna ai dettagli", "oggetti:draft:back")]);
-    rows.push(vec![button("🏠 Menu principale", "menu:main")]);
+    rows.push(vec![button("🏠 Menù principale", "menu:main")]);
     InlineKeyboardMarkup::new(rows)
 }
 
@@ -2750,7 +2752,7 @@ fn new_object_room_picker_keyboard(
     )]);
     rows.push(vec![button("↩️ Cambia casa", "oggetti:draft:location")]);
     rows.push(vec![button("↩️ Torna ai dettagli", "oggetti:draft:back")]);
-    rows.push(vec![button("🏠 Menu principale", "menu:main")]);
+    rows.push(vec![button("🏠 Menù principale", "menu:main")]);
     InlineKeyboardMarkup::new(rows)
 }
 
@@ -2788,7 +2790,7 @@ fn condition_keyboard() -> InlineKeyboardMarkup {
             "oggetti:draft:condition:clear",
         )],
         vec![button("⬅️ Dettagli", "oggetti:draft:back")],
-        vec![button("🏠 Menu principale", "menu:main")],
+        vec![button("🏠 Menù principale", "menu:main")],
     ])
 }
 
@@ -2802,14 +2804,14 @@ fn other_details_keyboard(draft: &ObjectDraft) -> InlineKeyboardMarkup {
         vec![button(&value, "oggetti:draft:value")],
         vec![button(&serial, "oggetti:draft:serial")],
         vec![button("⬅️ Dettagli", "oggetti:draft:back")],
-        vec![button("🏠 Menu principale", "menu:main")],
+        vec![button("🏠 Menù principale", "menu:main")],
     ])
 }
 
 fn cancel_keyboard() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
         vec![button("❌ Annulla", "oggetti:draft:cancel")],
-        vec![button("🏠 Menu principale", "menu:main")],
+        vec![button("🏠 Menù principale", "menu:main")],
     ])
 }
 
@@ -2845,7 +2847,7 @@ fn object_detail_keyboard(
     if let Some(return_button) = contextual_return {
         rows.push(vec![return_button]);
     }
-    rows.push(vec![button("🏠 Menu principale", "menu:main")]);
+    rows.push(vec![button("🏠 Menù principale", "menu:main")]);
     InlineKeyboardMarkup::new(rows)
 }
 
@@ -2856,7 +2858,7 @@ fn delete_confirmation_keyboard(id: i64) -> InlineKeyboardMarkup {
             &format!("oggetti:delete:do:{id}"),
         )],
         vec![button("↩️ Annulla", &format!("oggetti:view:{id}"))],
-        vec![button("🏠 Menu principale", "menu:main")],
+        vec![button("🏠 Menù principale", "menu:main")],
     ])
 }
 
@@ -2888,7 +2890,7 @@ fn list_keyboard(objects: &[ObjectSummary], page: i64, total_pages: i64) -> Inli
         button("➕ Nuovo", "oggetti:new"),
     ]);
     rows.push(vec![button("🏷️ Menu oggetti", "oggetti:menu")]);
-    rows.push(vec![button("🏠 Menu principale", "menu:main")]);
+    rows.push(vec![button("🏠 Menù principale", "menu:main")]);
     InlineKeyboardMarkup::new(rows)
 }
 
@@ -2903,7 +2905,7 @@ fn search_results_keyboard(objects: &[ObjectSummary]) -> InlineKeyboardMarkup {
         .collect::<Vec<_>>();
     rows.push(vec![button("🔎 Nuova ricerca", "oggetti:search")]);
     rows.push(vec![button("🏷️ Menu oggetti", "oggetti:menu")]);
-    rows.push(vec![button("🏠 Menu principale", "menu:main")]);
+    rows.push(vec![button("🏠 Menù principale", "menu:main")]);
     InlineKeyboardMarkup::new(rows)
 }
 
@@ -3029,17 +3031,17 @@ fn field_prompt(field: DraftField, draft: &ObjectDraft) -> String {
     if let Some(current) = current {
         if field == DraftField::Name {
             format!(
-                "{instruction}\n\nValore attuale:\n{current}\n\nScrivi un nuovo valore oppure usa /salta per mantenere quello attuale. Il nome è obbligatorio e non può essere rimosso."
+                "{instruction}\n\nValore attuale:\n{current}\n\nScrivi un nuovo valore oppure premi ⏭ Salta per mantenere quello attuale. Il nome è obbligatorio e non può essere rimosso."
             )
         } else {
             format!(
-                "{instruction}\n\nValore attuale:\n{current}\n\nScrivi un nuovo valore, usa /salta per mantenerlo oppure /rimuovi per cancellarlo."
+                "{instruction}\n\nValore attuale:\n{current}\n\nScrivi un nuovo valore, premi ⏭ Salta per mantenerlo oppure 🗑 Rimuovi per cancellarlo."
             )
         }
     } else if field == DraftField::Name {
         instruction
     } else {
-        format!("{instruction}\n\nUsa /salta per lasciare il campo vuoto.")
+        format!("{instruction}\n\nPremi ⏭ Salta per lasciare il campo vuoto.")
     }
 }
 
@@ -3264,8 +3266,8 @@ mod tests {
 
         assert!(prompt.contains("Valore attuale:"));
         assert!(prompt.contains("Bosch"));
-        assert!(prompt.contains("/salta per mantenerlo"));
-        assert!(prompt.contains("/rimuovi per cancellarlo"));
+        assert!(prompt.contains("⏭ Salta per mantenerlo"));
+        assert!(prompt.contains("🗑 Rimuovi per cancellarlo"));
     }
 
     #[test]

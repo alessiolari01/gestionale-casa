@@ -5,6 +5,7 @@
 mod access_control;
 mod auth;
 mod config;
+mod context_bot;
 mod db;
 mod identity;
 mod modules;
@@ -24,10 +25,13 @@ use modules::{
 };
 use sqlx::SqlitePool;
 use teloxide::{
+    dispatching::ShutdownToken,
     dptree,
     prelude::*,
     types::{InlineKeyboardButton, InlineKeyboardMarkup, User},
 };
+
+type Bot = context_bot::ContextBot;
 
 #[derive(Clone, Default)]
 struct IdentitySessionStore {
@@ -66,6 +70,44 @@ impl IdentitySessionStore {
             .unwrap_or_else(|p| p.into_inner())
             .remove(&chat_id);
     }
+}
+
+#[derive(Clone, Default)]
+struct ShutdownController {
+    token: Arc<Mutex<Option<ShutdownToken>>>,
+}
+
+impl ShutdownController {
+    fn install(&self, token: ShutdownToken) {
+        *self
+            .token
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(token);
+    }
+
+    fn request(&self) -> bool {
+        let token = self
+            .token
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        token.is_some_and(|token| token.shutdown().is_ok())
+    }
+}
+
+#[derive(Clone)]
+struct HandlerDependencies {
+    config: Arc<Config>,
+    pool: SqlitePool,
+    sessions: SessionStore,
+    location_sessions: LocationSessionStore,
+    container_sessions: ContainerSessionStore,
+    photo_sessions: PhotoSessionStore,
+    food_sessions: FoodSessionStore,
+    improvement_sessions: ImprovementSessionStore,
+    recipe_sessions: RecipeSessionStore,
+    identity_sessions: IdentitySessionStore,
+    shutdown_controller: ShutdownController,
 }
 
 const TOKIO_THREAD_STACK_SIZE: usize = 8 * 1024 * 1024;
@@ -117,7 +159,26 @@ async fn async_main() -> anyhow::Result<()> {
         "Database SQLite pronto"
     );
 
-    let bot = Bot::new(config.telegram_token.clone());
+    match modules::miglioramenti::cleanup_old_exports().await {
+        Ok(removed) if removed > 0 => {
+            tracing::info!(
+                removed,
+                "Export miglioramenti temporanei obsoleti eliminati"
+            );
+        }
+        Ok(_) => {}
+        Err(error) => {
+            tracing::warn!(
+                ?error,
+                "Pulizia export miglioramenti temporanei non riuscita"
+            );
+        }
+    }
+
+    let telegram_bot = teloxide::Bot::new(config.telegram_token.clone());
+    let improve_contexts = context_bot::ImproveContextStore::default();
+    let bot = Bot::new(telegram_bot.clone(), improve_contexts.clone(), pool.clone());
+    bot.restore_persisted_ui().await;
     let me = bot
         .get_me()
         .await
@@ -152,32 +213,35 @@ async fn async_main() -> anyhow::Result<()> {
     let improvement_sessions = ImprovementSessionStore::new();
     let recipe_sessions = RecipeSessionStore::new();
     let identity_sessions = IdentitySessionStore::new();
+    let shutdown_controller = ShutdownController::default();
+    let handler_dependencies = Arc::new(HandlerDependencies {
+        config: config.clone(),
+        pool: pool.clone(),
+        sessions,
+        location_sessions,
+        container_sessions,
+        photo_sessions,
+        food_sessions,
+        improvement_sessions,
+        recipe_sessions,
+        identity_sessions,
+        shutdown_controller: shutdown_controller.clone(),
+    });
     let handler = dptree::entry()
         .branch(Update::filter_message().endpoint(handle_message))
         .branch(Update::filter_callback_query().endpoint(handle_callback));
 
-    // Il dispatcher prende possesso di bot/config. Conserviamo cio' che serve
+    // Il dispatcher prende possesso del bot Telegram. Conserviamo ciò che serve
     // per notificare uno shutdown controllato ai soli amministratori.
     let shutdown_bot = bot.clone();
     let shutdown_pool = pool.clone();
 
-    Dispatcher::builder(bot, handler)
-        .dependencies(dptree::deps![
-            config,
-            pool,
-            sessions,
-            location_sessions,
-            container_sessions,
-            photo_sessions,
-            food_sessions,
-            improvement_sessions,
-            recipe_sessions,
-            identity_sessions
-        ])
+    let mut dispatcher = Dispatcher::builder(telegram_bot, handler)
+        .dependencies(dptree::deps![bot.clone(), handler_dependencies])
         .enable_ctrlc_handler()
-        .build()
-        .dispatch()
-        .await;
+        .build();
+    shutdown_controller.install(dispatcher.shutdown_token());
+    dispatcher.dispatch().await;
 
     let shutdown_chat_ids = match identity::list_system_admin_chat_ids(&shutdown_pool).await {
         Ok(chat_ids) => chat_ids,
@@ -191,7 +255,7 @@ async fn async_main() -> anyhow::Result<()> {
     };
     for chat_id in shutdown_chat_ids {
         if let Err(error) = shutdown_bot
-            .send_message(ChatId(chat_id), "🔴 Gestionale Casa è offline.")
+            .send_message_without_improve(ChatId(chat_id), "🔴 Gestionale Casa è offline.")
             .await
         {
             tracing::warn!(
@@ -206,22 +270,28 @@ async fn async_main() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn handle_message(
     bot: Bot,
     msg: Message,
-    config: Arc<Config>,
-    pool: SqlitePool,
-    sessions: SessionStore,
-    location_sessions: LocationSessionStore,
-    container_sessions: ContainerSessionStore,
-    photo_sessions: PhotoSessionStore,
-    food_sessions: FoodSessionStore,
-    improvement_sessions: ImprovementSessionStore,
-    recipe_sessions: RecipeSessionStore,
-    identity_sessions: IdentitySessionStore,
+    deps: Arc<HandlerDependencies>,
 ) -> ResponseResult<()> {
+    let config = deps.config.clone();
+    let pool = deps.pool.clone();
+    let sessions = deps.sessions.clone();
+    let location_sessions = deps.location_sessions.clone();
+    let container_sessions = deps.container_sessions.clone();
+    let photo_sessions = deps.photo_sessions.clone();
+    let food_sessions = deps.food_sessions.clone();
+    let improvement_sessions = deps.improvement_sessions.clone();
+    let recipe_sessions = deps.recipe_sessions.clone();
+    let identity_sessions = deps.identity_sessions.clone();
     let chat_id = msg.chat.id.0;
+    bot.cleanup_transient_media(msg.chat.id).await;
+    bot.record_text(chat_id, msg.text().or_else(|| msg.caption()));
+    let user_message_id = msg.id;
+    let cleanup_user_text = msg.text().is_some();
+    let cleanup_bot = bot.clone();
+    let cleanup_chat_id = msg.chat.id;
 
     let Some(sender) = msg.from.as_ref() else {
         tracing::warn!(chat_id, "Messaggio senza autore Telegram");
@@ -266,7 +336,7 @@ async fn handle_message(
         }
     };
 
-    identity::with_actor(
+    let result = identity::with_actor(
         actor.clone(),
         Box::pin(handle_authorized_message(
             bot,
@@ -283,7 +353,15 @@ async fn handle_message(
             actor,
         )),
     )
-    .await
+    .await;
+
+    if result.is_ok() && cleanup_user_text {
+        cleanup_bot
+            .delete_user_input(cleanup_chat_id, user_message_id)
+            .await;
+    }
+
+    result
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -421,7 +499,7 @@ async fn handle_authorized_message(
                     tracing::warn!(?error, "Operazione spazio guidata non riuscita");
                     bot.send_message(
                         msg.chat.id,
-                        format!("⚠️ {error}\n\nRiprova oppure usa /annulla."),
+                        format!("⚠️ {error}\n\nRiprova oppure premi ❌ Annulla."),
                     )
                     .reply_markup(space_flow_keyboard())
                     .await?;
@@ -517,7 +595,7 @@ async fn handle_authorized_message(
                 identity_sessions.set(chat_id, IdentityConversationState::AwaitingNewSpaceName);
                 bot.send_message(
                     msg.chat.id,
-                    "➕ Nuovo spazio\n\nScrivi il nome del nuovo spazio.\nPuoi usare /annulla per uscire.",
+                    "➕ Nuovo spazio\n\nScrivi il nome del nuovo spazio.\nPuoi premere ❌ Annulla per uscire.",
                 )
                 .reply_markup(space_flow_keyboard())
                 .await?;
@@ -553,7 +631,7 @@ async fn handle_authorized_message(
                 identity_sessions.set(chat_id, IdentityConversationState::AwaitingRenameSpaceName);
                 bot.send_message(
                     msg.chat.id,
-                    format!("✏️ Rinomina spazio\n\nSpazio predefinito attuale: {}\nScrivi il nuovo nome oppure /annulla.", actor.spazio_nome_snapshot),
+                    format!("✏️ Rinomina spazio\n\nSpazio predefinito attuale: {}\nScrivi il nuovo nome oppure premi ❌ Annulla.", actor.spazio_nome_snapshot),
                 )
                     .reply_markup(space_flow_keyboard())
                     .await?;
@@ -609,14 +687,14 @@ async fn handle_authorized_message(
         Some(_) => {
             bot.send_message(
                 msg.chat.id,
-                "Comando non riconosciuto.\nUsa /start per aprire il menu principale.",
+                "Comando non riconosciuto.\nUsa il pulsante 🏠 Menù principale.",
             )
             .await?;
         }
         None => {
             bot.send_message(
                 msg.chat.id,
-                "Non c'è un'operazione attiva. Usa /start oppure i pulsanti del menu.",
+                "Non c'è un'operazione attiva. Usa i pulsanti del menu.",
             )
             .await?;
         }
@@ -625,21 +703,22 @@ async fn handle_authorized_message(
     respond(())
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn handle_callback(
     bot: Bot,
     q: CallbackQuery,
-    config: Arc<Config>,
-    pool: SqlitePool,
-    sessions: SessionStore,
-    location_sessions: LocationSessionStore,
-    container_sessions: ContainerSessionStore,
-    photo_sessions: PhotoSessionStore,
-    food_sessions: FoodSessionStore,
-    improvement_sessions: ImprovementSessionStore,
-    recipe_sessions: RecipeSessionStore,
-    identity_sessions: IdentitySessionStore,
+    deps: Arc<HandlerDependencies>,
 ) -> ResponseResult<()> {
+    let config = deps.config.clone();
+    let pool = deps.pool.clone();
+    let sessions = deps.sessions.clone();
+    let location_sessions = deps.location_sessions.clone();
+    let container_sessions = deps.container_sessions.clone();
+    let photo_sessions = deps.photo_sessions.clone();
+    let food_sessions = deps.food_sessions.clone();
+    let improvement_sessions = deps.improvement_sessions.clone();
+    let recipe_sessions = deps.recipe_sessions.clone();
+    let identity_sessions = deps.identity_sessions.clone();
+    let shutdown_controller = deps.shutdown_controller.clone();
     bot.answer_callback_query(q.id.clone()).await?;
 
     let Some(message) = q.regular_message() else {
@@ -649,7 +728,6 @@ async fn handle_callback(
     let Some(data) = q.data.clone() else {
         return respond(());
     };
-
     let actor = match identity::lookup_telegram_actor(&pool, chat_id.0, &q.from).await {
         Ok(Some(actor)) => actor,
         Ok(None) if auth::is_authorized(chat_id.0, &config.allowed_chat_ids) => {
@@ -684,6 +762,22 @@ async fn handle_callback(
         }
     };
 
+    if !bot.claim_callback(chat_id.0, message.id, &data) {
+        let is_admin = identity::is_system_admin(&pool, &actor)
+            .await
+            .unwrap_or(false);
+        bot.send_message(
+            chat_id,
+            "⚠️ Questa schermata non è più attiva. Ho aperto un nuovo Menù principale.",
+        )
+        .reply_markup(modules::oggetti::main_menu_keyboard(is_admin))
+        .await?;
+        return respond(());
+    }
+
+    bot.cleanup_transient_media(chat_id).await;
+    bot.record_callback(chat_id.0, &data);
+
     identity::with_actor(
         actor.clone(),
         Box::pin(handle_authorized_callback(
@@ -698,6 +792,7 @@ async fn handle_callback(
             improvement_sessions,
             recipe_sessions,
             identity_sessions,
+            shutdown_controller,
             actor,
             data,
         )),
@@ -718,6 +813,7 @@ async fn handle_authorized_callback(
     improvement_sessions: ImprovementSessionStore,
     recipe_sessions: RecipeSessionStore,
     identity_sessions: IdentitySessionStore,
+    shutdown_controller: ShutdownController,
     actor: identity::AuditActor,
     data: String,
 ) -> ResponseResult<()> {
@@ -823,7 +919,7 @@ async fn handle_authorized_callback(
             identity_sessions.set(chat_id.0, IdentityConversationState::AwaitingNewSpaceName);
             bot.send_message(
                 chat_id,
-                "➕ Nuovo spazio\n\nScrivi il nome del nuovo spazio.\nPuoi usare /annulla per uscire.",
+                "➕ Nuovo spazio\n\nScrivi il nome del nuovo spazio.\nPuoi premere ❌ Annulla per uscire.",
             )
             .reply_markup(space_flow_keyboard())
             .await?;
@@ -835,7 +931,7 @@ async fn handle_authorized_callback(
             );
             bot.send_message(
                 chat_id,
-                format!("✏️ Rinomina spazio\n\nSpazio predefinito attuale: {}\nScrivi il nuovo nome oppure /annulla.", actor.spazio_nome_snapshot),
+                format!("✏️ Rinomina spazio\n\nSpazio predefinito attuale: {}\nScrivi il nuovo nome oppure premi ❌ Annulla.", actor.spazio_nome_snapshot),
             )
             .reply_markup(space_flow_keyboard())
             .await?;
@@ -940,6 +1036,33 @@ async fn handle_authorized_callback(
                     .await?;
             }
         }
+        "admin:shutdown" => {
+            if ensure_primary_admin_access(&bot, chat_id, &pool, &actor).await? {
+                bot.send_message(
+                    chat_id,
+                    "⏻ Spegni gestionale\n\nIl bot verrà arrestato in modo controllato. Vuoi continuare?",
+                )
+                .reply_markup(admin_shutdown_confirm_keyboard())
+                .await?;
+            }
+        }
+        "admin:shutdown:confirm" => {
+            if ensure_primary_admin_access(&bot, chat_id, &pool, &actor).await? {
+                bot.send_message_without_improve(
+                    chat_id,
+                    "⏳ Spegnimento del gestionale in corso…",
+                )
+                .await?;
+                if !shutdown_controller.request() {
+                    bot.send_message(
+                        chat_id,
+                        "⚠️ Non sono riuscito ad avviare lo spegnimento controllato.",
+                    )
+                    .reply_markup(admin_back_keyboard())
+                    .await?;
+                }
+            }
+        }
         "admin:status" | "system:status" => {
             send_status(&bot, chat_id, &pool, &actor).await?;
         }
@@ -1007,7 +1130,7 @@ async fn handle_authorized_callback(
 async fn send_online_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
-        "🟢 Gestionale Casa è online.\n\n🏠 Menu principale\nScegli una sezione.",
+        "🟢 Gestionale Casa è online.\n\n🏠 Menù principale\nScegli una sezione.",
     )
     .reply_markup(modules::oggetti::main_menu_keyboard(true))
     .await?;
@@ -1125,7 +1248,7 @@ async fn send_spaces(
                 "identity:profile".to_string(),
             )]);
             rows.push(vec![InlineKeyboardButton::callback(
-                "🏠 Menu principale".to_string(),
+                "🏠 Menù principale".to_string(),
                 "menu:main".to_string(),
             )]);
 
@@ -1514,7 +1637,7 @@ async fn send_access_gate(
         AccessRequestState::Approved => {
             bot.send_message(
                 chat_id,
-                "✅ La richiesta risulta approvata. Usa /start per entrare nel gestionale.",
+                "✅ La richiesta risulta approvata. Apri il gestionale dal pulsante disponibile.",
             )
             .await?;
         }
@@ -1634,7 +1757,7 @@ async fn send_admin_access_requests(
                     "admin:menu".to_string(),
                 ),
                 InlineKeyboardButton::callback(
-                    "🏠 Menu principale".to_string(),
+                    "🏠 Menù principale".to_string(),
                     "menu:main".to_string(),
                 ),
             ]);
@@ -1708,7 +1831,7 @@ async fn send_admin_access_request_detail(
                     "admin:access".to_string(),
                 ),
                 InlineKeyboardButton::callback(
-                    "🏠 Menu principale".to_string(),
+                    "🏠 Menù principale".to_string(),
                     "menu:main".to_string(),
                 ),
             ]);
@@ -1752,7 +1875,7 @@ async fn approve_access_request_ui(
             if let Err(error) = bot
                 .send_message(
                     ChatId(request.chat_id),
-                    "✅ La tua richiesta di accesso è stata approvata.\n\nUsa /start per aprire il gestionale. Ti è stato creato uno spazio personale; non hai ricevuto automaticamente accesso agli spazi degli altri utenti.",
+                    "✅ La tua richiesta di accesso è stata approvata.\n\nApri il gestionale dal pulsante disponibile. Ti è stato creato uno spazio personale; non hai ricevuto automaticamente accesso agli spazi degli altri utenti.",
                 )
                 .await
             {
@@ -1852,18 +1975,38 @@ fn admin_menu_keyboard(primary: bool, pending_access: i64) -> InlineKeyboardMark
             format!("📨 Richieste di accesso ({pending_access})"),
             "admin:access".to_string(),
         )]);
+        rows.push(vec![InlineKeyboardButton::callback(
+            "⏻ Spegni gestionale".to_string(),
+            "admin:shutdown".to_string(),
+        )]);
     }
     rows.push(vec![InlineKeyboardButton::callback(
-        "🏠 Menu principale".to_string(),
+        "🏠 Menù principale".to_string(),
         "menu:main".to_string(),
     )]);
     InlineKeyboardMarkup::new(rows)
 }
 
+fn admin_shutdown_confirm_keyboard() -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![
+        vec![InlineKeyboardButton::callback(
+            "⏻ Conferma spegnimento".to_string(),
+            "admin:shutdown:confirm".to_string(),
+        )],
+        vec![
+            InlineKeyboardButton::callback("❌ Annulla".to_string(), "admin:menu".to_string()),
+            InlineKeyboardButton::callback(
+                "🏠 Menù principale".to_string(),
+                "menu:main".to_string(),
+            ),
+        ],
+    ])
+}
+
 fn admin_back_keyboard() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![vec![
         InlineKeyboardButton::callback("⬅️ Amministrazione".to_string(), "admin:menu".to_string()),
-        InlineKeyboardButton::callback("🏠 Menu principale".to_string(), "menu:main".to_string()),
+        InlineKeyboardButton::callback("🏠 Menù principale".to_string(), "menu:main".to_string()),
     ]])
 }
 
@@ -1874,7 +2017,7 @@ fn profile_keyboard() -> InlineKeyboardMarkup {
             "identity:spaces".to_string(),
         )],
         vec![InlineKeyboardButton::callback(
-            "🏠 Menu principale".to_string(),
+            "🏠 Menù principale".to_string(),
             "menu:main".to_string(),
         )],
     ])
@@ -1891,7 +2034,7 @@ fn space_flow_keyboard() -> InlineKeyboardMarkup {
             "identity:spaces".to_string(),
         )],
         vec![InlineKeyboardButton::callback(
-            "🏠 Menu principale".to_string(),
+            "🏠 Menù principale".to_string(),
             "menu:main".to_string(),
         )],
     ])

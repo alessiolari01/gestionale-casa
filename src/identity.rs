@@ -955,9 +955,7 @@ pub(crate) async fn spaces_summary(pool: &SqlitePool, actor: &AuditActor) -> Res
         }
     ));
     lines.push(String::new());
-    lines.push("Comandi:".to_string());
-    lines.push("/spazio_nuovo <nome> — crea e attiva uno spazio condiviso".to_string());
-    lines.push("/spazio_rinomina <nome> — rinomina lo spazio attivo".to_string());
+    lines.push("Usa i pulsanti per creare, rinominare o cambiare spazio.".to_string());
     Ok(lines.join("\n"))
 }
 
@@ -1007,7 +1005,7 @@ pub(crate) async fn profile_summary(pool: &SqlitePool, actor: &AuditActor) -> Re
     };
 
     Ok(format!(
-        "👤 Profilo\n\nNome: {}\nTelegram: {}\nSpazio predefinito: {}\nVista: {}\nRuolo nello spazio: {}{}\nMembro dal: {}\nSpazi disponibili: {}\n\nUsa /spazi per cambiare spazio predefinito o modalità di visualizzazione.",
+        "👤 Profilo\n\nNome: {}\nTelegram: {}\nSpazio predefinito: {}\nVista: {}\nRuolo nello spazio: {}{}\nMembro dal: {}\nSpazi disponibili: {}\n\nUsa il pulsante 👥 Spazi per cambiare spazio predefinito o modalità di visualizzazione.",
         actor.nome_snapshot,
         telegram,
         actor.spazio_nome_snapshot,

@@ -224,8 +224,7 @@ Il bot usa Teloxide e comunica con Telegram tramite **HTTPS long polling in
 uscita**. Non serve pubblicare una porta del Galaxy S9 su Internet e non serve
 port forwarding del router.
 
-La whitelist dei `chat_id` continua a limitare l'uso del bot agli utenti
-autorizzati.
+`ALLOWED_CHAT_IDS` resta un bootstrap/meccanismo di emergenza. L'accesso ordinario è gestito dal database: un account Telegram sconosciuto può inviare una richiesta e soltanto l'amministratore principale può approvarla o rifiutarla.
 
 ## 8. Segreti e dati che non devono entrare in Git
 
@@ -275,3 +274,28 @@ git status
 
 Questa separazione permette di capire rapidamente se un problema riguarda
 **rete Tailscale**, **server SSH**, **Git/GitHub** oppure **backend Telegram**.
+
+## 10. Runtime UI, shutdown ed export amministrativo
+
+Dal blocco 7.2G.5 il bot persiste in SQLite il `message_id` della schermata UI principale per ogni chat. Questo permette di mantenere la UI a schermata singola anche attraverso riavvii: allo shutdown resta una schermata offline amministrativa e al successivo startup quella schermata viene sostituita/ripulita.
+
+L'amministratore principale può arrestare il dispatcher da:
+
+```text
+🛠️ Amministrazione
+→ ⏻ Spegni gestionale
+→ ⏻ Conferma spegnimento
+```
+
+Il percorso è equivalente allo shutdown controllato via `Ctrl+C`; non vanno avviati due runtime long-polling con lo stesso token Telegram.
+
+Dal 7.2G.6 il progetto contiene inoltre `scripts/export_miglioramenti.py`. L'export normale non richiede più SCP:
+
+```text
+💡 Miglioramenti
+→ 📦 Esporta miglioramenti
+→ download documento Telegram
+→ ✅ Ho scaricato il file
+```
+
+La copia temporanea vive esclusivamente sotto `data/tmp/miglioramenti_export/` e viene cancellata dopo conferma; gli orfani più vecchi di 24 ore sono ripuliti automaticamente. Lo ZIP esclude segreti, database completo, `.git`, `target`, backup e runtime non necessario.

@@ -1,6 +1,6 @@
 # Ricette
 
-**Stato: Step 7.2F.1 — implementazione operativa Telegram nel pacchetto, da verificare su S9 prima del commit.**
+**Stato: OPERATIVO E VERIFICATO SU S9 — Step 7.2F.1 + rifiniture 7.2G.1→7.2G.3.**
 
 ## Modello
 
@@ -243,3 +243,15 @@ etichette reali in caso di allergie/intolleranze.
 Il macro-step punta alla struttura e alle funzioni principali. Piccole
 rifiniture di testi, disposizione pulsanti e scorciatoie possono essere
 registrate in `💡 Miglioramenti` senza bloccare lo sviluppo strutturale.
+
+## Rifiniture operative consolidate nel 7.2G
+
+Dopo gli smoke test sono state integrate nel flusso principale:
+
+- durante l'aggiunta ingrediente viene prima proposta l'unità predefinita dell'alimento e resta disponibile `📏 Cambia unità`; solo dopo viene richiesta la quantità;
+- nella ricerca per ingredienti il primo alimento può essere digitato direttamente, senza il passaggio ridondante `Aggiungi ingrediente`;
+- il filtro categoria restringe i risultati degli alimenti nella ricerca per ingredienti e non viene trattato come ingrediente alternativo;
+- la ricerca Ricette espone separatamente ricerca per categoria e ricerca per ingredienti;
+- al termine dell'ultimo step la procedura guidata dichiara esplicitamente che la ricetta è terminata;
+- oltre all'archiviazione è disponibile l'eliminazione definitiva della ricetta con le necessarie conferme/autorizzazioni;
+- la navigazione segue la UI Telegram a schermata singola e include `💡 Migliora` contestuale dove previsto.

@@ -1,21 +1,8 @@
 # Documentazione dei moduli
 
-Ogni modulo mantiene una documentazione vicina all'implementazione o alla
-specifica approvata. I documenti devono distinguere chiaramente fra
-**PREVISTO**, **IN SVILUPPO**, **IMPLEMENTATO**, **VERIFICATO** e **RIMANDATO**.
+Ogni modulo distingue **PREVISTO**, **IN SVILUPPO**, **IMPLEMENTATO**, **VERIFICATO** e **RIMANDATO** e documenta schema, dominio, permessi, Telegram, storico e verifiche.
 
-Per ogni area vanno descritti, quando applicabili:
-
-- schema dati e relazioni;
-- regole di dominio e casi limite;
-- UI/comandi Telegram;
-- proprietà, condivisione e permessi;
-- storico/audit;
-- comportamento di modifica/eliminazione;
-- test automatici e verifiche runtime;
-- sviluppi futuri già approvati.
-
-## Moduli implementati/verificati
+## Implementati/verificati
 
 - [Oggetti](oggetti.md)
 - [Foto](foto.md)
@@ -24,13 +11,16 @@ Per ogni area vanno descritti, quando applicabili:
 - [Navigazione dei luoghi](navigazione-luoghi.md)
 - [Contenitori](contenitori.md)
 - [Storico](storico.md)
-- [Miglioramenti](miglioramenti.md) — backlog interno con screenshot, Step 7.2E;
+- [Miglioramenti](miglioramenti.md) — workflow verificabile, UI contestuale ed export admin;
+- [Alimentazione](alimentazione/README.md) — Alimenti e Ricette operative, resto dello Step 7.2 in sviluppo;
+- [Ricette](ricette.md) — rimando di compatibilità alla specifica Alimentazione.
 
-## Step 7 — in progettazione/implementazione
+## Alimentazione — prossime aree
 
-- [Alimentazione](alimentazione/README.md) — modulo principale dello Step 7;
-- [Ricette](ricette.md) — rimando di compatibilità alla nuova documentazione
-  Alimentazione.
+- Profili e porzioni — PREVISTO, prossimo sviluppo;
+- Turni/routine — PREVISTO;
+- Planner pasti e lista della spesa — PREVISTO;
+- Reminder ed export Alimentazione — PREVISTO.
 
 ## Moduli futuri già specificati
 
@@ -40,5 +30,4 @@ Per ogni area vanno descritti, quando applicabili:
 - Vestiti — futuro;
 - Veicoli — futuro.
 
-Le fondamenta condivise dello Step 7 sono documentate in
-[`docs/step7/README.md`](../step7/README.md).
+Le fondamenta condivise dello Step 7 sono documentate in [`docs/step7/README.md`](../step7/README.md).

@@ -1,257 +1,136 @@
 # Roadmap funzionale
 
-<!-- STEP_7_2G_CHIUSURA_DOCS -->
-## Checkpoint Step 7.2G — workflow Miglioramenti
+## Stato corrente — chiusura Step 7.2G.1→7.2G.6
 
-**Stato:** implementato e verificato sul Galaxy S9 il 26 agosto 2026.
+**Branch:** `step-7-alimentazione`
+**Baseline committata precedente:** `54dc4dd`
+**Stato runtime:** verificato sul Galaxy S9 il 27 agosto 2026.
 
-Completato:
+Completato nel blocco finale:
 
-- workflow `da_approvare / da_fare / scartato`;
-- stato di lettura admin separato tramite `letto_admin_il`;
-- archivio separato dei completati con conservazione allegati;
-- backfill dei vecchi stati;
-- `🆕` amministrativo predisposto anche per le richieste di accesso;
-- migration append-only `20260826024500_miglioramenti_workflow_admin.sql`;
-- pipeline Rust **142/142 test**;
-- migration reale, integrity e foreign key verificati;
-- completamento → archivio verificato anche direttamente sul DB.
+- workflow Miglioramenti verificabile e archivio manuale;
+- UI Telegram a schermata singola;
+- `💡 Migliora` contestuale con sezione/azioni reali;
+- persistenza UI online/offline tra riavvii;
+- spegnimento controllato da Amministrazione;
+- rifiniture Alimentazione/Ricette emerse dagli smoke test;
+- export ZIP dei Miglioramenti direttamente dal bot;
+- **153/153 test** finali, check e Clippy verdi.
 
-Verifica manuale ancora pendente, non bloccante per il checkpoint:
+Restano due elementi intenzionalmente non chiusi:
 
-- smoke Telegram con secondo account per `da_approvare`, `🆕`,
-  approvazione/scarto e nuove richieste di accesso.
-
-**Regola di prosecuzione:** la migration 7.2G è ormai applicata al DB reale e va
-considerata immutabile. Dopo commit/push riprendere dal prossimo elemento già
-previsto nella roadmap Step 7.2, senza ricostruire le fondamenta già concluse.
-
----
-
-
-## Stato corrente
-
-Gli Step 1→6C sono chiusi e confluiti in `main` con il merge `219caba`.
-
-Branch corrente: `step-7-alimentazione`.
-
-Lo Step 7 è stato ridefinito: la precedente sequenza documenti/garanzie,
-promemoria, tag/ricerca globale non è più il prossimo sviluppo. Quelle funzioni
-restano approvate ma vengono riposizionate dopo la nuova fondazione condivisa.
+1. **#7 — gestione account:** eliminazione/reset/revoca permessi da progettare come step separato perché coinvolge ownership, membership, storico e risorse;
+2. **#9 — Zona test/aggiornamenti quasi zero-downtime:** funzione infrastrutturale futura, da affrontare soltanto quando il gestionale sarà funzionalmente maturo.
 
 ## Step 7 — Fondazioni condivise e Alimentazione
 
 ### 7.0 — Specifica e organizzazione
 
-**Stato: VERIFICATO.**
-
-Checkpoint documentale chiuso con `135dd33`, senza migration/codice funzionale.
-
-- consolidamento requisiti;
-- utenti/spazi/condivisione;
-- storico con autore;
-- confini Alimentazione/Acquisti/Viaggi/Spese;
-- politica migration e DB di sviluppo;
-- README centrale con rimandi ai documenti di modulo.
+**VERIFICATO.** Requisiti, confini di dominio, politica migration e struttura documentale.
 
 ### 7.1 — Fondazioni condivise
 
-**Stato: IN SVILUPPO.**
+**OPERATIVE, con evoluzioni amministrative ancora possibili.**
 
-Il checkpoint `a650bc8` ha verificato fondazioni, identità Telegram→utente,
-spazio bootstrap, `/profilo` e audit autore. Il blocco corrente abilita lo
-spazio attivo come confine operativo, rimuove l'unicità globale legacy di
-case/tag e rende space-aware i moduli Step 6. Restano inviti/gestione membri,
-condivisione/copia e reminder trasversali prima di chiudere la macro-fase.
+Già presenti:
 
-- utenti interni;
-- account Telegram;
-- spazi personali/familiari/condivisi;
-- membership e ruoli;
-- inviti sicuri;
-- dati esistenti associati a uno spazio;
-- autorizzazioni;
-- condivisione vs copia;
-- audit con autore e origine dell'azione;
-- reminder trasversali Telegram/email.
+- utenti interni separati dagli account Telegram;
+- spazi, membership, spazio predefinito e vista multi-spazio;
+- ruoli di sistema e ruoli nello spazio;
+- proprietà separata da posizione/visibilità;
+- permessi riutilizzabili sulle risorse;
+- audit con autore/origine;
+- accesso Telegram tramite richiesta approvata dall'amministratore principale.
+
+La gestione distruttiva/reset degli account (#7) non è parte della chiusura 7.2G e richiederà regole dedicate.
 
 ### 7.2 — Alimentazione completa
 
-**Stato: IN SVILUPPO.**
+**IN SVILUPPO.**
 
-- alimenti globali e personalizzati;
-- unità strutturate;
-- ricette con ingredienti e procedimento;
-- categorie/tag/foto;
-- profili alimentari;
-- porzioni e override per persona;
-- turni/routine con nome personalizzato;
-- pasti a casa/lavoro/fuori/saltati;
-- preparazione anticipata;
-- reminder configurabili;
-- planner su date/intervalli reali;
-- partecipanti;
-- lista della spesa aggregata;
-- export PDF/immagine.
+#### Completato
 
-Specifica: `docs/moduli/alimentazione/README.md`.
+- Alimenti e unità;
+- catalogo base e categorie;
+- proprietà, visibilità e permessi;
+- prodotti commerciali, formati acquistabili e nutrizione;
+- Ricette operative con ingredienti strutturati;
+- prodotto commerciale opzionale nell'ingrediente, senza legare la ricetta al formato;
+- procedimento strutturato con foto/video e modalità guidata;
+- ricerca per nome/categoria/ingredienti e filtro categoria negli ingredienti;
+- rifiniture UI raccolte tramite `💡 Migliora`.
 
-### 7.2C — Alimenti operativi, fondazioni Ricette e amministrazione
+#### Prossima sequenza funzionale
 
-**Stato: VERIFICATO SU S9.**
+1. **Profili alimentari** indipendenti dall'account Telegram;
+2. **porzioni personali** e override per ingrediente;
+3. **turni/routine**;
+4. **planner pasti** su date reali e partecipanti;
+5. **lista della spesa** aggregata e scelta dei formati;
+6. reminder/export Alimentazione e integrazioni residue.
 
-- catalogo alimenti operativo;
-- categorie e filtri OR;
-- modifica alimenti;
-- proprietà, visibilità e collaboratori;
-- permessi generici sulle risorse;
-- fondazioni database Ricette;
-- pulizia accenti/unità e rimozione ID tecnici dalla UI;
-- comandi leggibili per Luoghi;
-- ruoli globali `utente/admin` e area amministrativa protetta lato backend;
-- 109/109 test e smoke Telegram verificato.
+### 7.3 — Integrazioni e condivisione operativa
 
-### 7.2F.1 — Ricette operative Telegram
+**PREVISTO.**
 
-**Stato: VERIFICATO SU S9 E CONSOLIDATO IN `6449f70`.**
-
-- creazione e modifica ricetta;
-- proprietario e visibilità sugli spazi;
-- collaboratori tramite il sistema generico dei permessi;
-- ingredienti collegati direttamente agli alimenti;
-- scelta opzionale del prodotto commerciale senza salvare il formato;
-- quantità e unità indipendenti dalla confezione;
-- procedimento strutturato in step numerati;
-- zero o più foto/video per singolo step;
-- vista completa del procedimento e modalità guidata step precedente/successivo;
-- elenco, dettaglio e ricerca per nome;
-- ricerca per più ingredienti con semantica OR e ordinamento per numero di
-  corrispondenze;
-- compatibilità alimentare derivata;
-- test backend e smoke Telegram completati con esito positivo sull'S9.
-
-### 7.2G — Workflow Miglioramenti e coda amministrativa
-
-**Stato: PROSSIMO STEP.**
-
-- sostituire il workflow legacy `aperto/pianificato/fatto/scartato` con il modello semplificato `da_approvare/da_fare/scartato`;
-- un miglioramento creato da admin nasce direttamente `da_fare`;
-- un miglioramento creato da un utente normale nasce `da_approvare`;
-- introdurre il flag/timestamp amministrativo di non-letto con icona `🆕` separata dallo stato;
-- applicare la stessa semantica `🆕` alle richieste di accesso;
-- aprire o decidere un elemento lo marca come letto;
-- approvare un miglioramento lo porta direttamente a `da_fare`, senza stato intermedio di pianificazione;
-- durante una revisione, i `da_fare` vengono realizzati direttamente;
-- i completati vengono archiviati e rimossi dall'elenco attivo;
-- gli `scartato` vengono eliminati durante la revisione insieme agli allegati fisici;
-- migrare gli stati legacy tramite nuova migration append-only senza modificare `20260825153000_accesso_miglioramenti.sql`.
-
-### 7.3 — Condivisione operativa e integrazioni
-
-**Stato: PREVISTO.**
-
-- accesso Telegram tramite richiesta approvata dall’amministratore principale;
-- inviti e gestione membri completi;
-- condivisione/copia dei modelli supportati;
+- gestione membri/inviti più completa dove ancora necessaria;
 - Google Calendar;
-- inviti ai pasti;
 - email;
-- account Google dedicato al gestionale;
-- futuri account Google personali;
-- impostazioni calendario/inviti/reminder.
+- inviti ai pasti;
+- impostazioni calendario/reminder;
+- account Google dedicato e possibile supporto futuro ad account personali.
 
-## Moduli già specificati per il futuro
+## Moduli futuri già specificati
 
-### Acquisti e prezzi
+### Acquisti e prezzi — RIMANDATO
 
-**Stato: RIMANDATO.**
+Prodotti/confezioni, prezzi base, negozi e confronto volantini. Deve riusare i formati commerciali già presenti in Alimentazione.
 
-- prodotto e confezione separati da alimento/oggetto;
-- prezzi normali/base modificabili;
-- prezzo confezione + prezzo normalizzato;
-- negozi/punti vendita quando necessario;
-- volantino usato come confronto temporaneo, senza sostituire il prezzo base;
-- monitoraggio solo per prodotti/oggetti per cui ha senso;
-- integrazione futura con lista della spesa e spese reali.
+### Viaggi — RIMANDATO
 
-Specifica: `docs/moduli/acquisti/README.md`.
+Bagagli, checklist, oggetti temporaneamente in viaggio, verifica partenza/rientro e collegamento alle spese.
 
-### Viaggi
+### Spese — RIMANDATO
 
-**Stato: RIMANDATO.**
+Spese personali/condivise, quote, saldi, rimborsi e collegamenti con acquisti/viaggi/spazi.
 
-- viaggio e partecipanti;
-- valigia/bagaglio scelto fra gli oggetti o creato al momento;
-- checklist generica modificabile;
-- modelli checklist;
-- quantità dinamiche + extra opzionale;
-- più oggetti reali collegabili alla stessa voce;
-- stato temporaneo `in viaggio` senza perdere la posizione abituale;
-- verifica partenza/rientro;
-- collegamento alle spese.
+## Evoluzione infrastrutturale finale — `🧪 Zona test`
 
-Specifica: `docs/moduli/viaggi/README.md`.
+**FUTURO / ULTIMA FASE, non prioritaria nell'uso personale corrente.**
 
-### Spese
+Obiettivo:
 
-**Stato: RIMANDATO.**
+```text
+versione stabile attiva per tutti
+→ preparazione/compilazione candidata
+→ pipeline automatica verde
+→ admin entra in 🧪 Zona test
+→ test su candidata e DB/snapshot separato
+→ ✅ Conferma versione
+→ 🚀 Installa e riavvia
+→ backup
+→ breve shutdown
+→ migration
+→ nuova stabile per tutti
+→ rollback automatico se i controlli falliscono
+```
 
-- personali e condivise;
-- pagatore e partecipanti;
-- ospiti senza account;
-- divisione uguale/importi/percentuali/quote;
-- saldi netti e rimborsi;
-- collegamento a viaggio/acquisto/spazio;
-- storico con autore.
+Vincoli già decisi:
 
-Specifica: `docs/moduli/spese/README.md`.
-
-## Funzioni storiche ancora approvate
-
-L'ordine dopo Step 7 verrà deciso quando la nuova architettura sarà stabile.
-Restano in progettazione:
-
-- documenti e garanzie;
-- ricerca globale;
-- tag evoluti;
-- manutenzioni e interventi;
-- costi/valore;
-- prestiti;
-- QR code e codici a barre;
-- archivio per elementi venduti/regalati/buttati/persi;
-- registro acquisti;
-- dashboard/statistiche;
-- modulo Veicoli;
-- modulo Vestiti.
+- un solo ingresso Telegram; niente due long-poller concorrenti con lo stesso token;
+- candidata visibile soltanto all'admin finché non viene promossa;
+- dati di test isolati dalla produzione;
+- migration reali applicate soltanto nel passaggio finale, salvo migration esplicitamente compatibili;
+- strategia `expand → migrate → contract` per evoluzioni strutturali importanti;
+- versione stabile precedente conservata per rollback.
 
 ## Principi trasversali
 
-1. le funzioni comuni vanno riusate dai moduli;
-2. nessuna cancellazione di un luogo deve cancellare automaticamente un bene;
-3. lo storico deve restare interpretabile nel tempo;
-4. in multiutente ogni modifica umana significativa deve avere autore;
-5. condividere e copiare sono operazioni diverse;
-6. il DB resta centrale;
-7. niente reset generale nel bot;
-8. le migration già applicate non si riscrivono;
-9. prima del go-live il DB di sviluppo può essere azzerato manualmente dopo backup;
-10. dopo il go-live le migration devono preservare i dati reali.
-
-## Regola per le future decisioni
-
-Una feature approvata viene prima documentata nel modulo o nella roadmap. Se
-influenza lo schema o più domini, va descritta anche in `ARCHITETTURA.md` o in
-`docs/step7/decisioni-architetturali.md` prima dell'implementazione.
-
-
-### Step 7.1B — Vista multi-spazio e condivisione trasversale — IN SVILUPPO
-
-- spazio attivo reinterpretato come spazio predefinito;
-- vista singolo spazio / tutti gli spazi di membership;
-- proprietà item separata dalla posizione fisica;
-- oggetti personali collocabili in case condivise con doppio controllo permessi;
-- fondazione `item_condivisioni` per condivisione senza copia;
-- UI Telegram disponibile sia tramite comandi testuali sia pulsanti inline;
-- verifica S9 obbligatoria prima del commit.
-
-Alimentazione 7.2 parte solo dopo la verifica di questo blocco.
+- migration reali append-only e immutabili;
+- sicurezza backend fail-closed;
+- nessun ID tecnico nella UI utente;
+- proprietà, visibilità, membership e permessi separati;
+- Telegram è frontend, non dominio;
+- liste operative paginate a 5 elementi dove applicabile;
+- modifiche runtime verificate sull'S9 prima della chiusura di uno step;
+- ogni checkpoint importante aggiorna README, roadmap, architettura, handoff e changelog.

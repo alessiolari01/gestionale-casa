@@ -1,3 +1,45 @@
+# Handoff completo — aggiornamento autorevole 27/08/2026
+
+> **Nota di lettura:** questa sezione iniziale aggiorna lo stato corrente. Le sezioni storiche più sotto restano utili per ricostruire le decisioni precedenti, ma quando una frase storica contraddice questo aggiornamento prevale lo stato qui descritto.
+
+## Checkpoint corrente
+
+- branch `step-7-alimentazione`;
+- baseline committata precedente `54dc4dd`;
+- blocco non committato 7.2G.1→7.2G.6 verificato su Galaxy S9;
+- **153/153 test**, check e Clippy verdi;
+- sei migration append-only nuove già applicate al DB reale;
+- UI Telegram a schermata singola e stato UI persistente;
+- `💡 Migliora` contestuale;
+- shutdown controllato da Amministrazione;
+- export ZIP Miglioramenti direttamente dal bot verificato end-to-end.
+
+### Migration finali del blocco
+
+```text
+20260826123000_miglioramenti_verifica_guidata.sql
+20260826223000_miglioramenti_contesto_rifiniture.sql
+20260827003000_miglioramenti_ultimo_passaggio.sql
+20260827014500_miglioramenti_finalissimi.sql
+20260827104500_runtime_ui_persistente.sql
+20260827123000_esporta_miglioramenti_bot.sql
+```
+
+Sono applicate e **non devono essere modificate**.
+
+### Backlog residuo
+
+- #7 gestione/reset/eliminazione account: requisito operativo separato;
+- #9 `🧪 Zona test` e aggiornamenti quasi zero-downtime: evoluzione infrastrutturale futura/finale.
+
+### Prossima direzione funzionale
+
+Profili alimentari → porzioni/override ingrediente → turni/routine → planner → lista della spesa.
+
+Per i dettagli operativi correnti usare `docs/HANDOFF.md`, che è il documento breve da leggere per primo.
+
+---
+
 # Handoff completo — Gestionale Casa
 
 <!-- STEP_7_2G_CHIUSURA_DOCS -->

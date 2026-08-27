@@ -28,6 +28,8 @@ use crate::{
     resource_permissions::{self, ResourcePermission},
 };
 
+type Bot = crate::context_bot::ContextBot;
+
 const RECIPE_LIST_PAGE_SIZE: i64 = 5;
 const FOOD_SEARCH_LIMIT: i64 = 8;
 const RECIPE_SEARCH_LIMIT: i64 = 20;
@@ -96,16 +98,11 @@ enum RecipeConversationState {
     IngredientSearch {
         draft: RecipeDraft,
     },
-    IngredientQuantity {
+    IngredientQuantityReady {
         draft: RecipeDraft,
         food: FoodChoice,
         product: Option<ProductChoice>,
-    },
-    IngredientUnit {
-        draft: RecipeDraft,
-        food: FoodChoice,
-        product: Option<ProductChoice>,
-        quantity: f64,
+        unit: UnitChoice,
     },
     StepText {
         draft: RecipeDraft,
@@ -138,6 +135,7 @@ enum RecipeConversationState {
     },
     IngredientFinderQuery {
         selected: Vec<FoodChoice>,
+        category_filter: Option<CategoryChoice>,
     },
     EditName {
         recipe_id: i64,
@@ -148,16 +146,11 @@ enum RecipeConversationState {
     EditIngredientSearch {
         recipe_id: i64,
     },
-    EditIngredientQuantity {
+    EditIngredientQuantityReady {
         recipe_id: i64,
         food: FoodChoice,
         product: Option<ProductChoice>,
-    },
-    EditIngredientUnit {
-        recipe_id: i64,
-        food: FoodChoice,
-        product: Option<ProductChoice>,
-        quantity: f64,
+        unit: UnitChoice,
     },
     EditStepText {
         recipe_id: i64,
@@ -265,6 +258,13 @@ struct UnitChoice {
     symbol: String,
 }
 
+#[derive(Debug, Clone, FromRow)]
+struct CategoryChoice {
+    id: i64,
+    name: String,
+    emoji: String,
+}
+
 #[derive(Debug, Clone, FromRow, PartialEq, Eq)]
 struct FoodChoice {
     id: i64,
@@ -319,12 +319,25 @@ pub async fn handle_message(
         return Ok(true);
     }
 
+    if command == Some("/ricette_ingredienti") {
+        cancel_draft_media(chat_id).await;
+        sessions.set(
+            chat_id,
+            RecipeConversationState::IngredientFinderQuery {
+                selected: Vec::new(),
+                category_filter: None,
+            },
+        );
+        show_ingredient_finder(bot, msg.chat.id, &[], None).await?;
+        return Ok(true);
+    }
+
     if command == Some("/ricetta_nuova") {
         cancel_draft_media(chat_id).await;
         sessions.set(chat_id, RecipeConversationState::NewName);
         bot.send_message(
             msg.chat.id,
-            "🍳 Nuova ricetta\n\nScrivi il nome della ricetta.\n\nPuoi usare /annulla in qualsiasi momento.",
+            "🍳 Nuova ricetta\n\nScrivi il nome della ricetta.\n\nPuoi premere ❌ Annulla in qualsiasi momento.",
         )
         .reply_markup(flow_keyboard("recipe:menu"))
         .await?;
@@ -445,10 +458,11 @@ pub async fn handle_message(
             .await?;
             Ok(true)
         }
-        RecipeConversationState::IngredientQuantity {
-            draft,
+        RecipeConversationState::IngredientQuantityReady {
+            mut draft,
             food,
             product,
+            unit,
         } => {
             let Some(text) = text_hint else {
                 send_text_required(bot, msg.chat.id, "Inserisci la quantità necessaria.").await?;
@@ -459,45 +473,29 @@ pub async fn handle_message(
                     msg.chat.id,
                     "⚠️ Quantità non valida. Inserisci un numero maggiore di zero.",
                 )
-                .reply_markup(flow_keyboard("recipe:new:ingredients"))
+                .reply_markup(ingredient_quantity_keyboard(
+                    "recipe:new:quantity:changeunit",
+                    "recipe:new:ingredients",
+                ))
                 .await?;
                 return Ok(true);
             };
+            draft.ingredients.push(DraftIngredient {
+                food_id: food.id,
+                food_name: food.name,
+                product_id: product.as_ref().map(|value| value.product_id),
+                product_label: product.as_ref().map(product_label),
+                quantity,
+                unit_id: unit.id,
+                unit_symbol: unit.symbol,
+            });
             sessions.set(
                 chat_id,
-                RecipeConversationState::IngredientUnit {
-                    draft,
-                    food: food.clone(),
-                    product,
-                    quantity,
+                RecipeConversationState::IngredientHub {
+                    draft: draft.clone(),
                 },
             );
-            show_unit_choice(
-                bot,
-                msg.chat.id,
-                pool,
-                &food,
-                "recipe:new:unit",
-                "recipe:new:ingredients",
-            )
-            .await?;
-            Ok(true)
-        }
-        RecipeConversationState::IngredientUnit {
-            draft,
-            food,
-            product,
-            quantity,
-        } => {
-            sessions.set(
-                chat_id,
-                RecipeConversationState::IngredientUnit {
-                    draft,
-                    food,
-                    product,
-                    quantity,
-                },
-            );
+            show_draft_ingredients(bot, msg.chat.id, &draft).await?;
             Ok(true)
         }
         RecipeConversationState::StepText { mut draft } => {
@@ -542,6 +540,7 @@ pub async fn handle_message(
             }
             match save_draft_media(bot, msg, "foto", step_index + 1).await {
                 Ok(media) => {
+                    bot.delete_user_input(msg.chat.id, msg.id).await;
                     if let Some(step) = draft.steps.get_mut(step_index) {
                         step.media.push(media);
                     }
@@ -580,6 +579,7 @@ pub async fn handle_message(
             }
             match save_draft_media(bot, msg, "video", step_index + 1).await {
                 Ok(media) => {
+                    bot.delete_user_input(msg.chat.id, msg.id).await;
                     if let Some(step) = draft.steps.get_mut(step_index) {
                         step.media.push(media);
                     }
@@ -638,7 +638,10 @@ pub async fn handle_message(
             );
             Ok(true)
         }
-        RecipeConversationState::IngredientFinderQuery { selected } => {
+        RecipeConversationState::IngredientFinderQuery {
+            selected,
+            category_filter,
+        } => {
             let Some(query) = text_hint.and_then(|value| clean_text(value, INGREDIENT_SEARCH_MAX))
             else {
                 send_text_required(
@@ -649,12 +652,20 @@ pub async fn handle_message(
                 .await?;
                 return Ok(true);
             };
-            let foods = search_food_choices(pool, &query, FOOD_SEARCH_LIMIT)
-                .await
-                .unwrap_or_default();
+            let foods = search_food_choices_filtered(
+                pool,
+                &query,
+                FOOD_SEARCH_LIMIT,
+                category_filter.as_ref().map(|category| category.id),
+            )
+            .await
+            .unwrap_or_default();
             sessions.set(
                 chat_id,
-                RecipeConversationState::IngredientFinderQuery { selected },
+                RecipeConversationState::IngredientFinderQuery {
+                    selected,
+                    category_filter: category_filter.clone(),
+                },
             );
             show_food_search_results(
                 bot,
@@ -662,7 +673,7 @@ pub async fn handle_message(
                 &query,
                 &foods,
                 "recipe:find:food",
-                "recipe:find",
+                "recipe:find:return",
             )
             .await?;
             Ok(true)
@@ -737,10 +748,11 @@ pub async fn handle_message(
             .await?;
             Ok(true)
         }
-        RecipeConversationState::EditIngredientQuantity {
+        RecipeConversationState::EditIngredientQuantityReady {
             recipe_id,
             food,
             product,
+            unit,
         } => {
             let Some(text) = text_hint else {
                 send_text_required(bot, msg.chat.id, "Inserisci la quantità necessaria.").await?;
@@ -748,47 +760,37 @@ pub async fn handle_message(
             };
             let Some(quantity) = parse_positive_number(text) else {
                 bot.send_message(msg.chat.id, "⚠️ Quantità non valida.")
-                    .reply_markup(flow_keyboard(&format!(
-                        "recipe:edit:ingredients:{recipe_id}"
-                    )))
+                    .reply_markup(ingredient_quantity_keyboard(
+                        &format!("recipe:edit:quantity:changeunit:{recipe_id}"),
+                        &format!("recipe:edit:ingredients:{recipe_id}"),
+                    ))
                     .await?;
                 return Ok(true);
             };
-            sessions.set(
-                chat_id,
-                RecipeConversationState::EditIngredientUnit {
-                    recipe_id,
-                    food: food.clone(),
-                    product,
-                    quantity,
-                },
-            );
-            show_unit_choice(
-                bot,
-                msg.chat.id,
+            match insert_recipe_ingredient(
                 pool,
+                recipe_id,
                 &food,
-                &format!("recipe:edit:u:{recipe_id}"),
-                &format!("recipe:edit:ingredients:{recipe_id}"),
+                product.as_ref(),
+                quantity,
+                &unit,
             )
-            .await?;
-            Ok(true)
-        }
-        RecipeConversationState::EditIngredientUnit {
-            recipe_id,
-            food,
-            product,
-            quantity,
-        } => {
-            sessions.set(
-                chat_id,
-                RecipeConversationState::EditIngredientUnit {
-                    recipe_id,
-                    food,
-                    product,
-                    quantity,
-                },
-            );
+            .await
+            {
+                Ok(()) => {
+                    sessions.clear_chat(chat_id);
+                    bot.send_message(msg.chat.id, "✅ Ingrediente aggiunto.")
+                        .await?;
+                    show_manage_ingredients(bot, msg.chat.id, pool, recipe_id).await?;
+                }
+                Err(error) => {
+                    bot.send_message(msg.chat.id, format!("⚠️ {error}"))
+                        .reply_markup(back_home_keyboard(&format!(
+                            "recipe:edit:ingredients:{recipe_id}"
+                        )))
+                        .await?;
+                }
+            }
             Ok(true)
         }
         RecipeConversationState::EditStepText { recipe_id, step_id } => {
@@ -827,6 +829,7 @@ pub async fn handle_message(
             match save_existing_step_media(bot, msg, pool, recipe_id, step_id, "foto").await {
                 Ok(()) => {
                     sessions.clear_chat(chat_id);
+                    bot.delete_user_input(msg.chat.id, msg.id).await;
                     bot.send_message(msg.chat.id, "✅ Foto aggiunta.").await?;
                     show_step_manage(bot, msg.chat.id, pool, recipe_id, step_id).await?;
                 }
@@ -852,6 +855,7 @@ pub async fn handle_message(
             match save_existing_step_media(bot, msg, pool, recipe_id, step_id, "video").await {
                 Ok(()) => {
                     sessions.clear_chat(chat_id);
+                    bot.delete_user_input(msg.chat.id, msg.id).await;
                     bot.send_message(msg.chat.id, "✅ Video aggiunto.").await?;
                     show_step_manage(bot, msg.chat.id, pool, recipe_id, step_id).await?;
                 }
@@ -910,7 +914,7 @@ pub async fn handle_callback(
             sessions.set(chat_id.0, RecipeConversationState::NewName);
             bot.send_message(
                 chat_id,
-                "🍳 Nuova ricetta\n\nScrivi il nome della ricetta.\n\nPuoi usare /annulla in qualsiasi momento.",
+                "🍳 Nuova ricetta\n\nScrivi il nome della ricetta.\n\nPuoi premere ❌ Annulla in qualsiasi momento.",
             )
             .reply_markup(flow_keyboard("recipe:menu"))
             .await?;
@@ -1200,40 +1204,65 @@ pub async fn handle_callback(
             let selected = Vec::new();
             sessions.set(
                 chat_id.0,
-                RecipeConversationState::IngredientFinder {
+                RecipeConversationState::IngredientFinderQuery {
                     selected: selected.clone(),
+                    category_filter: None,
                 },
             );
-            show_ingredient_finder(bot, chat_id, &selected).await?;
+            show_ingredient_finder(bot, chat_id, &selected, None).await?;
         }
-        "recipe:find:addmore" => {
-            let selected = selected_foods_from_state(sessions.get(chat_id.0)).unwrap_or_default();
+        "recipe:find:return" => {
+            let (selected, category_filter) = ingredient_query_state(sessions.get(chat_id.0));
             sessions.set(
                 chat_id.0,
-                RecipeConversationState::IngredientFinderQuery { selected },
+                RecipeConversationState::IngredientFinderQuery {
+                    selected: selected.clone(),
+                    category_filter: category_filter.clone(),
+                },
+            );
+            show_ingredient_finder(bot, chat_id, &selected, category_filter.as_ref()).await?;
+        }
+        "recipe:find:addmore" => {
+            let (selected, category_filter) = ingredient_query_state(sessions.get(chat_id.0));
+            sessions.set(
+                chat_id.0,
+                RecipeConversationState::IngredientFinderQuery {
+                    selected: selected.clone(),
+                    category_filter: category_filter.clone(),
+                },
             );
             bot.send_message(
                 chat_id,
-                "🥕 Aggiungi ingrediente alla ricerca\n\nScrivi il nome dell'alimento.",
+                "🥕 Aggiungi ingrediente alla ricerca
+
+Scrivi il nome dell'alimento. Il filtro categoria, se attivo, viene mantenuto.",
             )
-            .reply_markup(flow_keyboard("recipe:find"))
+            .reply_markup(ingredient_finder_keyboard(
+                &selected,
+                category_filter.as_ref(),
+            ))
             .await?;
         }
         "recipe:find:reset" => {
             let selected = Vec::new();
             sessions.set(
                 chat_id.0,
-                RecipeConversationState::IngredientFinder {
+                RecipeConversationState::IngredientFinderQuery {
                     selected: selected.clone(),
+                    category_filter: None,
                 },
             );
-            show_ingredient_finder(bot, chat_id, &selected).await?;
+            show_ingredient_finder(bot, chat_id, &selected, None).await?;
         }
         "recipe:find:run" => {
             let selected = selected_foods_from_state(sessions.get(chat_id.0)).unwrap_or_default();
             if selected.is_empty() {
+                let category_filter = ingredient_filter_from_state(sessions.get(chat_id.0));
                 bot.send_message(chat_id, "⚠️ Seleziona almeno un ingrediente.")
-                    .reply_markup(ingredient_finder_keyboard(&selected))
+                    .reply_markup(ingredient_finder_keyboard(
+                        &selected,
+                        category_filter.as_ref(),
+                    ))
                     .await?;
             } else {
                 sessions.set(
@@ -1317,15 +1346,7 @@ pub async fn handle_callback(
                 .await
                 .unwrap_or_default();
             if products.is_empty() {
-                sessions.set(
-                    chat_id.0,
-                    RecipeConversationState::IngredientQuantity {
-                        draft,
-                        food: food.clone(),
-                        product: None,
-                    },
-                );
-                ask_ingredient_quantity(bot, chat_id, &food, None, "recipe:new:ingredients")
+                begin_new_ingredient_quantity(bot, chat_id, pool, sessions, draft, food, None)
                     .await?;
             } else {
                 sessions.set(
@@ -1359,15 +1380,7 @@ pub async fn handle_callback(
                 show_invalid_action(bot, chat_id).await?;
                 return Ok(true);
             };
-            sessions.set(
-                chat_id.0,
-                RecipeConversationState::IngredientQuantity {
-                    draft,
-                    food: food.clone(),
-                    product: None,
-                },
-            );
-            ask_ingredient_quantity(bot, chat_id, &food, None, "recipe:new:ingredients").await?;
+            begin_new_ingredient_quantity(bot, chat_id, pool, sessions, draft, food, None).await?;
         }
         _ if data.starts_with("recipe:new:product:") => {
             let product_id = data
@@ -1398,59 +1411,76 @@ pub async fn handle_callback(
                     .await?;
                 return Ok(true);
             }
-            sessions.set(
-                chat_id.0,
-                RecipeConversationState::IngredientQuantity {
-                    draft,
-                    food: food.clone(),
-                    product: Some(product.clone()),
-                },
-            );
-            ask_ingredient_quantity(
-                bot,
-                chat_id,
-                &food,
-                Some(&product),
-                "recipe:new:ingredients",
-            )
-            .await?;
+            begin_new_ingredient_quantity(bot, chat_id, pool, sessions, draft, food, Some(product))
+                .await?;
         }
-        _ if data.starts_with("recipe:new:unit:") => {
+        "recipe:new:quantity:changeunit" => match sessions.get(chat_id.0) {
+            Some(RecipeConversationState::IngredientQuantityReady {
+                draft,
+                food,
+                product,
+                unit,
+            }) => {
+                sessions.set(
+                    chat_id.0,
+                    RecipeConversationState::IngredientQuantityReady {
+                        draft,
+                        food: food.clone(),
+                        product,
+                        unit,
+                    },
+                );
+                show_unit_choice(
+                    bot,
+                    chat_id,
+                    pool,
+                    &food,
+                    "recipe:new:quantity:unit",
+                    "recipe:new:ingredients",
+                )
+                .await?;
+            }
+            _ => show_expired_flow(bot, chat_id).await?,
+        },
+        _ if data.starts_with("recipe:new:quantity:unit:") => {
             let unit_id = data
-                .strip_prefix("recipe:new:unit:")
+                .strip_prefix("recipe:new:quantity:unit:")
                 .and_then(parse_positive_i64_str);
             let Some(unit_id) = unit_id else {
                 show_invalid_action(bot, chat_id).await?;
                 return Ok(true);
             };
             match sessions.get(chat_id.0) {
-                Some(RecipeConversationState::IngredientUnit {
-                    mut draft,
+                Some(RecipeConversationState::IngredientQuantityReady {
+                    draft,
                     food,
                     product,
-                    quantity,
+                    ..
                 }) => {
                     let Some(unit) = unit_by_id(pool, unit_id).await.unwrap_or(None) else {
                         bot.send_message(chat_id, "⚠️ Unità non disponibile.")
                             .await?;
                         return Ok(true);
                     };
-                    draft.ingredients.push(DraftIngredient {
-                        food_id: food.id,
-                        food_name: food.name,
-                        product_id: product.as_ref().map(|value| value.product_id),
-                        product_label: product.as_ref().map(product_label),
-                        quantity,
-                        unit_id: unit.id,
-                        unit_symbol: unit.symbol,
-                    });
                     sessions.set(
                         chat_id.0,
-                        RecipeConversationState::IngredientHub {
-                            draft: draft.clone(),
+                        RecipeConversationState::IngredientQuantityReady {
+                            draft,
+                            food: food.clone(),
+                            product: product.clone(),
+                            unit: unit.clone(),
                         },
                     );
-                    show_draft_ingredients(bot, chat_id, &draft).await?;
+                    ask_ingredient_quantity_ready(
+                        bot,
+                        chat_id,
+                        &food,
+                        product.as_ref(),
+                        &unit,
+                        "recipe:new:quantity:changeunit",
+                        "recipe:new:ingredients",
+                    )
+                    .await?;
                 }
                 _ => show_expired_flow(bot, chat_id).await?,
             }
@@ -1489,12 +1519,75 @@ pub async fn handle_callback(
                 _ => show_expired_flow(bot, chat_id).await?,
             }
         }
+        "recipe:find:categories" => {
+            let (selected, category_filter) = ingredient_query_state(sessions.get(chat_id.0));
+            sessions.set(
+                chat_id.0,
+                RecipeConversationState::IngredientFinderQuery {
+                    selected: selected.clone(),
+                    category_filter: category_filter.clone(),
+                },
+            );
+            show_recipe_food_categories(bot, chat_id, pool, 0, &selected, category_filter.as_ref())
+                .await?;
+        }
+        _ if data.starts_with("recipe:find:categories:") => {
+            let page = data
+                .strip_prefix("recipe:find:categories:")
+                .and_then(parse_nonnegative_i64)
+                .unwrap_or(0);
+            let (selected, category_filter) = ingredient_query_state(sessions.get(chat_id.0));
+            show_recipe_food_categories(
+                bot,
+                chat_id,
+                pool,
+                page,
+                &selected,
+                category_filter.as_ref(),
+            )
+            .await?;
+        }
+        "recipe:find:filter:clear" => {
+            let selected = selected_foods_from_state(sessions.get(chat_id.0)).unwrap_or_default();
+            sessions.set(
+                chat_id.0,
+                RecipeConversationState::IngredientFinderQuery {
+                    selected: selected.clone(),
+                    category_filter: None,
+                },
+            );
+            show_ingredient_finder(bot, chat_id, &selected, None).await?;
+        }
+        _ if data.starts_with("recipe:find:filter:") => {
+            let category_id = data
+                .strip_prefix("recipe:find:filter:")
+                .and_then(parse_positive_i64_str);
+            let Some(category_id) = category_id else {
+                show_invalid_action(bot, chat_id).await?;
+                return Ok(true);
+            };
+            let Some(category) = recipe_food_category_by_id(pool, category_id)
+                .await
+                .unwrap_or(None)
+            else {
+                show_invalid_action(bot, chat_id).await?;
+                return Ok(true);
+            };
+            let selected = selected_foods_from_state(sessions.get(chat_id.0)).unwrap_or_default();
+            sessions.set(
+                chat_id.0,
+                RecipeConversationState::IngredientFinderQuery {
+                    selected: selected.clone(),
+                    category_filter: Some(category.clone()),
+                },
+            );
+            show_ingredient_finder(bot, chat_id, &selected, Some(&category)).await?;
+        }
         _ if data.starts_with("recipe:find:food:") => {
             let food_id = data
                 .strip_prefix("recipe:find:food:")
                 .and_then(parse_positive_i64_str);
-            let mut selected =
-                selected_foods_from_state(sessions.get(chat_id.0)).unwrap_or_default();
+            let (mut selected, category_filter) = ingredient_query_state(sessions.get(chat_id.0));
             if let Some(food_id) = food_id {
                 if let Some(food) = visible_food_choice(pool, food_id).await.unwrap_or(None) {
                     if !selected.iter().any(|value| value.id == food.id) {
@@ -1504,11 +1597,12 @@ pub async fn handle_callback(
             }
             sessions.set(
                 chat_id.0,
-                RecipeConversationState::IngredientFinder {
+                RecipeConversationState::IngredientFinderQuery {
                     selected: selected.clone(),
+                    category_filter: category_filter.clone(),
                 },
             );
-            show_ingredient_finder(bot, chat_id, &selected).await?;
+            show_ingredient_finder(bot, chat_id, &selected, category_filter.as_ref()).await?;
         }
         _ if data.starts_with("recipe:complete:") => {
             if let Some(recipe_id) = data
@@ -1517,6 +1611,17 @@ pub async fn handle_callback(
             {
                 sessions.clear_chat(chat_id.0);
                 show_full_procedure(bot, chat_id, pool, recipe_id).await?;
+            } else {
+                show_invalid_action(bot, chat_id).await?;
+            }
+        }
+        _ if data.starts_with("recipe:guided:finish:") => {
+            if let Some(recipe_id) = data
+                .strip_prefix("recipe:guided:finish:")
+                .and_then(parse_positive_i64_str)
+            {
+                sessions.clear_chat(chat_id.0);
+                show_guided_finished(bot, chat_id, pool, recipe_id).await?;
             } else {
                 show_invalid_action(bot, chat_id).await?;
             }
@@ -1692,22 +1797,8 @@ async fn handle_edit_callback(
             .await
             .unwrap_or_default();
         if products.is_empty() {
-            sessions.set(
-                chat_id.0,
-                RecipeConversationState::EditIngredientQuantity {
-                    recipe_id,
-                    food: food.clone(),
-                    product: None,
-                },
-            );
-            ask_ingredient_quantity(
-                bot,
-                chat_id,
-                &food,
-                None,
-                &format!("recipe:edit:ingredients:{recipe_id}"),
-            )
-            .await?;
+            begin_edit_ingredient_quantity(bot, chat_id, pool, sessions, recipe_id, food, None)
+                .await?;
         } else {
             sessions.set(
                 chat_id.0,
@@ -1743,22 +1834,7 @@ async fn handle_edit_callback(
                 .await?;
             return Ok(());
         };
-        sessions.set(
-            chat_id.0,
-            RecipeConversationState::EditIngredientQuantity {
-                recipe_id,
-                food: food.clone(),
-                product: None,
-            },
-        );
-        ask_ingredient_quantity(
-            bot,
-            chat_id,
-            &food,
-            None,
-            &format!("recipe:edit:ingredients:{recipe_id}"),
-        )
-        .await?;
+        begin_edit_ingredient_quantity(bot, chat_id, pool, sessions, recipe_id, food, None).await?;
         return Ok(());
     }
     if let Some(raw) = data.strip_prefix("recipe:edit:p:") {
@@ -1781,25 +1857,53 @@ async fn handle_edit_callback(
                 .await?;
             return Ok(());
         };
-        sessions.set(
-            chat_id.0,
-            RecipeConversationState::EditIngredientQuantity {
-                recipe_id,
-                food: food.clone(),
-                product: Some(product.clone()),
-            },
-        );
-        ask_ingredient_quantity(
+        begin_edit_ingredient_quantity(
             bot,
             chat_id,
-            &food,
-            Some(&product),
-            &format!("recipe:edit:ingredients:{recipe_id}"),
+            pool,
+            sessions,
+            recipe_id,
+            food,
+            Some(product),
         )
         .await?;
         return Ok(());
     }
-    if let Some(raw) = data.strip_prefix("recipe:edit:u:") {
+    if let Some(recipe_id) = data
+        .strip_prefix("recipe:edit:quantity:changeunit:")
+        .and_then(parse_positive_i64_str)
+    {
+        match sessions.get(chat_id.0) {
+            Some(RecipeConversationState::EditIngredientQuantityReady {
+                recipe_id: state_recipe_id,
+                food,
+                product,
+                unit,
+            }) if state_recipe_id == recipe_id => {
+                sessions.set(
+                    chat_id.0,
+                    RecipeConversationState::EditIngredientQuantityReady {
+                        recipe_id,
+                        food: food.clone(),
+                        product,
+                        unit,
+                    },
+                );
+                show_unit_choice(
+                    bot,
+                    chat_id,
+                    pool,
+                    &food,
+                    &format!("recipe:edit:quantity:unit:{recipe_id}"),
+                    &format!("recipe:edit:ingredients:{recipe_id}"),
+                )
+                .await?;
+            }
+            _ => show_expired_flow(bot, chat_id).await?,
+        }
+        return Ok(());
+    }
+    if let Some(raw) = data.strip_prefix("recipe:edit:quantity:unit:") {
         let mut parts = raw.split(':');
         let recipe_id = parts.next().and_then(parse_positive_i64_str);
         let unit_id = parts.next().and_then(parse_positive_i64_str);
@@ -1812,41 +1916,36 @@ async fn handle_edit_callback(
             return Ok(());
         };
         match sessions.get(chat_id.0) {
-            Some(RecipeConversationState::EditIngredientUnit {
+            Some(RecipeConversationState::EditIngredientQuantityReady {
                 recipe_id: state_recipe_id,
                 food,
                 product,
-                quantity,
+                ..
             }) if state_recipe_id == recipe_id => {
                 let Some(unit) = unit_by_id(pool, unit_id).await.unwrap_or(None) else {
                     bot.send_message(chat_id, "⚠️ Unità non disponibile.")
                         .await?;
                     return Ok(());
                 };
-                match insert_recipe_ingredient(
-                    pool,
-                    recipe_id,
+                sessions.set(
+                    chat_id.0,
+                    RecipeConversationState::EditIngredientQuantityReady {
+                        recipe_id,
+                        food: food.clone(),
+                        product: product.clone(),
+                        unit: unit.clone(),
+                    },
+                );
+                ask_ingredient_quantity_ready(
+                    bot,
+                    chat_id,
                     &food,
                     product.as_ref(),
-                    quantity,
                     &unit,
+                    &format!("recipe:edit:quantity:changeunit:{recipe_id}"),
+                    &format!("recipe:edit:ingredients:{recipe_id}"),
                 )
-                .await
-                {
-                    Ok(()) => {
-                        sessions.clear_chat(chat_id.0);
-                        bot.send_message(chat_id, "✅ Ingrediente aggiunto.")
-                            .await?;
-                        show_manage_ingredients(bot, chat_id, pool, recipe_id).await?;
-                    }
-                    Err(error) => {
-                        bot.send_message(chat_id, format!("⚠️ {error}"))
-                            .reply_markup(back_home_keyboard(&format!(
-                                "recipe:edit:ingredients:{recipe_id}"
-                            )))
-                            .await?;
-                    }
-                }
+                .await?;
             }
             _ => show_expired_flow(bot, chat_id).await?,
         }
@@ -2261,6 +2360,47 @@ async fn handle_edit_callback(
         return Ok(());
     }
     if let Some(recipe_id) = data
+        .strip_prefix("recipe:edit:delete:ask:")
+        .and_then(parse_positive_i64_str)
+    {
+        if ensure_recipe_owner_ui(bot, chat_id, pool, recipe_id).await? {
+            bot.send_message(
+                chat_id,
+                "⚠️ Eliminare definitivamente questa ricetta?\n\nIngredienti, procedimento, media, condivisioni e permessi collegati verranno eliminati. Questa operazione non è reversibile.",
+            )
+            .reply_markup(InlineKeyboardMarkup::new(vec![
+                vec![button(
+                    "🗑 Elimina definitivamente",
+                    format!("recipe:edit:delete:yes:{recipe_id}"),
+                )],
+                vec![
+                    button("❌ Annulla", format!("recipe:edit:menu:{recipe_id}")),
+                    button("🏠 Menù principale", "menu:main"),
+                ],
+            ]))
+            .await?;
+        }
+        return Ok(());
+    }
+    if let Some(recipe_id) = data
+        .strip_prefix("recipe:edit:delete:yes:")
+        .and_then(parse_positive_i64_str)
+    {
+        match delete_recipe_permanently(pool, recipe_id).await {
+            Ok(paths) => {
+                sessions.clear_chat(chat_id.0);
+                cleanup_recipe_media_files(recipe_id, &paths).await;
+                bot.send_message(chat_id, "✅ Ricetta eliminata definitivamente.")
+                    .reply_markup(recipe_menu_keyboard())
+                    .await?;
+            }
+            Err(error) => {
+                bot.send_message(chat_id, format!("⚠️ {error}")).await?;
+            }
+        }
+        return Ok(());
+    }
+    if let Some(recipe_id) = data
         .strip_prefix("recipe:edit:archive:ask:")
         .and_then(parse_positive_i64_str)
     {
@@ -2268,7 +2408,7 @@ async fn handle_edit_callback(
             bot.send_message(chat_id, "⚠️ Archiviare questa ricetta? Non comparirà più negli elenchi normali, ma i dati restano nel database.")
                 .reply_markup(InlineKeyboardMarkup::new(vec![
                     vec![button("🗄 Archivia", format!("recipe:edit:archive:yes:{recipe_id}"))],
-                    vec![button("❌ Annulla", format!("recipe:detail:{recipe_id}")), button("🏠 Menu principale", "menu:main")],
+                    vec![button("❌ Annulla", format!("recipe:detail:{recipe_id}")), button("🏠 Menù principale", "menu:main")],
                 ]))
                 .await?;
         }
@@ -2364,7 +2504,7 @@ async fn show_menu(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> ResponseRes
             button("➕ Nuova ricetta", "recipe:new"),
         ],
         vec![
-            button("🔎 Cerca", "recipe:search"),
+            button("🔎 Cerca per nome", "recipe:search"),
             button("🥕 Cerca per ingredienti", "recipe:find"),
         ],
     ];
@@ -2376,7 +2516,7 @@ async fn show_menu(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> ResponseRes
     }
     rows.push(vec![
         button("⬅️ Indietro", "food:menu"),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     bot.send_message(
         chat_id,
@@ -2443,7 +2583,7 @@ async fn show_recipe_list(
     ]);
     keyboard.push(vec![
         button("⬅️ Indietro", "recipe:menu"),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     bot.send_message(chat_id, text)
         .reply_markup(InlineKeyboardMarkup::new(keyboard))
@@ -2597,7 +2737,7 @@ async fn show_recipe_detail(
     }
     keyboard.push(vec![
         button("⬅️ Indietro", "recipe:list:0"),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
 
     bot.send_message(chat_id, text)
@@ -2638,7 +2778,7 @@ async fn show_full_procedure(
     }
     keyboard.push(vec![
         button("⬅️ Indietro", format!("recipe:detail:{recipe_id}")),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     let markup = InlineKeyboardMarkup::new(keyboard);
 
@@ -2717,7 +2857,10 @@ async fn show_guided_step(
             format!("recipe:guided:{recipe_id}:{}", page + 1),
         ));
     } else {
-        nav.push(button("✅ Termina", format!("recipe:detail:{recipe_id}")));
+        nav.push(button(
+            "✅ Termina",
+            format!("recipe:guided:finish:{recipe_id}"),
+        ));
     }
     keyboard.push(nav);
     keyboard.push(vec![button(
@@ -2726,11 +2869,49 @@ async fn show_guided_step(
     )]);
     keyboard.push(vec![
         button("⬅️ Indietro", format!("recipe:detail:{recipe_id}")),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     bot.send_message(chat_id, text)
         .reply_markup(InlineKeyboardMarkup::new(keyboard))
         .await?;
+    Ok(())
+}
+
+async fn show_guided_finished(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    recipe_id: i64,
+) -> ResponseResult<()> {
+    let Some(recipe) = visible_recipe(pool, recipe_id).await.unwrap_or(None) else {
+        bot.send_message(chat_id, "⚠️ Ricetta non disponibile.")
+            .reply_markup(recipe_menu_keyboard())
+            .await?;
+        return Ok(());
+    };
+    bot.send_message(
+        chat_id,
+        format!(
+            "✅ Ricetta terminata\n\nHai completato tutti gli step di {}.",
+            recipe.name
+        ),
+    )
+    .reply_markup(InlineKeyboardMarkup::new(vec![
+        vec![button(
+            "🔁 Riparti dallo Step 1",
+            format!("recipe:guided:{recipe_id}:0"),
+        )],
+        vec![button(
+            "📖 Procedimento completo",
+            format!("recipe:complete:{recipe_id}"),
+        )],
+        vec![button(
+            "📄 Dettaglio ricetta",
+            format!("recipe:detail:{recipe_id}"),
+        )],
+        vec![button("🏠 Menù principale", "menu:main")],
+    ]))
+    .await?;
     Ok(())
 }
 
@@ -2768,7 +2949,7 @@ async fn show_step_media(
             "⬅️ Indietro",
             format!("recipe:guided:{recipe_id}:{}", step_number - 1),
         ),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     bot.send_message(
         chat_id,
@@ -2820,7 +3001,7 @@ async fn show_media_item(
                 "⬅️ Indietro",
                 format!("recipe:guided:{recipe_id}:{}", step_number - 1),
             ),
-            button("🏠 Menu principale", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
         ]]))
         .await?;
     Ok(())
@@ -2854,7 +3035,7 @@ async fn show_recipe_name_search(
     keyboard.push(vec![button("🔎 Nuova ricerca", "recipe:search")]);
     keyboard.push(vec![
         button("⬅️ Indietro", "recipe:menu"),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     bot.send_message(chat_id, text)
         .reply_markup(InlineKeyboardMarkup::new(keyboard))
@@ -2862,12 +3043,97 @@ async fn show_recipe_name_search(
     Ok(())
 }
 
+async fn show_recipe_food_categories(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    requested_page: i64,
+    selected: &[FoodChoice],
+    current_filter: Option<&CategoryChoice>,
+) -> ResponseResult<()> {
+    let categories = list_recipe_food_categories(pool).await.unwrap_or_default();
+    let total = categories.len() as i64;
+    let pages = ((total + RECIPE_LIST_PAGE_SIZE - 1) / RECIPE_LIST_PAGE_SIZE).max(1);
+    let page = requested_page.clamp(0, pages - 1);
+    let start = (page * RECIPE_LIST_PAGE_SIZE) as usize;
+    let end = (start + RECIPE_LIST_PAGE_SIZE as usize).min(categories.len());
+    let page_categories = &categories[start..end];
+    let mut rows = page_categories
+        .iter()
+        .map(|category| {
+            let selected_mark = if current_filter.is_some_and(|value| value.id == category.id) {
+                " ✅"
+            } else {
+                ""
+            };
+            vec![button(
+                format!("{} {}{}", category.emoji, category.name, selected_mark),
+                format!("recipe:find:filter:{}", category.id),
+            )]
+        })
+        .collect::<Vec<_>>();
+    if pages > 1 {
+        let mut nav = Vec::new();
+        if page > 0 {
+            nav.push(button(
+                "⬅️ Pagina precedente",
+                format!("recipe:find:categories:{}", page - 1),
+            ));
+        }
+        nav.push(button(format!("{}/{}", page + 1, pages), "recipe:noop"));
+        if page + 1 < pages {
+            nav.push(button(
+                "Pagina successiva ➡️",
+                format!("recipe:find:categories:{}", page + 1),
+            ));
+        }
+        rows.push(nav);
+    }
+    if current_filter.is_some() {
+        rows.push(vec![button(
+            "🧹 Rimuovi filtro categoria",
+            "recipe:find:filter:clear",
+        )]);
+    }
+    rows.push(vec![
+        button("⬅️ Indietro", "recipe:find:return"),
+        button("🏠 Menù principale", "menu:main"),
+    ]);
+    let filter_line = current_filter
+        .map(|category| format!("Filtro attuale: {} {}", category.emoji, category.name))
+        .unwrap_or_else(|| "Nessun filtro categoria attivo.".to_string());
+    bot.send_message(
+        chat_id,
+        format!(
+            "🏷 Filtra ingredienti per categoria\n\n{filter_line}\n{}\nCategorie: {} · Pagina {}/{}\n\nLa categoria filtra gli alimenti restituiti quando scrivi il nome: non aggiunge direttamente un ingrediente.",
+            if selected.is_empty() {
+                "Nessun ingrediente selezionato.".to_string()
+            } else {
+                format!("{} ingredienti già selezionati.", selected.len())
+            },
+            total,
+            page + 1,
+            pages
+        ),
+    )
+    .reply_markup(InlineKeyboardMarkup::new(rows))
+    .await?;
+    Ok(())
+}
+
 async fn show_ingredient_finder(
     bot: &Bot,
     chat_id: ChatId,
     selected: &[FoodChoice],
+    category_filter: Option<&CategoryChoice>,
 ) -> ResponseResult<()> {
-    let mut text = "🥕 Cerca ricette per ingredienti\n\nLa ricerca usa OR: basta che una ricetta contenga almeno uno degli ingredienti scelti. I risultati vengono ordinati per numero di corrispondenze.".to_string();
+    let mut text = "🥕 Cerca ricette per ingredienti\n\nDigita direttamente in chat il nome di un alimento. Se vuoi restringere gli alimenti trovati, usa 🏷 Filtra categoria.\n\nLa ricerca ricette usa OR: basta che una ricetta contenga almeno uno degli ingredienti scelti. I risultati vengono ordinati per numero di corrispondenze.".to_string();
+    if let Some(category) = category_filter {
+        text.push_str(&format!(
+            "\n\n🏷 Filtro categoria attivo: {} {}",
+            category.emoji, category.name
+        ));
+    }
     if selected.is_empty() {
         text.push_str("\n\nNessun ingrediente selezionato.");
     } else {
@@ -2877,7 +3143,7 @@ async fn show_ingredient_finder(
         }
     }
     bot.send_message(chat_id, text)
-        .reply_markup(ingredient_finder_keyboard(selected))
+        .reply_markup(ingredient_finder_keyboard(selected, category_filter))
         .await?;
     Ok(())
 }
@@ -2939,7 +3205,7 @@ async fn show_ingredient_search_results(
     keyboard.push(vec![button("➕ Modifica ingredienti", "recipe:find")]);
     keyboard.push(vec![
         button("⬅️ Indietro", "recipe:menu"),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     bot.send_message(chat_id, text)
         .reply_markup(InlineKeyboardMarkup::new(keyboard))
@@ -3006,14 +3272,14 @@ async fn show_edit_menu(
         ]);
     }
     if recipe.owner_user_id == Some(user_id) {
-        rows.push(vec![button(
-            "🗄 Archivia",
-            format!("recipe:edit:archive:ask:{recipe_id}"),
-        )]);
+        rows.push(vec![
+            button("🗄 Archivia", format!("recipe:edit:archive:ask:{recipe_id}")),
+            button("🗑 Elimina", format!("recipe:edit:delete:ask:{recipe_id}")),
+        ]);
     }
     rows.push(vec![
         button("⬅️ Indietro", format!("recipe:detail:{recipe_id}")),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     bot.send_message(chat_id, format!("✏️ Modifica ricetta\n{}", recipe.name))
         .reply_markup(InlineKeyboardMarkup::new(rows))
@@ -3080,7 +3346,7 @@ async fn show_manage_ingredients(
     )]);
     rows.push(vec![
         button("⬅️ Indietro", format!("recipe:edit:menu:{recipe_id}")),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     bot.send_message(chat_id, text)
         .reply_markup(InlineKeyboardMarkup::new(rows))
@@ -3143,7 +3409,7 @@ async fn show_manage_steps(
     ]);
     rows.push(vec![
         button("⬅️ Indietro", format!("recipe:edit:menu:{recipe_id}")),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     bot.send_message(chat_id, text)
         .reply_markup(InlineKeyboardMarkup::new(rows))
@@ -3244,7 +3510,7 @@ async fn show_step_manage(
     )]);
     rows.push(vec![
         button("⬅️ Indietro", format!("recipe:edit:steps:{recipe_id}")),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     bot.send_message(chat_id, text)
         .reply_markup(InlineKeyboardMarkup::new(rows))
@@ -3292,7 +3558,7 @@ async fn show_edit_visibility(
         )],
         vec![
             button("⬅️ Indietro", format!("recipe:edit:menu:{recipe_id}")),
-            button("🏠 Menu principale", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
         ],
     ]))
     .await?;
@@ -3353,7 +3619,7 @@ async fn show_collaborators(
     }
     rows.push(vec![
         button("⬅️ Indietro", format!("recipe:edit:menu:{recipe_id}")),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     bot.send_message(chat_id, text)
         .reply_markup(InlineKeyboardMarkup::new(rows))
@@ -3382,7 +3648,7 @@ async fn show_invite_permission_choice(
                     "⬅️ Indietro",
                     format!("recipe:edit:collaborators:{recipe_id}"),
                 ),
-                button("🏠 Menu principale", "menu:main"),
+                button("🏠 Menù principale", "menu:main"),
             ],
         ]))
         .await?;
@@ -3476,7 +3742,7 @@ async fn show_pending_recipe_invites(
     }
     keyboard.push(vec![
         button("⬅️ Indietro", "recipe:menu"),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     bot.send_message(chat_id, text)
         .reply_markup(InlineKeyboardMarkup::new(keyboard))
@@ -3567,7 +3833,7 @@ async fn show_after_step(bot: &Bot, chat_id: ChatId, draft: &RecipeDraft) -> Res
         ],
         vec![
             button("❌ Annulla", "recipe:new:cancel"),
-            button("🏠 Menu principale", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
         ],
     ]))
     .await?;
@@ -3588,7 +3854,7 @@ async fn show_visibility_choice(
         vec![button("🎯 Spazio predefinito", "recipe:new:visibility:default")],
         vec![button("🌐 Tutti i miei spazi", "recipe:new:visibility:all")],
         vec![button("🎛 Scegli spazi", "recipe:new:visibility:choose")],
-        vec![button("⬅️ Indietro", "recipe:new:steps:done"), button("❌ Annulla", "recipe:new:cancel"), button("🏠 Menu principale", "menu:main")],
+        vec![button("⬅️ Indietro", "recipe:new:steps:done"), button("❌ Annulla", "recipe:new:cancel"), button("🏠 Menù principale", "menu:main")],
     ]))
     .await?;
     Ok(())
@@ -3669,7 +3935,7 @@ async fn show_space_picker(
     rows.push(vec![button("✅ Conferma spazi", done_callback)]);
     rows.push(vec![
         button("⬅️ Indietro", back_callback),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     bot.send_message(
         chat_id,
@@ -3706,7 +3972,7 @@ async fn show_food_search_results(
         .collect::<Vec<_>>();
     rows.push(vec![
         button("⬅️ Indietro", back_callback),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     bot.send_message(chat_id, text)
         .reply_markup(InlineKeyboardMarkup::new(rows))
@@ -3735,7 +4001,7 @@ async fn show_product_choice(
     }
     rows.push(vec![
         button("⬅️ Indietro", back_callback),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     bot.send_message(
         chat_id,
@@ -3746,31 +4012,122 @@ async fn show_product_choice(
     Ok(())
 }
 
-async fn ask_ingredient_quantity(
+async fn preferred_ingredient_unit(pool: &SqlitePool, food: &FoodChoice) -> Result<UnitChoice> {
+    if let Some(unit_id) = food.default_unit_id {
+        if let Some(unit) = unit_by_id(pool, unit_id).await? {
+            return Ok(unit);
+        }
+    }
+    list_units(pool)
+        .await?
+        .into_iter()
+        .next()
+        .context("Nessuna unità di misura disponibile")
+}
+
+async fn begin_new_ingredient_quantity(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    sessions: &RecipeSessionStore,
+    draft: RecipeDraft,
+    food: FoodChoice,
+    product: Option<ProductChoice>,
+) -> ResponseResult<()> {
+    let unit = match preferred_ingredient_unit(pool, &food).await {
+        Ok(unit) => unit,
+        Err(error) => {
+            bot.send_message(chat_id, format!("⚠️ {error}"))
+                .reply_markup(flow_keyboard("recipe:new:ingredients"))
+                .await?;
+            return Ok(());
+        }
+    };
+    sessions.set(
+        chat_id.0,
+        RecipeConversationState::IngredientQuantityReady {
+            draft,
+            food: food.clone(),
+            product: product.clone(),
+            unit: unit.clone(),
+        },
+    );
+    ask_ingredient_quantity_ready(
+        bot,
+        chat_id,
+        &food,
+        product.as_ref(),
+        &unit,
+        "recipe:new:quantity:changeunit",
+        "recipe:new:ingredients",
+    )
+    .await
+}
+
+async fn begin_edit_ingredient_quantity(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    sessions: &RecipeSessionStore,
+    recipe_id: i64,
+    food: FoodChoice,
+    product: Option<ProductChoice>,
+) -> ResponseResult<()> {
+    let unit = match preferred_ingredient_unit(pool, &food).await {
+        Ok(unit) => unit,
+        Err(error) => {
+            bot.send_message(chat_id, format!("⚠️ {error}"))
+                .reply_markup(back_home_keyboard(&format!(
+                    "recipe:edit:ingredients:{recipe_id}"
+                )))
+                .await?;
+            return Ok(());
+        }
+    };
+    sessions.set(
+        chat_id.0,
+        RecipeConversationState::EditIngredientQuantityReady {
+            recipe_id,
+            food: food.clone(),
+            product: product.clone(),
+            unit: unit.clone(),
+        },
+    );
+    ask_ingredient_quantity_ready(
+        bot,
+        chat_id,
+        &food,
+        product.as_ref(),
+        &unit,
+        &format!("recipe:edit:quantity:changeunit:{recipe_id}"),
+        &format!("recipe:edit:ingredients:{recipe_id}"),
+    )
+    .await
+}
+
+async fn ask_ingredient_quantity_ready(
     bot: &Bot,
     chat_id: ChatId,
     food: &FoodChoice,
     product: Option<&ProductChoice>,
+    unit: &UnitChoice,
+    change_unit_callback: &str,
     back_callback: &str,
 ) -> ResponseResult<()> {
     let product_text = product
         .map(|value| format!("\n🛒 {} · {}", value.brand, value.product_name))
         .unwrap_or_default();
-    let default_unit = match (&food.default_unit_name, &food.default_unit_symbol) {
-        (Some(name), Some(symbol)) => format!(
-            "\n📏 Unità suggerita: {} ({symbol})",
-            plural_unit_name(name, symbol)
-        ),
-        _ => String::new(),
-    };
     bot.send_message(
         chat_id,
         format!(
-            "⚖️ Quantità ingrediente\n\n🥕 {}{}{}\n\nScrivi la quantità necessaria nella ricetta.",
-            food.name, product_text, default_unit
+            "⚖️ Quantità ingrediente\n\n🥕 {}{}\n📏 Unità: {} ({})\n\nScrivi la quantità necessaria oppure cambia unità prima di inserirla.",
+            food.name,
+            product_text,
+            plural_unit_name(&unit.name, &unit.symbol),
+            unit.symbol
         ),
     )
-    .reply_markup(flow_keyboard(back_callback))
+    .reply_markup(ingredient_quantity_keyboard(change_unit_callback, back_callback))
     .await?;
     Ok(())
 }
@@ -3804,7 +4161,7 @@ async fn show_unit_choice(
     }
     rows.push(vec![
         button("⬅️ Indietro", back_callback),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     bot.send_message(
         chat_id,
@@ -4695,6 +5052,83 @@ async fn search_food_choices(
         .context("Impossibile cercare gli alimenti per la ricetta")
 }
 
+async fn search_food_choices_filtered(
+    pool: &SqlitePool,
+    query: &str,
+    limit: i64,
+    category_id: Option<i64>,
+) -> Result<Vec<FoodChoice>> {
+    let Some(category_id) = category_id else {
+        return search_food_choices(pool, query, limit).await;
+    };
+    let actor = identity::current_actor();
+    let user_id = actor.utente_id.context("Utente non disponibile")?;
+    let normalized = normalize_name(query);
+    let like_value = format!("%{normalized}%");
+    let visibility = if actor.view_all {
+        "a.catalogo_globale = 1 OR a.proprietario_utente_id = ? OR EXISTS (\
+            SELECT 1 FROM alimento_spazi asp JOIN membri_spazio ms ON ms.spazio_id = asp.spazio_id \
+            WHERE asp.alimento_id = a.id AND ms.utente_id = ?\
+         )"
+    } else {
+        "a.catalogo_globale = 1 OR a.proprietario_utente_id = ? OR EXISTS (\
+            SELECT 1 FROM alimento_spazi asp WHERE asp.alimento_id = a.id AND asp.spazio_id = ?\
+         )"
+    };
+    let sql = format!(
+        "SELECT DISTINCT a.id, a.nome AS name, a.unita_predefinita_id AS default_unit_id, \
+                um.nome AS default_unit_name, um.simbolo AS default_unit_symbol \
+         FROM alimenti a \
+         JOIN alimento_categorie ac ON ac.alimento_id = a.id \
+         LEFT JOIN unita_misura um ON um.id = a.unita_predefinita_id \
+         WHERE a.archiviato = 0 AND ac.categoria_id = ? AND ({visibility}) AND (\
+            a.nome_normalizzato LIKE ? OR EXISTS (SELECT 1 FROM alimento_alias aa WHERE aa.alimento_id = a.id AND aa.alias_normalizzato LIKE ?) \
+            OR EXISTS (SELECT 1 FROM prodotti_alimentari p WHERE p.alimento_id = a.id AND p.attivo = 1 \
+                AND (p.marca_normalizzata LIKE ? OR p.nome_commerciale_normalizzato LIKE ?))\
+         ) \
+         ORDER BY CASE WHEN a.nome_normalizzato = ? THEN 0 ELSE 1 END, a.nome COLLATE NOCASE, a.id LIMIT ?"
+    );
+    let mut q = sqlx::query_as::<_, FoodChoice>(&sql)
+        .bind(category_id)
+        .bind(user_id);
+    if actor.view_all {
+        q = q.bind(user_id);
+    } else {
+        q = q.bind(actor.spazio_id);
+    }
+    q.bind(&like_value)
+        .bind(&like_value)
+        .bind(&like_value)
+        .bind(&like_value)
+        .bind(&normalized)
+        .bind(limit)
+        .fetch_all(pool)
+        .await
+        .context("Impossibile cercare gli alimenti filtrati per categoria")
+}
+
+async fn list_recipe_food_categories(pool: &SqlitePool) -> Result<Vec<CategoryChoice>> {
+    sqlx::query_as::<_, CategoryChoice>(
+        "SELECT id, nome AS name, emoji FROM categorie_alimento WHERE attiva = 1 ORDER BY ordinamento, id",
+    )
+    .fetch_all(pool)
+    .await
+    .context("Impossibile leggere le categorie degli ingredienti")
+}
+
+async fn recipe_food_category_by_id(
+    pool: &SqlitePool,
+    category_id: i64,
+) -> Result<Option<CategoryChoice>> {
+    sqlx::query_as::<_, CategoryChoice>(
+        "SELECT id, nome AS name, emoji FROM categorie_alimento WHERE id = ? AND attiva = 1",
+    )
+    .bind(category_id)
+    .fetch_optional(pool)
+    .await
+    .context("Impossibile leggere la categoria ingrediente")
+}
+
 async fn visible_food_choice(pool: &SqlitePool, food_id: i64) -> Result<Option<FoodChoice>> {
     let actor = identity::current_actor();
     let Some(user_id) = actor.utente_id else {
@@ -5311,6 +5745,65 @@ async fn pending_invite_count(pool: &SqlitePool) -> Result<i64> {
     .context("Impossibile contare gli inviti ricetta")
 }
 
+async fn delete_recipe_permanently(pool: &SqlitePool, recipe_id: i64) -> Result<Vec<String>> {
+    let user_id = identity::current_actor()
+        .utente_id
+        .context("Utente non disponibile")?;
+    let owner: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM ricette WHERE id = ? AND proprietario_utente_id = ?)",
+    )
+    .bind(recipe_id)
+    .bind(user_id)
+    .fetch_one(pool)
+    .await
+    .context("Impossibile verificare il proprietario della ricetta")?;
+    if !owner {
+        bail!("Solo il proprietario può eliminare definitivamente la ricetta");
+    }
+    let paths = sqlx::query_scalar::<_, String>(
+        "SELECT m.percorso_file FROM ricetta_step_media m \
+         JOIN ricetta_step s ON s.id = m.ricetta_step_id WHERE s.ricetta_id = ?",
+    )
+    .bind(recipe_id)
+    .fetch_all(pool)
+    .await
+    .context("Impossibile leggere i media della ricetta")?;
+    let mut tx = pool
+        .begin()
+        .await
+        .context("Impossibile iniziare l'eliminazione")?;
+    sqlx::query("DELETE FROM inviti_risorsa WHERE tipo_risorsa = 'ricetta' AND risorsa_id = ?")
+        .bind(recipe_id)
+        .execute(&mut *tx)
+        .await
+        .context("Impossibile eliminare gli inviti della ricetta")?;
+    sqlx::query("DELETE FROM permessi_risorsa WHERE tipo_risorsa = 'ricetta' AND risorsa_id = ?")
+        .bind(recipe_id)
+        .execute(&mut *tx)
+        .await
+        .context("Impossibile eliminare i permessi della ricetta")?;
+    let deleted = sqlx::query("DELETE FROM ricette WHERE id = ? AND proprietario_utente_id = ?")
+        .bind(recipe_id)
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await
+        .context("Impossibile eliminare la ricetta")?;
+    if deleted.rows_affected() != 1 {
+        bail!("Ricetta non disponibile o non di tua proprietà");
+    }
+    tx.commit()
+        .await
+        .context("Impossibile completare l'eliminazione")?;
+    Ok(paths)
+}
+
+async fn cleanup_recipe_media_files(recipe_id: i64, paths: &[String]) {
+    for path in paths {
+        let _ = tokio::fs::remove_file(path).await;
+    }
+    let _ = tokio::fs::remove_dir_all(PathBuf::from(MEDIA_ROOT).join(recipe_id.to_string())).await;
+}
+
 async fn archive_recipe(pool: &SqlitePool, recipe_id: i64) -> Result<()> {
     let user_id = identity::current_actor()
         .utente_id
@@ -5335,8 +5828,7 @@ fn draft_from_state(state: Option<RecipeConversationState>) -> Option<RecipeDraf
         RecipeConversationState::NewServings { draft }
         | RecipeConversationState::IngredientHub { draft }
         | RecipeConversationState::IngredientSearch { draft }
-        | RecipeConversationState::IngredientQuantity { draft, .. }
-        | RecipeConversationState::IngredientUnit { draft, .. }
+        | RecipeConversationState::IngredientQuantityReady { draft, .. }
         | RecipeConversationState::StepText { draft }
         | RecipeConversationState::StepMedia { draft, .. }
         | RecipeConversationState::StepPhoto { draft, .. }
@@ -5360,8 +5852,30 @@ fn step_media_state(state: Option<RecipeConversationState>) -> Option<(RecipeDra
 fn selected_foods_from_state(state: Option<RecipeConversationState>) -> Option<Vec<FoodChoice>> {
     match state? {
         RecipeConversationState::IngredientFinder { selected }
-        | RecipeConversationState::IngredientFinderQuery { selected } => Some(selected),
+        | RecipeConversationState::IngredientFinderQuery { selected, .. } => Some(selected),
         _ => None,
+    }
+}
+
+fn ingredient_filter_from_state(state: Option<RecipeConversationState>) -> Option<CategoryChoice> {
+    match state? {
+        RecipeConversationState::IngredientFinderQuery {
+            category_filter, ..
+        } => category_filter,
+        _ => None,
+    }
+}
+
+fn ingredient_query_state(
+    state: Option<RecipeConversationState>,
+) -> (Vec<FoodChoice>, Option<CategoryChoice>) {
+    match state {
+        Some(RecipeConversationState::IngredientFinder { selected }) => (selected, None),
+        Some(RecipeConversationState::IngredientFinderQuery {
+            selected,
+            category_filter,
+        }) => (selected, category_filter),
+        _ => (Vec::new(), None),
     }
 }
 
@@ -5372,12 +5886,12 @@ fn recipe_menu_keyboard() -> InlineKeyboardMarkup {
             button("➕ Nuova ricetta", "recipe:new"),
         ],
         vec![
-            button("🔎 Cerca", "recipe:search"),
+            button("🔎 Cerca per nome", "recipe:search"),
             button("🥕 Cerca per ingredienti", "recipe:find"),
         ],
         vec![
             button("⬅️ Indietro", "food:menu"),
-            button("🏠 Menu principale", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
         ],
     ])
 }
@@ -5406,7 +5920,7 @@ fn draft_ingredients_keyboard(draft: &RecipeDraft) -> InlineKeyboardMarkup {
     }
     rows.push(vec![
         button("❌ Annulla", "recipe:new:cancel"),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     InlineKeyboardMarkup::new(rows)
 }
@@ -5420,7 +5934,7 @@ fn step_media_keyboard() -> InlineKeyboardMarkup {
         vec![button("✅ Completa step", "recipe:new:step:done")],
         vec![
             button("❌ Annulla", "recipe:new:cancel"),
-            button("🏠 Menu principale", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
         ],
     ])
 }
@@ -5431,7 +5945,7 @@ fn step_attachment_cancel_keyboard() -> InlineKeyboardMarkup {
             "❌ Annulla allegato",
             "recipe:new:step:attachment:cancel",
         )],
-        vec![button("🏠 Menu principale", "menu:main")],
+        vec![button("🏠 Menù principale", "menu:main")],
     ])
 }
 
@@ -5442,16 +5956,29 @@ fn recipe_confirmation_keyboard() -> InlineKeyboardMarkup {
             button("⬅️ Visibilità", "recipe:new:steps:done"),
             button("❌ Annulla", "recipe:new:cancel"),
         ],
-        vec![button("🏠 Menu principale", "menu:main")],
+        vec![button("🏠 Menù principale", "menu:main")],
     ])
 }
 
-fn ingredient_finder_keyboard(selected: &[FoodChoice]) -> InlineKeyboardMarkup {
-    let mut rows = vec![vec![button(
-        "➕ Aggiungi ingrediente",
-        "recipe:find:addmore",
-    )]];
+fn ingredient_finder_keyboard(
+    selected: &[FoodChoice],
+    category_filter: Option<&CategoryChoice>,
+) -> InlineKeyboardMarkup {
+    let category_label = category_filter
+        .map(|category| format!("🏷 {} {}", category.emoji, category.name))
+        .unwrap_or_else(|| "🏷 Filtra categoria".to_string());
+    let mut rows = vec![vec![button(category_label, "recipe:find:categories")]];
+    if category_filter.is_some() {
+        rows.push(vec![button(
+            "🧹 Rimuovi filtro categoria",
+            "recipe:find:filter:clear",
+        )]);
+    }
     if !selected.is_empty() {
+        rows.push(vec![button(
+            "➕ Aggiungi ingrediente",
+            "recipe:find:addmore",
+        )]);
         rows.push(vec![
             button("🔎 Cerca ricette", "recipe:find:run"),
             button("🧹 Azzera", "recipe:find:reset"),
@@ -5459,23 +5986,37 @@ fn ingredient_finder_keyboard(selected: &[FoodChoice]) -> InlineKeyboardMarkup {
     }
     rows.push(vec![
         button("⬅️ Indietro", "recipe:menu"),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     InlineKeyboardMarkup::new(rows)
+}
+
+fn ingredient_quantity_keyboard(
+    change_unit_callback: &str,
+    back_callback: &str,
+) -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![
+        vec![button("📏 Cambia unità", change_unit_callback)],
+        vec![
+            button("⬅️ Indietro", back_callback),
+            button("❌ Annulla", "recipe:new:cancel"),
+            button("🏠 Menù principale", "menu:main"),
+        ],
+    ])
 }
 
 fn flow_keyboard(back_callback: &str) -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![vec![
         button("⬅️ Indietro", back_callback),
         button("❌ Annulla", "recipe:new:cancel"),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]])
 }
 
 fn back_home_keyboard(back_callback: &str) -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![vec![
         button("⬅️ Indietro", back_callback),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]])
 }
 
@@ -6204,7 +6745,6 @@ mod tests {
             format!("recipe:edit:irem:{id}:{id}"),
             format!("recipe:edit:pg:{id}:{id}"),
             format!("recipe:edit:p:{id}:{id}"),
-            format!("recipe:edit:u:{id}:{id}"),
             format!("recipe:edit:iu:{id}:{id}"),
             format!("recipe:edit:ie:{id}:{id}"),
             format!("recipe:edit:im:{id}:{id}"),

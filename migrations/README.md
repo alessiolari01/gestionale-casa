@@ -91,7 +91,7 @@ partono dalla categoria `Altro`.
 ## Step 7.2B — fondazione permessi risorse
 
 `20260824201500_permessi_risorse_condivise.sql` introduce `inviti_risorsa` e
-`permessi_risorsa`. La struttura e trasversale e verra riusata da Ricette e
+`permessi_risorsa`. La struttura è trasversale e verrà riusata da Ricette e
 dalle future entita condivisibili.
 
 ## Step 7.2C — fondazioni Ricette
@@ -195,3 +195,15 @@ come fonte autorevole.
 Gli ingredienti continuano a salvare `alimento_id` e, opzionalmente,
 `prodotto_alimentare_id`; non viene salvato alcun `formato_id`, perché la
 scelta della confezione appartiene alla futura Lista spesa.
+
+## Step 7.2G — workflow, verifica, UI persistente ed export
+
+- `20260826024500_miglioramenti_workflow_admin.sql` — workflow admin, lettura `🆕`, archivio dei completati;
+- `20260826123000_miglioramenti_verifica_guidata.sql` — stato `fatto`, campi di verifica, piani/allegati di collaudo;
+- `20260826223000_miglioramenti_contesto_rifiniture.sql` — rifiniture contestuali e stati dei miglioramenti del relativo pacchetto;
+- `20260827003000_miglioramenti_ultimo_passaggio.sql` — UI a schermata singola, descrizioni lunghe, ricerca Ricette e ulteriori rifiniture;
+- `20260827014500_miglioramenti_finalissimi.sql` — ritorno contestuale modifica testo e contesto `💡 Migliora`;
+- `20260827104500_runtime_ui_persistente.sql` — `telegram_ui_state`, persistenza schermata online/offline e supporto shutdown controllato;
+- `20260827123000_esporta_miglioramenti_bot.sql` — chiusura amministrativa della funzione `📦 Esporta miglioramenti`.
+
+Queste migration sono state applicate al DB reale del Galaxy S9 entro il checkpoint 7.2G.6. **Non modificarle in-place.**

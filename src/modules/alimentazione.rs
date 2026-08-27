@@ -22,6 +22,8 @@ use teloxide::{
 use super::storico::{self, NewFieldChange, NewHistoryEvent};
 use crate::identity;
 
+type Bot = crate::context_bot::ContextBot;
+
 const FOOD_PAGE_SIZE: usize = 5;
 const FOOD_PAGE_FETCH: i64 = FOOD_PAGE_SIZE as i64 + 1;
 const FOOD_NAME_MAX_CHARS: usize = 120;
@@ -59,7 +61,6 @@ enum FoodConversationState {
     },
     FilterCategories {
         selected: Vec<i64>,
-        page: i64,
     },
     EditFoodName {
         food_id: i64,
@@ -214,12 +215,17 @@ struct NutritionRecord {
 pub async fn show_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
-        "🍽️ Alimentazione\n\n\
-         Gli alimenti che crei restano tuoi e puoi decidere in quali spazi \
-         renderli visibili.\n\n\
-         Gli alimenti condivisi da altre persone negli spazi comuni vengono \
-         letti direttamente dal catalogo centrale: usa 🔄 Aggiorna alimenti \
-         per rileggere subito le novità.",
+        "🍽️ Alimentazione\n\nScegli se gestire gli alimenti oppure le ricette.",
+    )
+    .reply_markup(alimentation_menu_keyboard())
+    .await?;
+    Ok(())
+}
+
+async fn show_foods_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
+    bot.send_message(
+        chat_id,
+        "🥕 Alimenti\n\nCrea, consulta, cerca e filtra gli alimenti disponibili.\n\nℹ️ I dati vengono riletti automaticamente ogni volta che apri o modifichi questa sezione.",
     )
     .reply_markup(food_menu_keyboard())
     .await?;
@@ -237,9 +243,14 @@ pub async fn handle_message(
 
     if let Some((command, args)) = parse_command(text) {
         match command {
-            "/alimenti" | "/alimentazione" => {
+            "/alimentazione" => {
                 sessions.clear_chat(chat_id);
                 show_menu(bot, msg.chat.id).await?;
+                return Ok(true);
+            }
+            "/alimenti" => {
+                sessions.clear_chat(chat_id);
+                show_foods_menu(bot, msg.chat.id).await?;
                 return Ok(true);
             }
             "/alimento_nuovo" => {
@@ -250,7 +261,7 @@ pub async fn handle_message(
                         "➕ Nuovo alimento\n\n\
                          Scrivi il nome dell'alimento.\n\
                          Esempio: Pollo\n\n\
-                         Usa /annulla per uscire.",
+                         Premi ❌ Annulla per uscire.",
                     )
                     .reply_markup(cancel_keyboard())
                     .await?;
@@ -259,9 +270,9 @@ pub async fn handle_message(
                 }
                 return Ok(true);
             }
-            "/alimenti_lista" | "/alimenti_aggiorna" => {
+            "/alimenti_lista" => {
                 sessions.clear_chat(chat_id);
-                send_food_list(bot, msg.chat.id, pool, command == "/alimenti_aggiorna", 0).await?;
+                send_food_list(bot, msg.chat.id, pool, 0).await?;
                 return Ok(true);
             }
             "/alimento_cerca" => {
@@ -271,7 +282,7 @@ pub async fn handle_message(
                         msg.chat.id,
                         "🔎 Cerca alimento\n\n\
                          Scrivi il nome o un alias da cercare.\n\n\
-                         Usa /annulla per uscire.",
+                         Premi ❌ Annulla per uscire.",
                     )
                     .reply_markup(cancel_keyboard())
                     .await?;
@@ -368,7 +379,7 @@ pub async fn handle_message(
         Some(FoodConversationState::PendingCategory { .. }) => {
             bot.send_message(
                 msg.chat.id,
-                "Usa i pulsanti per scegliere la categoria dell'alimento, oppure /annulla.",
+                "Usa i pulsanti per scegliere la categoria dell'alimento, oppure premi ❌ Annulla.",
             )
             .await?;
             Ok(true)
@@ -378,7 +389,7 @@ pub async fn handle_message(
         | Some(FoodConversationState::EditFoodSpaces { .. }) => {
             bot.send_message(
                 msg.chat.id,
-                "Usa i pulsanti della schermata corrente oppure /annulla.",
+                "Usa i pulsanti della schermata corrente oppure premi ❌ Annulla.",
             )
             .await?;
             Ok(true)
@@ -755,6 +766,11 @@ pub async fn handle_callback(
             show_menu(bot, chat_id).await?;
             Ok(true)
         }
+        "food:foods" => {
+            sessions.clear_chat(chat_id.0);
+            show_foods_menu(bot, chat_id).await?;
+            Ok(true)
+        }
         "food:new" => {
             sessions.set(chat_id.0, FoodConversationState::Name);
             bot.send_message(
@@ -762,7 +778,7 @@ pub async fn handle_callback(
                 "➕ Nuovo alimento\n\n\
                  Scrivi il nome dell'alimento.\n\
                  Esempio: Pollo\n\n\
-                 Usa /annulla per uscire.",
+                 Premi ❌ Annulla per uscire.",
             )
             .reply_markup(cancel_keyboard())
             .await?;
@@ -770,12 +786,7 @@ pub async fn handle_callback(
         }
         "food:list" => {
             sessions.clear_chat(chat_id.0);
-            send_food_list(bot, chat_id, pool, false, 0).await?;
-            Ok(true)
-        }
-        "food:refresh" => {
-            sessions.clear_chat(chat_id.0);
-            send_food_list(bot, chat_id, pool, true, 0).await?;
+            send_food_list(bot, chat_id, pool, 0).await?;
             Ok(true)
         }
         "food:search" => {
@@ -784,7 +795,7 @@ pub async fn handle_callback(
                 chat_id,
                 "🔎 Cerca alimento\n\n\
                  Scrivi il nome o un alias da cercare.\n\n\
-                 Usa /annulla per uscire.",
+                 Premi ❌ Annulla per uscire.",
             )
             .reply_markup(cancel_keyboard())
             .await?;
@@ -794,7 +805,7 @@ pub async fn handle_callback(
             sessions.set(chat_id.0, FoodConversationState::Search);
             bot.send_message(
                 chat_id,
-                "🔎 Cerca alimento\n\nScrivi il nome o un alias da cercare.\n\nUsa /annulla per uscire.",
+                "🔎 Cerca alimento\n\nScrivi il nome o un alias da cercare.\n\nPremi ❌ Annulla per uscire.",
             )
             .reply_markup(search_from_list_keyboard())
             .await?;
@@ -802,14 +813,13 @@ pub async fn handle_callback(
         }
         "food:filter" => {
             let selected = match sessions.get(chat_id.0) {
-                Some(FoodConversationState::FilterCategories { selected, .. }) => selected,
+                Some(FoodConversationState::FilterCategories { selected }) => selected,
                 _ => Vec::new(),
             };
             sessions.set(
                 chat_id.0,
                 FoodConversationState::FilterCategories {
                     selected: selected.clone(),
-                    page: 0,
                 },
             );
             send_food_filter_menu(bot, chat_id, pool, &selected).await?;
@@ -817,7 +827,7 @@ pub async fn handle_callback(
         }
         "food:filter:all" => {
             sessions.clear_chat(chat_id.0);
-            send_food_list(bot, chat_id, pool, false, 0).await?;
+            send_food_list(bot, chat_id, pool, 0).await?;
             Ok(true)
         }
         "food:filter:clear" => {
@@ -825,34 +835,26 @@ pub async fn handle_callback(
                 chat_id.0,
                 FoodConversationState::FilterCategories {
                     selected: Vec::new(),
-                    page: 0,
                 },
             );
             send_food_filter_menu(bot, chat_id, pool, &[]).await?;
             Ok(true)
         }
-        "food:filter:apply" | "food:filter:refresh" => {
-            let (selected, current_page) = match sessions.get(chat_id.0) {
-                Some(FoodConversationState::FilterCategories { selected, page }) => {
-                    (selected, page)
-                }
-                _ => (Vec::new(), 0),
+        "food:filter:apply" => {
+            let selected = match sessions.get(chat_id.0) {
+                Some(FoodConversationState::FilterCategories { selected }) => selected,
+                _ => Vec::new(),
             };
 
             if selected.is_empty() {
                 sessions.clear_chat(chat_id.0);
-                send_food_list(bot, chat_id, pool, false, 0).await?;
+                send_food_list(bot, chat_id, pool, 0).await?;
             } else {
-                let page = if data == "food:filter:apply" {
-                    0
-                } else {
-                    current_page
-                };
+                let page = 0;
                 sessions.set(
                     chat_id.0,
                     FoodConversationState::FilterCategories {
                         selected: selected.clone(),
-                        page,
                     },
                 );
                 send_filtered_food_list(bot, chat_id, pool, &selected, page).await?;
@@ -875,7 +877,7 @@ pub async fn handle_callback(
             match list_categories(pool).await {
                 Ok(categories) if categories.iter().any(|category| category.id == category_id) => {
                     let mut selected = match sessions.get(chat_id.0) {
-                        Some(FoodConversationState::FilterCategories { selected, .. }) => selected,
+                        Some(FoodConversationState::FilterCategories { selected }) => selected,
                         _ => Vec::new(),
                     };
 
@@ -891,7 +893,6 @@ pub async fn handle_callback(
                         chat_id.0,
                         FoodConversationState::FilterCategories {
                             selected: selected.clone(),
-                            page: 0,
                         },
                     );
                     send_food_filter_menu(bot, chat_id, pool, &selected).await?;
@@ -917,17 +918,7 @@ pub async fn handle_callback(
                 .and_then(parse_nonnegative_page);
             if let Some(page) = page {
                 sessions.clear_chat(chat_id.0);
-                send_food_list(bot, chat_id, pool, false, page).await?;
-            }
-            Ok(true)
-        }
-        _ if data.starts_with("food:list:refresh:") => {
-            let page = data
-                .strip_prefix("food:list:refresh:")
-                .and_then(parse_nonnegative_page);
-            if let Some(page) = page {
-                sessions.clear_chat(chat_id.0);
-                send_food_list(bot, chat_id, pool, true, page).await?;
+                send_food_list(bot, chat_id, pool, page).await?;
             }
             Ok(true)
         }
@@ -960,14 +951,13 @@ pub async fn handle_callback(
                 .and_then(parse_nonnegative_page);
             let state = sessions.get(chat_id.0);
             match (page, state) {
-                (Some(page), Some(FoodConversationState::FilterCategories { selected, .. }))
+                (Some(page), Some(FoodConversationState::FilterCategories { selected }))
                     if !selected.is_empty() =>
                 {
                     sessions.set(
                         chat_id.0,
                         FoodConversationState::FilterCategories {
                             selected: selected.clone(),
-                            page,
                         },
                     );
                     send_filtered_food_list(bot, chat_id, pool, &selected, page).await?;
@@ -1442,14 +1432,14 @@ pub async fn handle_callback(
         }
         "food:back" => {
             sessions.clear_chat(chat_id.0);
-            show_menu(bot, chat_id).await?;
+            show_foods_menu(bot, chat_id).await?;
             Ok(true)
         }
         "food:new:back:name" => {
             sessions.set(chat_id.0, FoodConversationState::Name);
             bot.send_message(
                 chat_id,
-                "➕ Nuovo alimento\n\nScrivi il nome dell'alimento.\nEsempio: Pollo\n\nUsa /annulla per uscire.",
+                "➕ Nuovo alimento\n\nScrivi il nome dell'alimento.\nEsempio: Pollo\n\nPremi ❌ Annulla per uscire.",
             )
             .reply_markup(cancel_keyboard())
             .await?;
@@ -2065,6 +2055,83 @@ pub async fn handle_callback(
             }
             Ok(true)
         }
+        _ if data.starts_with("food:format:delete:ask:") => {
+            let format_id = data
+                .strip_prefix("food:format:delete:ask:")
+                .and_then(parse_positive_id);
+            if let Some(format_id) = format_id {
+                match get_product_format(pool, format_id).await {
+                    Ok(Some(format)) => match get_product(pool, format.product_id).await {
+                        Ok(Some(product))
+                            if can_edit_food_current(pool, product.food_id)
+                                .await
+                                .unwrap_or(false) =>
+                        {
+                            bot.send_message(
+                                chat_id,
+                                format!(
+                                    "🗑 Elimina formato\n\n{} · {}\nConfezione: {} {}\n\nIl formato verrà rimosso dalle opzioni attive. Il prodotto commerciale resterà disponibile.",
+                                    product.brand,
+                                    product.product_name,
+                                    display_quantity(format.package_quantity),
+                                    format.package_unit_symbol,
+                                ),
+                            )
+                            .reply_markup(InlineKeyboardMarkup::new(vec![
+                                vec![button(
+                                    "🗑 Elimina formato",
+                                    format!("food:format:delete:yes:{format_id}"),
+                                )],
+                                vec![
+                                    button("❌ Annulla", format!("food:format:view:{format_id}")),
+                                    button("🏠 Menù principale", "menu:main"),
+                                ],
+                            ]))
+                            .await?;
+                        }
+                        Ok(Some(_)) => {
+                            bot.send_message(
+                                chat_id,
+                                "⚠️ Non hai il permesso di eliminare questo formato.",
+                            )
+                            .await?;
+                        }
+                        _ => {
+                            bot.send_message(chat_id, "Prodotto non disponibile.")
+                                .await?;
+                        }
+                    },
+                    Ok(None) => {
+                        bot.send_message(chat_id, "Formato non disponibile.")
+                            .await?;
+                    }
+                    Err(error) => {
+                        tracing::error!(?error, format_id, "Errore eliminazione formato");
+                        bot.send_message(chat_id, "⚠️ Non riesco a leggere questo formato.")
+                            .await?;
+                    }
+                }
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:format:delete:yes:") => {
+            let format_id = data
+                .strip_prefix("food:format:delete:yes:")
+                .and_then(parse_positive_id);
+            if let Some(format_id) = format_id {
+                match delete_product_format(pool, format_id).await {
+                    Ok(product_id) => {
+                        sessions.clear_chat(chat_id.0);
+                        bot.send_message(chat_id, "✅ Formato eliminato.").await?;
+                        send_product_formats(bot, chat_id, pool, product_id).await?;
+                    }
+                    Err(error) => {
+                        bot.send_message(chat_id, format!("⚠️ {error}")).await?;
+                    }
+                }
+            }
+            Ok(true)
+        }
         _ if data.starts_with("food:format:edit:quantity:") => {
             let format_id = data
                 .strip_prefix("food:format:edit:quantity:")
@@ -2641,7 +2708,7 @@ async fn start_unit_choice(
             chat_id,
             format!(
                 "⚠️ Il nome deve contenere da 1 a {FOOD_NAME_MAX_CHARS} caratteri.\n\
-                 Riprova oppure usa /annulla."
+                 Riprova oppure premi ❌ Annulla."
             ),
         )
         .reply_markup(cancel_keyboard())
@@ -2789,7 +2856,6 @@ async fn send_food_list(
     bot: &Bot,
     chat_id: ChatId,
     pool: &SqlitePool,
-    refreshed: bool,
     page: i64,
 ) -> ResponseResult<()> {
     let actor = identity::current_actor();
@@ -2813,11 +2879,7 @@ async fn send_food_list(
         }
     };
     if total == 0 {
-        let title = if refreshed {
-            "🔄 Alimenti aggiornati"
-        } else {
-            "📋 Alimenti"
-        };
+        let title = "📋 Alimenti";
         bot.send_message(
             chat_id,
             format!("{title}\n\nNessun alimento disponibile nella vista corrente."),
@@ -2831,11 +2893,7 @@ async fn send_food_list(
     match list_foods_with_offset(pool, None, None, FOOD_PAGE_FETCH, page_offset(page)).await {
         Ok(rows) => {
             let (foods, has_next) = split_food_page(rows);
-            let title = if refreshed {
-                "🔄 Alimenti aggiornati"
-            } else {
-                "📋 Alimenti"
-            };
+            let title = "📋 Alimenti";
             let current_user = actor.utente_id;
             let mut text = format!(
                 "{title} · {}\nPagina {}/{}\n\n",
@@ -2994,7 +3052,7 @@ async fn send_filtered_food_list(
     page: i64,
 ) -> ResponseResult<()> {
     if category_ids.is_empty() {
-        send_food_list(bot, chat_id, pool, false, 0).await?;
+        send_food_list(bot, chat_id, pool, 0).await?;
         return Ok(());
     }
 
@@ -4688,7 +4746,7 @@ async fn unit_keyboard_from_db(pool: &SqlitePool) -> Result<InlineKeyboardMarkup
     rows.push(vec![
         button("⬅️ Indietro", "food:new:back:name"),
         button("❌ Annulla", "food:cancel"),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     Ok(InlineKeyboardMarkup::new(rows))
 }
@@ -4720,7 +4778,7 @@ fn visibility_keyboard() -> InlineKeyboardMarkup {
         vec![
             button("⬅️ Indietro", "food:new:back:category"),
             button("❌ Annulla", "food:cancel"),
-            button("🏠 Menu principale", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
         ],
     ])
 }
@@ -4738,9 +4796,20 @@ fn space_selection_keyboard(spaces: &[SpaceRecord], selected: &[i64]) -> InlineK
     rows.push(vec![
         button("⬅️ Indietro", "food:new:back:visibility"),
         button("❌ Annulla", "food:cancel"),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     InlineKeyboardMarkup::new(rows)
+}
+
+fn alimentation_menu_keyboard() -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![
+        vec![button("🥕 Alimenti", "food:foods")],
+        vec![button("🍳 Ricette", "recipe:menu")],
+        vec![
+            button("⬅️ Indietro", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
+        ],
+    ])
 }
 
 fn food_menu_keyboard() -> InlineKeyboardMarkup {
@@ -4750,9 +4819,11 @@ fn food_menu_keyboard() -> InlineKeyboardMarkup {
             button("📋 Elenco alimenti", "food:list"),
             button("🔎 Cerca", "food:search"),
         ],
-        vec![button("🔄 Aggiorna alimenti", "food:refresh")],
-        vec![button("🍳 Ricette", "recipe:menu")],
-        vec![button("🏠 Menu principale", "menu:main")],
+        vec![button("🏷 Filtra", "food:filter")],
+        vec![
+            button("⬅️ Indietro", "food:menu"),
+            button("🏠 Menù principale", "menu:main"),
+        ],
     ])
 }
 
@@ -4769,13 +4840,10 @@ fn food_results_keyboard(
         button("➕ Nuovo alimento", "food:new"),
         button("🔎 Cerca", "food:search:list"),
     ]);
-    rows.push(vec![
-        button("🏷 Filtra", "food:filter"),
-        button("🔄 Aggiorna", format!("food:list:refresh:{page}")),
-    ]);
+    rows.push(vec![button("🏷 Filtra", "food:filter")]);
     rows.push(vec![
         button("⬅️ Indietro", "food:back"),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     InlineKeyboardMarkup::new(rows)
 }
@@ -4796,7 +4864,7 @@ fn food_search_results_keyboard(
     rows.push(vec![button("📋 Elenco alimenti", "food:list")]);
     rows.push(vec![
         button("⬅️ Indietro", "food:list"),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     InlineKeyboardMarkup::new(rows)
 }
@@ -4811,7 +4879,7 @@ fn food_created_keyboard(id: i64) -> InlineKeyboardMarkup {
         vec![button("➕ Altro alimento", "food:new")],
         vec![
             button("⬅️ Indietro", "food:back"),
-            button("🏠 Menu principale", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
         ],
     ])
 }
@@ -4841,7 +4909,7 @@ fn food_detail_keyboard(id: i64, can_edit: bool, can_manage: bool) -> InlineKeyb
     rows.push(vec![button("📋 Elenco alimenti", "food:list")]);
     rows.push(vec![
         button("⬅️ Indietro", "food:list"),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     InlineKeyboardMarkup::new(rows)
 }
@@ -4878,7 +4946,7 @@ fn category_filter_keyboard(
     rows.push(vec![button("📋 Tutti", "food:filter:all")]);
     rows.push(vec![
         button("⬅️ Indietro", "food:list"),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     InlineKeyboardMarkup::new(rows)
 }
@@ -4896,13 +4964,10 @@ fn food_filtered_results_keyboard(
         button("➕ Nuovo alimento", "food:new"),
         button("🔎 Cerca", "food:search:list"),
     ]);
-    rows.push(vec![
-        button("🏷 Cambia filtro", "food:filter"),
-        button("🔄 Aggiorna", "food:filter:refresh"),
-    ]);
+    rows.push(vec![button("🏷 Cambia filtro", "food:filter")]);
     rows.push(vec![
         button("⬅️ Indietro", "food:list"),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     InlineKeyboardMarkup::new(rows)
 }
@@ -4924,7 +4989,7 @@ fn category_before_save_keyboard(categories: &[CategoryRecord]) -> InlineKeyboar
     rows.push(vec![
         button("⬅️ Indietro", "food:new:back:unit"),
         button("❌ Annulla", "food:cancel"),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     InlineKeyboardMarkup::new(rows)
 }
@@ -4948,7 +5013,7 @@ fn category_assignment_keyboard(
     }
     rows.push(vec![
         button("⬅️ Indietro", format!("food:view:{food_id}")),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     InlineKeyboardMarkup::new(rows)
 }
@@ -4959,13 +5024,10 @@ fn empty_filtered_keyboard() -> InlineKeyboardMarkup {
             button("➕ Nuovo alimento", "food:new"),
             button("🔎 Cerca", "food:search:list"),
         ],
-        vec![
-            button("🏷 Cambia filtro", "food:filter"),
-            button("🔄 Aggiorna", "food:filter:refresh"),
-        ],
+        vec![button("🏷 Cambia filtro", "food:filter")],
         vec![
             button("⬅️ Indietro", "food:list"),
-            button("🏠 Menu principale", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
         ],
     ])
 }
@@ -4986,7 +5048,7 @@ fn food_edit_keyboard(food_id: i64, can_manage: bool) -> InlineKeyboardMarkup {
     }
     rows.push(vec![
         button("⬅️ Indietro", format!("food:view:{food_id}")),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     InlineKeyboardMarkup::new(rows)
 }
@@ -4995,7 +5057,7 @@ fn edit_text_keyboard(food_id: i64) -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![vec![
         button("⬅️ Indietro", format!("food:edit:menu:{food_id}")),
         button("❌ Annulla", format!("food:edit:cancel:{food_id}")),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]])
 }
 
@@ -5015,7 +5077,7 @@ fn edit_unit_keyboard(food_id: i64, units: &[UnitRecord]) -> InlineKeyboardMarku
     }
     rows.push(vec![
         button("⬅️ Indietro", format!("food:edit:menu:{food_id}")),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     InlineKeyboardMarkup::new(rows)
 }
@@ -5040,7 +5102,7 @@ fn edit_visibility_keyboard(food_id: i64) -> InlineKeyboardMarkup {
         )],
         vec![
             button("⬅️ Indietro", format!("food:edit:menu:{food_id}")),
-            button("🏠 Menu principale", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
         ],
     ])
 }
@@ -5065,7 +5127,7 @@ fn edit_space_selection_keyboard(
     rows.push(vec![
         button("⬅️ Indietro", format!("food:edit:visibility:{food_id}")),
         button("❌ Annulla", format!("food:edit:cancel:{food_id}")),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     InlineKeyboardMarkup::new(rows)
 }
@@ -5090,7 +5152,7 @@ fn food_permissions_keyboard(
     }
     rows.push(vec![
         button("⬅️ Indietro", format!("food:edit:menu:{food_id}")),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     InlineKeyboardMarkup::new(rows)
 }
@@ -5107,7 +5169,7 @@ fn permission_level_keyboard(food_id: i64, user_id: i64) -> InlineKeyboardMarkup
         )],
         vec![
             button("⬅️ Indietro", format!("food:permissions:{food_id}")),
-            button("🏠 Menu principale", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
         ],
     ])
 }
@@ -5118,7 +5180,7 @@ fn permission_invite_keyboard(invite_id: i64) -> InlineKeyboardMarkup {
             button("✅ Accetta", format!("food:invite:accept:{invite_id}")),
             button("❌ Rifiuta", format!("food:invite:decline:{invite_id}")),
         ],
-        vec![button("🏠 Menu principale", "menu:main")],
+        vec![button("🏠 Menù principale", "menu:main")],
     ])
 }
 
@@ -5126,7 +5188,7 @@ fn search_from_list_keyboard() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![vec![
         button("⬅️ Indietro", "food:list"),
         button("❌ Annulla", "food:cancel"),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]])
 }
 
@@ -5134,7 +5196,7 @@ fn cancel_keyboard() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![vec![
         button("⬅️ Indietro", "food:back"),
         button("❌ Annulla", "food:cancel"),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]])
 }
 
@@ -6050,6 +6112,59 @@ async fn update_product_format_ean(
     Ok(())
 }
 
+async fn delete_product_format(pool: &SqlitePool, format_id: i64) -> Result<i64> {
+    let format = get_product_format(pool, format_id)
+        .await?
+        .context("Formato non disponibile")?;
+    let product = get_product(pool, format.product_id)
+        .await?
+        .context("Prodotto non disponibile")?;
+    if !can_edit_food_current(pool, product.food_id).await? {
+        bail!("Non hai il permesso di eliminare questo formato");
+    }
+
+    let mut tx = pool
+        .begin()
+        .await
+        .context("Impossibile iniziare l'eliminazione del formato")?;
+    let affected = sqlx::query(
+        "UPDATE formati_prodotto_alimentare SET attivo = 0, \
+         aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
+         WHERE id = ? AND attivo = 1",
+    )
+    .bind(format_id)
+    .execute(&mut *tx)
+    .await
+    .context("Impossibile eliminare il formato")?
+    .rows_affected();
+    if affected != 1 {
+        bail!("Formato non disponibile");
+    }
+
+    let product_label = product_history_name(&product.brand, &product.product_name);
+    record_product_history_event(
+        &mut tx,
+        product.id,
+        &product_label,
+        "eliminazione",
+        "formato_prodotto",
+        &[NewFieldChange {
+            campo: "confezione",
+            tipo_valore: "testo",
+            valore_prima: Some(package_history_value(
+                format.package_quantity,
+                &format.package_unit_symbol,
+            )),
+            valore_dopo: None,
+        }],
+    )
+    .await?;
+    tx.commit()
+        .await
+        .context("Impossibile completare l'eliminazione del formato")?;
+    Ok(product.id)
+}
+
 async fn get_unit_by_id(pool: &SqlitePool, unit_id: i64) -> Result<Option<UnitRecord>> {
     sqlx::query_as::<_, UnitRecord>(
         "SELECT id, nome, simbolo FROM unita_misura WHERE id = ? AND attiva = 1",
@@ -6875,7 +6990,7 @@ fn food_products_keyboard(
     }
     rows.push(vec![
         button("⬅️ Indietro", format!("food:view:{food_id}")),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     InlineKeyboardMarkup::new(rows)
 }
@@ -6904,7 +7019,7 @@ fn product_detail_keyboard(product: &ProductRecord, can_edit: bool) -> InlineKey
     }
     rows.push(vec![
         button("⬅️ Indietro", format!("food:products:{}", product.food_id)),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     InlineKeyboardMarkup::new(rows)
 }
@@ -6924,7 +7039,7 @@ fn product_edit_keyboard(product_id: i64) -> InlineKeyboardMarkup {
         )],
         vec![
             button("⬅️ Indietro", format!("food:product:view:{product_id}")),
-            button("🏠 Menu principale", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
         ],
     ])
 }
@@ -6933,7 +7048,7 @@ fn product_edit_cancel_keyboard(product_id: i64) -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![vec![
         button("⬅️ Indietro", format!("food:product:edit:{product_id}")),
         button("❌ Annulla", format!("food:product:view:{product_id}")),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]])
 }
 
@@ -6964,7 +7079,7 @@ fn product_formats_keyboard(
     }
     rows.push(vec![
         button("⬅️ Indietro", format!("food:product:view:{}", product.id)),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     InlineKeyboardMarkup::new(rows)
 }
@@ -6978,7 +7093,7 @@ fn product_format_quantity_keyboard(product_id: i64) -> InlineKeyboardMarkup {
         vec![
             button("⬅️ Indietro", format!("food:product:formats:{product_id}")),
             button("❌ Annulla", format!("food:product:formats:{product_id}")),
-            button("🏠 Menu principale", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
         ],
     ])
 }
@@ -7000,7 +7115,7 @@ fn product_format_unit_keyboard(product_id: i64, units: &[UnitRecord]) -> Inline
     rows.push(vec![
         button("⬅️ Indietro", format!("food:product:formats:{product_id}")),
         button("❌ Annulla", format!("food:product:formats:{product_id}")),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     InlineKeyboardMarkup::new(rows)
 }
@@ -7009,7 +7124,7 @@ fn product_format_cancel_keyboard(product_id: i64) -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![vec![
         button("⬅️ Indietro", format!("food:product:formats:{product_id}")),
         button("❌ Annulla", format!("food:product:view:{product_id}")),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]])
 }
 
@@ -7030,10 +7145,14 @@ fn product_format_detail_keyboard(
                 format!("food:format:edit:ean:{format_id}"),
             ),
         ]);
+        rows.push(vec![button(
+            "🗑 Elimina formato",
+            format!("food:format:delete:ask:{format_id}"),
+        )]);
     }
     rows.push(vec![
         button("⬅️ Indietro", format!("food:product:formats:{product_id}")),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     InlineKeyboardMarkup::new(rows)
 }
@@ -7047,7 +7166,7 @@ fn product_format_edit_quantity_keyboard(format_id: i64) -> InlineKeyboardMarkup
         vec![
             button("⬅️ Indietro", format!("food:format:view:{format_id}")),
             button("❌ Annulla", format!("food:format:view:{format_id}")),
-            button("🏠 Menu principale", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
         ],
     ])
 }
@@ -7069,7 +7188,7 @@ fn product_format_edit_unit_keyboard(format_id: i64, units: &[UnitRecord]) -> In
     rows.push(vec![
         button("⬅️ Indietro", format!("food:format:view:{format_id}")),
         button("❌ Annulla", format!("food:format:view:{format_id}")),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     InlineKeyboardMarkup::new(rows)
 }
@@ -7078,7 +7197,7 @@ fn product_cancel_keyboard(food_id: i64) -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![vec![
         button("⬅️ Indietro", format!("food:products:{food_id}")),
         button("❌ Annulla", format!("food:product:cancel:{food_id}")),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]])
 }
 
@@ -7091,7 +7210,7 @@ fn product_quantity_keyboard(food_id: i64) -> InlineKeyboardMarkup {
         vec![
             button("⬅️ Indietro", format!("food:products:{food_id}")),
             button("❌ Annulla", format!("food:product:cancel:{food_id}")),
-            button("🏠 Menu principale", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
         ],
     ])
 }
@@ -7113,7 +7232,7 @@ fn product_unit_keyboard(food_id: i64, units: &[UnitRecord]) -> InlineKeyboardMa
     rows.push(vec![
         button("⬅️ Indietro", format!("food:product:quantity:{food_id}")),
         button("❌ Annulla", format!("food:product:cancel:{food_id}")),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     InlineKeyboardMarkup::new(rows)
 }
@@ -7142,7 +7261,7 @@ fn product_nutrition_keyboard(
     }
     rows.push(vec![
         button("⬅️ Indietro", format!("food:product:view:{product_id}")),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     InlineKeyboardMarkup::new(rows)
 }
@@ -7164,7 +7283,7 @@ fn nutrition_confirmation_keyboard(product_id: i64) -> InlineKeyboardMarkup {
                 "❌ Annulla",
                 format!("food:product:nutrition:cancel:{product_id}"),
             ),
-            button("🏠 Menu principale", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
         ],
     ])
 }
@@ -7187,7 +7306,7 @@ fn nutrition_input_keyboard(product_id: i64) -> InlineKeyboardMarkup {
                 format!("food:product:nutrition:{product_id}"),
             ),
             button("❌ Annulla", format!("food:product:nutrition:{product_id}")),
-            button("🏠 Menu principale", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
         ],
     ])
 }

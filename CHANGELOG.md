@@ -1,3 +1,85 @@
+# Changelog
+
+## Step 7.2G.1 → 7.2G.6 — rifinitura Miglioramenti e UI Telegram — 2026-08-26/27
+
+Blocco finale costruito sulla baseline `54dc4dd`, completato e collaudato sul Galaxy S9 prima del commit conclusivo del ramo.
+
+### Miglioramenti e verifica guidata
+
+- reintrodotto lo stato attivo `fatto` come “implementato, da collaudare” e separata la verifica manuale dall'archiviazione;
+- stato verificato visualizzato come `🧪 Verificato · da archiviare`;
+- modifica del testo/allegati dopo il completamento riporta il miglioramento a `da_fare`;
+- piani di verifica e allegati di collaudo salvabili;
+- liste Miglioramenti paginate a 5 elementi;
+- ritorno al contesto/lista/pagina corretto da dettaglio, modifica e annullamento;
+- eliminazione globale degli scartati con doppia conferma;
+- descrizioni lunghe e multimessaggio, con lettura paginata;
+- utente normale limitato ai propri suggerimenti; azioni di stato/verifica/archivio riservate agli admin.
+
+### `💡 Migliora` contestuale
+
+- pulsante disponibile trasversalmente e, quando possibile, sulla stessa riga di `🏠 Menù principale`;
+- contesto con sezione reale, titolo schermata e buffer delle azioni recenti;
+- azioni ordinate dalla più recente alla meno recente e descritte con il vero nome del pulsante e la destinazione;
+- annullamento della creazione contestuale ritorna alla schermata di origine;
+- corretta la grafia globale `Menù principale`.
+
+### UI Telegram a schermata singola e runtime
+
+- introdotto `src/context_bot.rs` come wrapper Telegram per gestione schermata attiva, contesto Migliora e media temporanei;
+- persistenza del `message_id` attivo in `telegram_ui_state` per sopravvivere ai riavvii;
+- vecchie schermate e callback obsolete non devono produrre azioni duplicate;
+- input testuali/media temporanei vengono rimossi dopo acquisizione riuscita nei flussi supportati;
+- startup e shutdown amministrativi mantengono una sola schermata coerente online/offline;
+- aggiunto `⏻ Spegni gestionale` in Amministrazione con seconda conferma e shutdown Teloxide controllato;
+- dipendenze dei dispatcher raggruppate in `Arc<HandlerDependencies>`, eliminando definitivamente il limite di arità `dptree::Injectable` emerso con l'aggiunta dello shutdown controller.
+
+### Alimentazione e Ricette
+
+- eliminazione dei formati di vendita oltre a modifica quantità/unità;
+- scelta dell'unità dell'ingrediente prima dell'inserimento quantità, con possibilità di cambiarla rispetto al default dell'alimento;
+- menu Alimentazione riorganizzato in `Alimenti` e `Ricette`;
+- Ricette: eliminazione definitiva oltre all'archiviazione;
+- conclusione della procedura guidata con messaggio esplicito di ricetta terminata;
+- ricerca Ricette separata per categorie e per ingredienti;
+- nella ricerca per ingredienti la categoria è un **filtro**, non un ingrediente alternativo;
+- primo ingrediente digitabile direttamente senza passaggio ridondante “Aggiungi ingrediente”.
+
+### Export amministrativo Miglioramenti
+
+- aggiunto `scripts/export_miglioramenti.py`, parte del repository;
+- `📦 Esporta miglioramenti` disponibile all'amministratore principale;
+- ZIP con snapshot del working tree, stato Git, attivi/archivio, schema e allegati;
+- esclusi `.env`, database reale, `.git`, `target`, backup e runtime non necessario;
+- invio diretto del documento via Telegram;
+- copia temporanea mantenuta finché l'admin non preme `✅ Ho scaricato il file`;
+- cancellazione locale verificata realmente sull'S9;
+- pulizia automatica degli export orfani più vecchi di 24 ore.
+
+### Migration append-only del blocco
+
+- `20260826123000_miglioramenti_verifica_guidata.sql`;
+- `20260826223000_miglioramenti_contesto_rifiniture.sql`;
+- `20260827003000_miglioramenti_ultimo_passaggio.sql`;
+- `20260827014500_miglioramenti_finalissimi.sql`;
+- `20260827104500_runtime_ui_persistente.sql`;
+- `20260827123000_esporta_miglioramenti_bot.sql`.
+
+Tutte le migration sopra risultano applicate al DB reale e sono **immutabili**.
+
+### Verifica finale
+
+- `cargo fmt --all -- --check`: OK;
+- `cargo check --locked`: OK;
+- `cargo clippy --all-targets --locked -- -D warnings`: OK;
+- `cargo test --locked -- --test-threads=1`: **153/153**;
+- export #8 collaudato end-to-end dal bot e archiviato;
+- attivi rimasti: #7 gestione account (backlog separato) e #9 Zona test/aggiornamenti quasi zero-downtime (futuro infrastrutturale).
+
+> Il warning di future incompatibility di `proc-macro-error2 v2.0.1` proviene da una dipendenza esterna e non ha impedito check, Clippy o test.
+
+---
+
 ## Decisione Step 7.2G — workflow Miglioramenti semplificato — 2026-08-26
 
 - consolidato `6449f70` come checkpoint funzionale verificato dello Step 7.2F.1;

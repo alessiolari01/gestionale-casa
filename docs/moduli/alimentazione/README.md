@@ -1,19 +1,19 @@
 # Modulo Alimentazione
 
-**Stato complessivo: IN SVILUPPO — Alimentazione operativa, Ricette Step 7.2F.1 da verificare su S9.**
+**Stato complessivo: IN SVILUPPO — Alimenti e Ricette OPERATIVI/VERIFICATI; Profili, turni, planner e spesa ancora previsti.**
 
-Alimentazione raccoglie alimenti, ricette, profili, turni/routine,
-pianificazione dei pasti e lista della spesa. È progettato per uso personale e
-condiviso.
+Alimentazione raccoglie alimenti, prodotti commerciali, ricette, profili, turni/routine, pianificazione dei pasti e lista della spesa. È progettato per uso personale e condiviso.
 
 ## Stato delle aree
 
 | Area | Stato |
 |---|---|
 | Fondazioni utenti/spazi | OPERATIVE |
-| Alimenti e unità | OPERATIVI |
-| Ricette | STEP 7.2F.1 — implementate nel pacchetto, da verificare |
-| Profili e porzioni | PREVISTO |
+| Alimenti e unità | OPERATIVI/VERIFICATI |
+| Categorie e filtri | OPERATIVI/VERIFICATI |
+| Prodotti commerciali, formati e nutrizione | OPERATIVI/VERIFICATI |
+| Ricette e procedimento guidato | OPERATIVI/VERIFICATI |
+| Profili e porzioni | PREVISTO — prossimo sviluppo |
 | Turni/routine | PREVISTO |
 | Planner pasti | PREVISTO |
 | Lista della spesa | PREVISTO |
@@ -21,7 +21,79 @@ condiviso.
 | Export PDF/immagine | PREVISTO |
 | Google Calendar/email | PREVISTO — Step 7.3 |
 | Dispensa/scorte | RIMANDATO |
-| Sostituzioni ingredienti | RIMANDATO |
+| Sostituzioni automatiche ingredienti | RIMANDATO |
+
+## Navigazione Telegram corrente
+
+```text
+🍽️ Alimentazione
+├── 🥕 Alimenti
+└── 🍳 Ricette
+```
+
+Le sezioni interne mantengono elenco/creazione/ricerca/filtri pertinenti. Le liste operative usano massimo 5 elementi per pagina e rispettano la UI a schermata singola.
+
+## Alimenti
+
+- catalogo base globale;
+- alimenti personali/condivisi;
+- proprietà separata dalla visibilità;
+- categorie molti-a-molti con filtri OR;
+- unità strutturate e nomi descrittivi (`grammi (g)`, `chilogrammi (kg)`, ecc.);
+- ricerca anche tramite marca/nome dei prodotti commerciali, restituendo l'alimento generico;
+- collaboratori tramite permessi espliciti;
+- nessun ID tecnico mostrato in Telegram.
+
+## Prodotti commerciali e formati
+
+Gerarchia:
+
+```text
+Alimento
+└── Prodotto commerciale
+    ├── Formato 1
+    ├── Formato 2
+    └── Formato N
+```
+
+Marca, nome commerciale e nutrizione appartengono al prodotto. Quantità, unità e barcode/EAN appartengono al formato acquistabile. I formati possono essere modificati o eliminati.
+
+La Ricetta può fissare il prodotto commerciale ma **non il formato**: la scelta della confezione appartiene alla futura Lista spesa.
+
+## Ricette
+
+Operative con:
+
+- proprietà/visibilità/permessi;
+- ingredienti strutturati;
+- prodotto commerciale opzionale;
+- unità proposta dal default alimento ma modificabile prima della quantità;
+- procedimento a step con foto/video;
+- vista completa e procedura guidata;
+- ricerca per nome, categoria e ingredienti;
+- categoria come filtro nella ricerca ingredienti;
+- archiviazione ed eliminazione definitiva.
+
+Dettagli: [Ricette](ricette.md).
+
+## Prossima sequenza
+
+1. [Profili e porzioni](profili-e-porzioni.md);
+2. override quantità/esclusione per ingrediente;
+3. [Turni e routine](turni-e-routine.md);
+4. [Pianificazione e lista della spesa](pianificazione-e-spesa.md);
+5. [Reminder](reminder.md) ed [Export](export.md).
+
+## Principi
+
+- alimento ≠ prodotto commerciale ≠ formato ≠ scorta;
+- ricette con ingredienti strutturati, non testo libero;
+- profilo alimentare separato e opzionalmente collegabile a un account;
+- quantità base personalizzabili per profilo/persona;
+- pianificazione basata su date reali e partecipanti;
+- lista della spesa derivabile dalla pianificazione;
+- condivisione e copia seguono le regole generali Step 7;
+- ogni modifica condivisa deve poter essere attribuita all'autore nello storico.
 
 ## Documentazione
 
@@ -33,51 +105,3 @@ condiviso.
 - [Reminder](reminder.md)
 - [Export](export.md)
 - [Google Calendar ed email](integrazioni-google-email.md)
-
-## Principi
-
-- alimento ≠ prodotto acquistabile ≠ scorta;
-- ricette con ingredienti strutturati, non solo testo libero;
-- quantità base personalizzabili per profilo/persona;
-- un profilo può esistere senza account;
-- pianificazione basata su date reali e partecipanti;
-- turni/routine influenzano orari, luogo del pasto e preparazione;
-- lista della spesa derivabile dalla pianificazione;
-- condivisione e copia seguono le regole generali Step 7;
-- ogni modifica condivisa deve essere attribuita all'autore nello storico.
-
-## Relazione con altri moduli
-
-### Acquisti
-
-Alimentazione produce bisogni (`serve 1,5 kg di pasta`). Acquisti si occupa di
-prodotti, confezioni, negozi e prezzi.
-
-### Spese
-
-Un acquisto reale può generare una spesa personale/condivisa senza trasformare
-il planner in un modulo contabile.
-
-### Viaggi
-
-Un viaggio può in futuro usare pasti, liste e spese ma resta un dominio
-separato.
-
-## Prodotto commerciale e formato di vendita — Step 7.2F.0
-
-Il prodotto commerciale non coincide più con una singola confezione. La
-gerarchia di riferimento è:
-
-```text
-🥛 Formaggio spalmabile
-└── 🛒 Philadelphia · Original
-    ├── 📦 175 g
-    ├── 📦 200 g
-    └── 📦 350 g
-```
-
-Marca, nome commerciale e valori nutrizionali appartengono al prodotto.
-Quantità confezione, unità e barcode/EAN appartengono invece al formato.
-Ricette e ingredienti specifici continuano a referenziare
-`prodotto_alimentare_id`; la scelta del formato è demandata alla Lista spesa e
-ai futuri prezzi/disponibilità.

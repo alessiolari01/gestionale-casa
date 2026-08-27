@@ -220,7 +220,7 @@ percorso, ma il default e' `sqlite://data/db/gestionale.db`.
 **Perche'**: SQLite resta adatto a un gestionale personale su un solo host,
 mentre SQLx fornisce pool asincrono, gestione delle migration e una API Rust
 chiara senza introdurre un server database separato. La serie 0.8 viene usata
-intenzionalmente nello Step 4 per non imporre subito i requisiti toolchain piu'
+intenzionalmente nello Step 4 per non imporre subito i requisiti toolchain più
 nuovi della serie 0.9 sul Galaxy S9. Dependabot potra' proporre upgrade futuri
 senza applicarli automaticamente.
 
@@ -623,10 +623,9 @@ esempio `/casa_casa_principale`, `/stanza_camera` e
 `/contenitore_scatola_attrezzi`; in caso di omonimia viene aggiunto contesto
 umano progressivo senza esporre gli ID del database.
 
-### Accesso futuro al bot
+### Accesso applicativo al bot — operativo
 
-La whitelist Telegram statica non rappresenta il modello applicativo
-definitivo. Il modello previsto è:
+La whitelist Telegram statica non rappresenta il modello applicativo ordinario. Dal 7.2E il modello operativo è:
 
 ```text
 account Telegram sconosciuto
@@ -638,10 +637,7 @@ approvazione/rifiuto dell'amministratore principale
 utente normale autorizzato
 ```
 
-Un account non autorizzato deve poter utilizzare soltanto il flusso di
-richiesta accesso. L'approvazione all'uso del gestionale resta distinta dalla
-membership negli spazi e dai permessi sulle risorse. La whitelist configurata
-può restare come bootstrap o meccanismo di emergenza.
+Un account non autorizzato può utilizzare soltanto il flusso di richiesta accesso. L'approvazione all'uso del gestionale resta distinta dalla membership negli spazi e dai permessi sulle risorse. `ALLOWED_CHAT_IDS` resta bootstrap/emergenza e non sostituisce il controllo applicativo nel database.
 
 
 ## Ricette operative e procedimento guidato — Step 7.2F.1
@@ -655,3 +651,63 @@ Il procedimento è normalizzato in `ricetta_step` e `ricetta_step_media`: ogni
 step ha ordine e testo e può possedere più foto/video. Gli stessi dati vengono
 letti sia in modalità completa sia in modalità guidata. La colonna legacy
 `ricette.procedimento` resta solo per compatibilità storica.
+
+## UI Telegram a schermata singola — Step 7.2G.2→G.5
+
+`src/context_bot.rs` incapsula il bot Teloxide e centralizza quattro responsabilità trasversali:
+
+1. schermata UI principale attiva per chat;
+2. media/messaggi temporanei da ripulire alla navigazione;
+3. contesto del pulsante `💡 Migliora`;
+4. protezione contro callback appartenenti a schermate obsolete.
+
+La schermata attiva non è soltanto memoria di processo: `telegram_ui_state` salva il `message_id` corrente in SQLite. In questo modo, dopo uno shutdown controllato, resta una sola schermata offline e al successivo avvio il runtime può rimuoverla/sostituirla invece di accumulare vecchie tastiere.
+
+Il modello è intenzionalmente frontend-only: lo stato persistito serve a mantenere coerente la chat Telegram e non sostituisce sessioni o dati di dominio.
+
+## Dipendenze degli handler Telegram
+
+Le dipendenze runtime sono raccolte in:
+
+```text
+Arc<HandlerDependencies>
+```
+
+Gli endpoint DPTree ricevono quindi solo `Bot`, update (`Message`/`CallbackQuery`) e il contenitore condiviso. Questa scelta elimina la dipendenza dall'arità massima delle implementazioni `Injectable` e permette di aggiungere nuovi servizi senza ampliare continuamente la firma degli handler.
+
+## Shutdown controllato
+
+`ShutdownController` conserva il `ShutdownToken` del dispatcher Teloxide. L'amministratore principale può avviare lo spegnimento da `🛠️ Amministrazione → ⏻ Spegni gestionale`, sempre con seconda conferma. Lo stesso percorso finale del `Ctrl+C` produce la schermata offline amministrativa e chiude il dispatcher in modo ordinato.
+
+Non devono essere avviate contemporaneamente due istanze long-polling con lo stesso token Telegram.
+
+## Miglioramenti come backlog verificabile
+
+Il ciclo corrente è:
+
+```text
+utente normale: da_approvare → da_fare → fatto → verificato → archivio
+admin:                         da_fare → fatto → verificato → archivio
+```
+
+`verificato` è rappresentato dai campi di verifica (`verifica_esito`, `verificato_il`, ecc.), non da un quinto valore del `CHECK` di `stato`. Uno stato `fatto` resta attivo finché l'amministratore non collauda e archivia esplicitamente.
+
+Modificare testo o allegati dopo il completamento invalida il collaudo e riporta l'elemento a `da_fare`. I piani di verifica possono includere istruzioni e callback Telegram per aprire direttamente la schermata da collaudare.
+
+## Export amministrativo dei Miglioramenti — Step 7.2G.6
+
+`scripts/export_miglioramenti.py` genera uno snapshot sanitizzato del repository e del dominio Miglioramenti. Il file viene creato sotto:
+
+```text
+data/tmp/miglioramenti_export/
+```
+
+L'export è in sola lettura rispetto a repository e database. Include working tree non committato, manifest Git, attivi, archivio, schema e allegati utili; esclude segreti, DB completo, `.git`, `target`, backup e runtime non necessario.
+
+Il bot invia lo ZIP come documento. La copia locale viene eliminata soltanto dopo conferma esplicita `✅ Ho scaricato il file`; gli export orfani vengono ripuliti automaticamente dopo 24 ore. Il backend verifica sia il ruolo di amministratore principale sia che il percorso da eliminare appartenga alla directory export prevista.
+
+## Evoluzione infrastrutturale futura — Zona test
+
+È documentata ma **non va implementata ora** una futura `🧪 Zona test` riservata all'amministratore principale. L'obiettivo è mantenere la versione stabile disponibile mentre una candidata viene compilata e testata, quindi promuoverla con backup, breve shutdown, migration, restart e rollback.
+
+La futura architettura non dovrà avviare due long-poller con lo stesso token. Dovrà invece usare un solo ingresso Telegram che instrada l'admin verso stabile/candidata e, per test mutativi o migration, un database di test/snapshot separato. Per modifiche strutturali importanti è preferita la strategia `expand → migrate → contract`.
