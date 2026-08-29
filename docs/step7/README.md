@@ -1,10 +1,7 @@
 # Step 7 — Fondazioni condivise e Alimentazione
 
-**Stato: IN SVILUPPO — fondazioni, Alimenti, Ricette e rifinitura UI operative; prossimo blocco Profili e porzioni.**
-
-**Branch di lavoro:** `step-7-alimentazione`.
-
-La baseline committata precedente al blocco finale Miglioramenti è `54dc4dd`. Il working tree 7.2G.1→7.2G.6 è stato verificato sull'S9 con **153/153 test** e deve essere committato insieme alla chiusura documentale.
+**Stato: IN SVILUPPO — Step 7.2H chiuso; prossimo blocco Porzioni e override.**
+**Branch:** `step-7-alimentazione`.
 
 ## Macro-fasi
 
@@ -12,59 +9,38 @@ La baseline committata precedente al blocco finale Miglioramenti è `54dc4dd`. I
 |---|---|---|
 | 7.0 — Specifica e organizzazione | VERIFICATO | decisioni, confini e piano migration |
 | 7.1 — Fondazioni condivise | OPERATIVE | utenti, spazi, membership, ruoli, vista multi-spazio, audit, accesso DB-driven |
-| 7.2 — Alimentazione completa | IN SVILUPPO | Alimenti e Ricette operative; profili/turni/planner/spesa da fare |
-| 7.3 — Integrazioni | PREVISTO | Google Calendar, email, inviti/rifiniture multiutente |
+| 7.2 — Alimentazione | IN SVILUPPO | Alimenti/Ricette/Profili operativi; Porzioni/Turni/Planner/Spesa da completare |
+| 7.3 — Integrazioni | PREVISTO | Google Calendar, email e altre integrazioni |
 
-## Fondazioni operative
+## Stato 7.2
 
-- identità interna separata da Telegram;
-- spazi personali/condivisi e membership;
-- spazio predefinito + vista tutti i propri spazi;
-- ruoli globali `utente/admin` separati dai ruoli nello spazio;
-- proprietà delle risorse separata da visibilità e permessi;
-- audit con autore/origine;
-- accesso tramite richiesta approvata dall'amministratore principale;
-- `ALLOWED_CHAT_IDS` soltanto bootstrap/emergenza.
+Completati:
 
-## 7.2 — stato Alimentazione
-
-### Completato
-
-- Alimenti e unità;
-- catalogo base, categorie e compatibilità alimentare;
-- ownership/condivisione/permessi;
+- Alimenti/unità/categorie/catalogo/compatibilità;
 - prodotti commerciali, formati e nutrizione;
-- Ricette con ingredienti strutturati;
-- procedimento guidato con foto/video;
-- ricerca nome/categoria/ingredienti;
-- rifiniture UX raccolte e chiuse tramite Miglioramenti.
+- Ricette con ingredienti strutturati e procedimento guidato;
+- accesso approvato e amministrazione;
+- workflow Miglioramenti, verifica guidata e export;
+- Profili alimentari separati dagli account;
+- condivisione Profili tramite Spazi;
+- membri degli Spazi e inviti privati Telegram;
+- export progetto sanitizzato;
+- gestione non distruttiva dell'input inatteso.
 
-### Prossimo ordine
+## Step 7.2H — chiuso
 
-1. profili alimentari separati dagli account Telegram;
-2. porzioni personali e override ingrediente;
+Dettaglio: [step-7.2h-profili-spazi-inviti.md](step-7.2h-profili-spazi-inviti.md).
+
+Le verifiche che richiedono un secondo account restano differite e documentate nell'handoff; non bloccano il prossimo sviluppo.
+
+## Prossimo ordine
+
+1. Porzioni personali per Profilo;
+2. override quantità/esclusione ingrediente;
 3. turni/routine;
-4. planner pasti;
+4. planner versionato;
 5. lista della spesa;
 6. reminder/export e integrazioni residue.
-
-## Step 7.2G — Miglioramenti e UI Telegram
-
-Chiuso funzionalmente con:
-
-- workflow `da_approvare → da_fare → fatto → verificato → archivio`;
-- paginazione e ritorno contestuale;
-- descrizioni lunghe/multimessaggio;
-- `💡 Migliora` globale con sezione e azioni recenti;
-- UI a schermata singola;
-- stato UI persistente tra riavvii;
-- spegnimento amministrativo;
-- export ZIP del backlog direttamente dal bot.
-
-Restano fuori dalla chiusura:
-
-- #7 gestione distruttiva/reset account;
-- #9 Zona test / aggiornamenti quasi zero-downtime, funzione infrastrutturale futura.
 
 ## Documenti Step 7
 
@@ -73,8 +49,9 @@ Restano fuori dalla chiusura:
 - [Modello di condivisione](modello-condivisione.md)
 - [Storico e audit](storico-e-audit.md)
 - [Database e migrazioni](database-e-migrazioni.md)
+- [Chiusura 7.2H](step-7.2h-profili-spazi-inviti.md)
 - [Alimentazione](../moduli/alimentazione/README.md)
 
 ## Regola di stato
 
-Usare sempre una delle etichette: **PREVISTO**, **IN SVILUPPO**, **IMPLEMENTATO**, **VERIFICATO**, **RIMANDATO**. Le verifiche runtime devono riferirsi a prove realmente eseguite sull'S9.
+Usare: **PREVISTO**, **IN SVILUPPO**, **IMPLEMENTATO**, **VERIFICATO**, **RIMANDATO**. Non dichiarare un test live eseguito se richiede un account/condizione non disponibile.

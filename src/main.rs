@@ -13,7 +13,8 @@ mod resource_permissions;
 
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
+    time::Duration,
 };
 
 use anyhow::Context;
@@ -21,7 +22,7 @@ use config::Config;
 use modules::{
     alimentazione::FoodSessionStore, contenitori::ContainerSessionStore, foto::PhotoSessionStore,
     luoghi::LocationSessionStore, miglioramenti::ImprovementSessionStore, oggetti::SessionStore,
-    ricette::RecipeSessionStore,
+    profili_alimentari::ProfileSessionStore, ricette::RecipeSessionStore,
 };
 use sqlx::SqlitePool;
 use teloxide::{
@@ -104,10 +105,40 @@ struct HandlerDependencies {
     container_sessions: ContainerSessionStore,
     photo_sessions: PhotoSessionStore,
     food_sessions: FoodSessionStore,
+    profile_sessions: ProfileSessionStore,
     improvement_sessions: ImprovementSessionStore,
     recipe_sessions: RecipeSessionStore,
     identity_sessions: IdentitySessionStore,
     shutdown_controller: ShutdownController,
+}
+
+static UNEXPECTED_INPUT_COUNTS: OnceLock<Mutex<HashMap<i64, u8>>> = OnceLock::new();
+
+fn unexpected_input_count(chat_id: i64) -> u8 {
+    let counts = UNEXPECTED_INPUT_COUNTS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut counts = counts
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let count = counts.entry(chat_id).or_insert(0);
+    *count = count.saturating_add(1);
+    *count
+}
+
+fn reset_unexpected_input_count(chat_id: i64) {
+    if let Some(counts) = UNEXPECTED_INPUT_COUNTS.get() {
+        counts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&chat_id);
+    }
+}
+
+fn unexpected_input_notice(attempts: u8) -> &'static str {
+    if attempts >= 3 {
+        "ℹ️ Non sto aspettando un input in questo momento. La schermata corrente resta invariata: usa i pulsanti già visibili.\n\nIn caso di problemi puoi usare /start per tornare al Menù principale."
+    } else {
+        "ℹ️ Non sto aspettando un input in questo momento. La schermata corrente resta invariata: usa i pulsanti già visibili."
+    }
 }
 
 const TOKIO_THREAD_STACK_SIZE: usize = 8 * 1024 * 1024;
@@ -158,6 +189,29 @@ async fn async_main() -> anyhow::Result<()> {
         guided_recipes = database_status.guided_recipes_present,
         "Database SQLite pronto"
     );
+
+    match modules::spazi_membri::cleanup_inactive_invites(&pool).await {
+        Ok(removed) if removed > 0 => {
+            tracing::info!(removed, "Inviti spazio non più validi eliminati all'avvio");
+        }
+        Ok(_) => {}
+        Err(error) => {
+            tracing::warn!(?error, "Pulizia inviti spazio non riuscita all'avvio");
+        }
+    }
+
+    let invite_cleanup_pool = pool.clone();
+    let _invite_cleanup_task = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            if let Err(error) =
+                modules::spazi_membri::cleanup_inactive_invites(&invite_cleanup_pool).await
+            {
+                tracing::debug!(?error, "Pulizia periodica inviti spazio non riuscita");
+            }
+        }
+    });
 
     match modules::miglioramenti::cleanup_old_exports().await {
         Ok(removed) if removed > 0 => {
@@ -210,6 +264,7 @@ async fn async_main() -> anyhow::Result<()> {
     let container_sessions = ContainerSessionStore::new();
     let photo_sessions = PhotoSessionStore::new();
     let food_sessions = FoodSessionStore::new();
+    let profile_sessions = ProfileSessionStore::new();
     let improvement_sessions = ImprovementSessionStore::new();
     let recipe_sessions = RecipeSessionStore::new();
     let identity_sessions = IdentitySessionStore::new();
@@ -222,6 +277,7 @@ async fn async_main() -> anyhow::Result<()> {
         container_sessions,
         photo_sessions,
         food_sessions,
+        profile_sessions,
         improvement_sessions,
         recipe_sessions,
         identity_sessions,
@@ -282,6 +338,7 @@ async fn handle_message(
     let container_sessions = deps.container_sessions.clone();
     let photo_sessions = deps.photo_sessions.clone();
     let food_sessions = deps.food_sessions.clone();
+    let profile_sessions = deps.profile_sessions.clone();
     let improvement_sessions = deps.improvement_sessions.clone();
     let recipe_sessions = deps.recipe_sessions.clone();
     let identity_sessions = deps.identity_sessions.clone();
@@ -347,6 +404,7 @@ async fn handle_message(
             container_sessions,
             photo_sessions,
             food_sessions,
+            profile_sessions,
             improvement_sessions,
             recipe_sessions,
             identity_sessions,
@@ -374,12 +432,27 @@ async fn handle_authorized_message(
     container_sessions: ContainerSessionStore,
     photo_sessions: PhotoSessionStore,
     food_sessions: FoodSessionStore,
+    profile_sessions: ProfileSessionStore,
     improvement_sessions: ImprovementSessionStore,
     recipe_sessions: RecipeSessionStore,
     identity_sessions: IdentitySessionStore,
     actor: identity::AuditActor,
 ) -> ResponseResult<()> {
     let chat_id = msg.chat.id.0;
+
+    // Gli inviti spazi possono attendere un orario digitato manualmente.
+    // La gestione è attiva solo quando il relativo picker ha aperto l'attesa.
+    if modules::spazi_membri::handle_message(&bot, &msg, &pool, &actor).await? {
+        sessions.clear_chat(chat_id);
+        location_sessions.clear_chat(chat_id);
+        container_sessions.clear_chat(chat_id);
+        photo_sessions.clear_chat(chat_id);
+        food_sessions.clear_chat(chat_id);
+        improvement_sessions.clear_chat(chat_id);
+        recipe_sessions.clear_chat(chat_id);
+        identity_sessions.clear_chat(chat_id);
+        return respond(());
+    }
 
     // Miglioramenti gestisce anche foto/screenshot, quindi ha priorità sul
     // modulo Foto quando esiste una bozza attiva.
@@ -448,6 +521,9 @@ async fn handle_authorized_message(
     };
 
     let command = first_command(text);
+    if command.is_some() {
+        reset_unexpected_input_count(chat_id);
+    }
 
     // Qualunque altro comando esplicito interrompe un'eventuale attesa foto:
     // evita che una foto inviata piu' tardi venga associata per errore.
@@ -509,6 +585,19 @@ async fn handle_authorized_message(
         }
     }
 
+    if modules::profili_alimentari::handle_message(&bot, &msg, &pool, &profile_sessions, text)
+        .await?
+    {
+        sessions.clear_chat(chat_id);
+        location_sessions.clear_chat(chat_id);
+        container_sessions.clear_chat(chat_id);
+        photo_sessions.clear_chat(chat_id);
+        food_sessions.clear_chat(chat_id);
+        improvement_sessions.clear_chat(chat_id);
+        recipe_sessions.clear_chat(chat_id);
+        identity_sessions.clear_chat(chat_id);
+        return respond(());
+    }
     // Box intenzionale: Alimentazione ha un future molto grande; tenerlo
     // fuori dal frame del dispatcher riduce la pressione sullo stack.
     if Box::pin(modules::alimentazione::handle_message(
@@ -558,7 +647,22 @@ async fn handle_authorized_message(
             photo_sessions.clear_chat(chat_id);
             improvement_sessions.clear_chat(chat_id);
             recipe_sessions.clear_chat(chat_id);
-            send_main_menu(&bot, msg.chat.id, &pool, &actor).await?;
+            let payload = command_args(text);
+            let start_payload_handled = if payload.is_empty() {
+                false
+            } else {
+                modules::spazi_membri::handle_start_payload(
+                    &bot,
+                    msg.chat.id,
+                    &pool,
+                    &actor,
+                    payload,
+                )
+                .await?
+            };
+            if !start_payload_handled {
+                send_main_menu(&bot, msg.chat.id, &pool, &actor).await?;
+            }
         }
         Some("/ping") => {
             bot.send_message(msg.chat.id, "Pong! Gestionale Casa è online.")
@@ -692,11 +796,11 @@ async fn handle_authorized_message(
             .await?;
         }
         None => {
-            bot.send_message(
-                msg.chat.id,
-                "Non c'è un'operazione attiva. Usa i pulsanti del menu.",
-            )
-            .await?;
+            let attempts = unexpected_input_count(chat_id);
+            let notice = bot
+                .send_message_untracked(msg.chat.id, unexpected_input_notice(attempts))
+                .await?;
+            bot.mark_transient_message(msg.chat.id.0, notice.id);
         }
     }
 
@@ -715,6 +819,7 @@ async fn handle_callback(
     let container_sessions = deps.container_sessions.clone();
     let photo_sessions = deps.photo_sessions.clone();
     let food_sessions = deps.food_sessions.clone();
+    let profile_sessions = deps.profile_sessions.clone();
     let improvement_sessions = deps.improvement_sessions.clone();
     let recipe_sessions = deps.recipe_sessions.clone();
     let identity_sessions = deps.identity_sessions.clone();
@@ -728,6 +833,10 @@ async fn handle_callback(
     let Some(data) = q.data.clone() else {
         return respond(());
     };
+    reset_unexpected_input_count(chat_id.0);
+    if !data.starts_with("space-members:") {
+        modules::spazi_membri::clear_pending_input(chat_id.0);
+    }
     let actor = match identity::lookup_telegram_actor(&pool, chat_id.0, &q.from).await {
         Ok(Some(actor)) => actor,
         Ok(None) if auth::is_authorized(chat_id.0, &config.allowed_chat_ids) => {
@@ -789,6 +898,7 @@ async fn handle_callback(
             container_sessions,
             photo_sessions,
             food_sessions,
+            profile_sessions,
             improvement_sessions,
             recipe_sessions,
             identity_sessions,
@@ -810,6 +920,7 @@ async fn handle_authorized_callback(
     container_sessions: ContainerSessionStore,
     photo_sessions: PhotoSessionStore,
     food_sessions: FoodSessionStore,
+    profile_sessions: ProfileSessionStore,
     improvement_sessions: ImprovementSessionStore,
     recipe_sessions: RecipeSessionStore,
     identity_sessions: IdentitySessionStore,
@@ -819,7 +930,8 @@ async fn handle_authorized_callback(
 ) -> ResponseResult<()> {
     let data = data.as_str();
 
-    if data.starts_with("improve:")
+    if (data.starts_with("improve:")
+        || (data == "menu:main" && improvement_sessions.has_active(chat_id.0)))
         && modules::miglioramenti::handle_callback(
             &bot,
             chat_id,
@@ -839,6 +951,27 @@ async fn handle_authorized_callback(
         return respond(());
     }
 
+    if (data.starts_with("foodprof:")
+        || (data == "menu:main" && profile_sessions.has_active(chat_id.0)))
+        && modules::profili_alimentari::handle_callback(
+            &bot,
+            chat_id,
+            &pool,
+            &profile_sessions,
+            data,
+        )
+        .await?
+    {
+        sessions.clear_chat(chat_id.0);
+        location_sessions.clear_chat(chat_id.0);
+        container_sessions.clear_chat(chat_id.0);
+        photo_sessions.clear_chat(chat_id.0);
+        food_sessions.clear_chat(chat_id.0);
+        improvement_sessions.clear_chat(chat_id.0);
+        recipe_sessions.clear_chat(chat_id.0);
+        identity_sessions.clear_chat(chat_id.0);
+        return respond(());
+    }
     if data.starts_with("recipe:") || (data == "menu:main" && recipe_sessions.has_active(chat_id.0))
     {
         if Box::pin(modules::ricette::handle_callback(
@@ -885,6 +1018,21 @@ async fn handle_authorized_callback(
         }
     } else {
         food_sessions.clear_chat(chat_id.0);
+    }
+
+    if data.starts_with("space-members:")
+        && modules::spazi_membri::handle_callback(&bot, chat_id, &pool, &actor, data).await?
+    {
+        sessions.clear_chat(chat_id.0);
+        location_sessions.clear_chat(chat_id.0);
+        container_sessions.clear_chat(chat_id.0);
+        photo_sessions.clear_chat(chat_id.0);
+        food_sessions.clear_chat(chat_id.0);
+        profile_sessions.clear_chat(chat_id.0);
+        improvement_sessions.clear_chat(chat_id.0);
+        recipe_sessions.clear_chat(chat_id.0);
+        identity_sessions.clear_chat(chat_id.0);
+        return respond(());
     }
 
     match data {
@@ -940,18 +1088,33 @@ async fn handle_authorized_callback(
             if let Err(error) = identity::set_view_all(&pool, &actor, true).await {
                 bot.send_message(chat_id, format!("⚠️ {error}")).await?;
             } else {
-                bot.send_message(chat_id, "🌐 Ora visualizzi tutti i tuoi spazi.")
-                    .reply_markup(profile_keyboard())
-                    .await?;
+                if let Ok(message) = bot
+                    .send_message_untracked(chat_id, "🌐 Ora visualizzi tutti i tuoi spazi.")
+                    .await
+                {
+                    bot.mark_transient_message(chat_id.0, message.id);
+                }
+                let mut refreshed_actor = actor.clone();
+                refreshed_actor.view_all = true;
+                send_spaces(&bot, chat_id, &pool, &refreshed_actor).await?;
             }
         }
         "identity:view:default" => {
             if let Err(error) = identity::set_view_all(&pool, &actor, false).await {
                 bot.send_message(chat_id, format!("⚠️ {error}")).await?;
             } else {
-                bot.send_message(chat_id, "🎯 Ora visualizzi solo lo spazio predefinito.")
-                    .reply_markup(profile_keyboard())
-                    .await?;
+                if let Ok(message) = bot
+                    .send_message_untracked(
+                        chat_id,
+                        "🎯 Ora visualizzi solo lo spazio predefinito.",
+                    )
+                    .await
+                {
+                    bot.mark_transient_message(chat_id.0, message.id);
+                }
+                let mut refreshed_actor = actor.clone();
+                refreshed_actor.view_all = false;
+                send_spaces(&bot, chat_id, &pool, &refreshed_actor).await?;
             }
         }
         _ if data.starts_with("identity:space:") => {
@@ -966,12 +1129,19 @@ async fn handle_authorized_callback(
                 Some(space_id) => {
                     match identity::switch_active_space(&pool, &actor, space_id).await {
                         Ok(space) => {
-                            bot.send_message(
-                                chat_id,
-                                format!("⭐ Spazio predefinito: {}", space.nome),
-                            )
-                            .reply_markup(profile_keyboard())
-                            .await?;
+                            if let Ok(message) = bot
+                                .send_message_untracked(
+                                    chat_id,
+                                    format!("✅ Spazio predefinito impostato: {}", space.nome),
+                                )
+                                .await
+                            {
+                                bot.mark_transient_message(chat_id.0, message.id);
+                            }
+                            let mut refreshed_actor = actor.clone();
+                            refreshed_actor.spazio_id = space.id;
+                            refreshed_actor.spazio_nome_snapshot = space.nome;
+                            send_spaces(&bot, chat_id, &pool, &refreshed_actor).await?;
                         }
                         Err(error) => {
                             tracing::warn!(?error, space_id, "Cambio spazio non riuscito");
@@ -1243,6 +1413,15 @@ async fn send_spaces(
                     "identity:space:rename".to_string(),
                 ),
             ]);
+            if modules::spazi_membri::active_space_supports_members(pool, actor)
+                .await
+                .unwrap_or(false)
+            {
+                rows.push(vec![InlineKeyboardButton::callback(
+                    "👥 Membri dello spazio".to_string(),
+                    "space-members:menu".to_string(),
+                )]);
+            }
             rows.push(vec![InlineKeyboardButton::callback(
                 "👤 Profilo".to_string(),
                 "identity:profile".to_string(),
@@ -1552,6 +1731,11 @@ async fn handle_unapproved_message(
     user: &User,
 ) -> ResponseResult<()> {
     let command = msg.text().and_then(first_command);
+    let invite_link_opened = command == Some("/start")
+        && msg
+            .text()
+            .map(command_args)
+            .is_some_and(|payload| payload.starts_with("spazio_"));
     if command == Some("/richiedi_accesso") {
         match access_control::submit_request(pool, msg.chat.id.0, user).await {
             Ok(request_id) => {
@@ -1570,6 +1754,13 @@ async fn handle_unapproved_message(
         }
     } else {
         send_access_gate(bot, msg.chat.id, pool, user).await?;
+        if invite_link_opened {
+            bot.send_message(
+                msg.chat.id,
+                "🔗 Hai aperto un invito a uno spazio. Prima devi ottenere l'accesso al gestionale; dopo l'approvazione riapri lo stesso link per accettare l'invito.",
+            )
+            .await?;
+        }
     }
     Ok(())
 }
@@ -2011,16 +2202,10 @@ fn admin_back_keyboard() -> InlineKeyboardMarkup {
 }
 
 fn profile_keyboard() -> InlineKeyboardMarkup {
-    InlineKeyboardMarkup::new(vec![
-        vec![InlineKeyboardButton::callback(
-            "👥 Spazi".to_string(),
-            "identity:spaces".to_string(),
-        )],
-        vec![InlineKeyboardButton::callback(
-            "🏠 Menù principale".to_string(),
-            "menu:main".to_string(),
-        )],
-    ])
+    InlineKeyboardMarkup::new(vec![vec![
+        InlineKeyboardButton::callback("⬅️ Indietro".to_string(), "identity:spaces".to_string()),
+        InlineKeyboardButton::callback("🏠 Menù principale".to_string(), "menu:main".to_string()),
+    ]])
 }
 
 fn space_flow_keyboard() -> InlineKeyboardMarkup {
@@ -2055,10 +2240,18 @@ fn first_command(text: &str) -> Option<&str> {
 
 #[cfg(test)]
 mod runtime_tests {
-    use super::TOKIO_THREAD_STACK_SIZE;
+    use super::{unexpected_input_notice, TOKIO_THREAD_STACK_SIZE};
 
     #[test]
     fn runtime_tokio_mantiene_stack_rinforzato() {
         const { assert!(TOKIO_THREAD_STACK_SIZE >= 8 * 1024 * 1024) };
+    }
+
+    #[test]
+    fn input_inatteso_ripetuto_suggerisce_start_solo_dal_terzo_tentativo() {
+        assert!(!unexpected_input_notice(1).contains("/start"));
+        assert!(!unexpected_input_notice(2).contains("/start"));
+        assert!(unexpected_input_notice(3).contains("/start"));
+        assert!(unexpected_input_notice(9).contains("/start"));
     }
 }

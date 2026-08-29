@@ -442,6 +442,18 @@ impl ContextBot {
         )
     }
 
+    pub fn send_message_untracked<C, T>(
+        &self,
+        chat_id: C,
+        text: T,
+    ) -> <TelegramBot as Requester>::SendMessage
+    where
+        C: Into<Recipient>,
+        T: Into<String>,
+    {
+        self.inner.send_message(chat_id, text)
+    }
+
     pub fn send_document_untracked<C>(
         &self,
         chat_id: C,
@@ -739,6 +751,9 @@ fn infer_section(text: &str, screen: &str, current_section: Option<&str>) -> Str
         Some("Amministrazione")
     } else if normalized.contains("migliorament") {
         Some("Miglioramenti")
+    } else if normalized.contains("profili alimentari") || normalized.contains("profilo alimentare")
+    {
+        Some("Alimentazione › Profili alimentari")
     } else if normalized.contains("ricett") {
         Some("Alimentazione › Ricette")
     } else if normalized.contains("aliment") || normalized.contains("alimenti") {
@@ -763,6 +778,8 @@ fn infer_section(text: &str, screen: &str, current_section: Option<&str>) -> Str
 fn section_for_callback(data: &str) -> Option<String> {
     let section = if data == "menu:main" || data == "menu:soon" {
         "Menù principale"
+    } else if data.starts_with("foodprof:") {
+        "Alimentazione › Profili alimentari"
     } else if data.starts_with("recipe:") {
         "Alimentazione › Ricette"
     } else if data.starts_with("food:") {
@@ -784,7 +801,7 @@ fn section_for_callback(data: &str) -> Option<String> {
         || data.starts_with("oggetti:")
     {
         "Oggetti"
-    } else if data.starts_with("identity:") {
+    } else if data.starts_with("identity:") || data.starts_with("space-members:") {
         "Profilo e spazi"
     } else if data.starts_with("admin:") || data.starts_with("system:") {
         "Amministrazione"
@@ -809,6 +826,7 @@ fn section_for_command(text: &str) -> Option<String> {
         | "/miglioramenti_da_fare"
         | "/miglioramenti_fatti"
         | "/miglioramenti_archivio" => "Miglioramenti",
+        "/profili_alimentari" => "Alimentazione › Profili alimentari",
         "/alimentazione" | "/alimenti" => "Alimentazione › Alimenti",
         "/ricette" | "/ricetta_nuova" | "/ricette_ingredienti" => "Alimentazione › Ricette",
         "/oggetti" | "/oggetto_nuovo" => "Oggetti",
@@ -862,6 +880,8 @@ fn humanize_command(text: &str) -> String {
 fn humanize_callback(data: &str) -> String {
     let label = if data == "menu:main" {
         "hai premuto «🏠 Menù principale»"
+    } else if data.starts_with("foodprof:") {
+        "hai usato un pulsante della sezione Profili alimentari"
     } else if data.starts_with("food:") {
         "hai usato un pulsante della sezione Alimenti"
     } else if data.starts_with("recipe:") {
@@ -876,6 +896,8 @@ fn humanize_callback(data: &str) -> String {
         "hai usato un pulsante dei Luoghi"
     } else if data.starts_with("object:") || data.starts_with("oggetto:") {
         "hai usato un pulsante degli Oggetti"
+    } else if data.starts_with("space-members:") {
+        "hai usato un pulsante della gestione membri dello spazio"
     } else if data.starts_with("admin:") {
         "hai usato un pulsante dell'Amministrazione"
     } else {

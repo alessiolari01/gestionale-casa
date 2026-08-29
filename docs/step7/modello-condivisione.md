@@ -1,3 +1,10 @@
+<!-- MODELLO_CONDIVISIONE_7_2H_CHIUSO -->
+# Aggiornamento 7.2H — modello operativo
+
+Lo **Spazio** è il contesto di collaborazione. Non coincide con un'abitazione fisica. Un account autorizzato al bot non diventa automaticamente membro di uno Spazio: la membership è esplicita e può essere acquisita tramite invito privato.
+
+I Profili alimentari sono risorse personali/condivisibili tramite Spazi e non possono essere globali. La condivisione mantiene una sola risorsa viva; una futura duplicazione/personalizzazione deve produrre una copia indipendente con provenienza.
+
 # Modello di condivisione
 
 **Stato: IN SVILUPPO.** Utenti, membership, spazio attivo e isolamento dei
@@ -176,3 +183,81 @@ Prima dell'implementazione di ogni delete vanno definiti:
 
 Lo storico deve rimanere interpretabile anche dopo uscita/rimozione di un
 utente.
+
+<!-- STEP7_2H0_PROFILI_FONDAZIONI -->
+## 8. Decisione 7.2H.0 — spazio, luogo, proprietà e visibilità
+
+Da questo blocco lo **spazio** va interpretato come un contesto di collaborazione e autorizzazione, non come sinonimo di abitazione fisica.
+
+I concetti restano distinti:
+
+- **account esterno**: identità Telegram o futura integrazione;
+- **utente interno**: identità applicativa stabile;
+- **spazio**: gruppo/contesto nel quale più utenti possono collaborare;
+- **abitazione, stanza, contenitore**: luoghi fisici;
+- **proprietà**: chi possiede/gestisce una risorsa;
+- **visibilità**: chi può scoprirla e usarla;
+- **permessi**: quali modifiche sono consentite.
+
+Per le risorse che lo supportano vengono riconosciuti tre ambiti concettuali:
+
+1. **privata** — visibile al proprietario/gestore;
+2. **condivisa** — stessa risorsa sincronizzata, visibile a uno o più account/spazi autorizzati;
+3. **globale** — catalogo comune del gestionale, pubblicabile/modificabile direttamente solo dall'amministratore.
+
+La visibilità globale **non** è prevista per abitazioni, stanze, contenitori, oggetti, profili alimentari, planner o liste della spesa. È invece adatta a cataloghi come alimenti, prodotti commerciali e ricette di riferimento.
+
+Condividere non crea una copia: chi usa la risorsa condivisa vede la stessa entità aggiornata. Una futura azione `📄 Crea una mia versione` produrrà invece una copia indipendente mantenendo soltanto la provenienza informativa.
+
+### Proposte sui contenuti globali
+
+Un utente normale non modifica direttamente un contenuto globale. È prevista una coda di **proposte di modifica** amministrative, con confronto prima/dopo e approvazione/rifiuto. Questa funzione è futura e non è implementata nel 7.2H.0.
+
+### Modalità utente per l'amministratore
+
+È prevista una futura `🛡️ Modalità utente`: l'amministratore potrà usare il bot con interfaccia e autorizzazioni ordinarie, evitando azioni globali accidentali. L'uscita dalla modalità dovrà essere esplicita e chiaramente indicata. La modalità non modifica il ruolo persistito dell'account: è una vista operativa protetta.
+
+<!-- STEP7_2H3_MEMBRI_SPAZI -->
+## 9. Membri degli spazi — 7.2H.3
+
+L'accesso al gestionale e l'accesso a uno spazio sono autorizzazioni separate.
+L'approvazione di un account Telegram crea/abilita l'utente e il suo spazio
+personale, ma **non** lo aggiunge automaticamente agli spazi di altre persone.
+
+Per gli spazi `famiglia` e `condiviso`, proprietario e amministratori possono
+usare `👥 Membri dello spazio` per aggiungere un account già autorizzato con uno
+dei ruoli:
+
+- `👤 Membro` — uso ordinario dello spazio, con i permessi previsti dalle
+  singole risorse;
+- `👁️ Sola lettura` — consultazione senza scrittura nello spazio;
+- `🛡️ Amministratore` — gestione dello spazio e dei membri.
+
+Il ruolo `proprietario` non viene assegnato dal picker. Il proprietario non può
+essere rimosso e la schermata non consente di rimuovere se stessi. Gli spazi
+`personale` non accettano membri aggiuntivi.
+
+Rimuovere una membership non elimina l'account, il suo spazio personale o i
+suoi dati posseduti. La perdita della membership rimuove invece l'accesso alle
+risorse che erano visibili soltanto attraverso quello spazio; il fallback dello
+spazio attivo resta gestito dai trigger già presenti.
+
+## Step 7.2H.4A — Inviti privati agli spazi
+
+La gestione membri usa inviti privati tramite deep-link Telegram e non espone agli utenti normali l'elenco degli account autorizzati. Proprietario/amministratore sceglie ruolo e modalità del link: monouso, riutilizzabile, numero massimo di utilizzi o scadenza.
+
+Gli inviti attivi consentono `📋 Copia link d'invito`, modifica del ruolo futuro, aggiunta/modifica/rimozione della scadenza e revoca. Data e orario sono modificabili dall'interfaccia Telegram; il calendario è costruito con inline button.
+
+Gli inviti monouso consumati, quelli che raggiungono il limite, quelli scaduti e quelli revocati vengono eliminati dalla tabella operativa. I token/link non vengono registrati nello Storico.
+
+Il destinatario deve accettare esplicitamente l'invito. Se non è ancora autorizzato al gestionale, deve prima completare il normale flusso di accesso e poi riaprire lo stesso link. L'approvazione dell'account non crea automaticamente membership in spazi condivisi.
+
+
+## Rifiniture UX H.4B
+
+Gli inviti restano separati dall'accesso al gestionale. Se il creatore dell'invito o un utente già membro apre il deep-link, il backend non incrementa `utilizzi` e non elimina un invito monouso; la UI informa l'utente e propone il ritorno a `👥 I miei spazi` o al `🏠 Menù principale`.
+
+Le notifiche operative relative agli spazi sono messaggi temporanei: possono essere lette e usate per navigare, ma vengono ripulite alla successiva interazione per non accumulare messaggi persistenti.
+
+Le schermate del flusso inviti mantengono la navigazione standard sulla stessa riga quando esiste un livello precedente:
+`⬅️ Indietro | 🏠 Menù principale | 💡 Migliora`.

@@ -1,3 +1,77 @@
+<!-- HANDOFF_AUTOREVOLE_20260829_STEP7_2H -->
+# Handoff completo — aggiornamento autorevole 29/08/2026 — chiusura Step 7.2H
+
+> Questo aggiornamento prevale sulle sezioni storiche successive quando descrivono uno stato precedente. Le sezioni vecchie restano intenzionalmente nel file per conservare la cronologia decisionale.
+
+## Checkpoint
+
+- repository `alessiolari01/gestionale-casa`;
+- branch `step-7-alimentazione`;
+- HEAD precedente alla finalizzazione documentale: `34d076c`;
+- blocco locale completato: **7.2H.0→7.2H.4F**;
+- file migration presenti: **36**;
+- ultima migration: `20260829005000_h4e_input_export_progetto.sql`;
+- Profili alimentari operativi;
+- membri/inviti Spazi operativi;
+- export progetto sanitizzato operativo;
+- input inattesi non distruttivi con escalation `/start` al terzo tentativo;
+- collaudo manuale export progetto e input escalation completato;
+- verifiche multi-account residue registrate come differite e non bloccanti.
+
+## Migration nuove 7.2H
+
+```text
+20260827190000_profili_alimentari_fondazioni.sql
+20260828074000_catalogo_gallette.sql
+20260828101500_inviti_spazi_operativi.sql
+20260828202500_h4c_inviti_verifica_guidata.sql
+20260829002500_h4d_rifiniture_finali.sql
+20260829005000_h4e_input_export_progetto.sql
+```
+
+Non modificarle se già applicate. Usare una nuova migration append-only per qualsiasi correzione futura.
+
+## Moduli e responsabilità
+
+- `src/modules/profili_alimentari.rs`: Profili alimentari e condivisione tramite Spazi;
+- `src/modules/spazi_membri.rs`: membri, inviti, ruoli, scadenze, accettazione e notifiche;
+- `src/modules/miglioramenti.rs`: backlog, verifica guidata, archivio ed export;
+- `scripts/export_progetto.py`: handoff tecnico sanitizzato;
+- `src/context_bot.rs`: UI persistente e contesto Telegram;
+- `src/main.rs`: routing, sessioni e gestione input inattesi.
+
+## Decisioni definitive emerse in 7.2H
+
+1. Spazio = contesto di collaborazione, non abitazione fisica.
+2. Case/stanze/contenitori/oggetti non sono risorse globali; possono essere condivisi solo secondo il modello degli Spazi.
+3. Profilo alimentare = persona alimentare, con account opzionale.
+4. Profili privati o condivisi; mai globali.
+5. Contenuti globali solo per tipi compatibili e sotto controllo amministrativo.
+6. Condivisione = stessa risorsa viva; duplicazione/personalizzazione = copia indipendente con provenienza.
+7. Planner futuro versionato: pasti completati congelati, aggiornamento esplicito per quelli futuri.
+8. Lista della spesa non deve cambiare automaticamente solo perché cambia una ricetta/planner.
+9. Miglioramenti confermati dall'utente passano direttamente in archivio; `Fatto · da verificare` è riservato a implementazioni non ancora collaudate.
+10. Un input inatteso fuori da un wizard non deve mai sostituire la schermata UI attiva.
+
+## Verifiche differite secondo account
+
+- accettazione nuovo invito e apertura diretta dello spazio;
+- notifica di accettazione al creatore;
+- notifica cambio ruolo;
+- notifica rimozione e perdita effettiva dell'accesso.
+
+Non bloccare il prossimo step per questi test; conservarli come checklist guidata.
+
+## Prossimo sviluppo
+
+**Step successivo: Porzioni e override per Profilo/ingrediente**, poi turni/routine, planner, lista della spesa, reminder/export.
+
+## Workflow di consegna
+
+Gli aggiornamenti futuri devono preferire ZIP applicabili. Su S9 usare funzioni shell con `|| return 1`, non `set -e`, in modo che un errore fermi lo step senza chiudere la sessione SSH. Una nuova migration richiede sempre backup DB, prova su copia, integrity/FK e solo dopo `cargo run`.
+
+Per la versione breve leggere `docs/HANDOFF.md`.
+
 # Handoff completo — aggiornamento autorevole 27/08/2026
 
 > **Nota di lettura:** questa sezione iniziale aggiorna lo stato corrente. Le sezioni storiche più sotto restano utili per ricostruire le decisioni precedenti, ma quando una frase storica contraddice questo aggiornamento prevale lo stato qui descritto.

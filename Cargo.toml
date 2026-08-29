@@ -8,6 +8,6 @@ anyhow = "1"
 dotenvy = "0.15"
 sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
 teloxide = { version = "0.17", default-features = false, features = ["rustls", "ctrlc_handler"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "time"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"

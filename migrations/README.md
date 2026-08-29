@@ -207,3 +207,35 @@ scelta della confezione appartiene alla futura Lista spesa.
 - `20260827123000_esporta_miglioramenti_bot.sql` — chiusura amministrativa della funzione `📦 Esporta miglioramenti`.
 
 Queste migration sono state applicate al DB reale del Galaxy S9 entro il checkpoint 7.2G.6. **Non modificarle in-place.**
+
+<!-- STEP7_2H0_PROFILI_FONDAZIONI -->
+## Step 7.2H.0 — fondazioni Profili alimentari
+
+`20260827190000_profili_alimentari_fondazioni.sql` introduce `profili_alimentari` e `profilo_alimentare_spazi` senza modificare dati esistenti.
+
+Il profilo rappresenta una persona alimentare separata dall'account Telegram; il collegamento a `utenti` è opzionale. Il profilo è privato di default e può essere condiviso in uno o più spazi di collaborazione, ma non può diventare globale.
+
+La migration aggiunge vincoli di unicità per i profili attivi e trigger che impediscono di condividere profili archiviati, limitano la condivisione al gestore nel primo blocco operativo e richiedono una membership con diritto di scrittura nello spazio di destinazione.
+
+<!-- STEP7_2H3_MEMBRI_RIFINITURE -->
+## Step 7.2H.3 — membri degli spazi e catalogo gallette
+
+`20260828074000_catalogo_gallette.sql` aggiunge al catalogo globale `Gallette`,
+`Gallette di riso` e `Gallette di mais`, tutte nella categoria `Cereali e
+derivati` con unità predefinita `g`.
+
+Per non attribuire al prodotto generico certificazioni che dipendono da marca,
+formulazione e contaminazioni, la matrice `alimento_compatibilita` viene
+completata per queste voci con stato `verificare`. La migration è append-only e
+non modifica `20260827190000_profili_alimentari_fondazioni.sql` né altre
+migration già applicate.
+- `20260828101500_inviti_spazi_operativi.sql`: rende operativi gli inviti privati agli spazi (deep-link Telegram, modalità invito, scadenza modificabile e ciclo di vita).
+- `20260828202500_h4c_inviti_verifica_guidata.sql` — H.4C: porta a `fatto · da verificare` i miglioramenti UX H.3/H.4, aggiunge piani di collaudo guidati e quattro verifiche pendenti che richiedono un secondo account.
+
+### 20260829002500_h4d_rifiniture_finali.sql
+Step 7.2H.4D: porta in `Fatto · da verificare` le ultime rifiniture UX ridefinite (#33, #39, #40, #41) e registra i relativi piani di verifica guidata. Nessuna modifica strutturale allo schema.
+- `20260829005000_h4e_input_export_progetto.sql` — Step 7.2H.4E: rende non distruttivo il testo inatteso fuori dai wizard e registra il nuovo export tecnico progetto sanitizzato con verifica guidata.
+
+## Chiusura Step 7.2H
+
+Al termine di 7.2H il repository contiene **36 migration SQL**; l'ultima è `20260829005000_h4e_input_export_progetto.sql`. Le rifiniture H.4F su input inattesi ed export progetto non richiedono schema aggiuntivo e quindi non introducono una migration.

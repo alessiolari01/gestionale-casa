@@ -1,3 +1,10 @@
+<!-- MIGLIORAMENTI_CHIUSURA_7_2H -->
+# Aggiornamento 7.2H — verifica guidata ed export tecnici
+
+Regola operativa: un miglioramento implementato ma non ancora provato è `Fatto · da verificare`; quando l'utente conferma che funziona, va direttamente in `📦 Archiviato`. Le verifiche che richiedono un secondo account possono restare differite con piano guidato senza bloccare lo sviluppo.
+
+L'area Miglioramenti espone `📦 Esporta miglioramenti` e `📦 Esporta progetto`. Il secondo genera un handoff tecnico sanitizzato e auto-documentante, includendo `_project_handoff/CURRENT_STATE.md` e senza dati sensibili/runtime.
+
 # Modulo Miglioramenti
 
 **Stato: OPERATIVO E VERIFICATO — chiusura Step 7.2G.1→7.2G.6.**
@@ -204,3 +211,9 @@ L'export è stato collaudato realmente: ZIP ricevuto da Telegram, scaricato e po
 
 - **#7**: eliminazione/reset/revoca account — rimane `da_fare`, richiede uno step amministrativo dedicato;
 - **#9**: `🧪 Zona test` / aggiornamenti quasi zero-downtime — requisito futuro e ultimo dell'infrastruttura, non da implementare durante l'attuale uso personale.
+
+## Export tecnico del progetto
+
+L'amministratore principale può usare `📦 Esporta progetto` per generare uno ZIP adatto a un handoff tecnico completo. L'archivio contiene lo stato corrente dei sorgenti, anche se non ancora committato, insieme a migration, documentazione, script e metadati Git essenziali.
+
+L'export non contiene dati runtime o sensibili: `.env`, token, database, `data/`, allegati utente, backup, `target/`, `.git/`, cache e ZIP temporanei sono esclusi. Prima della creazione viene effettuato anche un controllo conservativo dei file testuali per evitare la fuoriuscita accidentale di credenziali evidenti.

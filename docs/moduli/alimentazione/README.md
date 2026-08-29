@@ -1,6 +1,6 @@
 # Modulo Alimentazione
 
-**Stato complessivo: IN SVILUPPO — Alimenti e Ricette OPERATIVI/VERIFICATI; Profili, turni, planner e spesa ancora previsti.**
+**Stato complessivo: IN SVILUPPO — Alimenti, Ricette e Profili alimentari OPERATIVI; prossimo blocco Porzioni/override.**
 
 Alimentazione raccoglie alimenti, prodotti commerciali, ricette, profili, turni/routine, pianificazione dei pasti e lista della spesa. È progettato per uso personale e condiviso.
 
@@ -13,7 +13,8 @@ Alimentazione raccoglie alimenti, prodotti commerciali, ricette, profili, turni/
 | Categorie e filtri | OPERATIVI/VERIFICATI |
 | Prodotti commerciali, formati e nutrizione | OPERATIVI/VERIFICATI |
 | Ricette e procedimento guidato | OPERATIVI/VERIFICATI |
-| Profili e porzioni | PREVISTO — prossimo sviluppo |
+| Profili alimentari | OPERATIVI/VERIFICATI per i flussi disponibili |
+| Porzioni e override | PREVISTO — prossimo sviluppo |
 | Turni/routine | PREVISTO |
 | Planner pasti | PREVISTO |
 | Lista della spesa | PREVISTO |
@@ -78,11 +79,10 @@ Dettagli: [Ricette](ricette.md).
 
 ## Prossima sequenza
 
-1. [Profili e porzioni](profili-e-porzioni.md);
-2. override quantità/esclusione per ingrediente;
-3. [Turni e routine](turni-e-routine.md);
-4. [Pianificazione e lista della spesa](pianificazione-e-spesa.md);
-5. [Reminder](reminder.md) ed [Export](export.md).
+1. porzioni e override in [Profili e porzioni](profili-e-porzioni.md);
+2. [Turni e routine](turni-e-routine.md);
+3. [Pianificazione e lista della spesa](pianificazione-e-spesa.md);
+4. [Reminder](reminder.md) ed [Export](export.md).
 
 ## Principi
 

@@ -215,7 +215,7 @@ struct NutritionRecord {
 pub async fn show_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
-        "🍽️ Alimentazione\n\nScegli se gestire gli alimenti oppure le ricette.",
+        "🍽️ Alimentazione\n\nScegli se gestire alimenti, ricette oppure i profili alimentari.",
     )
     .reply_markup(alimentation_menu_keyboard())
     .await?;
@@ -4805,6 +4805,7 @@ fn alimentation_menu_keyboard() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
         vec![button("🥕 Alimenti", "food:foods")],
         vec![button("🍳 Ricette", "recipe:menu")],
+        vec![button("👥 Profili alimentari", "foodprof:menu")],
         vec![
             button("⬅️ Indietro", "menu:main"),
             button("🏠 Menù principale", "menu:main"),
@@ -7490,7 +7491,7 @@ mod tests {
         .await
         .expect("conteggio catalogo base");
 
-        assert_eq!(count, 418);
+        assert_eq!(count, 421);
 
         let pollo: (String, String) = sqlx::query_as(
             "SELECT nome, nome_normalizzato FROM alimenti \
@@ -7502,6 +7503,25 @@ mod tests {
 
         assert_eq!(pollo.0, "🥩 Petto di pollo");
         assert_eq!(pollo.1, "petto di pollo");
+    }
+
+    #[tokio::test]
+    async fn catalogo_base_include_le_gallette_in_cereali() {
+        let pool = test_pool().await;
+        let rows: Vec<(String, String)> = sqlx::query_as(
+            "SELECT a.nome_normalizzato, c.codice FROM alimenti a \
+             JOIN alimento_categorie ac ON ac.alimento_id = a.id \
+             JOIN categorie_alimento c ON c.id = ac.categoria_id \
+             WHERE a.catalogo_globale = 1 \
+               AND a.nome_normalizzato IN ('gallette', 'gallette di riso', 'gallette di mais') \
+             ORDER BY a.nome_normalizzato",
+        )
+        .fetch_all(&pool)
+        .await
+        .expect("gallette del catalogo");
+
+        assert_eq!(rows.len(), 3);
+        assert!(rows.iter().all(|(_, category)| category == "cereali"));
     }
 
     #[tokio::test]
@@ -7551,7 +7571,7 @@ mod tests {
         .fetch_one(&pool)
         .await
         .expect("conteggio alimenti base");
-        assert_eq!(foods, 418);
+        assert_eq!(foods, 421);
 
         let assignments: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) \
@@ -7696,7 +7716,7 @@ mod tests {
                 let total = count_foods(&pool, None, None)
                     .await
                     .expect("conteggio catalogo secondo utente");
-                assert_eq!(total, 418);
+                assert_eq!(total, 421);
 
                 let rows =
                     list_foods_with_offset(&pool, None, None, FOOD_PAGE_FETCH, page_offset(1))

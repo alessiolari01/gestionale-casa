@@ -1,27 +1,22 @@
 # Roadmap funzionale
 
-## Stato corrente — chiusura Step 7.2G.1→7.2G.6
+## Stato corrente — Step 7.2H chiuso, finalizzazione documentale
 
 **Branch:** `step-7-alimentazione`
-**Baseline committata precedente:** `54dc4dd`
-**Stato runtime:** verificato sul Galaxy S9 il 27 agosto 2026.
+**Baseline Git precedente:** `34d076c`
+**Stato runtime:** Profili, Spazi/Membri/Inviti, input inattesi ed export progetto collaudati sul Galaxy S9 entro il 29 agosto 2026.
 
-Completato nel blocco finale:
+Completato in 7.2H:
 
-- workflow Miglioramenti verificabile e archivio manuale;
-- UI Telegram a schermata singola;
-- `💡 Migliora` contestuale con sezione/azioni reali;
-- persistenza UI online/offline tra riavvii;
-- spegnimento controllato da Amministrazione;
-- rifiniture Alimentazione/Ricette emerse dagli smoke test;
-- export ZIP dei Miglioramenti direttamente dal bot;
-- **153/153 test** finali, check e Clippy verdi.
+- fondazioni e UI Profili alimentari;
+- gestione membri degli Spazi;
+- inviti privati via deep-link con ruoli, utilizzi e scadenze;
+- rifiniture UX inviti/Miglioramenti;
+- verifiche guidate e differimento esplicito dei test che richiedono un secondo account;
+- input inatteso non distruttivo + suggerimento `/start` al terzo tentativo;
+- `📦 Esporta progetto` sanitizzato e auto-documentante.
 
-Restano due elementi intenzionalmente non chiusi:
-
-1. **#7 — gestione account:** eliminazione/reset/revoca permessi da progettare come step separato perché coinvolge ownership, membership, storico e risorse;
-2. **#9 — Zona test/aggiornamenti quasi zero-downtime:** funzione infrastrutturale futura, da affrontare soltanto quando il gestionale sarà funzionalmente maturo.
-
+Prossimo blocco funzionale: **Porzioni e override**. La finalizzazione corrente aggiorna documentazione e GitHub senza aggiungere nuove funzionalità.
 ## Step 7 — Fondazioni condivise e Alimentazione
 
 ### 7.0 — Specifica e organizzazione
@@ -62,12 +57,11 @@ La gestione distruttiva/reset degli account (#7) non è parte della chiusura 7.2
 
 #### Prossima sequenza funzionale
 
-1. **Profili alimentari** indipendenti dall'account Telegram;
-2. **porzioni personali** e override per ingrediente;
-3. **turni/routine**;
-4. **planner pasti** su date reali e partecipanti;
-5. **lista della spesa** aggregata e scelta dei formati;
-6. reminder/export Alimentazione e integrazioni residue.
+1. **porzioni personali** per Profilo e override per ingrediente;
+2. **turni/routine**;
+3. **planner pasti** su date reali e partecipanti, con snapshot/versione ricetta;
+4. **lista della spesa** aggregata e scelta dei formati;
+5. reminder/export Alimentazione e integrazioni residue.
 
 ### 7.3 — Integrazioni e condivisione operativa
 

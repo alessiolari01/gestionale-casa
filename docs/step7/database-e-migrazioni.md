@@ -220,3 +220,18 @@ Evoluzione principale:
 L'export ZIP è una funzione applicativa in sola lettura e non richiede una tabella runtime dedicata: i file temporanei restano sotto `data/tmp/miglioramenti_export/` e non sono parte del database.
 
 La suite finale dopo 7.2G.6 è **153/153 test**.
+
+
+<!-- DB_MIGRATIONS_7_2H -->
+## Migration Step 7.2H
+
+```text
+20260827190000_profili_alimentari_fondazioni.sql
+20260828074000_catalogo_gallette.sql
+20260828101500_inviti_spazi_operativi.sql
+20260828202500_h4c_inviti_verifica_guidata.sql
+20260829002500_h4d_rifiniture_finali.sql
+20260829005000_h4e_input_export_progetto.sql
+```
+
+Con questi file il repository contiene **36 migration SQL**. H.4F non aggiunge migration. Tutte le migration già applicate al DB reale vanno trattate come immutabili.

@@ -1,3 +1,8 @@
+<!-- PLANNER_VERSIONATO_DECISIONE_7_2H -->
+# Decisione consolidata 7.2H — planner versionato
+
+Il futuro Planner deve salvare la versione/snapshot della ricetta effettivamente applicata al pasto. Se la ricetta cambia dopo la pianificazione, `🔄 Aggiorna planner` va mostrato solo quando esiste una differenza e solo per pasti non completati. I pasti completati restano congelati. L'aggiornamento della lista della spesa è un'azione separata e non deve cambiare automaticamente quantità già acquistate.
+
 # Pianificazione pasti e lista della spesa
 
 **Stato: PREVISTO.**
@@ -83,3 +88,21 @@ prodotto commerciale. La Lista spesa dovrà quindi:
 
 Esempio: per 300 g necessari e formati 175 g, 200 g e 350 g, la Lista spesa
 non modifica la ricetta ma valuta quale confezione/combinazione acquistare.
+
+<!-- STEP7_2H0_PROFILI_FONDAZIONI -->
+## Versioni delle ricette applicate al planner
+
+Il planner futuro non deve cambiare silenziosamente quando una ricetta condivisa o globale viene modificata.
+
+Ogni utilizzo della ricetta nel planner dovrà ricordare la **versione applicata**. Se la ricetta corrente cambia e almeno un pasto interessato è ancora pianificato/non completato, la UI mostrerà `🔄 Aggiorna planner` solo in presenza di differenze reali.
+
+L'utente potrà:
+
+- vedere quali ricette e quali pasti sono interessati;
+- applicare tutti gli aggiornamenti compatibili;
+- aggiornare singole occorrenze;
+- mantenere deliberatamente una versione precedente.
+
+I pasti completati/passati restano congelati come snapshot storico e non vengono riscritti da modifiche successive alla ricetta.
+
+Un aggiornamento del planner può rendere obsoleta una lista della spesa già generata. In quel caso la lista non viene modificata automaticamente: viene segnalato un aggiornamento disponibile separato, così gli acquisti già effettuati non vengono persi o reinterpretati.

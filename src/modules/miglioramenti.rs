@@ -18,7 +18,7 @@ use sqlx::{FromRow, SqlitePool};
 use teloxide::{
     net::Download,
     prelude::*,
-    types::{InlineKeyboardButton, InlineKeyboardMarkup, InputFile},
+    types::{CopyTextButton, InlineKeyboardButton, InlineKeyboardMarkup, InputFile},
 };
 use tokio::{fs::File, task};
 
@@ -33,6 +33,8 @@ const DESCRIPTION_PAGE_CHARS: usize = 3000;
 const DETAIL_DESCRIPTION_PREVIEW_CHARS: usize = 1800;
 const EXPORT_ROOT: &str = "data/tmp/miglioramenti_export";
 const EXPORT_SCRIPT: &str = "scripts/export_miglioramenti.py";
+const PROJECT_EXPORT_ROOT: &str = "data/tmp/progetto_export";
+const PROJECT_EXPORT_SCRIPT: &str = "scripts/export_progetto.py";
 const EXPORT_ORPHAN_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 
 #[derive(Debug, Clone)]
@@ -325,7 +327,7 @@ pub async fn handle_message(
         ImprovementConversationState::OptionalPhoto {
             description,
             context,
-            origin_token: _,
+            origin_token,
         } => {
             if msg.photo().is_none() {
                 bot.send_message(
@@ -350,9 +352,18 @@ pub async fn handle_message(
                 Ok(()) => {
                     sessions.clear_chat(chat_id);
                     bot.delete_user_input(msg.chat.id, msg.id).await;
-                    bot.send_message(msg.chat.id, "✅ Miglioramento salvato con screenshot.")
-                        .reply_markup(after_save_keyboard(improvement_id))
-                        .await?;
+                    if !restore_origin_after_save(
+                        bot,
+                        msg.chat.id,
+                        origin_token,
+                        "✅ Miglioramento salvato con screenshot.",
+                    )
+                    .await?
+                    {
+                        bot.send_message(msg.chat.id, "✅ Miglioramento salvato con screenshot.")
+                            .reply_markup(after_save_keyboard(improvement_id))
+                            .await?;
+                    }
                 }
                 Err(error) => {
                     tracing::error!(?error, improvement_id, "Errore allegato miglioramento");
@@ -490,7 +501,12 @@ pub async fn handle_callback(
 ) -> ResponseResult<bool> {
     match data {
         "improve:noop" => return Ok(true),
+        "menu:main" if sessions.has_active(chat_id.0) => {
+            discard_pending_export(bot, chat_id, sessions).await;
+            return Ok(false);
+        }
         "improve:menu" => {
+            discard_pending_export(bot, chat_id, sessions).await;
             sessions.clear_chat(chat_id.0);
             show_menu(bot, chat_id, pool).await?;
             return Ok(true);
@@ -507,7 +523,7 @@ pub async fn handle_callback(
             let Some(ImprovementConversationState::OptionalPhoto {
                 description,
                 context,
-                ..
+                origin_token,
             }) = sessions.take(chat_id.0)
             else {
                 bot.send_message(chat_id, "⚠️ Non c'è un miglioramento pronto da salvare.")
@@ -516,9 +532,18 @@ pub async fn handle_callback(
             };
             match create_improvement(pool, &description, context.as_deref()).await {
                 Ok(id) => {
-                    bot.send_message(chat_id, "✅ Miglioramento salvato.")
-                        .reply_markup(after_save_keyboard(id))
-                        .await?;
+                    if !restore_origin_after_save(
+                        bot,
+                        chat_id,
+                        origin_token,
+                        "✅ Miglioramento salvato.",
+                    )
+                    .await?
+                    {
+                        bot.send_message(chat_id, "✅ Miglioramento salvato.")
+                            .reply_markup(after_save_keyboard(id))
+                            .await?;
+                    }
                 }
                 Err(error) => {
                     tracing::error!(?error, "Errore salvataggio miglioramento");
@@ -534,6 +559,10 @@ pub async fn handle_callback(
         }
         "improve:export" => {
             start_export(bot, chat_id, pool, sessions).await?;
+            return Ok(true);
+        }
+        "improve:export:project" => {
+            start_project_export(bot, chat_id, pool, sessions).await?;
             return Ok(true);
         }
         "improve:export:downloaded" => {
@@ -616,6 +645,11 @@ Descrivi cosa vorresti cambiare o migliorare. Puoi usare più messaggi; quando h
 
     if let Some((id, return_to)) = parse_edit_callback(data) {
         if can_edit_owned(pool, id).await.unwrap_or(false) {
+            let current_description = owned_improvement_description(pool, id)
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or_default();
             sessions.set(
                 chat_id.0,
                 ImprovementConversationState::DescriptionDraft {
@@ -626,11 +660,19 @@ Descrivi cosa vorresti cambiare o migliorare. Puoi usare più messaggi; quando h
                     return_to,
                 },
             );
+            let copy_hint = if current_description.chars().count() <= 256 {
+                "Puoi usare 📋 Copia testo originale, incollarlo nel campo di scrittura e cambiare solo ciò che serve."
+            } else {
+                "Il testo supera il limite di 256 caratteri del pulsante copia di Telegram: trovi comunque qui sotto il testo corrente come riferimento."
+            };
             bot.send_message(
                 chat_id,
-                "✏️ Modifica testo\n\nInvia la nuova descrizione. Puoi dividerla in più messaggi; quando hai finito premi ✅ Fine descrizione.",
+                format!(
+                    "✏️ Modifica testo\n\n{copy_hint}\n\nTesto attuale:\n{}\n\nInvia la nuova descrizione. Puoi dividerla in più messaggi; quando hai finito premi ✅ Fine descrizione.",
+                    truncate(&current_description, 1200)
+                ),
             )
-            .reply_markup(description_keyboard())
+            .reply_markup(edit_description_keyboard(&current_description))
             .await?;
         } else {
             bot.send_message(
@@ -818,7 +860,7 @@ Descrivi cosa vorresti cambiare o migliorare. Puoi usare più messaggi; quando h
             Ok(()) => {
                 bot.send_message(chat_id, "📦 Miglioramento verificato e archiviato.")
                     .await?;
-                show_list(bot, chat_id, pool, ListScope::Verified, 0).await?;
+                show_list(bot, chat_id, pool, ListScope::Done, 0).await?;
             }
             Err(error) => {
                 tracing::warn!(?error, id, "Archiviazione miglioramento non riuscita");
@@ -1073,6 +1115,27 @@ async fn finish_description(
     Ok(())
 }
 
+async fn restore_origin_after_save(
+    bot: &Bot,
+    chat_id: ChatId,
+    origin_token: Option<u64>,
+    notice: &str,
+) -> ResponseResult<bool> {
+    let Some(token) = origin_token else {
+        return Ok(false);
+    };
+    let Some(snapshot) = bot.improve_context(chat_id.0, token) else {
+        return Ok(false);
+    };
+    let request = bot.send_message(chat_id, format!("{notice}\n\n{}", snapshot.screen_text));
+    if let Some(keyboard) = snapshot.keyboard {
+        request.reply_markup(keyboard).await?;
+    } else {
+        request.await?;
+    }
+    Ok(true)
+}
+
 async fn cancel_improvement_flow(
     bot: &Bot,
     chat_id: ChatId,
@@ -1168,6 +1231,84 @@ pub async fn cleanup_old_exports() -> Result<usize> {
     Ok(removed)
 }
 
+async fn cleanup_old_project_exports() -> Result<usize> {
+    let root = project_export_root_path();
+    let mut removed = 0usize;
+    let mut entries = match tokio::fs::read_dir(&root).await {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(error) => {
+            return Err(error).context("Impossibile leggere gli export progetto temporanei")
+        }
+    };
+    let now = SystemTime::now();
+    while let Some(entry) = entries
+        .next_entry()
+        .await
+        .context("Impossibile leggere un export progetto temporaneo")?
+    {
+        let path = entry.path();
+        if !is_export_zip_path(&path) {
+            continue;
+        }
+        let metadata = match entry.metadata().await {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                tracing::debug!(?error, ?path, "Metadata export progetto non leggibile");
+                continue;
+            }
+        };
+        let modified = match metadata.modified() {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        let age = now.duration_since(modified).unwrap_or_default();
+        if age < EXPORT_ORPHAN_MAX_AGE {
+            continue;
+        }
+        match tokio::fs::remove_file(&path).await {
+            Ok(()) => removed += 1,
+            Err(error) => tracing::debug!(?error, ?path, "Export progetto orfano non eliminabile"),
+        }
+    }
+    Ok(removed)
+}
+
+async fn discard_pending_export(bot: &Bot, chat_id: ChatId, sessions: &ImprovementSessionStore) {
+    if !matches!(
+        sessions.get(chat_id.0),
+        Some(ImprovementConversationState::ExportReady { .. })
+    ) {
+        return;
+    }
+
+    let Some(ImprovementConversationState::ExportReady {
+        file_path,
+        document_message_id,
+    }) = sessions.take(chat_id.0)
+    else {
+        return;
+    };
+
+    if is_export_zip_path(&file_path) {
+        match tokio::fs::remove_file(&file_path).await {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => tracing::warn!(
+                ?error,
+                ?file_path,
+                "Export abbandonato non eliminabile dall'S9"
+            ),
+        }
+    } else {
+        tracing::error!(?file_path, "Percorso export abbandonato rifiutato");
+    }
+
+    let message_id = teloxide::types::MessageId(document_message_id);
+    bot.mark_transient_message(chat_id.0, message_id);
+    bot.delete_user_input(chat_id, message_id).await;
+}
+
 async fn start_export(
     bot: &Bot,
     chat_id: ChatId,
@@ -1183,6 +1324,7 @@ async fn start_export(
         return Ok(());
     }
 
+    discard_pending_export(bot, chat_id, sessions).await;
     sessions.clear_chat(chat_id.0);
     if let Err(error) = cleanup_old_exports().await {
         tracing::warn!(
@@ -1228,7 +1370,7 @@ async fn start_export(
             let _ = tokio::fs::remove_file(&bundle.path).await;
             bot.send_message(
                 chat_id,
-                "⚠️ Lo ZIP è stato creato ma Telegram non è riuscito a inviarlo. Ho eliminato la copia temporanea; puoi riprovare.",
+                "⚠️ Telegram non ha confermato l'invio dello ZIP entro il tempo previsto. In alcuni casi il documento può comparire comunque pochi secondi dopo.\n\nHo eliminato soltanto la copia temporanea sull'S9: attendi qualche secondo e, se il documento non compare, usa di nuovo 📦 Esporta miglioramenti.",
             )
             .reply_markup(menu_keyboard(true))
             .await?;
@@ -1257,6 +1399,176 @@ async fn start_export(
     .reply_markup(export_ready_keyboard())
     .await?;
     Ok(())
+}
+
+async fn start_project_export(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    sessions: &ImprovementSessionStore,
+) -> ResponseResult<()> {
+    if !is_primary_admin(pool).await.unwrap_or(false) {
+        bot.send_message(
+            chat_id,
+            "⚠️ L'esportazione del progetto è riservata all'amministratore principale.",
+        )
+        .await?;
+        return Ok(());
+    }
+
+    discard_pending_export(bot, chat_id, sessions).await;
+    sessions.clear_chat(chat_id.0);
+    if let Err(error) = cleanup_old_project_exports().await {
+        tracing::warn!(?error, "Pulizia preventiva export progetto non riuscita");
+    }
+
+    bot.send_message_without_improve(
+        chat_id,
+        "⏳ Preparazione esportazione progetto...\n\nCreo uno ZIP tecnico sanitizzato con sorgenti, migration, documentazione, script e metadati Git. Escludo database, .env, token, backup, allegati utente e file runtime.",
+    )
+    .await?;
+
+    let bundle = match build_project_export_bundle().await {
+        Ok(bundle) => bundle,
+        Err(error) => {
+            tracing::error!(?error, "Esportazione progetto fallita");
+            bot.send_message(
+                chat_id,
+                "⚠️ Non sono riuscito a creare l'esportazione del progetto. Nessun dato del gestionale è stato modificato; puoi riprovare.",
+            )
+            .reply_markup(menu_keyboard(true))
+            .await?;
+            return Ok(());
+        }
+    };
+
+    let file_name = bundle
+        .path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("gestionale-casa_handoff_progetto.zip")
+        .to_string();
+
+    let document = match bot
+        .send_document_untracked(chat_id, InputFile::file(bundle.path.clone()))
+        .caption(format!("📦 {file_name}"))
+        .await
+    {
+        Ok(message) => message,
+        Err(error) => {
+            tracing::error!(?error, path = ?bundle.path, "Invio export progetto Telegram fallito");
+            let _ = tokio::fs::remove_file(&bundle.path).await;
+            bot.send_message(
+                chat_id,
+                "⚠️ Telegram non ha confermato l'invio dello ZIP del progetto. Ho eliminato la copia temporanea dall'S9; puoi riprovare.",
+            )
+            .reply_markup(menu_keyboard(true))
+            .await?;
+            return Ok(());
+        }
+    };
+
+    sessions.set(
+        chat_id.0,
+        ImprovementConversationState::ExportReady {
+            file_path: bundle.path.clone(),
+            document_message_id: document.id.0,
+        },
+    );
+
+    bot.send_message_without_improve(
+        chat_id,
+        format!(
+            "✅ Esportazione progetto pronta\n\n📄 File: {file_name}\n💾 Dimensione: {}\n📚 File inclusi: {}\n\n🔒 Esclusi: .env, database, token, backup, data/, target/, .git/, allegati utente e file temporanei.\n\nScarica il documento qui sopra e poi premi ✅ Ho scaricato il file.",
+            human_file_size(bundle.size_bytes),
+            bundle.files,
+        ),
+    )
+    .reply_markup(export_ready_keyboard())
+    .await?;
+    Ok(())
+}
+
+#[derive(Debug, Clone)]
+struct ProjectExportBundle {
+    path: PathBuf,
+    files: i64,
+    size_bytes: u64,
+}
+
+async fn build_project_export_bundle() -> Result<ProjectExportBundle> {
+    task::spawn_blocking(build_project_export_bundle_blocking)
+        .await
+        .context("Task esportazione progetto interrotto")?
+}
+
+fn build_project_export_bundle_blocking() -> Result<ProjectExportBundle> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let output_dir = root.join(PROJECT_EXPORT_ROOT);
+    std::fs::create_dir_all(&output_dir)
+        .context("Impossibile creare la directory export progetto")?;
+    let script = root.join(PROJECT_EXPORT_SCRIPT);
+    if !script.is_file() {
+        bail!("Script export progetto non trovato: {}", script.display());
+    }
+
+    let mut last_error = None;
+    for executable in ["python", "python3"] {
+        let output = match Command::new(executable)
+            .arg(&script)
+            .arg("--root")
+            .arg(&root)
+            .arg("--output-dir")
+            .arg(&output_dir)
+            .current_dir(&root)
+            .output()
+        {
+            Ok(output) => output,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                last_error = Some(anyhow::anyhow!(error));
+                continue;
+            }
+            Err(error) => return Err(error).context("Impossibile avviare l'exporter progetto"),
+        };
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            bail!("Exporter progetto terminato con errore: {stderr}");
+        }
+        let stdout =
+            String::from_utf8(output.stdout).context("Output exporter progetto non UTF-8")?;
+        let mut values = HashMap::new();
+        for line in stdout.lines() {
+            if let Some((key, value)) = line.split_once('=') {
+                values.insert(key.trim(), value.trim());
+            }
+        }
+        let path = PathBuf::from(
+            values
+                .get("EXPORT_PATH")
+                .copied()
+                .context("EXPORT_PATH mancante dall'exporter progetto")?,
+        );
+        if !path.is_file() || !is_export_zip_path(&path) {
+            bail!(
+                "L'exporter progetto ha restituito un file non valido: {}",
+                path.display()
+            );
+        }
+        return Ok(ProjectExportBundle {
+            path,
+            files: parse_export_number(&values, "FILES")?,
+            size_bytes: values
+                .get("SIZE_BYTES")
+                .copied()
+                .context("SIZE_BYTES mancante dall'exporter progetto")?
+                .parse()
+                .context("SIZE_BYTES non valido")?,
+        });
+    }
+
+    Err(last_error.unwrap_or_else(|| anyhow::anyhow!("Python non disponibile")))
+        .context("Serve Python per creare lo ZIP del progetto")
 }
 
 async fn confirm_export_download(
@@ -1301,19 +1613,21 @@ async fn confirm_export_download(
 
     match tokio::fs::remove_file(&file_path).await {
         Ok(()) => {
-            bot.mark_transient_message(chat_id.0, teloxide::types::MessageId(document_message_id));
+            bot.delete_user_input(chat_id, teloxide::types::MessageId(document_message_id))
+                .await;
             bot.send_message(
                 chat_id,
-                "✅ Download confermato. La copia temporanea dello ZIP è stata eliminata dall'S9. Il documento Telegram verrà rimosso alla prossima navigazione.",
+                "✅ Download confermato. La copia temporanea dello ZIP è stata eliminata dall'S9 e il documento Telegram è stato rimosso.",
             )
             .reply_markup(menu_keyboard(true))
             .await?;
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            bot.mark_transient_message(chat_id.0, teloxide::types::MessageId(document_message_id));
+            bot.delete_user_input(chat_id, teloxide::types::MessageId(document_message_id))
+                .await;
             bot.send_message(
                 chat_id,
-                "✅ Download confermato. La copia temporanea non era più presente sull'S9; puoi continuare normalmente.",
+                "✅ Download confermato. La copia temporanea non era più presente sull'S9 e il documento Telegram è stato rimosso.",
             )
             .reply_markup(menu_keyboard(true))
             .await?;
@@ -1433,18 +1747,26 @@ fn export_root_path() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(EXPORT_ROOT)
 }
 
+fn project_export_root_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join(PROJECT_EXPORT_ROOT)
+}
+
 fn is_export_zip_path(path: &Path) -> bool {
-    let expected_root = export_root_path();
-    let parent_ok = path
-        .parent()
-        .is_some_and(|parent| parent == expected_root.as_path());
-    let name_ok = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| {
+    let parent = path.parent();
+    let name = path.file_name().and_then(|name| name.to_str());
+
+    let improvement_export = parent.is_some_and(|parent| parent == export_root_path().as_path())
+        && name.is_some_and(|name| {
             name.starts_with("gestionale-casa_handoff_miglioramenti_") && name.ends_with(".zip")
         });
-    parent_ok && name_ok
+
+    let project_export = parent
+        .is_some_and(|parent| parent == project_export_root_path().as_path())
+        && name.is_some_and(|name| {
+            name.starts_with("gestionale-casa_handoff_progetto_") && name.ends_with(".zip")
+        });
+
+    improvement_export || project_export
 }
 
 fn human_file_size(bytes: u64) -> String {
@@ -1598,14 +1920,10 @@ async fn show_list(
             "improve:discarded:delete_all:ask".to_string(),
         )]);
     }
-    buttons.push(vec![InlineKeyboardButton::callback(
-        "⬅️ Miglioramenti".to_string(),
-        "improve:menu".to_string(),
-    )]);
-    buttons.push(vec![InlineKeyboardButton::callback(
-        "🏠 Menù principale".to_string(),
-        "menu:main".to_string(),
-    )]);
+    buttons.push(vec![
+        InlineKeyboardButton::callback("⬅️ Miglioramenti".to_string(), "improve:menu".to_string()),
+        InlineKeyboardButton::callback("🏠 Menù principale".to_string(), "menu:main".to_string()),
+    ]);
     bot.send_message(chat_id, lines.join("\n"))
         .reply_markup(InlineKeyboardMarkup::new(buttons))
         .await?;
@@ -2412,6 +2730,24 @@ async fn can_edit_owned(pool: &SqlitePool, improvement_id: i64) -> Result<bool> 
     .context("Impossibile verificare la proprietà del miglioramento")
 }
 
+async fn owned_improvement_description(
+    pool: &SqlitePool,
+    improvement_id: i64,
+) -> Result<Option<String>> {
+    let actor = identity::current_actor();
+    let Some(user_id) = actor.utente_id else {
+        return Ok(None);
+    };
+    sqlx::query_scalar(
+        "SELECT descrizione FROM miglioramenti WHERE id = ? AND autore_utente_id = ?",
+    )
+    .bind(improvement_id)
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await
+    .context("Impossibile leggere il testo originale del miglioramento")
+}
+
 async fn mark_read(pool: &SqlitePool, improvement_id: i64) -> Result<()> {
     if !is_primary_admin(pool).await? {
         bail!("Operazione riservata all'amministratore principale");
@@ -2770,10 +3106,16 @@ fn menu_keyboard(admin: bool) -> InlineKeyboardMarkup {
             "🗂️ Tutti i miglioramenti".to_string(),
             "improve:list:all:0".to_string(),
         )]);
-        rows.push(vec![InlineKeyboardButton::callback(
-            "📦 Esporta miglioramenti".to_string(),
-            "improve:export".to_string(),
-        )]);
+        rows.push(vec![
+            InlineKeyboardButton::callback(
+                "📦 Esporta miglioramenti".to_string(),
+                "improve:export".to_string(),
+            ),
+            InlineKeyboardButton::callback(
+                "📦 Esporta progetto".to_string(),
+                "improve:export:project".to_string(),
+            ),
+        ]);
         rows.push(vec![
             InlineKeyboardButton::callback(
                 "❌ Scartati".to_string(),
@@ -2816,6 +3158,40 @@ fn flow_cancel_keyboard() -> InlineKeyboardMarkup {
         InlineKeyboardButton::callback("❌ Annulla".to_string(), "improve:cancel".to_string()),
         InlineKeyboardButton::callback("🏠 Menù principale".to_string(), "menu:main".to_string()),
     ]])
+}
+
+fn edit_description_keyboard(current_description: &str) -> InlineKeyboardMarkup {
+    let mut rows = Vec::new();
+    let chunks = copy_text_chunks(current_description, 240);
+    if chunks.len() == 1 {
+        rows.push(vec![InlineKeyboardButton::copy_text_button(
+            "📋 Copia testo originale".to_string(),
+            CopyTextButton {
+                text: chunks[0].clone(),
+            },
+        )]);
+    } else {
+        let total = chunks.len();
+        for (index, chunk) in chunks.into_iter().enumerate() {
+            rows.push(vec![InlineKeyboardButton::copy_text_button(
+                format!("📋 Copia parte {}/{}", index + 1, total),
+                CopyTextButton { text: chunk },
+            )]);
+        }
+    }
+    rows.extend(description_keyboard().inline_keyboard);
+    InlineKeyboardMarkup::new(rows)
+}
+
+fn copy_text_chunks(value: &str, max_chars: usize) -> Vec<String> {
+    if value.is_empty() {
+        return Vec::new();
+    }
+    let chars = value.chars().collect::<Vec<_>>();
+    chars
+        .chunks(max_chars.max(1))
+        .map(|chunk| chunk.iter().collect::<String>())
+        .collect()
 }
 
 fn description_keyboard() -> InlineKeyboardMarkup {
@@ -3339,6 +3715,28 @@ mod tests {
             "/tmp/gestionale-casa_handoff_miglioramenti_20260827_120000.zip"
         )));
         assert!(!is_export_zip_path(&export_root_path().join("altro.zip")));
+    }
+
+    #[test]
+    fn percorso_export_progetto_accetta_solo_zip_nella_directory_dedicata() {
+        let project =
+            project_export_root_path().join("gestionale-casa_handoff_progetto_20260829_010000.zip");
+        assert!(is_export_zip_path(&project));
+        assert!(!is_export_zip_path(&project_export_root_path().join(
+            "gestionale-casa_handoff_miglioramenti_20260829_010000.zip"
+        )));
+        assert!(!is_export_zip_path(&PathBuf::from(
+            "/tmp/gestionale-casa_handoff_progetto_20260829_010000.zip"
+        )));
+    }
+
+    #[test]
+    fn copia_testo_lungo_viene_divisa_entra_limite_telegram() {
+        let value = "à".repeat(700);
+        let chunks = copy_text_chunks(&value, 240);
+        assert_eq!(chunks.len(), 3);
+        assert!(chunks.iter().all(|chunk| chunk.chars().count() <= 240));
+        assert_eq!(chunks.concat(), value);
     }
 
     #[test]

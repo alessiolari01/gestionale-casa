@@ -1,3 +1,18 @@
+<!-- CHANGELOG_STEP7_2H_20260829 -->
+# 29/08/2026 — Step 7.2H: Profili, membri/inviti Spazi e chiusura UX
+
+- aggiunte fondazioni `profili_alimentari` + condivisione tramite Spazi;
+- resa operativa la UI Profili con creazione, modifica, dettaglio, archiviazione e storico leggibile;
+- aggiunta gestione membri degli Spazi e inviti privati Telegram con ruolo, scadenza, calendario, limite utilizzi, revoca e notifiche;
+- aggiunte gallette al catalogo alimentare globale con compatibilità prudenziale `verificare`;
+- rifinite navigazione Spazi/Miglioramenti, ritorni contestuali, calendario/orari inviti e limiti utilizzi;
+- migliorato il workflow `Fatto · da verificare` con piani guidati e verifiche differite per i casi multi-account;
+- corretto l'input inatteso fuori dai wizard: la schermata corrente non viene più sostituita e dopo tre tentativi consecutivi viene suggerito `/start`;
+- aggiunto `📦 Esporta progetto`, handoff tecnico sanitizzato con `_project_handoff/CURRENT_STATE.md` generato da zero;
+- esclusi dall'export `.env`, token, DB, `data/`, `.git/`, `target/`, backup, cache e file tecnici temporanei;
+- migration repository portate a 36, ultima `20260829005000_h4e_input_export_progetto.sql`;
+- collaudo manuale completato per input inattesi ed export progetto; i casi che richiedono un secondo account restano esplicitamente differiti.
+
 # Changelog
 
 ## Step 7.2G.1 → 7.2G.6 — rifinitura Miglioramenti e UI Telegram — 2026-08-26/27

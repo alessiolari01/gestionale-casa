@@ -6,32 +6,28 @@ un'app dedicata.
 
 ## Stato corrente — Step 7
 
-Gli Step 1→6C sono chiusi e presenti in `main` tramite il merge `219caba`.
-Lo sviluppo corrente resta sul branch:
+Il branch di sviluppo è `step-7-alimentazione`. La baseline Git attualmente pubblicata prima della finalizzazione è `34d076c` (`Step 7.2G.1-7.2G.6: completa miglioramenti e UI Telegram`); sopra quella baseline è stato completato e collaudato il blocco **7.2H.0→7.2H.4F**.
 
-```text
-step-7-alimentazione
-```
+Il blocco 7.2H ha reso operative le fondamenta dei **Profili alimentari** e la collaborazione tramite **Spazi**, inclusi membri e inviti privati. Ha inoltre chiuso le rifiniture del workflow Miglioramenti e introdotto un export tecnico sanitizzato del progetto.
 
-La baseline committata prima dell'ultimo blocco è `54dc4dd` (`Step 7.2G: completa workflow miglioramenti e coda amministrativa`). Sul working tree sono stati completati e collaudati gli incrementi **7.2G.1 → 7.2G.6**, che chiudono la fase di rifinitura del modulo Miglioramenti e consolidano la UI Telegram.
+Stato verificato sul Galaxy S9 al 29/08/2026:
 
-Stato verificato sul Galaxy S9:
+- Profili alimentari come entità separate dagli account Telegram, con collegamento account opzionale;
+- UI di creazione, dettaglio, modifica, archiviazione e condivisione dei Profili;
+- gestione membri degli Spazi e inviti privati via deep-link Telegram;
+- inviti monouso/riutilizzabili, limite utilizzi, scadenza, calendario e orario;
+- notifiche e navigazione contestuale sugli eventi di membership;
+- input inattesi fuori dai wizard non distruggono la schermata corrente; dopo tre tentativi consecutivi viene suggerito `/start`;
+- `📦 Esporta miglioramenti` e `📦 Esporta progetto` disponibili dall'area Miglioramenti;
+- export progetto con codice, migration, documentazione e manifest tecnici, ma senza `.env`, token, database, `data/`, backup, `target/` o `.git/`;
+- `_project_handoff/CURRENT_STATE.md` viene generato da zero ad ogni export e fotografa il working tree reale;
+- migration SQL presenti nel repository: **36**, ultima `20260829005000_h4e_input_export_progetto.sql`;
+- controlli DB eseguiti durante i pacchetti H.4: `PRAGMA integrity_check = ok` e nessuna violazione foreign key;
+- collaudo manuale dell'escalation input inattesi e del nuovo export progetto completato.
 
-- pipeline Rust finale: **153/153 test**;
-- `cargo check --locked` e Clippy `-D warnings` verdi;
-- migration reali applicate fino a `20260827123000_esporta_miglioramenti_bot.sql`;
-- `PRAGMA integrity_check = ok` e nessuna violazione foreign key nei controlli eseguiti prima delle migration;
-- UI Telegram a schermata singola con stato persistente tra riavvii;
-- spegnimento controllato da `🛠️ Amministrazione`;
-- `💡 Migliora` contestuale con sezione e azioni recenti;
-- export ZIP dei Miglioramenti direttamente dal bot, verificato end-to-end compresa la cancellazione della copia temporanea dall'S9 dopo `✅ Ho scaricato il file`.
+I test che richiedono un **secondo account Telegram** restano documentati come verifiche differite e non bloccano l'avanzamento: accettazione invito, notifica al creatore, cambio ruolo e rimozione membro vanno riprovati end-to-end quando il secondo account sarà disponibile.
 
-Il backlog Miglioramenti attivo, al momento della chiusura documentale, contiene soltanto:
-
-- **#7** — gestione amministrativa di eliminazione/reset/revoca account: da progettare separatamente per non compromettere ownership, membership, permessi e storico;
-- **#9** — ambiente `🧪 Zona test` e aggiornamenti quasi zero-downtime: funzione infrastrutturale futura, intenzionalmente rimandata alla fase finale del progetto.
-
-La prossima area funzionale dello Step 7 è **Profili alimentari e porzioni**, seguita da override per ingrediente, turni/routine, planner pasti e lista della spesa.
+La prossima area funzionale è **Porzioni e override per profilo/ingrediente**. Profili e condivisione non vanno ricostruiti: sono già la base su cui proseguire.
 
 ## Alimentazione
 
@@ -86,12 +82,13 @@ Prima di modificare il progetto, leggere nell'ordine:
   - [x] Ricette operative e procedimento guidato;
   - [x] accesso Telegram approvato, amministrazione e workflow Miglioramenti;
   - [x] rifiniture UI Telegram 7.2G.1→7.2G.6;
-  - [ ] profili alimentari e porzioni;
+  - [x] profili alimentari: fondazioni, UI, gestione e condivisione via Spazi;
+  - [ ] porzioni personali e override ingrediente;
   - [ ] turni/routine;
   - [ ] planner e lista della spesa;
   - [ ] reminder/export/integrazioni residue.
 
-Il checkpoint runtime corrente è stato verificato sull'S9 con **153/153 test** e con collaudo reale dell'export Miglioramenti dal bot.
+Il checkpoint runtime 7.2H è stato collaudato sull'S9, incluso l'export progetto sanitizzato e la gestione non distruttiva degli input inattesi. La pipeline finale prima del commit/push è il controllo autorevole conclusivo.
 
 ## Fonte ufficiale e workflow corrente
 

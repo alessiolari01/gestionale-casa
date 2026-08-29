@@ -76,6 +76,19 @@ async fn entity_owner_space_id(
             .fetch_optional(&mut *conn)
             .await
         }
+        "profilo_alimentare" => {
+            sqlx::query_scalar(
+                "SELECT ms.spazio_id FROM profili_alimentari pa \
+                 JOIN membri_spazio ms ON ms.utente_id = pa.gestore_utente_id \
+                 JOIN spazi s ON s.id = ms.spazio_id \
+                 WHERE pa.id = ? \
+                 ORDER BY CASE WHEN s.tipo = 'personale' THEN 0 ELSE 1 END, ms.spazio_id \
+                 LIMIT 1",
+            )
+            .bind(id_origine)
+            .fetch_optional(&mut *conn)
+            .await
+        }
         _ => Ok(None),
     }
 }
@@ -338,6 +351,7 @@ struct HistoryListRow {
     tipo_entita: String,
     when_local: String,
     operazione: String,
+    componente: String,
     nome_entita_snapshot: String,
     abitazione_nome_snapshot: Option<String>,
     stanza_nome_snapshot: Option<String>,
@@ -787,7 +801,7 @@ async fn load_filtered_global_history_page(
     let mut list = QueryBuilder::<Sqlite>::new(
         "SELECT e.id, se.tipo_entita, \
                 strftime('%d/%m/%Y %H:%M', e.avvenuto_il, 'localtime') AS when_local, \
-                e.operazione, e.nome_entita_snapshot, \
+                e.operazione, e.componente, e.nome_entita_snapshot, \
                 e.abitazione_nome_snapshot, e.stanza_nome_snapshot, \
                 e.contenitore_percorso_snapshot, e.spazio_nome_snapshot, \
                 e.luogo_spazio_nome_snapshot, e.attore_nome_snapshot, \
@@ -1767,7 +1781,7 @@ async fn load_entity_history_page(
     let events = sqlx::query_as::<_, HistoryListRow>(
         "SELECT e.id, se.tipo_entita, \
                 strftime('%d/%m/%Y %H:%M', e.avvenuto_il, 'localtime') AS when_local, \
-                e.operazione, e.nome_entita_snapshot, \
+                e.operazione, e.componente, e.nome_entita_snapshot, \
                 e.abitazione_nome_snapshot, e.stanza_nome_snapshot, \
                 e.contenitore_percorso_snapshot, e.spazio_nome_snapshot, \
                 e.luogo_spazio_nome_snapshot, e.attore_nome_snapshot, \
@@ -1863,8 +1877,8 @@ fn format_history_list(title: &str, events: &[HistoryListRow], page: i64, total:
         message.push_str(&format!(
             "{}\n{} {} · {} {}",
             event.when_local,
-            operation_icon(&event.operazione),
-            operation_label(&event.operazione),
+            event_action_icon(&event.componente, &event.operazione),
+            event_action_label(&event.componente, &event.operazione),
             entity_icon(&event.tipo_entita),
             event.nome_entita_snapshot,
         ));
@@ -1893,12 +1907,12 @@ fn format_event_detail(
     let mut message = format!(
         "📜 Dettaglio storico\n\n{}\n{} {}\n{} {}\nModulo: {} · {}",
         event.when_local,
-        operation_icon(&event.operazione),
-        operation_label(&event.operazione),
+        event_action_icon(&event.componente, &event.operazione),
+        event_action_label(&event.componente, &event.operazione),
         entity_icon(&event.tipo_entita),
         event.nome_entita_snapshot,
-        event.modulo,
-        event.componente,
+        module_label(&event.modulo),
+        component_label(&event.componente),
     );
 
     if event.automatico != 0 {
@@ -1916,8 +1930,10 @@ fn format_event_detail(
             origin_label(&event.origine_azione)
         ));
     }
-    if let Some(space) = event.spazio_nome_snapshot.as_deref() {
-        message.push_str(&format!("\n👥 Spazio dell'entità: {space}"));
+    if event.tipo_entita != "profilo_alimentare" {
+        if let Some(space) = event.spazio_nome_snapshot.as_deref() {
+            message.push_str(&format!("\n👥 Spazio dell'entità: {space}"));
+        }
     }
 
     if event.evento_padre_id.is_some() {
@@ -2115,8 +2131,8 @@ fn parse_nonnegative(value: &str) -> Option<i64> {
 fn event_button_label(event: &HistoryListRow) -> String {
     format!(
         "{} {} · {}",
-        operation_icon(&event.operazione),
-        operation_label(&event.operazione),
+        event_action_icon(&event.componente, &event.operazione),
+        event_action_label(&event.componente, &event.operazione),
         truncate_chars(&event.nome_entita_snapshot, 22)
     )
 }
@@ -2209,6 +2225,44 @@ fn location_with_home_icon(location: &str) -> String {
     }
 }
 
+fn event_action_icon(component: &str, operation: &str) -> &'static str {
+    match component {
+        "condivisione_profilo" => "👥",
+        "privatizzazione_profilo" => "🔒",
+        "archiviazione_profilo" => "📦",
+        "visibilita_profili" => "👁️",
+        _ => operation_icon(operation),
+    }
+}
+
+fn event_action_label(component: &str, operation: &str) -> &'static str {
+    match component {
+        "condivisione_profilo" => "Condiviso",
+        "privatizzazione_profilo" => "Reso privato",
+        "archiviazione_profilo" => "Archiviato",
+        "visibilita_profili" => "Visibilità modificata",
+        _ => operation_label(operation),
+    }
+}
+
+fn module_label(module: &str) -> &str {
+    match module {
+        "alimentazione" => "Alimentazione",
+        _ => module,
+    }
+}
+
+fn component_label(component: &str) -> &str {
+    match component {
+        "profili_alimentari"
+        | "visibilita_profili"
+        | "condivisione_profilo"
+        | "privatizzazione_profilo"
+        | "archiviazione_profilo" => "Profili alimentari",
+        _ => component,
+    }
+}
+
 fn operation_icon(operation: &str) -> &'static str {
     match operation {
         "creazione" => "➕",
@@ -2246,6 +2300,7 @@ fn entity_icon(entity_type: &str) -> &'static str {
         "vestito" => "👕",
         "alimento" => "🥕",
         "prodotto_alimentare" => "🛒",
+        "profilo_alimentare" => "👤",
         _ => "🔹",
     }
 }
@@ -2278,6 +2333,8 @@ fn field_label(field: &str) -> &str {
         "valore_stimato_centesimi" => "Valore stimato",
         "condizione" => "Condizione",
         "note" => "Note",
+        "visibilita" => "Visibilità",
+        "stato" => "Stato",
         "foto_id" => "Foto",
         "ruolo" => "Ruolo foto",
         "percorso_file" => "File interno",

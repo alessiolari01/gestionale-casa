@@ -1,3 +1,45 @@
+<!-- STEP7_2H_CHIUSURA_20260829 -->
+# Aggiornamento architetturale autorevole — Step 7.2H chiuso (29/08/2026)
+
+Il branch `step-7-alimentazione` ha completato il blocco **7.2H.0→7.2H.4F**. Le sezioni storiche più sotto restano valide per la cronologia; in caso di contrasto prevale questo aggiornamento.
+
+## Modello corrente
+
+- `utente/account` identifica chi usa il sistema;
+- `spazio` è un contesto di collaborazione, **non** una casa fisica;
+- case, stanze, contenitori e oggetti restano risorse fisiche assegnate a uno spazio e non diventano globali;
+- proprietà, visibilità, membership e permessi sono concetti distinti;
+- un Profilo alimentare rappresenta una persona alimentare ed è separato dall'account Telegram; il collegamento a un utente è opzionale;
+- i Profili possono essere privati o condivisi tramite Spazi, ma non globali;
+- contenuti globali sono ammessi solo per domini compatibili (es. cataloghi) e la pubblicazione globale resta un'azione amministrativa.
+
+## Runtime Telegram
+
+Gli handler principali continuano a ricevere `Arc<HandlerDependencies>` per evitare crescita dell'arità DPTree. `ContextBot` conserva la schermata UI principale e il contesto di navigazione.
+
+Gli input testuali fuori da un wizard non sostituiscono la schermata corrente: vengono trattati come input inattesi. Dopo tre tentativi consecutivi viene aggiunto il suggerimento `/start`; il contatore viene azzerato da una navigazione/comando valido o dall'ingresso in un flusso che richiede input.
+
+## Spazi e inviti
+
+`src/modules/spazi_membri.rs` gestisce membership e inviti privati. Gli inviti usano deep-link Telegram e supportano ruolo, modalità monouso/riutilizzabile, limite utilizzi e scadenza. L'apertura da parte del creatore o di un membro già presente non consuma l'invito.
+
+## Export tecnici
+
+`scripts/export_miglioramenti.py` esporta il backlog/archivio Miglioramenti. `scripts/export_progetto.py` crea un handoff tecnico completo ma sanitizzato. L'export progetto ricrea sempre `_project_handoff/` da zero e include `CURRENT_STATE.md`, manifest Git/file, albero e regole di esclusione. `.env`, token, DB, `data/`, `.git/`, `target/`, backup e file runtime sono esclusi; pattern sensibili nei file testuali fanno fallire l'export in modo conservativo.
+
+## Migration del blocco 7.2H
+
+```text
+20260827190000_profili_alimentari_fondazioni.sql
+20260828074000_catalogo_gallette.sql
+20260828101500_inviti_spazi_operativi.sql
+20260828202500_h4c_inviti_verifica_guidata.sql
+20260829002500_h4d_rifiniture_finali.sql
+20260829005000_h4e_input_export_progetto.sql
+```
+
+Sono append-only; se risultano applicate sul DB reale non devono essere modificate in-place.
+
 # Architettura
 
 ## Stato architetturale corrente — Step 7
