@@ -2231,6 +2231,7 @@ fn event_action_icon(component: &str, operation: &str) -> &'static str {
         "privatizzazione_profilo" => "🔒",
         "archiviazione_profilo" => "📦",
         "visibilita_profili" => "👁️",
+        "porzione_profilo" => "🍽️",
         _ => operation_icon(operation),
     }
 }
@@ -2241,6 +2242,7 @@ fn event_action_label(component: &str, operation: &str) -> &'static str {
         "privatizzazione_profilo" => "Reso privato",
         "archiviazione_profilo" => "Archiviato",
         "visibilita_profili" => "Visibilità modificata",
+        "porzione_profilo" => "Porzione modificata",
         _ => operation_label(operation),
     }
 }
@@ -2258,7 +2260,8 @@ fn component_label(component: &str) -> &str {
         | "visibilita_profili"
         | "condivisione_profilo"
         | "privatizzazione_profilo"
-        | "archiviazione_profilo" => "Profili alimentari",
+        | "archiviazione_profilo"
+        | "porzione_profilo" => "Profili alimentari",
         _ => component,
     }
 }
@@ -2334,6 +2337,7 @@ fn field_label(field: &str) -> &str {
         "condizione" => "Condizione",
         "note" => "Note",
         "visibilita" => "Visibilità",
+        "porzione_ricetta" => "Porzione ricetta",
         "stato" => "Stato",
         "foto_id" => "Foto",
         "ruolo" => "Ruolo foto",

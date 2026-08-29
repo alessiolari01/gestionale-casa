@@ -37,6 +37,7 @@ pub struct ProfileSessionStore {
 enum ProfileConversationState {
     NewPersonName,
     Rename { profile_id: i64 },
+    PortionPercentage { profile_id: i64, recipe_id: i64 },
 }
 
 impl ProfileSessionStore {
@@ -201,6 +202,16 @@ pub async fn handle_message(
             }
             Ok(true)
         }
+        Some(ProfileConversationState::PortionPercentage {
+            profile_id,
+            recipe_id,
+        }) => {
+            crate::modules::porzioni_profili::handle_percentage_message(
+                bot, msg, pool, profile_id, recipe_id, text,
+            )
+            .await?;
+            Ok(true)
+        }
         None => Ok(false),
     }
 }
@@ -212,6 +223,23 @@ pub async fn handle_callback(
     sessions: &ProfileSessionStore,
     data: &str,
 ) -> ResponseResult<bool> {
+    if data.starts_with("foodprof:portion:") {
+        if let Some((profile_id, recipe_id)) =
+            crate::modules::porzioni_profili::portion_context_from_callback(data)
+        {
+            sessions.set(
+                chat_id.0,
+                ProfileConversationState::PortionPercentage {
+                    profile_id,
+                    recipe_id,
+                },
+            );
+        } else {
+            sessions.clear_chat(chat_id.0);
+        }
+        return crate::modules::porzioni_profili::handle_callback(bot, chat_id, pool, data).await;
+    }
+
     match data {
         "foodprof:noop" => Ok(true),
         "foodprof:menu" => {
@@ -1389,6 +1417,10 @@ fn profile_detail_keyboard(profile_id: i64, can_manage: bool) -> InlineKeyboardM
                 format!("foodprof:spaces:{profile_id}:0"),
             ),
         ]);
+        rows.push(vec![button(
+            "🍽️ Porzioni e preferenze",
+            format!("foodprof:portion:list:{profile_id}:0"),
+        )]);
         rows.push(vec![button(
             "📦 Archivia profilo",
             format!("foodprof:archive:{profile_id}"),
