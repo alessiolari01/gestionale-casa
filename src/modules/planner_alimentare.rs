@@ -1970,8 +1970,19 @@ mod telegram_tests {
     }
 
     #[test]
-    fn navigazione_globale_ha_indietro_migliora_menu() {
+    fn navigazione_globale_ha_indietro_e_menu_principale() {
+        // `💡 Migliora` non viene aggiunto qui: lo inserisce il ContextBot
+        // subito prima di `🏠 Menù principale` quando la riga ha meno di tre
+        // pulsanti. La riga che l'utente vede è quindi
+        // `⬅️ Indietro | 💡 Migliora | 🏠 Menù principale`, come da specifica.
+        // Il test verifica ciò che questa funzione deve davvero garantire:
+        // due pulsanti, con `menu:main` in ultima posizione, altrimenti
+        // l'inserimento del ContextBot finirebbe nel punto sbagliato.
         let row = planner_global_nav("planner:menu");
-        assert_eq!(row.len(), 3);
+        assert_eq!(row.len(), 2);
+        assert!(matches!(
+            &row[1].kind,
+            teloxide::types::InlineKeyboardButtonKind::CallbackData(data) if data == "menu:main"
+        ));
     }
 }
