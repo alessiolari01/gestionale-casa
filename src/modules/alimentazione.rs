@@ -215,7 +215,7 @@ struct NutritionRecord {
 pub async fn show_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
-        "🍽️ Alimentazione\n\nScegli se gestire alimenti, ricette oppure i profili alimentari.",
+        "🍽️ Alimentazione\n\nScegli alimenti, ricette, profili alimentari oppure il Planner.",
     )
     .reply_markup(alimentation_menu_keyboard())
     .await?;
@@ -4806,6 +4806,7 @@ fn alimentation_menu_keyboard() -> InlineKeyboardMarkup {
         vec![button("🥕 Alimenti", "food:foods")],
         vec![button("🍳 Ricette", "recipe:menu")],
         vec![button("👥 Profili alimentari", "foodprof:menu")],
+        vec![button("📅 Planner alimentare", "planner:menu")],
         vec![
             button("⬅️ Indietro", "menu:main"),
             button("🏠 Menù principale", "menu:main"),

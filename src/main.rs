@@ -591,6 +591,18 @@ async fn handle_authorized_message(
         }
     }
 
+    if modules::planner_alimentare::handle_message(&bot, &msg, &pool, text).await? {
+        sessions.clear_chat(chat_id);
+        location_sessions.clear_chat(chat_id);
+        container_sessions.clear_chat(chat_id);
+        photo_sessions.clear_chat(chat_id);
+        food_sessions.clear_chat(chat_id);
+        improvement_sessions.clear_chat(chat_id);
+        recipe_sessions.clear_chat(chat_id);
+        identity_sessions.clear_chat(chat_id);
+        return respond(());
+    }
+
     if modules::profili_alimentari::handle_message(&bot, &msg, &pool, &profile_sessions, text)
         .await?
     {
@@ -952,6 +964,20 @@ async fn handle_authorized_callback(
         container_sessions.clear_chat(chat_id.0);
         photo_sessions.clear_chat(chat_id.0);
         food_sessions.clear_chat(chat_id.0);
+        recipe_sessions.clear_chat(chat_id.0);
+        identity_sessions.clear_chat(chat_id.0);
+        return respond(());
+    }
+
+    if data.starts_with("planner:")
+        && modules::planner_alimentare::handle_callback(&bot, chat_id, &pool, data).await?
+    {
+        sessions.clear_chat(chat_id.0);
+        location_sessions.clear_chat(chat_id.0);
+        container_sessions.clear_chat(chat_id.0);
+        photo_sessions.clear_chat(chat_id.0);
+        food_sessions.clear_chat(chat_id.0);
+        profile_sessions.clear_chat(chat_id.0);
         recipe_sessions.clear_chat(chat_id.0);
         identity_sessions.clear_chat(chat_id.0);
         return respond(());

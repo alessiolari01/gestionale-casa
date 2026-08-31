@@ -628,7 +628,17 @@ where
                         })
                     }) {
                         if row.len() < 3 {
-                            row.push(improve);
+                            let menu_index = row
+                                .iter()
+                                .position(|button| {
+                                    matches!(
+                                        &button.kind,
+                                        InlineKeyboardButtonKind::CallbackData(data)
+                                            if data == "menu:main"
+                                    )
+                                })
+                                .unwrap_or(row.len());
+                            row.insert(menu_index, improve);
                         } else {
                             keyboard.inline_keyboard.push(vec![improve]);
                         }
@@ -751,6 +761,8 @@ fn infer_section(text: &str, screen: &str, current_section: Option<&str>) -> Str
         Some("Amministrazione")
     } else if normalized.contains("migliorament") {
         Some("Miglioramenti")
+    } else if normalized.contains("planner") {
+        Some("Alimentazione › Planner")
     } else if normalized.contains("profili alimentari") || normalized.contains("profilo alimentare")
     {
         Some("Alimentazione › Profili alimentari")
@@ -778,6 +790,8 @@ fn infer_section(text: &str, screen: &str, current_section: Option<&str>) -> Str
 fn section_for_callback(data: &str) -> Option<String> {
     let section = if data == "menu:main" || data == "menu:soon" {
         "Menù principale"
+    } else if data.starts_with("planner:") {
+        "Alimentazione › Planner"
     } else if data.starts_with("foodprof:") {
         "Alimentazione › Profili alimentari"
     } else if data.starts_with("recipe:") {
