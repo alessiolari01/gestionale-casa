@@ -22,6 +22,66 @@ EXCLUDED_DIRS = {
 }
 
 
+EXPORT_SCOPES = {
+    "pending": ("Da approvare", "da_approvare"),
+    "todo": ("Da fare", "da_fare"),
+    "done": ("Fatte", "fatto"),
+    "archived": ("Archiviate", None),
+}
+EXPORT_SCOPE_ORDER = ("pending", "todo", "done", "archived")
+
+
+def parse_scopes(raw: str) -> tuple[str, ...]:
+    requested = {value.strip() for value in raw.split(",") if value.strip()}
+    if not requested:
+        raise ValueError("Seleziona almeno una categoria da esportare")
+    unknown = requested - set(EXPORT_SCOPES)
+    if unknown:
+        raise ValueError(f"Filtri export non validi: {', '.join(sorted(unknown))}")
+    return tuple(scope for scope in EXPORT_SCOPE_ORDER if scope in requested)
+
+
+def scopes_token(scopes: tuple[str, ...]) -> str:
+    return ",".join(scopes)
+
+
+def scopes_label(scopes: tuple[str, ...]) -> str:
+    if scopes == EXPORT_SCOPE_ORDER:
+        return "Tutti"
+    return " + ".join(EXPORT_SCOPES[scope][0] for scope in scopes)
+
+
+def filter_exported(exported: dict[str, list[dict]], scopes: tuple[str, ...]) -> dict[str, list[dict]]:
+    filtered = {table: list(rows) for table, rows in exported.items()}
+    active = filtered.get("miglioramenti", [])
+    archive = filtered.get("miglioramenti_archivio", [])
+
+    if scopes != EXPORT_SCOPE_ORDER:
+        wanted_statuses = {
+            EXPORT_SCOPES[scope][1] for scope in scopes
+            if EXPORT_SCOPES[scope][1] is not None
+        }
+        active = [item for item in active if item.get("stato") in wanted_statuses]
+
+    if "archived" not in scopes:
+        archive = []
+
+    active_ids = {item.get("id") for item in active}
+    archive_ids = {item.get("id") for item in archive}
+    filtered["miglioramenti"] = active
+    filtered["miglioramenti_archivio"] = archive
+
+    for table, rows in list(filtered.items()):
+        if table in {"miglioramenti", "miglioramenti_archivio"}:
+            continue
+        if rows and "miglioramento_id" in rows[0]:
+            filtered[table] = [item for item in rows if item.get("miglioramento_id") in active_ids]
+        elif rows and "miglioramento_archivio_id" in rows[0]:
+            filtered[table] = [item for item in rows if item.get("miglioramento_archivio_id") in archive_ids]
+    return filtered
+
+
+
 def run_git(root: Path, *args: str) -> str:
     proc = subprocess.run(
         ["git", *args],
@@ -114,7 +174,7 @@ def find_attachment(root: Path, raw: object) -> Path | None:
     return None
 
 
-def build_summary(active: list[dict], archive: list[dict], attachment_count: int, branch: str, head: str, dirty: bool) -> str:
+def build_summary(active: list[dict], archive: list[dict], attachment_count: int, branch: str, head: str, dirty: bool, scopes: tuple[str, ...]) -> str:
     def value(item: dict, key: str) -> str:
         raw = item.get(key)
         if raw is None:
@@ -128,6 +188,7 @@ def build_summary(active: list[dict], archive: list[dict], attachment_count: int
         f"- Branch: `{branch}`",
         f"- HEAD: `{head}`",
         f"- Working tree: {'con modifiche locali' if dirty else 'pulito'}",
+        f"- Filtro export: **{scopes_label(scopes)}**",
         f"- Miglioramenti attivi: **{len(active)}**",
         f"- Archivio: **{len(archive)}**",
         f"- Allegati locali copiati: **{attachment_count}**",
@@ -162,7 +223,7 @@ def build_summary(active: list[dict], archive: list[dict], attachment_count: int
     return "\n".join(lines)
 
 
-def export_bundle(root: Path, output_dir: Path) -> tuple[Path, int, int, int]:
+def export_bundle(root: Path, output_dir: Path, scopes: tuple[str, ...]) -> tuple[Path, int, int, int]:
     if not (root / ".git").exists():
         raise RuntimeError(f"Repository Git non trovato: {root}")
 
@@ -172,7 +233,7 @@ def export_bundle(root: Path, output_dir: Path) -> tuple[Path, int, int, int]:
 
     output_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output = output_dir / f"gestionale-casa_handoff_miglioramenti_{stamp}.zip"
+    output = output_dir / f"gestionale-casa_handoff_miglioramenti_{scopes_token(scopes).replace(chr(44), chr(45))}_{stamp}.zip"
     partial = output.with_suffix(".zip.part")
     partial.unlink(missing_ok=True)
 
@@ -197,6 +258,7 @@ def export_bundle(root: Path, output_dir: Path) -> tuple[Path, int, int, int]:
             ).fetchall()
         ]
         exported = {table: table_rows(connection, table) for table in table_names}
+        exported = filter_exported(exported, scopes)
         active = exported.get("miglioramenti", [])
         archive = exported.get("miglioramenti_archivio", [])
         users = safe_user_rows(connection)
@@ -253,13 +315,17 @@ def export_bundle(root: Path, output_dir: Path) -> tuple[Path, int, int, int]:
         "head": head,
         "git_status_short": status,
         "git_log_5": log5,
+        "export_scope": scopes_token(scopes),
+        "export_scope_label": scopes_label(scopes),
     }
     schema_text = "\n\n".join(
         f"-- {row['type']}: {row['name']}\n{row['sql']};"
         for row in schema_rows
         if row["sql"]
     )
-    summary = build_summary(active, archive, len(attachment_entries), branch, head, bool(status))
+    summary = build_summary(
+        active, archive, len(attachment_entries), branch, head, bool(status), scopes
+    )
 
     try:
         with zipfile.ZipFile(partial, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive_zip:
@@ -311,11 +377,13 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--scope", required=True)
     args = parser.parse_args()
 
     try:
+        scopes = parse_scopes(args.scope)
         path, active, archived, attachments = export_bundle(
-            args.root.expanduser().resolve(), args.output_dir.expanduser()
+            args.root.expanduser().resolve(), args.output_dir.expanduser(), scopes
         )
     except Exception as error:
         print(f"ERROR={error}", file=sys.stderr)
@@ -325,6 +393,7 @@ def main() -> int:
     print(f"ACTIVE={active}")
     print(f"ARCHIVED={archived}")
     print(f"ATTACHMENTS={attachments}")
+    print(f"SCOPE={scopes_token(scopes)}")
     print(f"SIZE_BYTES={path.stat().st_size}")
     return 0
 

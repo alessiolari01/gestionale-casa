@@ -36,8 +36,18 @@ pub struct ProfileSessionStore {
 #[derive(Debug, Clone)]
 enum ProfileConversationState {
     NewPersonName,
-    Rename { profile_id: i64 },
-    PortionPercentage { profile_id: i64, recipe_id: i64 },
+    Rename {
+        profile_id: i64,
+    },
+    PortionPercentage {
+        profile_id: i64,
+        recipe_id: i64,
+    },
+    IngredientQuantity {
+        profile_id: i64,
+        recipe_id: i64,
+        ingredient_id: i64,
+    },
 }
 
 impl ProfileSessionStore {
@@ -212,6 +222,27 @@ pub async fn handle_message(
             .await?;
             Ok(true)
         }
+        Some(ProfileConversationState::IngredientQuantity {
+            profile_id,
+            recipe_id,
+            ingredient_id,
+        }) => {
+            let completed = crate::modules::porzioni_ingredienti::quantity_input_is_valid(text);
+            crate::modules::porzioni_ingredienti::handle_quantity_message(
+                bot,
+                msg,
+                pool,
+                profile_id,
+                recipe_id,
+                ingredient_id,
+                text,
+            )
+            .await?;
+            if completed {
+                sessions.clear_chat(chat_id);
+            }
+            Ok(true)
+        }
         None => Ok(false),
     }
 }
@@ -223,6 +254,24 @@ pub async fn handle_callback(
     sessions: &ProfileSessionStore,
     data: &str,
 ) -> ResponseResult<bool> {
+    if data.starts_with("foodprof:ing:") {
+        if let Some((profile_id, recipe_id, ingredient_id)) =
+            crate::modules::porzioni_ingredienti::input_context_from_callback(data)
+        {
+            sessions.set(
+                chat_id.0,
+                ProfileConversationState::IngredientQuantity {
+                    profile_id,
+                    recipe_id,
+                    ingredient_id,
+                },
+            );
+        } else {
+            sessions.clear_chat(chat_id.0);
+        }
+        return crate::modules::porzioni_ingredienti::handle_callback(bot, chat_id, pool, data)
+            .await;
+    }
     if data.starts_with("foodprof:portion:") {
         if let Some((profile_id, recipe_id)) =
             crate::modules::porzioni_profili::portion_context_from_callback(data)

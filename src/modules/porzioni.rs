@@ -113,6 +113,64 @@ pub fn calculate_profile_quantity(
     })
 }
 
+/// Contributo di un singolo profilo a una riga ingrediente.
+///
+/// È il mattone usato dai futuri planner e lista della spesa: ogni profilo
+/// viene calcolato con le stesse regole di `calculate_profile_quantity`, poi
+/// i contributi presenti vengono sommati.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ProfileIngredientContribution {
+    pub profile_id: i64,
+    pub portion_factor: f64,
+    pub ingredient_override: IngredientOverride,
+}
+
+/// Risultato del calcolo multi-profilo per una singola riga ingrediente.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MultiProfileIngredientCalculation {
+    pub total_quantity: f64,
+    pub included_profiles: Vec<i64>,
+    pub excluded_profiles: Vec<i64>,
+}
+
+/// Calcola la quantità complessiva necessaria per più profili.
+///
+/// L'override di quantità resta assoluto per il singolo profilo e quindi
+/// prevale sulla sua percentuale. Un profilo che esclude l'ingrediente non
+/// contribuisce al totale, ma viene mantenuto in `excluded_profiles`.
+pub fn calculate_multi_profile_ingredient(
+    recipe_total_quantity: f64,
+    recipe_servings: i64,
+    profiles: &[ProfileIngredientContribution],
+) -> Result<MultiProfileIngredientCalculation, PortionError> {
+    let mut total_quantity = 0.0;
+    let mut included_profiles = Vec::new();
+    let mut excluded_profiles = Vec::new();
+
+    for profile in profiles {
+        let calculation = calculate_profile_quantity(
+            recipe_total_quantity,
+            recipe_servings,
+            profile.portion_factor,
+            profile.ingredient_override,
+        )?;
+
+        match calculation.final_quantity {
+            Some(quantity) => {
+                total_quantity += quantity;
+                included_profiles.push(profile.profile_id);
+            }
+            None => excluded_profiles.push(profile.profile_id),
+        }
+    }
+
+    Ok(MultiProfileIngredientCalculation {
+        total_quantity,
+        included_profiles,
+        excluded_profiles,
+    })
+}
+
 fn is_positive_finite(value: f64) -> bool {
     value.is_finite() && value > 0.0
 }
@@ -210,5 +268,60 @@ mod tests {
                 Err(PortionError::OverrideQuantity)
             );
         }
+    }
+
+    #[test]
+    fn multi_profile_sums_scaled_and_absolute_overrides() {
+        let profiles = [
+            ProfileIngredientContribution {
+                profile_id: 10,
+                portion_factor: 1.2,
+                ingredient_override: IngredientOverride::None,
+            },
+            ProfileIngredientContribution {
+                profile_id: 20,
+                portion_factor: 0.8,
+                ingredient_override: IngredientOverride::Quantity(90.0),
+            },
+        ];
+
+        let result =
+            calculate_multi_profile_ingredient(400.0, 4, &profiles).expect("calcolo valido");
+
+        assert_close(result.total_quantity, 210.0);
+        assert_eq!(result.included_profiles, vec![10, 20]);
+        assert!(result.excluded_profiles.is_empty());
+    }
+
+    #[test]
+    fn multi_profile_tracks_exclusions_without_adding_them() {
+        let profiles = [
+            ProfileIngredientContribution {
+                profile_id: 10,
+                portion_factor: 1.5,
+                ingredient_override: IngredientOverride::None,
+            },
+            ProfileIngredientContribution {
+                profile_id: 20,
+                portion_factor: 1.0,
+                ingredient_override: IngredientOverride::Excluded,
+            },
+        ];
+
+        let result =
+            calculate_multi_profile_ingredient(400.0, 4, &profiles).expect("calcolo valido");
+
+        assert_close(result.total_quantity, 150.0);
+        assert_eq!(result.included_profiles, vec![10]);
+        assert_eq!(result.excluded_profiles, vec![20]);
+    }
+
+    #[test]
+    fn multi_profile_empty_selection_has_zero_total() {
+        let result = calculate_multi_profile_ingredient(400.0, 4, &[]).expect("calcolo valido");
+
+        assert_close(result.total_quantity, 0.0);
+        assert!(result.included_profiles.is_empty());
+        assert!(result.excluded_profiles.is_empty());
     }
 }

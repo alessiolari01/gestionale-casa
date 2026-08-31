@@ -34,6 +34,8 @@ use teloxide::{
 
 type Bot = context_bot::ContextBot;
 
+const TELEGRAM_REQUEST_TIMEOUT: Duration = Duration::from_secs(180);
+
 #[derive(Clone, Default)]
 struct IdentitySessionStore {
     inner: Arc<Mutex<HashMap<i64, IdentityConversationState>>>,
@@ -229,7 +231,11 @@ async fn async_main() -> anyhow::Result<()> {
         }
     }
 
-    let telegram_bot = teloxide::Bot::new(config.telegram_token.clone());
+    let telegram_client = teloxide::net::default_reqwest_settings()
+        .timeout(TELEGRAM_REQUEST_TIMEOUT)
+        .build()
+        .context("Impossibile configurare il client HTTP Telegram")?;
+    let telegram_bot = teloxide::Bot::with_client(config.telegram_token.clone(), telegram_client);
     let improve_contexts = context_bot::ImproveContextStore::default();
     let bot = Bot::new(telegram_bot.clone(), improve_contexts.clone(), pool.clone());
     bot.restore_persisted_ui().await;
@@ -2240,7 +2246,13 @@ fn first_command(text: &str) -> Option<&str> {
 
 #[cfg(test)]
 mod runtime_tests {
-    use super::{unexpected_input_notice, TOKIO_THREAD_STACK_SIZE};
+    use super::{unexpected_input_notice, TELEGRAM_REQUEST_TIMEOUT, TOKIO_THREAD_STACK_SIZE};
+    use std::time::Duration;
+
+    #[test]
+    fn timeout_http_telegram_supporta_upload_lunghi() {
+        assert!(TELEGRAM_REQUEST_TIMEOUT >= Duration::from_secs(120));
+    }
 
     #[test]
     fn runtime_tokio_mantiene_stack_rinforzato() {

@@ -48,6 +48,49 @@ pub async fn handle_callback(
         return Ok(true);
     }
 
+    if let Some((profile_id, recipe_id)) = parse_two_i64(data, "foodprof:portion:percent:") {
+        show_percentage_editor(bot, chat_id, pool, profile_id, recipe_id).await?;
+        return Ok(true);
+    }
+
+    if let Some((profile_id, recipe_id)) = parse_two_i64(data, "foodprof:portion:resetall:ask:") {
+        show_reset_all_confirmation(bot, chat_id, pool, profile_id, recipe_id).await?;
+        return Ok(true);
+    }
+
+    if let Some((profile_id, recipe_id)) = parse_two_i64(data, "foodprof:portion:resetall:yes:") {
+        match reset_all_customizations(pool, profile_id, recipe_id).await {
+            Ok(changed) => {
+                let notice = if changed {
+                    "✅ Modifiche resettate: porzione al 100% e ingredienti ripristinati."
+                } else {
+                    "ℹ️ La ricetta usa già le quantità originali."
+                };
+                show_portion_detail_with_notice(
+                    bot,
+                    chat_id,
+                    pool,
+                    profile_id,
+                    recipe_id,
+                    Some(notice),
+                )
+                .await?;
+            }
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    profile_id,
+                    recipe_id,
+                    "Reset completo ricetta rifiutato"
+                );
+                bot.send_message(chat_id, format!("⚠️ {error}"))
+                    .reply_markup(portion_return_keyboard(profile_id))
+                    .await?;
+            }
+        }
+        return Ok(true);
+    }
+
     if let Some((profile_id, recipe_id, percentage)) =
         parse_three_i64(data, "foodprof:portion:set:")
     {
@@ -58,13 +101,20 @@ pub async fn handle_callback(
 
         match set_portion_percentage(pool, profile_id, recipe_id, percentage).await {
             Ok(changed) => {
-                let message = if changed {
-                    "✅ Porzione personale aggiornata."
+                let notice = if changed {
+                    format!("✅ Percentuale aggiornata al {percentage}%.")
                 } else {
-                    "ℹ️ La porzione era già impostata così."
+                    format!("ℹ️ Percentuale già impostata al {percentage}%.")
                 };
-                bot.send_message(chat_id, message).await?;
-                show_portion_detail(bot, chat_id, pool, profile_id, recipe_id).await?;
+                show_portion_detail_with_notice(
+                    bot,
+                    chat_id,
+                    pool,
+                    profile_id,
+                    recipe_id,
+                    Some(&notice),
+                )
+                .await?;
             }
             Err(error) => {
                 tracing::warn!(
@@ -85,13 +135,20 @@ pub async fn handle_callback(
     if let Some((profile_id, recipe_id)) = parse_two_i64(data, "foodprof:portion:reset:") {
         match reset_portion(pool, profile_id, recipe_id).await {
             Ok(changed) => {
-                let message = if changed {
-                    "♻️ Ripristinata la porzione standard."
+                let notice = if changed {
+                    "✅ Percentuale ripristinata al 100%."
                 } else {
-                    "ℹ️ La ricetta usa già la porzione standard."
+                    "ℹ️ La percentuale è già al 100%."
                 };
-                bot.send_message(chat_id, message).await?;
-                show_portion_detail(bot, chat_id, pool, profile_id, recipe_id).await?;
+                show_portion_detail_with_notice(
+                    bot,
+                    chat_id,
+                    pool,
+                    profile_id,
+                    recipe_id,
+                    Some(notice),
+                )
+                .await?;
             }
             Err(error) => {
                 tracing::warn!(
@@ -176,6 +233,17 @@ async fn show_portion_detail(
     profile_id: i64,
     recipe_id: i64,
 ) -> ResponseResult<()> {
+    show_portion_detail_with_notice(bot, chat_id, pool, profile_id, recipe_id, None).await
+}
+
+async fn show_portion_detail_with_notice(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    profile_id: i64,
+    recipe_id: i64,
+    notice: Option<&str>,
+) -> ResponseResult<()> {
     let profile_name = match managed_profile_name(pool, profile_id).await {
         Ok(Some(name)) => name,
         Ok(None) => {
@@ -199,26 +267,20 @@ async fn show_portion_detail(
     match visible_recipe(pool, profile_id, recipe_id).await {
         Ok(Some(recipe)) => {
             let percentage = factor_to_percentage(recipe.factor.unwrap_or(1.0));
-            let custom = recipe.factor.is_some();
-            let mode = if custom {
-                "personalizzata"
-            } else {
-                "standard della ricetta"
-            };
-
+            let override_count = ingredient_override_count(pool, profile_id, recipe_id)
+                .await
+                .unwrap_or(0);
+            let customized = percentage != 100 || override_count > 0;
             bot.send_message(
                 chat_id,
                 format!(
-                    "🍽️ Porzione personale\n\n👤 Profilo: {profile_name}\n🍳 Ricetta: {}\n👥 Ricetta base: {} porzioni\n\n⚖️ Porzione: {percentage}%\n📌 Modalità: {mode}\n\nLa percentuale scala proporzionalmente le quantità della singola porzione.\n\n⌨️ Puoi anche scrivere direttamente una percentuale in chat, ad esempio 125 oppure 125%.",
-                    recipe.name, recipe.servings
+                    "{}⚙️ Personalizzazione ricetta\n\n👤 Profilo: {profile_name}\n🍳 Ricetta: {}\n👥 Ricetta base: {} porzioni\n\n🍽️ Porzione ricetta: {percentage}%\n⚙️ Ingredienti personalizzati: {override_count}\n\n📐 Ordine di calcolo:\n1. quantità originale della ricetta\n2. percentuale della porzione\n3. eventuale modifica del singolo ingrediente\n\n💡 Una quantità personalizzata del singolo ingrediente prevale sulla percentuale generale; un ingrediente escluso resta escluso.",
+                    notice.map(|value| format!("{value}\n\n")).unwrap_or_default(),
+                    recipe.name,
+                    recipe.servings
                 ),
             )
-            .reply_markup(portion_detail_keyboard(
-                profile_id,
-                recipe_id,
-                percentage,
-                custom,
-            ))
+            .reply_markup(personalization_summary_keyboard(profile_id, recipe_id, customized))
             .await?;
         }
         Ok(None) => {
@@ -227,14 +289,202 @@ async fn show_portion_detail(
                 .await?;
         }
         Err(error) => {
-            tracing::error!(?error, profile_id, recipe_id, "Errore dettaglio porzione");
+            tracing::error!(
+                ?error,
+                profile_id,
+                recipe_id,
+                "Errore dettaglio personalizzazione"
+            );
             bot.send_message(chat_id, "⚠️ Non riesco a leggere questa ricetta.")
                 .reply_markup(portion_return_keyboard(profile_id))
                 .await?;
         }
     }
-
     Ok(())
+}
+
+async fn show_percentage_editor(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    profile_id: i64,
+    recipe_id: i64,
+) -> ResponseResult<()> {
+    let profile_name = match managed_profile_name(pool, profile_id).await {
+        Ok(Some(name)) => name,
+        _ => {
+            bot.send_message(chat_id, "⚠️ Profilo non disponibile.")
+                .reply_markup(main_profile_menu_keyboard())
+                .await?;
+            return Ok(());
+        }
+    };
+    match visible_recipe(pool, profile_id, recipe_id).await {
+        Ok(Some(recipe)) => {
+            let percentage = factor_to_percentage(recipe.factor.unwrap_or(1.0));
+            let custom = recipe.factor.is_some();
+            bot.send_message(
+                chat_id,
+                format!(
+                    "🍽️ Porzione ricetta\n\n👤 Profilo: {profile_name}\n🍳 Ricetta: {}\n\n⚖️ Porzione: {percentage}%\n\nLa percentuale modifica tutti gli ingredienti non personalizzati.\n⌨️ Puoi scrivere direttamente una percentuale, ad esempio 125 oppure 125%.",
+                    recipe.name
+                ),
+            )
+            .reply_markup(portion_detail_keyboard(profile_id, recipe_id, percentage, custom))
+            .await?;
+        }
+        Ok(None) => {
+            bot.send_message(chat_id, "⚠️ Ricetta non disponibile nel contesto corrente.")
+                .reply_markup(portion_return_keyboard(profile_id))
+                .await?;
+        }
+        Err(error) => {
+            tracing::error!(?error, profile_id, recipe_id, "Errore editor percentuale");
+            bot.send_message(chat_id, "⚠️ Non riesco a leggere questa ricetta.")
+                .reply_markup(portion_return_keyboard(profile_id))
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+async fn ingredient_override_count(
+    pool: &SqlitePool,
+    profile_id: i64,
+    recipe_id: i64,
+) -> Result<i64> {
+    sqlx::query_scalar(
+        "SELECT COUNT(*) FROM profilo_ricetta_ingredienti_override o \
+         JOIN ricetta_ingredienti ri ON ri.id = o.ricetta_ingrediente_id \
+         WHERE o.profilo_alimentare_id = ? AND ri.ricetta_id = ?",
+    )
+    .bind(profile_id)
+    .bind(recipe_id)
+    .fetch_one(pool)
+    .await
+    .context("Impossibile contare gli ingredienti personalizzati")
+}
+
+async fn show_reset_all_confirmation(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    profile_id: i64,
+    recipe_id: i64,
+) -> ResponseResult<()> {
+    let recipe_name = visible_recipe(pool, profile_id, recipe_id)
+        .await
+        .ok()
+        .flatten()
+        .map(|recipe| recipe.name)
+        .unwrap_or_else(|| "questa ricetta".to_string());
+    bot.send_message(
+        chat_id,
+        format!("⚠️ Resettare tutte le modifiche di {recipe_name}?\n\nVerranno ripristinati:\n• porzione ricetta al 100%\n• tutte le quantità personalizzate\n• tutti gli ingredienti esclusi\n\nLa ricetta tornerà alle quantità originali."),
+    )
+    .reply_markup(InlineKeyboardMarkup::new(vec![
+        vec![button("✅ Sì, resetta", format!("foodprof:portion:resetall:yes:{profile_id}:{recipe_id}"))],
+        vec![
+            button("❌ Annulla", format!("foodprof:portion:view:{profile_id}:{recipe_id}")),
+            button("🏠 Menù principale", "menu:main"),
+        ],
+    ]))
+    .await?;
+    Ok(())
+}
+
+async fn reset_all_customizations(
+    pool: &SqlitePool,
+    profile_id: i64,
+    recipe_id: i64,
+) -> Result<bool> {
+    let user_id = current_user_id()?;
+    let mut tx = pool
+        .begin()
+        .await
+        .context("Impossibile iniziare il reset completo della ricetta")?;
+    let profile_name = managed_profile_name_conn(&mut tx, profile_id, user_id).await?;
+    ensure_recipe_visible_conn(&mut tx, recipe_id, user_id).await?;
+
+    let factor: Option<f64> = sqlx::query_scalar(
+        "SELECT fattore_porzione FROM profilo_ricetta_porzioni WHERE profilo_alimentare_id = ? AND ricetta_id = ?",
+    ).bind(profile_id).bind(recipe_id).fetch_optional(&mut *tx).await
+      .context("Impossibile leggere la porzione prima del reset")?;
+
+    let overrides: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM profilo_ricetta_ingredienti_override o \
+         JOIN ricetta_ingredienti ri ON ri.id = o.ricetta_ingrediente_id \
+         WHERE o.profilo_alimentare_id = ? AND ri.ricetta_id = ?",
+    )
+    .bind(profile_id)
+    .bind(recipe_id)
+    .fetch_one(&mut *tx)
+    .await
+    .context("Impossibile leggere gli override prima del reset")?;
+
+    if factor.is_none() && overrides == 0 {
+        return Ok(false);
+    }
+
+    sqlx::query(
+        "DELETE FROM profilo_ricetta_porzioni WHERE profilo_alimentare_id = ? AND ricetta_id = ?",
+    )
+    .bind(profile_id)
+    .bind(recipe_id)
+    .execute(&mut *tx)
+    .await
+    .context("Impossibile ripristinare la porzione al 100%")?;
+
+    sqlx::query(
+        "DELETE FROM profilo_ricetta_ingredienti_override \
+         WHERE profilo_alimentare_id = ? \
+           AND ricetta_ingrediente_id IN (SELECT id FROM ricetta_ingredienti WHERE ricetta_id = ?)",
+    )
+    .bind(profile_id)
+    .bind(recipe_id)
+    .execute(&mut *tx)
+    .await
+    .context("Impossibile rimuovere gli override ingrediente")?;
+
+    let entity_id =
+        storico::ensure_entity(&mut tx, "profilo_alimentare", profile_id, &profile_name).await?;
+    let event_id = storico::record_event(
+        &mut tx,
+        &NewHistoryEvent {
+            entita_storico_id: entity_id,
+            modulo: "alimentazione",
+            componente: "porzione_profilo",
+            operazione: "modifica",
+            nome_entita_snapshot: &profile_name,
+            abitazione_storico_id: None,
+            abitazione_nome_snapshot: None,
+            stanza_storico_id: None,
+            stanza_nome_snapshot: None,
+            evento_padre_id: None,
+        },
+    )
+    .await?;
+
+    storico::record_field_changes(
+        &mut tx,
+        event_id,
+        &[NewFieldChange {
+            campo: "personalizzazioni_ricetta",
+            tipo_valore: "testo",
+            valore_prima: Some(format!(
+                "Porzione {}% · {} ingredienti personalizzati",
+                factor_to_percentage(factor.unwrap_or(1.0)),
+                overrides
+            )),
+            valore_dopo: Some("Porzione 100% · nessun ingrediente personalizzato".to_string()),
+        }],
+    )
+    .await?;
+
+    tx.commit()
+        .await
+        .context("Impossibile completare il reset della ricetta")?;
+    Ok(true)
 }
 
 async fn managed_profile_name(pool: &SqlitePool, profile_id: i64) -> Result<Option<String>> {
@@ -373,20 +623,20 @@ pub async fn handle_percentage_message(
 
     match set_portion_percentage(pool, profile_id, recipe_id, percentage).await {
         Ok(changed) => {
-            if changed {
-                bot.send_message(
-                    msg.chat.id,
-                    format!("✅ Porzione personale impostata al {percentage}%."),
-                )
-                .await?;
+            let notice = if changed {
+                format!("✅ Percentuale aggiornata al {percentage}%.")
             } else {
-                bot.send_message(
-                    msg.chat.id,
-                    format!("ℹ️ La porzione era già impostata al {percentage}%."),
-                )
-                .await?;
-            }
-            show_portion_detail(bot, msg.chat.id, pool, profile_id, recipe_id).await?;
+                format!("ℹ️ Percentuale già impostata al {percentage}%.")
+            };
+            show_portion_detail_with_notice(
+                bot,
+                msg.chat.id,
+                pool,
+                profile_id,
+                recipe_id,
+                Some(&notice),
+            )
+            .await?;
         }
         Err(error) => {
             tracing::warn!(
@@ -407,7 +657,7 @@ pub async fn handle_percentage_message(
 
 pub fn portion_context_from_callback(data: &str) -> Option<(i64, i64)> {
     let rest = data
-        .strip_prefix("foodprof:portion:view:")
+        .strip_prefix("foodprof:portion:percent:")
         .or_else(|| data.strip_prefix("foodprof:portion:set:"))
         .or_else(|| data.strip_prefix("foodprof:portion:reset:"))?;
 
@@ -721,6 +971,39 @@ fn recipe_list_keyboard(
     InlineKeyboardMarkup::new(rows)
 }
 
+fn personalization_summary_keyboard(
+    profile_id: i64,
+    recipe_id: i64,
+    customized: bool,
+) -> InlineKeyboardMarkup {
+    let mut rows = vec![
+        vec![button(
+            "🍽️ Modifica porzione ricetta",
+            format!("foodprof:portion:percent:{profile_id}:{recipe_id}"),
+        )],
+        vec![button(
+            "🥕 Ingredienti personalizzati",
+            crate::modules::porzioni_ingredienti::list_callback_for_recipe(profile_id, recipe_id),
+        )],
+    ];
+
+    if customized {
+        rows.push(vec![button(
+            "♻️ Resetta modifiche",
+            format!("foodprof:portion:resetall:ask:{profile_id}:{recipe_id}"),
+        )]);
+    }
+
+    rows.push(vec![
+        button(
+            "⬅️ Indietro",
+            format!("foodprof:portion:list:{profile_id}:0"),
+        ),
+        button("🏠 Menù principale", "menu:main"),
+    ]);
+    InlineKeyboardMarkup::new(rows)
+}
+
 fn portion_detail_keyboard(
     profile_id: i64,
     recipe_id: i64,
@@ -748,15 +1031,15 @@ fn portion_detail_keyboard(
 
     if custom {
         rows.push(vec![button(
-            "♻️ Ripristina standard",
+            "♻️ Ripristina 100%",
             format!("foodprof:portion:reset:{profile_id}:{recipe_id}"),
         )]);
     }
 
     rows.push(vec![
         button(
-            "⬅️ Indietro",
-            format!("foodprof:portion:list:{profile_id}:0"),
+            "⬅️ Personalizzazione ricetta",
+            format!("foodprof:portion:view:{profile_id}:{recipe_id}"),
         ),
         button("🏠 Menù principale", "menu:main"),
     ]);

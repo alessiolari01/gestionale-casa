@@ -46,6 +46,81 @@ struct ExportBundle {
     size_bytes: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ExportSelection(u8);
+
+impl ExportSelection {
+    const PENDING: u8 = 1;
+    const TODO: u8 = 2;
+    const DONE: u8 = 4;
+    const ARCHIVED: u8 = 8;
+    const ALL: u8 = Self::PENDING | Self::TODO | Self::DONE | Self::ARCHIVED;
+
+    fn empty() -> Self {
+        Self(0)
+    }
+    fn all() -> Self {
+        Self(Self::ALL)
+    }
+    fn from_mask(mask: u8) -> Option<Self> {
+        (mask <= Self::ALL).then_some(Self(mask))
+    }
+    fn mask(self) -> u8 {
+        self.0
+    }
+    fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+    fn contains(self, bit: u8) -> bool {
+        self.0 & bit != 0
+    }
+
+    fn toggle(self, bit: u8) -> Option<Self> {
+        matches!(
+            bit,
+            Self::PENDING | Self::TODO | Self::DONE | Self::ARCHIVED
+        )
+        .then_some(Self(self.0 ^ bit))
+    }
+
+    fn scope_arg(self) -> String {
+        let mut values = Vec::new();
+        if self.contains(Self::PENDING) {
+            values.push("pending");
+        }
+        if self.contains(Self::TODO) {
+            values.push("todo");
+        }
+        if self.contains(Self::DONE) {
+            values.push("done");
+        }
+        if self.contains(Self::ARCHIVED) {
+            values.push("archived");
+        }
+        values.join(",")
+    }
+
+    fn label(self) -> String {
+        if self.0 == Self::ALL {
+            return "Tutti".to_string();
+        }
+        let mut labels = Vec::new();
+        if self.contains(Self::PENDING) {
+            labels.push("Da approvare");
+        }
+        if self.contains(Self::TODO) {
+            labels.push("Da fare");
+        }
+        if self.contains(Self::DONE) {
+            labels.push("Fatte");
+        }
+        if self.contains(Self::ARCHIVED) {
+            labels.push("Archiviate");
+        }
+        labels.join(" + ")
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct ImprovementSessionStore {
     inner: Arc<Mutex<HashMap<i64, ImprovementConversationState>>>,
@@ -140,7 +215,6 @@ enum ListScope {
     Pending,
     Todo,
     Done,
-    Verified,
     Discarded,
 }
 
@@ -152,7 +226,6 @@ impl ListScope {
             Self::Pending => "pending",
             Self::Todo => "todo",
             Self::Done => "done",
-            Self::Verified => "verified",
             Self::Discarded => "discarded",
         }
     }
@@ -164,7 +237,6 @@ impl ListScope {
             Self::Pending => "🟡 Da approvare",
             Self::Todo => "🟢 Da fare",
             Self::Done => "✅ Fatti da verificare",
-            Self::Verified => "🧪 Verificati da archiviare",
             Self::Discarded => "❌ Scartati",
         }
     }
@@ -267,11 +339,6 @@ pub async fn handle_message(
         Some("/miglioramenti_fatti") => {
             sessions.clear_chat(chat_id);
             show_list(bot, msg.chat.id, pool, ListScope::Done, 0).await?;
-            return Ok(true);
-        }
-        Some("/miglioramenti_verificati") => {
-            sessions.clear_chat(chat_id);
-            show_list(bot, msg.chat.id, pool, ListScope::Verified, 0).await?;
             return Ok(true);
         }
         Some("/miglioramenti_archivio") => {
@@ -558,7 +625,7 @@ pub async fn handle_callback(
             return Ok(true);
         }
         "improve:export" => {
-            start_export(bot, chat_id, pool, sessions).await?;
+            show_export_scope_menu(bot, chat_id, pool, sessions, ExportSelection::empty()).await?;
             return Ok(true);
         }
         "improve:export:project" => {
@@ -575,6 +642,52 @@ pub async fn handle_callback(
             return Ok(true);
         }
         _ => {}
+    }
+
+    if let Some(rest) = data.strip_prefix("improve:export:toggle:") {
+        let mut parts = rest.split(':');
+        let selection = parts
+            .next()
+            .and_then(|value| value.parse::<u8>().ok())
+            .and_then(ExportSelection::from_mask);
+        let bit = parts.next().and_then(|value| value.parse::<u8>().ok());
+        if let (Some(selection), Some(bit)) = (selection, bit) {
+            if parts.next().is_none() {
+                if let Some(updated) = selection.toggle(bit) {
+                    show_export_scope_menu(bot, chat_id, pool, sessions, updated).await?;
+                    return Ok(true);
+                }
+            }
+        }
+    }
+
+    if let Some(selection) = data
+        .strip_prefix("improve:export:all:")
+        .and_then(|value| value.parse::<u8>().ok())
+        .and_then(ExportSelection::from_mask)
+    {
+        let updated = if selection == ExportSelection::all() {
+            ExportSelection::empty()
+        } else {
+            ExportSelection::all()
+        };
+        show_export_scope_menu(bot, chat_id, pool, sessions, updated).await?;
+        return Ok(true);
+    }
+
+    if let Some(selection) = data
+        .strip_prefix("improve:export:run:")
+        .and_then(|value| value.parse::<u8>().ok())
+        .and_then(ExportSelection::from_mask)
+    {
+        if selection.is_empty() {
+            bot.send_message(chat_id, "⚠️ Seleziona almeno una categoria.")
+                .reply_markup(export_scope_keyboard(selection))
+                .await?;
+        } else {
+            start_export(bot, chat_id, pool, sessions, selection).await?;
+        }
+        return Ok(true);
     }
 
     if let Some(token) = data
@@ -834,14 +947,11 @@ Descrivi cosa vorresti cambiare o migliorare. Puoi usare più messaggi; quando h
     }
 
     if let Some(id) = parse_id(data, "improve:verify:ok:") {
-        match mark_verified(pool, id).await {
+        match verify_and_archive_improvement(pool, id).await {
             Ok(()) => {
-                bot.send_message(
-                    chat_id,
-                    "✅ Miglioramento verificato correttamente. Ora puoi archiviarlo.",
-                )
-                .await?;
-                show_detail(bot, chat_id, pool, id, None).await?;
+                bot.send_message(chat_id, "✅ Miglioramento verificato e archiviato.")
+                    .await?;
+                show_list(bot, chat_id, pool, ListScope::Done, 0).await?;
             }
             Err(error) => {
                 bot.send_message(chat_id, format!("⚠️ {error}")).await?;
@@ -1309,11 +1419,42 @@ async fn discard_pending_export(bot: &Bot, chat_id: ChatId, sessions: &Improveme
     bot.delete_user_input(chat_id, message_id).await;
 }
 
+async fn show_export_scope_menu(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    sessions: &ImprovementSessionStore,
+    selection: ExportSelection,
+) -> ResponseResult<()> {
+    if !is_primary_admin(pool).await.unwrap_or(false) {
+        bot.send_message(
+            chat_id,
+            "⚠️ L'esportazione dei miglioramenti è riservata all'amministratore principale.",
+        )
+        .await?;
+        return Ok(());
+    }
+
+    discard_pending_export(bot, chat_id, sessions).await;
+    sessions.clear_chat(chat_id.0);
+    bot.send_message_without_improve(
+        chat_id,
+        format!(
+            "📦 Esporta miglioramenti\n\nSeleziona una o più categorie.\n\n📌 Selezione corrente: {}\n\nGli allegati vengono filtrati insieme ai relativi elementi.",
+            if selection.is_empty() { "nessuna".to_string() } else { selection.label() }
+        ),
+    )
+    .reply_markup(export_scope_keyboard(selection))
+    .await?;
+    Ok(())
+}
+
 async fn start_export(
     bot: &Bot,
     chat_id: ChatId,
     pool: &SqlitePool,
     sessions: &ImprovementSessionStore,
+    selection: ExportSelection,
 ) -> ResponseResult<()> {
     if !is_primary_admin(pool).await.unwrap_or(false) {
         bot.send_message(
@@ -1335,11 +1476,14 @@ async fn start_export(
 
     bot.send_message_without_improve(
         chat_id,
-        "⏳ Preparazione esportazione miglioramenti...\n\nCreo uno ZIP sanitizzato dello stato reale corrente. Il gestionale resta utilizzabile al termine dell'operazione.",
+        format!(
+            "⏳ Preparazione esportazione miglioramenti...\n\n📌 Filtro: {}\n\nCreo uno ZIP sanitizzato dello stato reale corrente.",
+            selection.label()
+        ),
     )
     .await?;
 
-    let bundle = match build_export_bundle().await {
+    let bundle = match build_export_bundle(selection).await {
         Ok(bundle) => bundle,
         Err(error) => {
             tracing::error!(?error, "Esportazione miglioramenti fallita");
@@ -1367,10 +1511,12 @@ async fn start_export(
         Ok(message) => message,
         Err(error) => {
             tracing::error!(?error, path = ?bundle.path, "Invio export Telegram fallito");
-            let _ = tokio::fs::remove_file(&bundle.path).await;
             bot.send_message(
                 chat_id,
-                "⚠️ Telegram non ha confermato l'invio dello ZIP entro il tempo previsto. In alcuni casi il documento può comparire comunque pochi secondi dopo.\n\nHo eliminato soltanto la copia temporanea sull'S9: attendi qualche secondo e, se il documento non compare, usa di nuovo 📦 Esporta miglioramenti.",
+                format!(
+                    "⚠️ Telegram non ha ancora confermato l'invio dello ZIP. Per file grandi ora attendo molto più a lungo prima di mostrare questo avviso.\n\nSe il documento compare comunque dopo questo messaggio, puoi usarlo normalmente: non verrà eliminato. La copia temporanea resta sull'S9 e verrà ripulita automaticamente solo se diventa obsoleta.\n\n📄 File: {}",
+                    bundle.path.file_name().and_then(|name| name.to_str()).unwrap_or("export miglioramenti")
+                ),
             )
             .reply_markup(menu_keyboard(true))
             .await?;
@@ -1389,7 +1535,8 @@ async fn start_export(
     bot.send_message_without_improve(
         chat_id,
         format!(
-            "✅ Esportazione pronta\n\n📄 File: {file_name}\n💾 Dimensione: {}\n🗂️ Miglioramenti attivi: {}\n📦 Archiviati: {}\n🖼️ Allegati inclusi: {}\n\nScarica il documento qui sopra. Quando hai verificato che il download è completato premi ✅ Ho scaricato il file: solo allora eliminerò la copia temporanea dall'S9.",
+            "✅ Esportazione pronta\n\n📌 Filtro: {}\n📄 File: {file_name}\n💾 Dimensione: {}\n🗂️ Miglioramenti attivi: {}\n📦 Archiviati: {}\n🖼️ Allegati inclusi: {}\n\nScarica il documento qui sopra. Quando hai verificato che il download è completato premi ✅ Ho scaricato il file: solo allora eliminerò la copia temporanea dall'S9.",
+            selection.label(),
             human_file_size(bundle.size_bytes),
             bundle.active,
             bundle.archived,
@@ -1656,13 +1803,13 @@ async fn confirm_export_download(
     Ok(())
 }
 
-async fn build_export_bundle() -> Result<ExportBundle> {
-    task::spawn_blocking(build_export_bundle_blocking)
+async fn build_export_bundle(selection: ExportSelection) -> Result<ExportBundle> {
+    task::spawn_blocking(move || build_export_bundle_blocking(selection))
         .await
         .context("Task esportazione miglioramenti interrotto")?
 }
 
-fn build_export_bundle_blocking() -> Result<ExportBundle> {
+fn build_export_bundle_blocking(selection: ExportSelection) -> Result<ExportBundle> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let output_dir = root.join(EXPORT_ROOT);
     std::fs::create_dir_all(&output_dir).context("Impossibile creare la directory export")?;
@@ -1679,6 +1826,8 @@ fn build_export_bundle_blocking() -> Result<ExportBundle> {
             .arg(&root)
             .arg("--output-dir")
             .arg(&output_dir)
+            .arg("--scope")
+            .arg(selection.scope_arg())
             .current_dir(&root)
             .output()
         {
@@ -1811,10 +1960,9 @@ pub async fn show_menu(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> Respons
         let pending = count_scope(pool, ListScope::Pending).await.unwrap_or(0);
         let todo = count_scope(pool, ListScope::Todo).await.unwrap_or(0);
         let done = count_scope(pool, ListScope::Done).await.unwrap_or(0);
-        let verified = count_scope(pool, ListScope::Verified).await.unwrap_or(0);
         let all = count_scope(pool, ListScope::All).await.unwrap_or(0);
         format!(
-            "💡 Miglioramenti\n\n🟡 Da approvare: {pending}\n🟢 Da fare: {todo}\n✅ Fatti da verificare: {done}\n🧪 Verificati da archiviare: {verified}\n🗂️ Attivi totali: {all}\n\nUsa i pulsanti qui sotto per aprire la sezione desiderata."
+            "💡 Miglioramenti\n\n🟡 Da approvare: {pending}\n🟢 Da fare: {todo}\n✅ Fatti da verificare: {done}\n📦 Verificati: archiviazione diretta\n🗂️ Attivi totali: {all}\n\nUsa i pulsanti qui sotto per aprire la sezione desiderata."
         )
     } else {
         "💡 Miglioramenti\n\nPuoi creare suggerimenti e gestire soltanto i tuoi: testo, screenshot ed eliminazione del suggerimento attivo. Lo stato amministrativo viene gestito dall'amministratore.".to_string()
@@ -2192,21 +2340,19 @@ async fn show_verification(
     .await
     .unwrap_or(false);
     if already_verified {
-        bot.send_message(
-            chat_id,
-            "🧪 Questo miglioramento è già stato verificato. Puoi consultare le prove oppure archiviarlo.",
-        )
-        .reply_markup(InlineKeyboardMarkup::new(vec![
-            vec![InlineKeyboardButton::callback(
-                "📦 Archivia miglioramento".to_string(),
-                format!("improve:archive:{improvement_id}"),
-            )],
-            vec![InlineKeyboardButton::callback(
-                "⬅️ Miglioramento".to_string(),
-                format!("improve:view:{improvement_id}"),
-            )],
-        ]))
-        .await?;
+        match archive_verified_improvement(pool, improvement_id).await {
+            Ok(()) => {
+                bot.send_message(
+                    chat_id,
+                    "✅ Miglioramento già verificato: archiviato automaticamente.",
+                )
+                .await?;
+                show_list(bot, chat_id, pool, ListScope::Done, 0).await?;
+            }
+            Err(error) => {
+                bot.send_message(chat_id, format!("⚠️ {error}")).await?;
+            }
+        }
         return Ok(());
     }
 
@@ -2801,21 +2947,85 @@ async fn set_status(pool: &SqlitePool, improvement_id: i64, state: &str) -> Resu
     Ok(())
 }
 
-async fn mark_verified(pool: &SqlitePool, improvement_id: i64) -> Result<()> {
+async fn verify_and_archive_improvement(pool: &SqlitePool, improvement_id: i64) -> Result<()> {
     ensure_primary_admin_for_done(pool, improvement_id).await?;
     let admin_id = identity::current_actor()
         .utente_id
         .context("Amministratore senza identità interna")?;
-    sqlx::query(
+    let mut tx = pool
+        .begin()
+        .await
+        .context("Impossibile iniziare verifica e archiviazione")?;
+
+    let updated = sqlx::query(
         "UPDATE miglioramenti SET verifica_esito = 'ok', verifica_note = NULL, \
          verificato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), verificato_da_utente_id = ?, \
-         aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND stato = 'fatto'",
+         aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
+         WHERE id = ? AND stato = 'fatto'",
     )
     .bind(admin_id)
     .bind(improvement_id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .context("Impossibile confermare il collaudo")?;
+
+    if updated.rows_affected() != 1 {
+        bail!("Miglioramento non disponibile per il collaudo");
+    }
+
+    let inserted = sqlx::query(
+        "INSERT INTO miglioramenti_archivio (miglioramento_origine_id, autore_utente_id, descrizione, modulo, contesto, creato_il, \
+            completato_il, archiviato_da_utente_id, verifica_esito, verifica_note, verificato_il, verificato_da_utente_id) \
+         SELECT id, autore_utente_id, descrizione, modulo, contesto, creato_il, COALESCE(fatto_il, aggiornato_il), ?, \
+                verifica_esito, verifica_note, verificato_il, verificato_da_utente_id \
+         FROM miglioramenti WHERE id = ? AND stato = 'fatto' AND verifica_esito = 'ok'",
+    )
+    .bind(admin_id)
+    .bind(improvement_id)
+    .execute(&mut *tx)
+    .await
+    .context("Impossibile archiviare il miglioramento verificato")?;
+
+    if inserted.rows_affected() != 1 {
+        bail!("Impossibile creare la copia archiviata del miglioramento");
+    }
+    let archive_id = inserted.last_insert_rowid();
+
+    sqlx::query(
+        "INSERT INTO miglioramento_archivio_allegati \
+         (miglioramento_archivio_id, tipo, percorso_file, descrizione, creato_il) \
+         SELECT ?, tipo, percorso_file, descrizione, creato_il \
+         FROM miglioramento_allegati WHERE miglioramento_id = ?",
+    )
+    .bind(archive_id)
+    .bind(improvement_id)
+    .execute(&mut *tx)
+    .await
+    .context("Impossibile archiviare gli allegati originali")?;
+
+    sqlx::query(
+        "INSERT INTO miglioramento_archivio_verifica_allegati \
+         (miglioramento_archivio_id, tipo, percorso_file, descrizione, creato_il) \
+         SELECT ?, tipo, percorso_file, descrizione, creato_il \
+         FROM miglioramento_verifica_allegati WHERE miglioramento_id = ?",
+    )
+    .bind(archive_id)
+    .bind(improvement_id)
+    .execute(&mut *tx)
+    .await
+    .context("Impossibile archiviare le prove di collaudo")?;
+
+    sqlx::query(
+        "DELETE FROM miglioramenti WHERE id = ? AND stato = 'fatto' AND verifica_esito = 'ok'",
+    )
+    .bind(improvement_id)
+    .execute(&mut *tx)
+    .await
+    .context("Impossibile rimuovere il miglioramento dal backlog")?;
+
+    tx.commit()
+        .await
+        .context("Impossibile completare verifica e archiviazione")?;
     Ok(())
 }
 
@@ -2979,7 +3189,6 @@ async fn count_scope(pool: &SqlitePool, scope: ListScope) -> Result<i64> {
         ListScope::Pending => sqlx::query_scalar("SELECT COUNT(*) FROM miglioramenti WHERE stato = 'da_approvare'").fetch_one(pool).await,
         ListScope::Todo => sqlx::query_scalar("SELECT COUNT(*) FROM miglioramenti WHERE stato = 'da_fare'").fetch_one(pool).await,
         ListScope::Done => sqlx::query_scalar("SELECT COUNT(*) FROM miglioramenti WHERE stato = 'fatto' AND COALESCE(verifica_esito, '') <> 'ok'").fetch_one(pool).await,
-        ListScope::Verified => sqlx::query_scalar("SELECT COUNT(*) FROM miglioramenti WHERE stato = 'fatto' AND verifica_esito = 'ok'").fetch_one(pool).await,
         ListScope::Discarded => sqlx::query_scalar("SELECT COUNT(*) FROM miglioramenti WHERE stato = 'scartato'").fetch_one(pool).await,
     };
     count.context("Impossibile contare i miglioramenti")
@@ -3034,16 +3243,6 @@ async fn fetch_scope(
             )
             .await
         }
-        ListScope::Verified => {
-            fetch_state_page(
-                pool,
-                select,
-                "m.stato = 'fatto' AND m.verifica_esito = 'ok'",
-                order,
-                offset,
-            )
-            .await
-        }
         ListScope::Discarded => {
             fetch_state_page(pool, select, "m.stato = 'scartato'", order, offset).await
         }
@@ -3092,16 +3291,10 @@ fn menu_keyboard(admin: bool) -> InlineKeyboardMarkup {
                 "improve:list:todo:0".to_string(),
             ),
         ]);
-        rows.push(vec![
-            InlineKeyboardButton::callback(
-                "✅ Fatti da verificare".to_string(),
-                "improve:list:done:0".to_string(),
-            ),
-            InlineKeyboardButton::callback(
-                "🧪 Verificati".to_string(),
-                "improve:list:verified:0".to_string(),
-            ),
-        ]);
+        rows.push(vec![InlineKeyboardButton::callback(
+            "✅ Fatti da verificare".to_string(),
+            "improve:list:done:0".to_string(),
+        )]);
         rows.push(vec![InlineKeyboardButton::callback(
             "🗂️ Tutti i miglioramenti".to_string(),
             "improve:list:all:0".to_string(),
@@ -3131,6 +3324,50 @@ fn menu_keyboard(admin: bool) -> InlineKeyboardMarkup {
         "🏠 Menù principale".to_string(),
         "menu:main".to_string(),
     )]);
+    InlineKeyboardMarkup::new(rows)
+}
+
+fn export_scope_keyboard(selection: ExportSelection) -> InlineKeyboardMarkup {
+    fn mark(selected: bool, label: &str) -> String {
+        format!("{} {label}", if selected { "✅" } else { "☐" })
+    }
+    let mask = selection.mask();
+    let mut rows = vec![
+        vec![
+            InlineKeyboardButton::callback(
+                mark(selection.contains(ExportSelection::PENDING), "Da approvare"),
+                format!("improve:export:toggle:{mask}:{}", ExportSelection::PENDING),
+            ),
+            InlineKeyboardButton::callback(
+                mark(selection.contains(ExportSelection::TODO), "Da fare"),
+                format!("improve:export:toggle:{mask}:{}", ExportSelection::TODO),
+            ),
+        ],
+        vec![
+            InlineKeyboardButton::callback(
+                mark(selection.contains(ExportSelection::DONE), "Fatte"),
+                format!("improve:export:toggle:{mask}:{}", ExportSelection::DONE),
+            ),
+            InlineKeyboardButton::callback(
+                mark(selection.contains(ExportSelection::ARCHIVED), "Archiviate"),
+                format!("improve:export:toggle:{mask}:{}", ExportSelection::ARCHIVED),
+            ),
+        ],
+        vec![InlineKeyboardButton::callback(
+            mark(selection == ExportSelection::all(), "Tutti"),
+            format!("improve:export:all:{mask}"),
+        )],
+    ];
+    if !selection.is_empty() {
+        rows.push(vec![InlineKeyboardButton::callback(
+            format!("📦 Esporta · {}", selection.label()),
+            format!("improve:export:run:{mask}"),
+        )]);
+    }
+    rows.push(vec![
+        InlineKeyboardButton::callback("⬅️ Miglioramenti".to_string(), "improve:menu".to_string()),
+        InlineKeyboardButton::callback("🏠 Menù principale".to_string(), "menu:main".to_string()),
+    ]);
     InlineKeyboardMarkup::new(rows)
 }
 
@@ -3405,7 +3642,6 @@ fn parse_list_callback(data: &str) -> Option<(ListScope, i64)> {
         "pending" => ListScope::Pending,
         "todo" => ListScope::Todo,
         "done" => ListScope::Done,
-        "verified" => ListScope::Verified,
         "discarded" => ListScope::Discarded,
         _ => return None,
     };
@@ -3423,7 +3659,6 @@ fn parse_scope_token(value: &str) -> Option<ListScope> {
         "pending" => Some(ListScope::Pending),
         "todo" => Some(ListScope::Todo),
         "done" => Some(ListScope::Done),
-        "verified" => Some(ListScope::Verified),
         "discarded" => Some(ListScope::Discarded),
         _ => None,
     }
@@ -3737,6 +3972,26 @@ mod tests {
         assert_eq!(chunks.len(), 3);
         assert!(chunks.iter().all(|chunk| chunk.chars().count() <= 240));
         assert_eq!(chunks.concat(), value);
+    }
+
+    #[test]
+    fn filtro_export_miglioramenti_supporta_selezione_multipla() {
+        let selection = ExportSelection::empty()
+            .toggle(ExportSelection::TODO)
+            .unwrap()
+            .toggle(ExportSelection::DONE)
+            .unwrap();
+        assert_eq!(selection.scope_arg(), "todo,done");
+        assert_eq!(selection.label(), "Da fare + Fatte");
+        assert!(selection.contains(ExportSelection::TODO));
+        assert!(selection.contains(ExportSelection::DONE));
+        assert!(!selection.contains(ExportSelection::ARCHIVED));
+        assert_eq!(
+            ExportSelection::all().scope_arg(),
+            "pending,todo,done,archived"
+        );
+        assert_eq!(ExportSelection::all().label(), "Tutti");
+        assert!(ExportSelection::from_mask(16).is_none());
     }
 
     #[test]
