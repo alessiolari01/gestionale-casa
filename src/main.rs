@@ -22,7 +22,8 @@ use config::Config;
 use modules::{
     alimentazione::FoodSessionStore, contenitori::ContainerSessionStore, foto::PhotoSessionStore,
     luoghi::LocationSessionStore, miglioramenti::ImprovementSessionStore, oggetti::SessionStore,
-    profili_alimentari::ProfileSessionStore, ricette::RecipeSessionStore,
+    planner_elenco::PlannerSessionStore, profili_alimentari::ProfileSessionStore,
+    ricette::RecipeSessionStore,
 };
 use sqlx::SqlitePool;
 use teloxide::{
@@ -108,6 +109,7 @@ struct HandlerDependencies {
     photo_sessions: PhotoSessionStore,
     food_sessions: FoodSessionStore,
     profile_sessions: ProfileSessionStore,
+    planner_sessions: PlannerSessionStore,
     improvement_sessions: ImprovementSessionStore,
     recipe_sessions: RecipeSessionStore,
     identity_sessions: IdentitySessionStore,
@@ -271,6 +273,7 @@ async fn async_main() -> anyhow::Result<()> {
     let photo_sessions = PhotoSessionStore::new();
     let food_sessions = FoodSessionStore::new();
     let profile_sessions = ProfileSessionStore::new();
+    let planner_sessions = PlannerSessionStore::new();
     let improvement_sessions = ImprovementSessionStore::new();
     let recipe_sessions = RecipeSessionStore::new();
     let identity_sessions = IdentitySessionStore::new();
@@ -284,6 +287,7 @@ async fn async_main() -> anyhow::Result<()> {
         photo_sessions,
         food_sessions,
         profile_sessions,
+        planner_sessions,
         improvement_sessions,
         recipe_sessions,
         identity_sessions,
@@ -345,6 +349,7 @@ async fn handle_message(
     let photo_sessions = deps.photo_sessions.clone();
     let food_sessions = deps.food_sessions.clone();
     let profile_sessions = deps.profile_sessions.clone();
+    let planner_sessions = deps.planner_sessions.clone();
     let improvement_sessions = deps.improvement_sessions.clone();
     let recipe_sessions = deps.recipe_sessions.clone();
     let identity_sessions = deps.identity_sessions.clone();
@@ -411,6 +416,7 @@ async fn handle_message(
             photo_sessions,
             food_sessions,
             profile_sessions,
+            planner_sessions,
             improvement_sessions,
             recipe_sessions,
             identity_sessions,
@@ -439,6 +445,7 @@ async fn handle_authorized_message(
     photo_sessions: PhotoSessionStore,
     food_sessions: FoodSessionStore,
     profile_sessions: ProfileSessionStore,
+    planner_sessions: PlannerSessionStore,
     improvement_sessions: ImprovementSessionStore,
     recipe_sessions: RecipeSessionStore,
     identity_sessions: IdentitySessionStore,
@@ -454,6 +461,7 @@ async fn handle_authorized_message(
         container_sessions.clear_chat(chat_id);
         photo_sessions.clear_chat(chat_id);
         food_sessions.clear_chat(chat_id);
+        planner_sessions.clear_chat(chat_id);
         improvement_sessions.clear_chat(chat_id);
         recipe_sessions.clear_chat(chat_id);
         identity_sessions.clear_chat(chat_id);
@@ -493,6 +501,7 @@ async fn handle_authorized_message(
         container_sessions.clear_chat(chat_id);
         photo_sessions.clear_chat(chat_id);
         food_sessions.clear_chat(chat_id);
+        planner_sessions.clear_chat(chat_id);
         improvement_sessions.clear_chat(chat_id);
         identity_sessions.clear_chat(chat_id);
         return respond(());
@@ -535,6 +544,7 @@ async fn handle_authorized_message(
     // evita che una foto inviata piu' tardi venga associata per errore.
     if command.is_some() {
         photo_sessions.clear_chat(chat_id);
+        planner_sessions.clear_chat(chat_id);
         improvement_sessions.clear_chat(chat_id);
         recipe_sessions.clear_chat(chat_id);
         if command != Some("/spazio_nuovo")
@@ -591,6 +601,19 @@ async fn handle_authorized_message(
         }
     }
 
+    if modules::planner_elenco::handle_message(&bot, &msg, &pool, &planner_sessions, text).await? {
+        sessions.clear_chat(chat_id);
+        location_sessions.clear_chat(chat_id);
+        container_sessions.clear_chat(chat_id);
+        photo_sessions.clear_chat(chat_id);
+        food_sessions.clear_chat(chat_id);
+        profile_sessions.clear_chat(chat_id);
+        improvement_sessions.clear_chat(chat_id);
+        recipe_sessions.clear_chat(chat_id);
+        identity_sessions.clear_chat(chat_id);
+        return respond(());
+    }
+
     if modules::profili_alimentari::handle_message(&bot, &msg, &pool, &profile_sessions, text)
         .await?
     {
@@ -599,6 +622,7 @@ async fn handle_authorized_message(
         container_sessions.clear_chat(chat_id);
         photo_sessions.clear_chat(chat_id);
         food_sessions.clear_chat(chat_id);
+        planner_sessions.clear_chat(chat_id);
         improvement_sessions.clear_chat(chat_id);
         recipe_sessions.clear_chat(chat_id);
         identity_sessions.clear_chat(chat_id);
@@ -651,6 +675,7 @@ async fn handle_authorized_message(
             location_sessions.clear_chat(chat_id);
             container_sessions.clear_chat(chat_id);
             photo_sessions.clear_chat(chat_id);
+            planner_sessions.clear_chat(chat_id);
             improvement_sessions.clear_chat(chat_id);
             recipe_sessions.clear_chat(chat_id);
             let payload = command_args(text);
@@ -826,6 +851,7 @@ async fn handle_callback(
     let photo_sessions = deps.photo_sessions.clone();
     let food_sessions = deps.food_sessions.clone();
     let profile_sessions = deps.profile_sessions.clone();
+    let planner_sessions = deps.planner_sessions.clone();
     let improvement_sessions = deps.improvement_sessions.clone();
     let recipe_sessions = deps.recipe_sessions.clone();
     let identity_sessions = deps.identity_sessions.clone();
@@ -905,6 +931,7 @@ async fn handle_callback(
             photo_sessions,
             food_sessions,
             profile_sessions,
+            planner_sessions,
             improvement_sessions,
             recipe_sessions,
             identity_sessions,
@@ -927,6 +954,7 @@ async fn handle_authorized_callback(
     photo_sessions: PhotoSessionStore,
     food_sessions: FoodSessionStore,
     profile_sessions: ProfileSessionStore,
+    planner_sessions: PlannerSessionStore,
     improvement_sessions: ImprovementSessionStore,
     recipe_sessions: RecipeSessionStore,
     identity_sessions: IdentitySessionStore,
@@ -957,6 +985,22 @@ async fn handle_authorized_callback(
         return respond(());
     }
 
+    if data.starts_with("planner:")
+        && modules::planner_elenco::handle_callback(&bot, chat_id, &pool, &planner_sessions, data)
+            .await?
+    {
+        sessions.clear_chat(chat_id.0);
+        location_sessions.clear_chat(chat_id.0);
+        container_sessions.clear_chat(chat_id.0);
+        photo_sessions.clear_chat(chat_id.0);
+        food_sessions.clear_chat(chat_id.0);
+        profile_sessions.clear_chat(chat_id.0);
+        improvement_sessions.clear_chat(chat_id.0);
+        recipe_sessions.clear_chat(chat_id.0);
+        identity_sessions.clear_chat(chat_id.0);
+        return respond(());
+    }
+
     if (data.starts_with("foodprof:")
         || (data == "menu:main" && profile_sessions.has_active(chat_id.0)))
         && modules::profili_alimentari::handle_callback(
@@ -973,6 +1017,7 @@ async fn handle_authorized_callback(
         container_sessions.clear_chat(chat_id.0);
         photo_sessions.clear_chat(chat_id.0);
         food_sessions.clear_chat(chat_id.0);
+        planner_sessions.clear_chat(chat_id.0);
         improvement_sessions.clear_chat(chat_id.0);
         recipe_sessions.clear_chat(chat_id.0);
         identity_sessions.clear_chat(chat_id.0);
@@ -994,6 +1039,7 @@ async fn handle_authorized_callback(
             container_sessions.clear_chat(chat_id.0);
             photo_sessions.clear_chat(chat_id.0);
             food_sessions.clear_chat(chat_id.0);
+            planner_sessions.clear_chat(chat_id.0);
             improvement_sessions.clear_chat(chat_id.0);
             identity_sessions.clear_chat(chat_id.0);
             return respond(());
@@ -1035,6 +1081,7 @@ async fn handle_authorized_callback(
         photo_sessions.clear_chat(chat_id.0);
         food_sessions.clear_chat(chat_id.0);
         profile_sessions.clear_chat(chat_id.0);
+        planner_sessions.clear_chat(chat_id.0);
         improvement_sessions.clear_chat(chat_id.0);
         recipe_sessions.clear_chat(chat_id.0);
         identity_sessions.clear_chat(chat_id.0);
@@ -1048,6 +1095,7 @@ async fn handle_authorized_callback(
             container_sessions.clear_chat(chat_id.0);
             photo_sessions.clear_chat(chat_id.0);
             food_sessions.clear_chat(chat_id.0);
+            planner_sessions.clear_chat(chat_id.0);
             improvement_sessions.clear_chat(chat_id.0);
             recipe_sessions.clear_chat(chat_id.0);
             send_main_menu(&bot, chat_id, &pool, &actor).await?;

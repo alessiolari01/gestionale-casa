@@ -166,6 +166,142 @@ fn positive_finite(value: f64) -> bool {
     value.is_finite() && value > 0.0
 }
 
+// ---------------------------------------------------------------------------
+// Step 7.3B.1 - Aritmetica delle date del planner.
+//
+// Il progetto non dipende da una libreria di date: le poche operazioni servite
+// sono implementate qui, in un modulo di dominio testabile, invece che dentro
+// gli handler Telegram. Le date sono sempre stringhe ISO `AAAA-MM-GG`, la stessa
+// forma usata da SQLite e dalle colonne `data_inizio`/`data_fine`.
+// ---------------------------------------------------------------------------
+
+/// Giorni trascorsi dal 1970-01-01 per una data del calendario gregoriano
+/// (algoritmo di Howard Hinnant, valido anche per le date precedenti).
+fn days_from_civil(year: i32, month: u32, day: u32) -> i64 {
+    let year = i64::from(if month <= 2 { year - 1 } else { year });
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let year_of_era = year - era * 400;
+    let month_prime = (i64::from(month) + 9) % 12;
+    let day_of_year = (153 * month_prime + 2) / 5 + i64::from(day) - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
+}
+
+/// Inversa di `days_from_civil`.
+fn civil_from_days(days: i64) -> (i32, u32, u32) {
+    let days = days + 719_468;
+    let era = if days >= 0 { days } else { days - 146_096 } / 146_097;
+    let day_of_era = days - era * 146_097;
+    let year_of_era =
+        (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let year = year_of_era + era * 400;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_prime = (5 * day_of_year + 2) / 153;
+    let day = (day_of_year - (153 * month_prime + 2) / 5 + 1) as u32;
+    let month = if month_prime < 10 {
+        month_prime + 3
+    } else {
+        month_prime - 9
+    } as u32;
+    let year = if month <= 2 { year + 1 } else { year };
+    (year as i32, month, day)
+}
+
+/// Interpreta una data ISO `AAAA-MM-GG`, rifiutando i giorni inesistenti come
+/// il 31 febbraio: la conversione di andata e ritorno deve coincidere.
+pub fn parse_iso_date(value: &str) -> Option<(i32, u32, u32)> {
+    let bytes = value.as_bytes();
+    if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
+        return None;
+    }
+    let year: i32 = value.get(0..4)?.parse().ok()?;
+    let month: u32 = value.get(5..7)?.parse().ok()?;
+    let day: u32 = value.get(8..10)?.parse().ok()?;
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    if civil_from_days(days_from_civil(year, month, day)) != (year, month, day) {
+        return None;
+    }
+    Some((year, month, day))
+}
+
+/// Formatta una data ISO a partire dai suoi componenti.
+pub fn format_iso_date(year: i32, month: u32, day: u32) -> String {
+    format!("{year:04}-{month:02}-{day:02}")
+}
+
+/// Sposta una data ISO di `delta` giorni, in avanti o indietro.
+pub fn add_days(date: &str, delta: i64) -> Option<String> {
+    let (year, month, day) = parse_iso_date(date)?;
+    let (year, month, day) = civil_from_days(days_from_civil(year, month, day) + delta);
+    Some(format_iso_date(year, month, day))
+}
+
+/// Differenza in giorni fra due date ISO.
+pub fn days_between(from: &str, to: &str) -> Option<i64> {
+    let (fy, fm, fd) = parse_iso_date(from)?;
+    let (ty, tm, td) = parse_iso_date(to)?;
+    Some(days_from_civil(ty, tm, td) - days_from_civil(fy, fm, fd))
+}
+
+/// Giorno della settimana con lunedì = 0.
+pub fn weekday_monday_zero(date: &str) -> Option<u32> {
+    let (year, month, day) = parse_iso_date(date)?;
+    Some((days_from_civil(year, month, day) + 3).rem_euclid(7) as u32)
+}
+
+/// Lunedì della settimana che contiene la data indicata.
+pub fn week_start(date: &str) -> Option<String> {
+    let offset = i64::from(weekday_monday_zero(date)?);
+    add_days(date, -offset)
+}
+
+/// Lunedì e domenica della settimana che contiene la data indicata.
+pub fn week_range(date: &str) -> Option<(String, String)> {
+    let start = week_start(date)?;
+    let end = add_days(&start, 6)?;
+    Some((start, end))
+}
+
+/// Primo e ultimo giorno del mese che contiene la data indicata.
+pub fn month_range(date: &str) -> Option<(String, String)> {
+    let (year, month, _) = parse_iso_date(date)?;
+    let start = format_iso_date(year, month, 1);
+    let (next_year, next_month) = if month == 12 {
+        (year + 1, 1)
+    } else {
+        (year, month + 1)
+    };
+    let end = add_days(&format_iso_date(next_year, next_month, 1), -1)?;
+    Some((start, end))
+}
+
+/// Data leggibile per l'utente: `31/08/2026`. Se il valore non è una data
+/// valida viene restituito invariato, per non nascondere un dato sporco.
+pub fn format_human_date(date: &str) -> String {
+    match parse_iso_date(date) {
+        Some((year, month, day)) => format!("{day:02}/{month:02}/{year:04}"),
+        None => date.to_string(),
+    }
+}
+
+/// Abbreviazione italiana del giorno della settimana.
+pub fn weekday_short(date: &str) -> Option<&'static str> {
+    const GIORNI: [&str; 7] = ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"];
+    Some(GIORNI[weekday_monday_zero(date)? as usize])
+}
+
+/// Periodo leggibile: `31/08/2026 – 06/09/2026`, oppure la sola data quando il
+/// periodo dura un giorno solo.
+pub fn format_human_range(start: &str, end: &str) -> String {
+    if start == end {
+        format_human_date(start)
+    } else {
+        format!("{} – {}", format_human_date(start), format_human_date(end))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -240,5 +376,87 @@ mod tests {
             Some("2026-08-31T10:00:00Z"),
             Some("2026-08-31T11:00:00Z"),
         ));
+    }
+
+    #[test]
+    fn date_valide_e_invalide() {
+        assert_eq!(parse_iso_date("2026-08-31"), Some((2026, 8, 31)));
+        assert_eq!(parse_iso_date("2024-02-29"), Some((2024, 2, 29)));
+        for invalida in [
+            "2026-02-31",
+            "2026-13-01",
+            "2026-00-10",
+            "2026-08-00",
+            "2025-02-29",
+            "31/08/2026",
+            "2026-8-31",
+            "",
+        ] {
+            assert_eq!(
+                parse_iso_date(invalida),
+                None,
+                "doveva essere rifiutata: {invalida}"
+            );
+        }
+    }
+
+    #[test]
+    fn spostamento_giorni_attraversa_mesi_e_anni() {
+        assert_eq!(add_days("2026-08-31", 1).as_deref(), Some("2026-09-01"));
+        assert_eq!(add_days("2026-01-01", -1).as_deref(), Some("2025-12-31"));
+        assert_eq!(add_days("2024-02-28", 1).as_deref(), Some("2024-02-29"));
+        assert_eq!(add_days("2025-02-28", 1).as_deref(), Some("2025-03-01"));
+    }
+
+    #[test]
+    fn giorno_della_settimana_con_lunedi_zero() {
+        assert_eq!(weekday_monday_zero("2026-08-31"), Some(0));
+        assert_eq!(weekday_monday_zero("2026-09-06"), Some(6));
+        assert_eq!(weekday_short("2026-08-31"), Some("Lun"));
+        assert_eq!(weekday_short("2026-09-06"), Some("Dom"));
+    }
+
+    #[test]
+    fn settimana_parte_sempre_da_lunedi() {
+        for giorno in ["2026-08-31", "2026-09-01", "2026-09-03", "2026-09-06"] {
+            assert_eq!(
+                week_range(giorno),
+                Some(("2026-08-31".to_string(), "2026-09-06".to_string())),
+                "settimana sbagliata per {giorno}"
+            );
+        }
+    }
+
+    #[test]
+    fn mese_copre_tutti_i_giorni_reali() {
+        assert_eq!(
+            month_range("2026-02-10"),
+            Some(("2026-02-01".to_string(), "2026-02-28".to_string()))
+        );
+        assert_eq!(
+            month_range("2024-02-10"),
+            Some(("2024-02-01".to_string(), "2024-02-29".to_string()))
+        );
+        assert_eq!(
+            month_range("2026-12-05"),
+            Some(("2026-12-01".to_string(), "2026-12-31".to_string()))
+        );
+    }
+
+    #[test]
+    fn differenza_fra_date() {
+        assert_eq!(days_between("2026-08-31", "2026-09-06"), Some(6));
+        assert_eq!(days_between("2026-09-06", "2026-08-31"), Some(-6));
+        assert_eq!(days_between("2026-08-31", "2026-08-31"), Some(0));
+    }
+
+    #[test]
+    fn periodo_leggibile() {
+        assert_eq!(
+            format_human_range("2026-08-31", "2026-09-06"),
+            "31/08/2026 – 06/09/2026"
+        );
+        assert_eq!(format_human_range("2026-08-31", "2026-08-31"), "31/08/2026");
+        assert_eq!(format_human_date("non-una-data"), "non-una-data");
     }
 }

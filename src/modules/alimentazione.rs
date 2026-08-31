@@ -4806,6 +4806,7 @@ fn alimentation_menu_keyboard() -> InlineKeyboardMarkup {
         vec![button("🥕 Alimenti", "food:foods")],
         vec![button("🍳 Ricette", "recipe:menu")],
         vec![button("👥 Profili alimentari", "foodprof:menu")],
+        vec![button("📅 Planner", "planner:menu")],
         vec![
             button("⬅️ Indietro", "menu:main"),
             button("🏠 Menù principale", "menu:main"),

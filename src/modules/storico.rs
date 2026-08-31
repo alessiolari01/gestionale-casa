@@ -89,6 +89,12 @@ async fn entity_owner_space_id(
             .fetch_optional(&mut *conn)
             .await
         }
+        "planner" => {
+            sqlx::query_scalar("SELECT spazio_id FROM planner_alimentari WHERE id = ?")
+                .bind(id_origine)
+                .fetch_optional(&mut *conn)
+                .await
+        }
         _ => Ok(None),
     }
 }
@@ -2265,6 +2271,7 @@ fn component_label(component: &str) -> &str {
         | "archiviazione_profilo"
         | "porzione_profilo"
         | "ingrediente_profilo" => "Profili alimentari",
+        "planner" | "archiviazione_planner" => "Planner",
         _ => component,
     }
 }
@@ -2307,6 +2314,7 @@ fn entity_icon(entity_type: &str) -> &'static str {
         "alimento" => "🥕",
         "prodotto_alimentare" => "🛒",
         "profilo_alimentare" => "👤",
+        "planner" => "📅",
         _ => "🔹",
     }
 }
