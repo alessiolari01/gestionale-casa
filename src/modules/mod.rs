@@ -17,6 +17,7 @@ pub mod foto;
 pub mod luoghi;
 pub mod miglioramenti;
 pub mod oggetti;
+pub mod planner_alimentare;
 pub mod porzioni;
 pub mod porzioni_ingredienti;
 pub mod porzioni_profili;
