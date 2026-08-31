@@ -2,7 +2,7 @@ name: Rust CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'step-*']
   pull_request:
     branches: [main]
   workflow_dispatch:
