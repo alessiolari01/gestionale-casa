@@ -892,7 +892,9 @@ pub async fn handle_callback(
     sessions: &RecipeSessionStore,
     data: &str,
 ) -> ResponseResult<bool> {
-    if !data.starts_with("recipe:") && !(data == "menu:main" && sessions.has_active(chat_id.0)) {
+    let gestisce_callback =
+        data.starts_with("recipe:") || (data == "menu:main" && sessions.has_active(chat_id.0));
+    if !gestisce_callback {
         return Ok(false);
     }
 
