@@ -16,6 +16,8 @@ use teloxide::{
     types::{InlineKeyboardButton, InlineKeyboardMarkup},
 };
 
+type Bot = crate::context_bot::ContextBot;
+
 const MAX_LIST_RESULTS: i64 = 30;
 
 #[derive(Clone, Default)]
@@ -107,6 +109,52 @@ struct LocationTreeNode {
     children: Vec<LocationTreeNode>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FriendlyLocationTarget {
+    Home(i64),
+    Room(i64),
+    Container(i64),
+}
+
+#[derive(Debug, Clone)]
+struct FriendlyLocationCommand {
+    command: String,
+    target: FriendlyLocationTarget,
+}
+
+#[derive(Debug, Clone)]
+struct FriendlyCommandSeed {
+    prefix: &'static str,
+    primary: String,
+    contexts: Vec<String>,
+    target: FriendlyLocationTarget,
+    sort_id: i64,
+}
+
+#[derive(Debug, Clone, FromRow)]
+struct FriendlyHomeRecord {
+    id: i64,
+    name: String,
+    space_name: String,
+}
+
+#[derive(Debug, Clone, FromRow)]
+struct FriendlyRoomRecord {
+    id: i64,
+    name: String,
+    home_name: String,
+    space_name: String,
+}
+
+#[derive(Debug, Clone, FromRow)]
+struct FriendlyContainerRecord {
+    id: i64,
+    name: String,
+    home_name: String,
+    room_name: Option<String>,
+    space_name: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct HomeChoice {
     pub(crate) id: i64,
@@ -127,6 +175,7 @@ struct ItemLocation {
     room_id: Option<i64>,
     container_id: Option<i64>,
     home_name: Option<String>,
+    home_space_name: Option<String>,
     room_name: Option<String>,
 }
 
@@ -197,6 +246,42 @@ pub async fn handle_message(
             return Ok(true);
         }
 
+        if is_friendly_location_command(command) {
+            sessions.clear_chat(chat_id);
+            match resolve_friendly_location_command(pool, command).await {
+                Ok(Some(FriendlyLocationTarget::Home(id))) => {
+                    show_home_detail(bot, msg.chat.id, pool, id).await?
+                }
+                Ok(Some(FriendlyLocationTarget::Room(id))) => {
+                    show_room_detail(bot, msg.chat.id, pool, id).await?
+                }
+                Ok(Some(FriendlyLocationTarget::Container(id))) => {
+                    crate::modules::contenitori::show_container_detail(bot, msg.chat.id, pool, id)
+                        .await?
+                }
+                Ok(None) => {
+                    bot.send_message(
+                        msg.chat.id,
+                        "⚠️ Questo comando non corrisponde più a un luogo visibile. Apri 🗺 Struttura per vedere i luoghi aggiornati.",
+                    )
+                    .await?;
+                }
+                Err(error) => {
+                    tracing::error!(
+                        ?error,
+                        command,
+                        "Errore risoluzione comando luogo leggibile"
+                    );
+                    bot.send_message(
+                        msg.chat.id,
+                        "⚠️ Non riesco a risolvere questo comando luogo. Riapri 🗺 Struttura e riprova.",
+                    )
+                    .await?;
+                }
+            }
+            return Ok(true);
+        }
+
         match command {
             "/luoghi" | "/case" => {
                 sessions.clear_chat(chat_id);
@@ -238,7 +323,7 @@ pub async fn handle_message(
                 if let Some(id) = parse_positive_id(args) {
                     show_home_detail(bot, msg.chat.id, pool, id).await?;
                 } else {
-                    bot.send_message(msg.chat.id, "Uso: /casa <id>\nEsempio: /casa 1")
+                    bot.send_message(msg.chat.id, "Apri Luoghi e scegli la casa dall'elenco.")
                         .await?;
                 }
                 return Ok(true);
@@ -246,7 +331,7 @@ pub async fn handle_message(
             "/casa_rinomina" => {
                 if let Some((id, new_name)) = split_id_and_rest(args) {
                     if !home_exists(pool, id).await.unwrap_or(false) {
-                        bot.send_message(msg.chat.id, format!("Casa #{id} non trovata."))
+                        bot.send_message(msg.chat.id, "Casa non trovata.")
                             .reply_markup(locations_menu_keyboard())
                             .await?;
                     } else if new_name.is_empty() {
@@ -265,7 +350,7 @@ pub async fn handle_message(
                 } else {
                     bot.send_message(
                         msg.chat.id,
-                        "Uso: /casa_rinomina <id> [nuovo nome]\nEsempio: /casa_rinomina 1 Casa principale",
+                        "Apri la casa da Luoghi e usa ⚙️ Gestisci → ✏️ Rinomina.",
                     )
                     .await?;
                 }
@@ -278,7 +363,7 @@ pub async fn handle_message(
                 } else {
                     bot.send_message(
                         msg.chat.id,
-                        "Uso: /casa_elimina <id>\nEsempio: /casa_elimina 1",
+                        "Apri la casa da Luoghi e usa ⚙️ Gestisci → 🗑 Elimina.",
                     )
                     .await?;
                 }
@@ -287,7 +372,7 @@ pub async fn handle_message(
             "/stanza_nuova" => {
                 if let Some((home_id, room_name)) = split_id_and_rest(args) {
                     if !home_exists(pool, home_id).await.unwrap_or(false) {
-                        bot.send_message(msg.chat.id, format!("Casa #{home_id} non trovata."))
+                        bot.send_message(msg.chat.id, "Casa non trovata.")
                             .reply_markup(locations_menu_keyboard())
                             .await?;
                     } else if room_name.is_empty() {
@@ -312,11 +397,8 @@ pub async fn handle_message(
                         .await?;
                     }
                 } else {
-                    bot.send_message(
-                        msg.chat.id,
-                        "Uso: /stanza_nuova <casa_id> [nome]\nEsempio: /stanza_nuova 1 Garage",
-                    )
-                    .await?;
+                    bot.send_message(msg.chat.id, "Apri la casa da Luoghi e usa ➕🚪 Stanza.")
+                        .await?;
                 }
                 return Ok(true);
             }
@@ -325,7 +407,7 @@ pub async fn handle_message(
                 if let Some(id) = parse_positive_id(args) {
                     show_room_detail(bot, msg.chat.id, pool, id).await?;
                 } else {
-                    bot.send_message(msg.chat.id, "Uso: /stanza <id>\nEsempio: /stanza 3")
+                    bot.send_message(msg.chat.id, "Apri Luoghi e scegli la stanza dall'elenco.")
                         .await?;
                 }
                 return Ok(true);
@@ -356,7 +438,7 @@ pub async fn handle_message(
                             .await?;
                         }
                         Ok(None) => {
-                            bot.send_message(msg.chat.id, format!("Stanza #{id} non trovata."))
+                            bot.send_message(msg.chat.id, "Stanza non trovata.")
                                 .reply_markup(locations_menu_keyboard())
                                 .await?;
                         }
@@ -369,7 +451,7 @@ pub async fn handle_message(
                 } else {
                     bot.send_message(
                         msg.chat.id,
-                        "Uso: /stanza_rinomina <id> [nuovo nome]\nEsempio: /stanza_rinomina 3 Garage grande",
+                        "Apri la stanza da Luoghi e usa ⚙️ Gestisci → ✏️ Rinomina.",
                     )
                     .await?;
                 }
@@ -382,7 +464,7 @@ pub async fn handle_message(
                 } else {
                     bot.send_message(
                         msg.chat.id,
-                        "Uso: /stanza_elimina <id>\nEsempio: /stanza_elimina 3",
+                        "Apri la stanza da Luoghi e usa ⚙️ Gestisci → 🗑 Elimina.",
                     )
                     .await?;
                 }
@@ -395,7 +477,7 @@ pub async fn handle_message(
                 } else {
                     bot.send_message(
                         msg.chat.id,
-                        "Uso: /oggetto_luogo <id>\nEsempio: /oggetto_luogo 12",
+                        "Apri l'oggetto da Oggetti e usa il pulsante per assegnare o spostare il luogo.",
                     )
                     .await?;
                 }
@@ -448,7 +530,7 @@ pub async fn handle_message(
             }
             Ok(None) => {
                 sessions.clear_chat(chat_id);
-                bot.send_message(msg.chat.id, format!("Stanza #{id} non trovata."))
+                bot.send_message(msg.chat.id, "Stanza non trovata.")
                     .reply_markup(locations_menu_keyboard())
                     .await?;
             }
@@ -525,7 +607,7 @@ pub async fn handle_callback(
                     );
                     ask_home_name(bot, chat_id, true).await?;
                 } else {
-                    bot.send_message(chat_id, format!("Casa #{id} non trovata."))
+                    bot.send_message(chat_id, "Casa non trovata.")
                         .reply_markup(locations_menu_keyboard())
                         .await?;
                 }
@@ -554,7 +636,7 @@ pub async fn handle_callback(
                     );
                     ask_room_name(bot, chat_id, false).await?;
                 } else {
-                    bot.send_message(chat_id, format!("Casa #{home_id} non trovata."))
+                    bot.send_message(chat_id, "Casa non trovata.")
                         .reply_markup(locations_menu_keyboard())
                         .await?;
                 }
@@ -581,7 +663,7 @@ pub async fn handle_callback(
                         ask_room_name(bot, chat_id, true).await?;
                     }
                     Ok(None) => {
-                        bot.send_message(chat_id, format!("Stanza #{id} non trovata."))
+                        bot.send_message(chat_id, "Stanza non trovata.")
                             .reply_markup(locations_menu_keyboard())
                             .await?;
                     }
@@ -763,27 +845,50 @@ async fn send_location_tree(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> Re
         return Ok(());
     }
 
-    let rooms = sqlx::query_as::<_, RoomRecord>(
+    let room_sql = format!(
         "SELECT s.id AS id, s.abitazione_id AS home_id, s.nome AS name, a.nome AS home_name \
          FROM stanze s JOIN abitazioni a ON a.id = s.abitazione_id \
-         ORDER BY s.nome COLLATE NOCASE, s.id",
-    )
-    .fetch_all(pool)
-    .await
-    .unwrap_or_default();
-    let containers = sqlx::query_as::<_, TreeContainerRecord>(
-        "SELECT id, abitazione_id AS home_id, stanza_id AS room_id, \
-                contenitore_padre_id AS parent_id, nome AS name \
-         FROM contenitori ORDER BY nome COLLATE NOCASE, id",
-    )
-    .fetch_all(pool)
-    .await
-    .unwrap_or_default();
+         WHERE {} ORDER BY a.nome COLLATE NOCASE, s.nome COLLATE NOCASE, s.id",
+        crate::identity::visible_space_sql("a")
+    );
+    let rooms = sqlx::query_as::<_, RoomRecord>(&room_sql)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
+    let container_sql = format!(
+        "SELECT c.id, c.abitazione_id AS home_id, c.stanza_id AS room_id, \
+                c.contenitore_padre_id AS parent_id, c.nome AS name \
+         FROM contenitori c JOIN abitazioni a ON a.id = c.abitazione_id \
+         WHERE {} ORDER BY a.nome COLLATE NOCASE, c.nome COLLATE NOCASE, c.id",
+        crate::identity::visible_space_sql("a")
+    );
+    let containers = sqlx::query_as::<_, TreeContainerRecord>(&container_sql)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
+
+    let friendly_commands = match friendly_location_commands(pool).await {
+        Ok(commands) => commands,
+        Err(error) => {
+            tracing::error!(?error, "Errore generazione comandi leggibili dei luoghi");
+            Vec::new()
+        }
+    };
+    let room_commands = friendly_command_map(&friendly_commands, 'r');
+    let container_commands = friendly_command_map(&friendly_commands, 'c');
 
     let mut text = "🌳 Struttura completa dei luoghi\n\n".to_string();
     for home in &homes {
-        text.push_str(&format!("🏠 {}  /luogo_h{}\n", home.name, home.id));
-        let nodes = build_home_nodes(home.id, &rooms, &containers);
+        text.push_str(&format!("🏠 {}\n", home.name));
+        let nodes = build_home_nodes(
+            home.id,
+            &rooms,
+            &containers,
+            &room_commands,
+            &container_commands,
+        );
         render_tree_nodes(&nodes, "", &mut text, 0);
         text.push('\n');
         if text.chars().count() > 3500 {
@@ -791,7 +896,6 @@ async fn send_location_tree(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> Re
             break;
         }
     }
-    text.push_str("Tocca un comando /luogo_… per aprire direttamente quel luogo.");
 
     bot.send_message(chat_id, text)
         .reply_markup(location_navigation_keyboard())
@@ -799,21 +903,52 @@ async fn send_location_tree(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> Re
     Ok(())
 }
 
+fn friendly_command_map(commands: &[FriendlyLocationCommand], kind: char) -> HashMap<i64, String> {
+    commands
+        .iter()
+        .filter_map(|entry| {
+            let id = match (kind, entry.target) {
+                ('h', FriendlyLocationTarget::Home(id))
+                | ('r', FriendlyLocationTarget::Room(id))
+                | ('c', FriendlyLocationTarget::Container(id)) => id,
+                _ => return None,
+            };
+            Some((id, entry.command.clone()))
+        })
+        .collect()
+}
+
 fn build_home_nodes(
     home_id: i64,
     rooms: &[RoomRecord],
     containers: &[TreeContainerRecord],
+    room_commands: &HashMap<i64, String>,
+    container_commands: &HashMap<i64, String>,
 ) -> Vec<LocationTreeNode> {
     let mut nodes = Vec::new();
     for room in rooms.iter().filter(|room| room.home_id == home_id) {
-        let children = build_container_nodes(containers, home_id, Some(room.id), None, 0);
+        let children = build_container_nodes(
+            containers,
+            home_id,
+            Some(room.id),
+            None,
+            0,
+            container_commands,
+        );
         nodes.push(LocationTreeNode {
             label: format!("🚪 {}", room.name),
-            command: format!("/luogo_r{}", room.id),
+            command: room_commands.get(&room.id).cloned().unwrap_or_default(),
             children,
         });
     }
-    nodes.extend(build_container_nodes(containers, home_id, None, None, 0));
+    nodes.extend(build_container_nodes(
+        containers,
+        home_id,
+        None,
+        None,
+        0,
+        container_commands,
+    ));
     nodes
 }
 
@@ -823,6 +958,7 @@ fn build_container_nodes(
     room_id: Option<i64>,
     parent_id: Option<i64>,
     depth: usize,
+    container_commands: &HashMap<i64, String>,
 ) -> Vec<LocationTreeNode> {
     if depth >= 20 {
         return Vec::new();
@@ -836,13 +972,17 @@ fn build_container_nodes(
         })
         .map(|container| LocationTreeNode {
             label: format!("📦 {}", container.name),
-            command: format!("/luogo_c{}", container.id),
+            command: container_commands
+                .get(&container.id)
+                .cloned()
+                .unwrap_or_default(),
             children: build_container_nodes(
                 containers,
                 home_id,
                 room_id,
                 Some(container.id),
                 depth + 1,
+                container_commands,
             ),
         })
         .collect()
@@ -855,16 +995,235 @@ fn render_tree_nodes(nodes: &[LocationTreeNode], prefix: &str, text: &mut String
     for (index, node) in nodes.iter().enumerate() {
         let last = index + 1 == nodes.len();
         let branch = if last { "└── " } else { "├── " };
-        text.push_str(&format!(
-            "{prefix}{branch}{}  {}\n",
-            node.label, node.command
-        ));
+        let _has_hidden_command = !node.command.is_empty();
+        text.push_str(&format!("{prefix}{branch}{}\n", node.label));
         let child_prefix = format!("{prefix}{}", if last { "    " } else { "│   " });
         render_tree_nodes(&node.children, &child_prefix, text, depth + 1);
         if text.chars().count() > 3500 {
             break;
         }
     }
+}
+
+async fn resolve_friendly_location_command(
+    pool: &SqlitePool,
+    command: &str,
+) -> Result<Option<FriendlyLocationTarget>, sqlx::Error> {
+    Ok(friendly_location_commands(pool)
+        .await?
+        .into_iter()
+        .find(|entry| entry.command == command)
+        .map(|entry| entry.target))
+}
+
+async fn friendly_location_commands(
+    pool: &SqlitePool,
+) -> Result<Vec<FriendlyLocationCommand>, sqlx::Error> {
+    let home_sql = format!(
+        "SELECT a.id, a.nome AS name, sp.nome AS space_name \
+         FROM abitazioni a JOIN spazi sp ON sp.id = a.spazio_id \
+         WHERE {} ORDER BY sp.nome COLLATE NOCASE, a.nome COLLATE NOCASE, a.id",
+        crate::identity::visible_space_sql("a")
+    );
+    let homes = sqlx::query_as::<_, FriendlyHomeRecord>(&home_sql)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_all(pool)
+        .await?;
+
+    let room_sql = format!(
+        "SELECT s.id, s.nome AS name, a.nome AS home_name, sp.nome AS space_name \
+         FROM stanze s \
+         JOIN abitazioni a ON a.id = s.abitazione_id \
+         JOIN spazi sp ON sp.id = a.spazio_id \
+         WHERE {} ORDER BY sp.nome COLLATE NOCASE, a.nome COLLATE NOCASE, s.nome COLLATE NOCASE, s.id",
+        crate::identity::visible_space_sql("a")
+    );
+    let rooms = sqlx::query_as::<_, FriendlyRoomRecord>(&room_sql)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_all(pool)
+        .await?;
+
+    let container_sql = format!(
+        "SELECT c.id, c.nome AS name, a.nome AS home_name, s.nome AS room_name, sp.nome AS space_name \
+         FROM contenitori c \
+         JOIN abitazioni a ON a.id = c.abitazione_id \
+         JOIN spazi sp ON sp.id = a.spazio_id \
+         LEFT JOIN stanze s ON s.id = c.stanza_id \
+         WHERE {} ORDER BY sp.nome COLLATE NOCASE, a.nome COLLATE NOCASE, s.nome COLLATE NOCASE, c.nome COLLATE NOCASE, c.id",
+        crate::identity::visible_space_sql("a")
+    );
+    let containers = sqlx::query_as::<_, FriendlyContainerRecord>(&container_sql)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_all(pool)
+        .await?;
+
+    let mut seeds = Vec::with_capacity(homes.len() + rooms.len() + containers.len());
+    seeds.extend(homes.into_iter().map(|home| FriendlyCommandSeed {
+        prefix: "/casa_",
+        primary: home.name,
+        contexts: vec![home.space_name],
+        target: FriendlyLocationTarget::Home(home.id),
+        sort_id: home.id,
+    }));
+    seeds.extend(rooms.into_iter().map(|room| FriendlyCommandSeed {
+        prefix: "/stanza_",
+        primary: room.name,
+        contexts: vec![room.home_name, room.space_name],
+        target: FriendlyLocationTarget::Room(room.id),
+        sort_id: room.id,
+    }));
+    seeds.extend(containers.into_iter().map(|container| {
+        let mut contexts = Vec::new();
+        if let Some(room_name) = container.room_name {
+            contexts.push(room_name);
+        }
+        contexts.push(container.home_name);
+        contexts.push(container.space_name);
+        FriendlyCommandSeed {
+            prefix: "/contenitore_",
+            primary: container.name,
+            contexts,
+            target: FriendlyLocationTarget::Container(container.id),
+            sort_id: container.id,
+        }
+    }));
+
+    Ok(build_unique_friendly_commands(&seeds))
+}
+
+fn build_unique_friendly_commands(seeds: &[FriendlyCommandSeed]) -> Vec<FriendlyLocationCommand> {
+    let mut context_counts = vec![0_usize; seeds.len()];
+
+    loop {
+        let commands = seeds
+            .iter()
+            .enumerate()
+            .map(|(index, seed)| compose_friendly_command(seed, context_counts[index], None))
+            .collect::<Vec<_>>();
+        let mut groups: HashMap<String, Vec<usize>> = HashMap::new();
+        for (index, command) in commands.iter().enumerate() {
+            groups.entry(command.clone()).or_default().push(index);
+        }
+
+        let mut changed = false;
+        for (command, indexes) in groups {
+            let collides = indexes.len() > 1 || is_reserved_location_command(&command);
+            if !collides {
+                continue;
+            }
+            for index in indexes {
+                if context_counts[index] < seeds[index].contexts.len() {
+                    context_counts[index] += 1;
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+
+    let base_commands = seeds
+        .iter()
+        .enumerate()
+        .map(|(index, seed)| compose_friendly_command(seed, context_counts[index], None))
+        .collect::<Vec<_>>();
+    let mut groups: HashMap<String, Vec<usize>> = HashMap::new();
+    for (index, command) in base_commands.iter().enumerate() {
+        groups.entry(command.clone()).or_default().push(index);
+    }
+
+    let mut final_commands = base_commands;
+    for (command, mut indexes) in groups {
+        if indexes.len() == 1 && !is_reserved_location_command(&command) {
+            continue;
+        }
+        indexes.sort_by_key(|index| seeds[*index].sort_id);
+        for (position, index) in indexes.into_iter().enumerate() {
+            final_commands[index] =
+                compose_friendly_command(&seeds[index], context_counts[index], Some(position + 1));
+        }
+    }
+
+    seeds
+        .iter()
+        .zip(final_commands)
+        .map(|(seed, command)| FriendlyLocationCommand {
+            command,
+            target: seed.target,
+        })
+        .collect()
+}
+
+fn compose_friendly_command(
+    seed: &FriendlyCommandSeed,
+    context_count: usize,
+    ordinal: Option<usize>,
+) -> String {
+    let mut parts = vec![slugify_command_component(&seed.primary)];
+    parts.extend(
+        seed.contexts
+            .iter()
+            .take(context_count)
+            .map(|value| slugify_command_component(value)),
+    );
+    let mut command = format!("{}{}", seed.prefix, parts.join("_"));
+    if let Some(ordinal) = ordinal {
+        command.push('_');
+        command.push_str(&ordinal.to_string());
+    }
+    command
+}
+
+fn slugify_command_component(value: &str) -> String {
+    let mut slug = String::new();
+    let mut pending_separator = false;
+    for ch in value.trim().chars().flat_map(char::to_lowercase) {
+        let replacement = match ch {
+            'à' | 'á' | 'â' | 'ä' | 'ã' | 'å' => Some('a'),
+            'è' | 'é' | 'ê' | 'ë' => Some('e'),
+            'ì' | 'í' | 'î' | 'ï' => Some('i'),
+            'ò' | 'ó' | 'ô' | 'ö' | 'õ' => Some('o'),
+            'ù' | 'ú' | 'û' | 'ü' => Some('u'),
+            'ç' => Some('c'),
+            'ñ' => Some('n'),
+            value if value.is_ascii_alphanumeric() => Some(value),
+            _ => None,
+        };
+        if let Some(value) = replacement {
+            if pending_separator && !slug.is_empty() {
+                slug.push('_');
+            }
+            slug.push(value);
+            pending_separator = false;
+        } else if !slug.is_empty() {
+            pending_separator = true;
+        }
+    }
+    if slug.is_empty() {
+        "luogo".to_string()
+    } else {
+        slug
+    }
+}
+
+fn is_friendly_location_command(command: &str) -> bool {
+    !is_reserved_location_command(command)
+        && (command.starts_with("/casa_")
+            || command.starts_with("/stanza_")
+            || command.starts_with("/contenitore_"))
+}
+
+fn is_reserved_location_command(command: &str) -> bool {
+    matches!(
+        command,
+        "/casa_nuova"
+            | "/casa_rinomina"
+            | "/casa_elimina"
+            | "/stanza_nuova"
+            | "/stanza_rinomina"
+            | "/stanza_elimina"
+    )
 }
 
 fn parse_location_command(command: &str) -> Option<(char, i64)> {
@@ -880,9 +1239,9 @@ fn parse_location_command(command: &str) -> Option<(char, i64)> {
 
 async fn ask_home_name(bot: &Bot, chat_id: ChatId, rename: bool) -> ResponseResult<()> {
     let text = if rename {
-        "✏️ Scrivi il nuovo nome della casa.\n\n/annulla per uscire."
+        "✏️ Scrivi il nuovo nome della casa.\n\nPremi ❌ Annulla per uscire."
     } else {
-        "➕ Nuova casa\n\nScrivi il nome dell'abitazione.\nEsempio: Casa principale\n\n/annulla per uscire."
+        "➕ Nuova casa\n\nScrivi il nome dell'abitazione.\nEsempio: Casa principale\n\nPremi ❌ Annulla per uscire."
     };
     bot.send_message(chat_id, text)
         .reply_markup(location_navigation_keyboard())
@@ -892,9 +1251,9 @@ async fn ask_home_name(bot: &Bot, chat_id: ChatId, rename: bool) -> ResponseResu
 
 async fn ask_room_name(bot: &Bot, chat_id: ChatId, rename: bool) -> ResponseResult<()> {
     let text = if rename {
-        "✏️ Scrivi il nuovo nome della stanza.\n\n/annulla per uscire."
+        "✏️ Scrivi il nuovo nome della stanza.\n\nPremi ❌ Annulla per uscire."
     } else {
-        "➕ Nuova stanza\n\nScrivi il nome della stanza.\nEsempio: Garage\n\n/annulla per uscire."
+        "➕ Nuova stanza\n\nScrivi il nome della stanza.\nEsempio: Garage\n\nPremi ❌ Annulla per uscire."
     };
     bot.send_message(chat_id, text)
         .reply_markup(location_navigation_keyboard())
@@ -912,7 +1271,7 @@ async fn create_home_from_input(
     let Some(name) = clean_name(input) else {
         bot.send_message(
             chat_id,
-            "Il nome della casa non può essere vuoto e deve restare entro 120 caratteri. Riprova oppure usa /annulla.",
+            "Il nome della casa non può essere vuoto e deve restare entro 120 caratteri. Riprova oppure premi ❌ Annulla.",
         )
         .await?;
         return Ok(());
@@ -948,7 +1307,7 @@ async fn rename_home_from_input(
     let Some(name) = clean_name(input) else {
         bot.send_message(
             chat_id,
-            "Il nome della casa non può essere vuoto e deve restare entro 120 caratteri. Riprova oppure usa /annulla.",
+            "Il nome della casa non può essere vuoto e deve restare entro 120 caratteri. Riprova oppure premi ❌ Annulla.",
         )
         .await?;
         return Ok(());
@@ -963,7 +1322,7 @@ async fn rename_home_from_input(
         }
         Ok(false) => {
             sessions.clear_chat(chat_id.0);
-            bot.send_message(chat_id, format!("Casa #{id} non trovata."))
+            bot.send_message(chat_id, "Casa non trovata.")
                 .reply_markup(locations_menu_keyboard())
                 .await?;
         }
@@ -990,7 +1349,7 @@ async fn create_room_from_input(
     let Some(name) = clean_name(input) else {
         bot.send_message(
             chat_id,
-            "Il nome della stanza non può essere vuoto e deve restare entro 120 caratteri. Riprova oppure usa /annulla.",
+            "Il nome della stanza non può essere vuoto e deve restare entro 120 caratteri. Riprova oppure premi ❌ Annulla.",
         )
         .await?;
         return Ok(());
@@ -1026,7 +1385,7 @@ async fn rename_room_from_input(
     let Some(name) = clean_name(input) else {
         bot.send_message(
             chat_id,
-            "Il nome della stanza non può essere vuoto e deve restare entro 120 caratteri. Riprova oppure usa /annulla.",
+            "Il nome della stanza non può essere vuoto e deve restare entro 120 caratteri. Riprova oppure premi ❌ Annulla.",
         )
         .await?;
         return Ok(());
@@ -1041,7 +1400,7 @@ async fn rename_room_from_input(
         }
         Ok(false) => {
             sessions.clear_chat(chat_id.0);
-            bot.send_message(chat_id, format!("Stanza #{} non trovata.", room.id))
+            bot.send_message(chat_id, "Stanza non trovata.")
                 .reply_markup(home_detail_keyboard(room.home_id, &[]))
                 .await?;
         }
@@ -1062,7 +1421,7 @@ async fn send_home_list(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> Respon
         Ok(homes) if homes.is_empty() => {
             bot.send_message(
                 chat_id,
-                "🏠 Non ci sono ancora case registrate.\n\nUsa ➕ Nuova casa oppure /casa_nuova.",
+                "🏠 Non ci sono ancora case registrate.\n\nUsa il pulsante ➕ Nuova casa.",
             )
             .reply_markup(locations_menu_keyboard())
             .await?;
@@ -1070,10 +1429,7 @@ async fn send_home_list(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> Respon
         Ok(homes) => {
             let mut text = "🏠 Case registrate\n\n".to_string();
             for home in &homes {
-                text.push_str(&format!(
-                    "#{} · {}\n/luogo_h{}\n\n",
-                    home.id, home.name, home.id
-                ));
+                text.push_str(&format!("{}\n\n", home.name));
             }
             bot.send_message(chat_id, text)
                 .reply_markup(home_list_keyboard(&homes))
@@ -1089,13 +1445,23 @@ async fn send_home_list(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> Respon
 }
 
 async fn send_room_list(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> ResponseResult<()> {
-    let rooms = sqlx::query_as::<_, RoomRecord>(
-        "SELECT s.id AS id, s.abitazione_id AS home_id, s.nome AS name, a.nome AS home_name \
+    let rooms_sql = format!(
+        "SELECT s.id AS id, s.abitazione_id AS home_id, s.nome AS name, \
+                CASE WHEN ? = 1 THEN a.nome || ' · ' || sp.nome ELSE a.nome END AS home_name \
          FROM stanze s JOIN abitazioni a ON a.id = s.abitazione_id \
-         ORDER BY a.nome COLLATE NOCASE, s.nome COLLATE NOCASE, s.id",
-    )
-    .fetch_all(pool)
-    .await;
+         JOIN spazi sp ON sp.id = a.spazio_id \
+         WHERE {} ORDER BY sp.nome COLLATE NOCASE, a.nome COLLATE NOCASE, s.nome COLLATE NOCASE, s.id",
+        crate::identity::visible_space_sql("a")
+    );
+    let rooms = sqlx::query_as::<_, RoomRecord>(&rooms_sql)
+        .bind(if crate::identity::current_view_all() {
+            1_i64
+        } else {
+            0_i64
+        })
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_all(pool)
+        .await;
 
     match rooms {
         Ok(rooms) if rooms.is_empty() => {
@@ -1107,12 +1473,9 @@ async fn send_room_list(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> Respon
             let mut text = "🚪 Elenco stanze\n\n".to_string();
             let mut rows = Vec::new();
             for room in rooms.iter().take(50) {
-                text.push_str(&format!(
-                    "#{} · {}\n📍 {}\n/luogo_r{}\n\n",
-                    room.id, room.name, room.home_name, room.id
-                ));
+                text.push_str(&format!("{}\n📍 {}\n\n", room.name, room.home_name));
                 rows.push(vec![button(
-                    &format!("🚪 #{} · {}", room.id, truncate_chars(&room.name, 32)),
+                    &format!("🚪 {}", truncate_chars(&room.name, 40)),
                     &format!("loc:room:{}", room.id),
                 )]);
                 if text.chars().count() > 3200 {
@@ -1124,7 +1487,7 @@ async fn send_room_list(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> Respon
             }
             rows.push(vec![
                 button("↩️ Case, stanze e contenitori", "loc:menu"),
-                button("🏠 Menu principale", "menu:main"),
+                button("🏠 Menù principale", "menu:main"),
             ]);
             bot.send_message(chat_id, text)
                 .reply_markup(InlineKeyboardMarkup::new(rows))
@@ -1150,7 +1513,7 @@ async fn show_create_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
             ],
             vec![
                 button("↩️ Case, stanze e contenitori", "loc:menu"),
-                button("🏠 Menu principale", "menu:main"),
+                button("🏠 Menù principale", "menu:main"),
             ],
         ]))
         .await?;
@@ -1169,7 +1532,7 @@ async fn show_home_picker_for_new_room(
                 vec![button("➕ Crea una casa", "loc:home:new")],
                 vec![
                     button("↩️ Crea…", "loc:create"),
-                    button("🏠 Menu principale", "menu:main"),
+                    button("🏠 Menù principale", "menu:main"),
                 ],
             ]))
             .await?;
@@ -1188,7 +1551,7 @@ async fn show_home_picker_for_new_room(
         .collect::<Vec<_>>();
     rows.push(vec![
         button("↩️ Crea…", "loc:create"),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     bot.send_message(chat_id, "🚪 Nuova stanza\n\nScegli la casa.")
         .reply_markup(InlineKeyboardMarkup::new(rows))
@@ -1207,9 +1570,8 @@ pub(crate) async fn show_home_detail(
             let rooms = list_rooms_for_home(pool, id).await.unwrap_or_default();
             let item_count = count_items_for_home(pool, id).await.unwrap_or(0);
             let mut text = format!(
-                "🏠 {}\n#{}\n\n🚪 Stanze: {}\n📦 Elementi assegnati: {}",
+                "🏠 {}\n\n🚪 Stanze: {}\n📦 Elementi assegnati: {}",
                 home.name,
-                home.id,
                 rooms.len(),
                 item_count
             );
@@ -1224,7 +1586,7 @@ pub(crate) async fn show_home_detail(
                 .await?;
         }
         Ok(None) => {
-            bot.send_message(chat_id, format!("Casa #{id} non trovata."))
+            bot.send_message(chat_id, "Casa non trovata.")
                 .reply_markup(locations_menu_keyboard())
                 .await?;
         }
@@ -1249,15 +1611,15 @@ pub(crate) async fn show_room_detail(
             bot.send_message(
                 chat_id,
                 format!(
-                    "🚪 {}\n#{}\n\n🏠 Casa: {}\n📦 Elementi assegnati: {}",
-                    room.name, room.id, room.home_name, item_count
+                    "🚪 {}\n\n🏠 Casa: {}\n📦 Elementi assegnati: {}",
+                    room.name, room.home_name, item_count
                 ),
             )
             .reply_markup(room_detail_keyboard(&room))
             .await?;
         }
         Ok(None) => {
-            bot.send_message(chat_id, format!("Stanza #{id} non trovata."))
+            bot.send_message(chat_id, "Stanza non trovata.")
                 .reply_markup(locations_menu_keyboard())
                 .await?;
         }
@@ -1277,28 +1639,25 @@ async fn show_home_manage(
     id: i64,
 ) -> ResponseResult<()> {
     let Some(home) = get_home(pool, id).await.unwrap_or(None) else {
-        bot.send_message(chat_id, format!("Casa #{id} non trovata."))
+        bot.send_message(chat_id, "Casa non trovata.")
             .reply_markup(locations_menu_keyboard())
             .await?;
         return Ok(());
     };
 
-    bot.send_message(
-        chat_id,
-        format!("⚙️ Gestisci casa\n\n🏠 #{} · {}", home.id, home.name),
-    )
-    .reply_markup(InlineKeyboardMarkup::new(vec![
-        vec![button("✏️ Rinomina", &format!("loc:home:rename:{id}"))],
-        vec![button(
-            "🗑 Elimina casa",
-            &format!("loc:home:delete:ask:{id}"),
-        )],
-        vec![
-            button("↩️ Torna alla casa", &format!("loc:home:{id}")),
-            button("🏠 Menu principale", "menu:main"),
-        ],
-    ]))
-    .await?;
+    bot.send_message(chat_id, format!("⚙️ Gestisci casa\n\n🏠 {}", home.name))
+        .reply_markup(InlineKeyboardMarkup::new(vec![
+            vec![button("✏️ Rinomina", &format!("loc:home:rename:{id}"))],
+            vec![button(
+                "🗑 Elimina casa",
+                &format!("loc:home:delete:ask:{id}"),
+            )],
+            vec![
+                button("↩️ Torna alla casa", &format!("loc:home:{id}")),
+                button("🏠 Menù principale", "menu:main"),
+            ],
+        ]))
+        .await?;
     Ok(())
 }
 
@@ -1309,7 +1668,7 @@ async fn show_room_manage(
     id: i64,
 ) -> ResponseResult<()> {
     let Some(room) = get_room(pool, id).await.unwrap_or(None) else {
-        bot.send_message(chat_id, format!("Stanza #{id} non trovata."))
+        bot.send_message(chat_id, "Stanza non trovata.")
             .reply_markup(locations_menu_keyboard())
             .await?;
         return Ok(());
@@ -1318,8 +1677,8 @@ async fn show_room_manage(
     bot.send_message(
         chat_id,
         format!(
-            "⚙️ Gestisci stanza\n\n🚪 #{} · {}\n🏠 {}",
-            room.id, room.name, room.home_name
+            "⚙️ Gestisci stanza\n\n🚪 {}\n🏠 {}",
+            room.name, room.home_name
         ),
     )
     .reply_markup(InlineKeyboardMarkup::new(vec![
@@ -1330,7 +1689,7 @@ async fn show_room_manage(
         )],
         vec![
             button("↩️ Torna alla stanza", &format!("loc:room:{id}")),
-            button("🏠 Menu principale", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
         ],
     ]))
     .await?;
@@ -1350,15 +1709,15 @@ async fn send_home_delete_confirmation(
             bot.send_message(
                 chat_id,
                 format!(
-                    "⚠️ Eliminare la casa?\n\n🏠 {}\n#{}\n\nVerranno eliminate anche {} stanze. I {} elementi collegati NON verranno eliminati: resteranno nel gestionale senza luogo strutturato.\n\nL'operazione sulla casa non può essere annullata.",
-                    home.name, home.id, room_count, item_count
+                    "⚠️ Eliminare la casa?\n\n🏠 {}\n\nVerranno eliminate anche {} stanze. I {} elementi collegati NON verranno eliminati: resteranno nel gestionale senza luogo strutturato.\n\nL'operazione sulla casa non può essere annullata.",
+                    home.name, room_count, item_count
                 ),
             )
             .reply_markup(home_delete_keyboard(id))
             .await?;
         }
         Ok(None) => {
-            bot.send_message(chat_id, format!("Casa #{id} non trovata."))
+            bot.send_message(chat_id, "Casa non trovata.")
                 .reply_markup(locations_menu_keyboard())
                 .await?;
         }
@@ -1381,13 +1740,13 @@ async fn delete_home_and_report(
         Ok(true) => {
             bot.send_message(
                 chat_id,
-                format!("🗑 Casa #{id} eliminata. Gli oggetti sono rimasti nel gestionale."),
+                "🗑 Casa eliminata. Gli oggetti sono rimasti nel gestionale.",
             )
             .reply_markup(locations_menu_keyboard())
             .await?;
         }
         Ok(false) => {
-            bot.send_message(chat_id, format!("Casa #{id} non trovata."))
+            bot.send_message(chat_id, "Casa non trovata.")
                 .reply_markup(locations_menu_keyboard())
                 .await?;
         }
@@ -1413,15 +1772,15 @@ async fn send_room_delete_confirmation(
             bot.send_message(
                 chat_id,
                 format!(
-                    "⚠️ Eliminare la stanza?\n\n🚪 {}\n🏠 {}\n#{}\n\nI {} elementi collegati NON verranno eliminati: resteranno associati alla casa, ma senza stanza.\nI {} contenitori della stanza verranno mantenuti e promossi direttamente nella casa, conservando la loro gerarchia.\n\nL'operazione sulla stanza non può essere annullata.",
-                    room.name, room.home_name, room.id, item_count, container_count
+                    "⚠️ Eliminare la stanza?\n\n🚪 {}\n🏠 {}\n\nI {} elementi collegati NON verranno eliminati: resteranno associati alla casa, ma senza stanza.\nI {} contenitori della stanza verranno mantenuti e promossi direttamente nella casa, conservando la loro gerarchia.\n\nL'operazione sulla stanza non può essere annullata.",
+                    room.name, room.home_name, item_count, container_count
                 ),
             )
             .reply_markup(room_delete_keyboard(&room))
             .await?;
         }
         Ok(None) => {
-            bot.send_message(chat_id, format!("Stanza #{id} non trovata."))
+            bot.send_message(chat_id, "Stanza non trovata.")
                 .reply_markup(locations_menu_keyboard())
                 .await?;
         }
@@ -1443,7 +1802,7 @@ async fn delete_room_and_report(
     let room = match get_room(pool, id).await {
         Ok(Some(room)) => room,
         Ok(None) => {
-            bot.send_message(chat_id, format!("Stanza #{id} non trovata."))
+            bot.send_message(chat_id, "Stanza non trovata.")
                 .reply_markup(locations_menu_keyboard())
                 .await?;
             return Ok(());
@@ -1460,14 +1819,14 @@ async fn delete_room_and_report(
         Ok(true) => {
             bot.send_message(
                 chat_id,
-                format!("🗑 Stanza #{id} eliminata. Gli oggetti restano associati alla casa."),
+                "🗑 Stanza eliminata. Gli oggetti restano associati alla casa.",
             )
             .reply_markup(home_detail_keyboard(room.home_id, &[]))
             .await?;
             show_home_detail(bot, chat_id, pool, room.home_id).await?;
         }
         Ok(false) => {
-            bot.send_message(chat_id, format!("Stanza #{id} non trovata."))
+            bot.send_message(chat_id, "Stanza non trovata.")
                 .reply_markup(locations_menu_keyboard())
                 .await?;
         }
@@ -1487,8 +1846,7 @@ async fn show_item_location_picker(
     item_id: i64,
 ) -> ResponseResult<()> {
     if !object_exists(pool, item_id).await.unwrap_or(false) {
-        bot.send_message(chat_id, format!("Oggetto #{item_id} non trovato."))
-            .await?;
+        bot.send_message(chat_id, "Oggetto non trovato.").await?;
         return Ok(());
     }
 
@@ -1508,20 +1866,20 @@ async fn show_item_location_picker(
     let text = if homes.is_empty() {
         if is_move {
             format!(
-                "🚚 Sposta oggetto #{item_id}\n\nPosizione attuale: {current}\n\nNon ci sono altre case disponibili. Creane una dalla sezione 🏠 Case e stanze."
+                "🚚 Sposta oggetto\n\nPosizione attuale: {current}\n\nNon ci sono altre case disponibili. Creane una dalla sezione 🏠 Case e stanze."
             )
         } else {
             format!(
-                "🏠 Assegna luogo all'oggetto #{item_id}\n\nPosizione attuale: {current}\n\nNon ci sono ancora case. Creane una dalla sezione 🏠 Case e stanze."
+                "🏠 Assegna luogo all'oggetto\n\nPosizione attuale: {current}\n\nNon ci sono ancora case. Creane una dalla sezione 🏠 Case e stanze."
             )
         }
     } else if is_move {
         format!(
-            "🚚 Sposta oggetto #{item_id}\n\nPosizione attuale: {current}\n\nScegli la nuova casa. Nei passaggi successivi potrai scegliere anche una stanza o un contenitore."
+            "🚚 Sposta oggetto\n\nPosizione attuale: {current}\n\nScegli la nuova casa. Nei passaggi successivi potrai scegliere anche una stanza o un contenitore."
         )
     } else {
         format!(
-            "🏠 Assegna luogo all'oggetto #{item_id}\n\nPosizione attuale: {current}\n\nScegli la casa. Nei passaggi successivi potrai scegliere anche una stanza o un contenitore."
+            "🏠 Assegna luogo all'oggetto\n\nPosizione attuale: {current}\n\nScegli la casa. Nei passaggi successivi potrai scegliere anche una stanza o un contenitore."
         )
     };
 
@@ -1539,7 +1897,7 @@ async fn show_home_destination_picker(
     home_id: i64,
 ) -> ResponseResult<()> {
     let Some(home) = get_home(pool, home_id).await.unwrap_or(None) else {
-        bot.send_message(chat_id, format!("Casa #{home_id} non trovata."))
+        bot.send_message(chat_id, "Casa non trovata.")
             .reply_markup(locations_menu_keyboard())
             .await?;
         return Ok(());
@@ -1606,13 +1964,13 @@ async fn show_home_destination_picker(
 
     rows.push(vec![
         button("↩️ Scegli un'altra casa", &format!("loc:item:{item_id}")),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
 
     bot.send_message(
         chat_id,
         format!(
-            "{action} #{item_id}\n\nPosizione attuale: {current}\nDestinazione scelta: 🏠 {}\n\nPuoi spostare l'oggetto direttamente nella casa, entrare in una stanza oppure scegliere un contenitore direttamente nella casa.",
+            "{action}\n\nPosizione attuale: {current}\nDestinazione scelta: 🏠 {}\n\nPuoi spostare l'oggetto direttamente nella casa, entrare in una stanza oppure scegliere un contenitore direttamente nella casa.",
             home.name
         ),
     )
@@ -1629,7 +1987,7 @@ async fn show_room_destination_picker(
     room_id: i64,
 ) -> ResponseResult<()> {
     let Some(room) = get_room(pool, room_id).await.unwrap_or(None) else {
-        bot.send_message(chat_id, format!("Stanza #{room_id} non trovata."))
+        bot.send_message(chat_id, "Stanza non trovata.")
             .reply_markup(locations_menu_keyboard())
             .await?;
         return Ok(());
@@ -1683,7 +2041,7 @@ async fn show_room_destination_picker(
             "↩️ Torna alla casa scelta",
             &format!("loc:item:home:{item_id}:{}", room.home_id),
         ),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
 
     let action = if is_move {
@@ -1695,7 +2053,7 @@ async fn show_room_destination_picker(
     bot.send_message(
         chat_id,
         format!(
-            "{action} #{item_id}\n\nPosizione attuale: {current}\nDestinazione scelta: 🏠 {} / 🚪 {}\n\nPuoi fermarti nella stanza oppure entrare in uno dei suoi contenitori.",
+            "{action}\n\nPosizione attuale: {current}\nDestinazione scelta: 🏠 {} / 🚪 {}\n\nPuoi fermarti nella stanza oppure entrare in uno dei suoi contenitori.",
             room.home_name, room.name
         ),
     )
@@ -1716,7 +2074,7 @@ async fn show_container_destination_picker(
         .ok()
         .flatten()
     else {
-        bot.send_message(chat_id, format!("Contenitore #{container_id} non trovato."))
+        bot.send_message(chat_id, "Contenitore non trovato.")
             .reply_markup(locations_menu_keyboard())
             .await?;
         return Ok(());
@@ -1784,7 +2142,7 @@ async fn show_container_destination_picker(
     };
     rows.push(vec![
         button("↩️ Livello precedente", &back_callback),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
 
     let action = if is_move {
@@ -1796,7 +2154,7 @@ async fn show_container_destination_picker(
     bot.send_message(
         chat_id,
         format!(
-            "{action} #{item_id}\n\nPosizione attuale: {current}\nDestinazione scelta: 📦 {}\n\nPuoi spostare qui l'oggetto oppure entrare in un sottocontenitore.",
+            "{action}\n\nPosizione attuale: {current}\nDestinazione scelta: 📦 {}\n\nPuoi spostare qui l'oggetto oppure entrare in un sottocontenitore.",
             crate::modules::contenitori::format_path_for_ui(&path)
         ),
     )
@@ -1812,7 +2170,7 @@ async fn send_objects_for_home(
     home_id: i64,
 ) -> ResponseResult<()> {
     let Some(home) = get_home(pool, home_id).await.unwrap_or(None) else {
-        bot.send_message(chat_id, format!("Casa #{home_id} non trovata."))
+        bot.send_message(chat_id, "Casa non trovata.")
             .reply_markup(locations_menu_keyboard())
             .await?;
         return Ok(());
@@ -1840,7 +2198,7 @@ async fn send_objects_for_room(
     room_id: i64,
 ) -> ResponseResult<()> {
     let Some(room) = get_room(pool, room_id).await.unwrap_or(None) else {
-        bot.send_message(chat_id, format!("Stanza #{room_id} non trovata."))
+        bot.send_message(chat_id, "Stanza non trovata.")
             .reply_markup(locations_menu_keyboard())
             .await?;
         return Ok(());
@@ -1874,7 +2232,7 @@ async fn send_filtered_objects(
         bot.send_message(chat_id, format!("🏷️ Nessun oggetto in:\n{title}"))
             .reply_markup(InlineKeyboardMarkup::new(vec![vec![
                 button("↩️ Indietro", &back_callback),
-                button("🏠 Menu principale", "menu:main"),
+                button("🏠 Menù principale", "menu:main"),
             ]]))
             .await?;
         return Ok(());
@@ -1882,9 +2240,9 @@ async fn send_filtered_objects(
 
     let mut text = format!("🏷️ Oggetti in:\n{title}\n\n");
     for object in objects {
-        text.push_str(&format!("#{} · {}", object.id, object.name));
-        if let Some((location, command)) = summary_location(pool, object).await {
-            text.push_str(&format!("\n📍 {location}\n{command}"));
+        text.push_str(&object.name);
+        if let Some(location) = summary_location(pool, object).await {
+            text.push_str(&format!("\n📍 {location}"));
         }
         text.push_str("\n\n");
     }
@@ -1902,18 +2260,48 @@ async fn send_filtered_objects(
     Ok(())
 }
 
+#[cfg(test)]
 fn format_location(location: Option<&ItemLocation>) -> String {
+    format_location_with_space(location, false)
+}
+
+fn format_location_with_space(location: Option<&ItemLocation>, show_space: bool) -> String {
     match location {
         Some(location) => match (&location.home_name, &location.room_name) {
-            (Some(home), Some(room)) => format!("🏠 {home} / 🚪 {room}"),
-            (Some(home), None) => format!("🏠 {home}"),
+            (Some(home), Some(room)) => {
+                let home =
+                    location_home_label(home, location.home_space_name.as_deref(), show_space);
+                format!("🏠 {home} / 🚪 {room}")
+            }
+            (Some(home), None) => {
+                let home =
+                    location_home_label(home, location.home_space_name.as_deref(), show_space);
+                format!("🏠 {home}")
+            }
             _ => "Nessun luogo strutturato".to_string(),
         },
         None => "Nessun luogo strutturato".to_string(),
     }
 }
 
+fn location_home_label(home: &str, space: Option<&str>, show_space: bool) -> String {
+    if show_space {
+        if let Some(space) = space {
+            return format!("{home} · {space}");
+        }
+    }
+    home.to_string()
+}
+
 async fn format_location_full(pool: &SqlitePool, location: Option<&ItemLocation>) -> String {
+    format_location_full_mode(pool, location, crate::identity::current_view_all()).await
+}
+
+async fn format_location_full_mode(
+    pool: &SqlitePool,
+    location: Option<&ItemLocation>,
+    show_space: bool,
+) -> String {
     let Some(location) = location else {
         return "Nessun luogo strutturato".to_string();
     };
@@ -1922,20 +2310,11 @@ async fn format_location_full(pool: &SqlitePool, location: Option<&ItemLocation>
         if let Ok(Some(path)) =
             crate::modules::contenitori::container_path(pool, container_id).await
         {
-            let mut parts = vec![format!("🏠 {}", path.home_name)];
-            if let Some(room_name) = path.room_name {
-                parts.push(format!("🚪 {room_name}"));
-            }
-            parts.extend(
-                path.containers
-                    .into_iter()
-                    .map(|container| format!("📦 {}", container.name)),
-            );
-            return parts.join(" / ");
+            return crate::modules::contenitori::format_path_for_ui_with_space(&path, show_space);
         }
     }
 
-    format_location(Some(location))
+    format_location_with_space(Some(location), show_space)
 }
 
 async fn location_change_message_full(
@@ -1943,10 +2322,21 @@ async fn location_change_message_full(
     previous: Option<&ItemLocation>,
     current: Option<&ItemLocation>,
 ) -> String {
-    let before = format_location_full(pool, previous).await;
-    let after = format_location_full(pool, current).await;
+    // Nei messaggi di modifica del luogo mostriamo sempre lo spazio: due case
+    // possono avere lo stesso nome e uno spostamento cross-space deve essere inequivocabile.
+    let mut before = format_location_full_mode(pool, previous, true).await;
+    let mut after = format_location_full_mode(pool, current, true).await;
     let had_location = has_structured_location(previous);
     let has_location = has_structured_location(current);
+
+    // I percorsi che terminano in un contenitore non includono l'emoji della casa.
+    // Nei messaggi di spostamento la aggiungiamo qui per rendere Da/A coerenti.
+    if had_location && !before.starts_with("🏠 ") {
+        before = format!("🏠 {before}");
+    }
+    if has_location && !after.starts_with("🏠 ") {
+        after = format!("🏠 {after}");
+    }
     let unchanged = previous == current;
 
     match (had_location, has_location, unchanged) {
@@ -1993,29 +2383,23 @@ fn location_change_message(
     }
 }
 
-async fn summary_location(
-    pool: &SqlitePool,
-    object: &LocatedObjectSummary,
-) -> Option<(String, String)> {
+async fn summary_location(pool: &SqlitePool, object: &LocatedObjectSummary) -> Option<String> {
     if let Some(container_id) = object.container_id {
         if let Ok(Some(path)) =
             crate::modules::contenitori::container_path(pool, container_id).await
         {
-            return Some((
-                crate::modules::contenitori::format_path_for_ui(&path),
-                format!("/luogo_c{container_id}"),
-            ));
+            return Some(crate::modules::contenitori::format_path_for_ui(&path));
         }
     }
-    if let (Some(room_id), Some(home), Some(room)) = (
+    if let (Some(_), Some(home), Some(room)) = (
         object.room_id,
         object.home_name.as_deref(),
         object.room_name.as_deref(),
     ) {
-        return Some((format!("{home} / {room}"), format!("/luogo_r{room_id}")));
+        return Some(format!("{home} / {room}"));
     }
-    if let (Some(home_id), Some(home)) = (object.home_id, object.home_name.as_deref()) {
-        return Some((home.to_string(), format!("/luogo_h{home_id}")));
+    if let (Some(_), Some(home)) = (object.home_id, object.home_name.as_deref()) {
+        return Some(home.to_string());
     }
     None
 }
@@ -2233,9 +2617,12 @@ pub(crate) async fn record_item_location_event(
 }
 
 async fn create_home(pool: &SqlitePool, name: &str) -> Result<i64, sqlx::Error> {
+    crate::identity::ensure_can_write_sqlx(pool).await?;
+    let space_id = crate::identity::current_space_id();
     let mut tx = pool.begin().await?;
-    let result = sqlx::query("INSERT INTO abitazioni (nome) VALUES (?)")
+    let result = sqlx::query("INSERT INTO abitazioni (nome, spazio_id) VALUES (?, ?)")
         .bind(name)
+        .bind(space_id)
         .execute(&mut *tx)
         .await?;
     let id = result.last_insert_rowid();
@@ -2275,12 +2662,18 @@ async fn create_home(pool: &SqlitePool, name: &str) -> Result<i64, sqlx::Error> 
 }
 
 async fn rename_home(pool: &SqlitePool, id: i64, name: &str) -> Result<bool, sqlx::Error> {
+    let Some(space_id) = visible_home_space_id(pool, id).await? else {
+        return Ok(false);
+    };
+    crate::identity::ensure_can_write_space_sqlx(pool, space_id).await?;
     let mut tx = pool.begin().await?;
-    let Some(old_name) =
-        sqlx::query_scalar::<_, String>("SELECT nome FROM abitazioni WHERE id = ?")
-            .bind(id)
-            .fetch_optional(&mut *tx)
-            .await?
+    let Some(old_name) = sqlx::query_scalar::<_, String>(
+        "SELECT nome FROM abitazioni WHERE id = ? AND spazio_id = ?",
+    )
+    .bind(id)
+    .bind(space_id)
+    .fetch_optional(&mut *tx)
+    .await?
     else {
         return Ok(false);
     };
@@ -2292,10 +2685,11 @@ async fn rename_home(pool: &SqlitePool, id: i64, name: &str) -> Result<bool, sql
     let history_id =
         crate::modules::storico::ensure_entity(&mut tx, "abitazione", id, &old_name).await?;
     let result = sqlx::query(
-        "UPDATE abitazioni SET nome = ?, aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
+        "UPDATE abitazioni SET nome = ?, aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND spazio_id = ?",
     )
     .bind(name)
     .bind(id)
+    .bind(space_id)
     .execute(&mut *tx)
     .await?;
 
@@ -2337,12 +2731,18 @@ async fn rename_home(pool: &SqlitePool, id: i64, name: &str) -> Result<bool, sql
 }
 
 async fn delete_home(pool: &SqlitePool, id: i64) -> Result<bool, sqlx::Error> {
+    let Some(space_id) = visible_home_space_id(pool, id).await? else {
+        return Ok(false);
+    };
+    crate::identity::ensure_can_write_space_sqlx(pool, space_id).await?;
     let mut tx = pool.begin().await?;
-    let Some(home_name) =
-        sqlx::query_scalar::<_, String>("SELECT nome FROM abitazioni WHERE id = ?")
-            .bind(id)
-            .fetch_optional(&mut *tx)
-            .await?
+    let Some(home_name) = sqlx::query_scalar::<_, String>(
+        "SELECT nome FROM abitazioni WHERE id = ? AND spazio_id = ?",
+    )
+    .bind(id)
+    .bind(space_id)
+    .fetch_optional(&mut *tx)
+    .await?
     else {
         return Ok(false);
     };
@@ -2500,8 +2900,9 @@ async fn delete_home(pool: &SqlitePool, id: i64) -> Result<bool, sqlx::Error> {
     }
     crate::modules::storico::mark_entity_deleted(&mut tx, home_history_id).await?;
 
-    let result = sqlx::query("DELETE FROM abitazioni WHERE id = ?")
+    let result = sqlx::query("DELETE FROM abitazioni WHERE id = ? AND spazio_id = ?")
         .bind(id)
+        .bind(space_id)
         .execute(&mut *tx)
         .await?;
 
@@ -2510,34 +2911,128 @@ async fn delete_home(pool: &SqlitePool, id: i64) -> Result<bool, sqlx::Error> {
 }
 
 async fn get_home(pool: &SqlitePool, id: i64) -> Result<Option<HomeRecord>, sqlx::Error> {
-    sqlx::query_as::<_, HomeRecord>("SELECT id, nome AS name FROM abitazioni WHERE id = ?")
+    let sql = format!(
+        "SELECT a.id, CASE WHEN ? = 1 THEN a.nome || ' · ' || sp.nome ELSE a.nome END AS name \
+         FROM abitazioni a JOIN spazi sp ON sp.id = a.spazio_id \
+         WHERE a.id = ? AND {}",
+        crate::identity::visible_space_sql("a")
+    );
+    sqlx::query_as::<_, HomeRecord>(&sql)
+        .bind(if crate::identity::current_view_all() {
+            1_i64
+        } else {
+            0_i64
+        })
         .bind(id)
+        .bind(crate::identity::visible_space_bind_id())
         .fetch_optional(pool)
         .await
 }
 
 async fn home_exists(pool: &SqlitePool, id: i64) -> Result<bool, sqlx::Error> {
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM abitazioni WHERE id = ?")
+    let sql = format!(
+        "SELECT COUNT(*) FROM abitazioni a WHERE a.id = ? AND {}",
+        crate::identity::visible_space_sql("a")
+    );
+    let count: i64 = sqlx::query_scalar(&sql)
         .bind(id)
+        .bind(crate::identity::visible_space_bind_id())
         .fetch_one(pool)
         .await?;
     Ok(count == 1)
 }
 
 async fn list_homes(pool: &SqlitePool) -> Result<Vec<HomeRecord>, sqlx::Error> {
-    sqlx::query_as::<_, HomeRecord>(
-        "SELECT id, nome AS name FROM abitazioni ORDER BY nome COLLATE NOCASE, id",
-    )
-    .fetch_all(pool)
-    .await
+    let sql = format!(
+        "SELECT a.id, CASE WHEN ? = 1 THEN a.nome || ' · ' || sp.nome ELSE a.nome END AS name \
+         FROM abitazioni a JOIN spazi sp ON sp.id = a.spazio_id \
+         WHERE {} ORDER BY sp.nome COLLATE NOCASE, a.nome COLLATE NOCASE, a.id",
+        crate::identity::visible_space_sql("a")
+    );
+    sqlx::query_as::<_, HomeRecord>(&sql)
+        .bind(if crate::identity::current_view_all() {
+            1_i64
+        } else {
+            0_i64
+        })
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_all(pool)
+        .await
+}
+
+async fn visible_home_space_id(
+    pool: &SqlitePool,
+    home_id: i64,
+) -> Result<Option<i64>, sqlx::Error> {
+    let sql = format!(
+        "SELECT a.spazio_id FROM abitazioni a WHERE a.id = ? AND {}",
+        crate::identity::visible_space_sql("a")
+    );
+    sqlx::query_scalar(&sql)
+        .bind(home_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_optional(pool)
+        .await
+}
+
+async fn visible_item_space_id(
+    pool: &SqlitePool,
+    item_id: i64,
+) -> Result<Option<i64>, sqlx::Error> {
+    let sql = format!(
+        "SELECT i.spazio_id FROM items i WHERE i.id = ? AND {}",
+        crate::identity::visible_space_sql("i")
+    );
+    sqlx::query_scalar(&sql)
+        .bind(item_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_optional(pool)
+        .await
+}
+
+pub(crate) async fn ensure_location_target_writable(
+    pool: &SqlitePool,
+    home_id: Option<i64>,
+    container_id: Option<i64>,
+) -> anyhow::Result<()> {
+    let target_space = if let Some(container_id) = container_id {
+        let sql = format!(
+            "SELECT a.spazio_id FROM contenitori c JOIN abitazioni a ON a.id = c.abitazione_id \
+             WHERE c.id = ? AND {}",
+            crate::identity::visible_space_sql("a")
+        );
+        sqlx::query_scalar::<_, i64>(&sql)
+            .bind(container_id)
+            .bind(crate::identity::visible_space_bind_id())
+            .fetch_optional(pool)
+            .await?
+    } else if let Some(home_id) = home_id {
+        visible_home_space_id(pool, home_id).await?
+    } else {
+        None
+    };
+    if let Some(space_id) = target_space {
+        crate::identity::ensure_can_write_space(pool, space_id).await?;
+        Ok(())
+    } else if home_id.is_none() && container_id.is_none() {
+        Ok(())
+    } else {
+        anyhow::bail!("Luogo di destinazione non accessibile")
+    }
 }
 
 async fn create_room(pool: &SqlitePool, home_id: i64, name: &str) -> Result<i64, sqlx::Error> {
+    let home_space = visible_home_space_id(pool, home_id)
+        .await?
+        .ok_or(sqlx::Error::RowNotFound)?;
+    crate::identity::ensure_can_write_space_sqlx(pool, home_space).await?;
     let mut tx = pool.begin().await?;
-    let home_name: String = sqlx::query_scalar("SELECT nome FROM abitazioni WHERE id = ?")
-        .bind(home_id)
-        .fetch_one(&mut *tx)
-        .await?;
+    let home_name: String =
+        sqlx::query_scalar("SELECT nome FROM abitazioni WHERE id = ? AND spazio_id = ?")
+            .bind(home_id)
+            .bind(home_space)
+            .fetch_one(&mut *tx)
+            .await?;
     let home_history_id =
         crate::modules::storico::ensure_entity(&mut tx, "abitazione", home_id, &home_name).await?;
 
@@ -2583,13 +3078,27 @@ async fn create_room(pool: &SqlitePool, home_id: i64, name: &str) -> Result<i64,
 }
 
 async fn rename_room(pool: &SqlitePool, id: i64, name: &str) -> Result<bool, sqlx::Error> {
+    let room_sql = format!(
+        "SELECT a.spazio_id FROM stanze s JOIN abitazioni a ON a.id = s.abitazione_id WHERE s.id = ? AND {}",
+        crate::identity::visible_space_sql("a")
+    );
+    let Some(space_id) = sqlx::query_scalar::<_, i64>(&room_sql)
+        .bind(id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_optional(pool)
+        .await?
+    else {
+        return Ok(false);
+    };
+    crate::identity::ensure_can_write_space_sqlx(pool, space_id).await?;
     let mut tx = pool.begin().await?;
     let Some((home_id, old_name, home_name)) = sqlx::query_as::<_, (i64, String, String)>(
         "SELECT s.abitazione_id, s.nome, a.nome \
          FROM stanze s JOIN abitazioni a ON a.id = s.abitazione_id \
-         WHERE s.id = ?",
+         WHERE s.id = ? AND a.spazio_id = ?",
     )
     .bind(id)
+    .bind(space_id)
     .fetch_optional(&mut *tx)
     .await?
     else {
@@ -2606,10 +3115,11 @@ async fn rename_room(pool: &SqlitePool, id: i64, name: &str) -> Result<bool, sql
         crate::modules::storico::ensure_entity(&mut tx, "stanza", id, &old_name).await?;
 
     let result = sqlx::query(
-        "UPDATE stanze SET nome = ?, aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
+        "UPDATE stanze SET nome = ?, aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')          WHERE id = ? AND EXISTS (             SELECT 1 FROM abitazioni a WHERE a.id = stanze.abitazione_id AND a.spazio_id = ?         )",
     )
     .bind(name)
     .bind(id)
+    .bind(space_id)
     .execute(&mut *tx)
     .await?;
     if result.rows_affected() != 1 {
@@ -2650,13 +3160,27 @@ async fn rename_room(pool: &SqlitePool, id: i64, name: &str) -> Result<bool, sql
 }
 
 async fn delete_room(pool: &SqlitePool, id: i64) -> Result<bool, sqlx::Error> {
+    let room_sql = format!(
+        "SELECT a.spazio_id FROM stanze s JOIN abitazioni a ON a.id = s.abitazione_id WHERE s.id = ? AND {}",
+        crate::identity::visible_space_sql("a")
+    );
+    let Some(space_id) = sqlx::query_scalar::<_, i64>(&room_sql)
+        .bind(id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_optional(pool)
+        .await?
+    else {
+        return Ok(false);
+    };
+    crate::identity::ensure_can_write_space_sqlx(pool, space_id).await?;
     let mut tx = pool.begin().await?;
     let Some((home_id, room_name, home_name)) = sqlx::query_as::<_, (i64, String, String)>(
         "SELECT s.abitazione_id, s.nome, a.nome \
          FROM stanze s JOIN abitazioni a ON a.id = s.abitazione_id \
-         WHERE s.id = ?",
+         WHERE s.id = ? AND a.spazio_id = ?",
     )
     .bind(id)
+    .bind(space_id)
     .fetch_optional(&mut *tx)
     .await?
     else {
@@ -2740,9 +3264,12 @@ async fn delete_room(pool: &SqlitePool, id: i64) -> Result<bool, sqlx::Error> {
     .await?;
 
     crate::modules::storico::mark_entity_deleted(&mut tx, room_history_id).await?;
-    let result = sqlx::query("DELETE FROM stanze WHERE id = ?")
-        .bind(id)
-        .execute(&mut *tx)
+    let result = sqlx::query(
+        "DELETE FROM stanze WHERE id = ? AND EXISTS (             SELECT 1 FROM abitazioni a WHERE a.id = stanze.abitazione_id AND a.spazio_id = ?         )",
+    )
+    .bind(id)
+    .bind(space_id)
+    .execute(&mut *tx)
         .await?;
     if result.rows_affected() != 1 {
         return Ok(false);
@@ -2783,63 +3310,110 @@ async fn delete_room(pool: &SqlitePool, id: i64) -> Result<bool, sqlx::Error> {
 }
 
 async fn get_room(pool: &SqlitePool, id: i64) -> Result<Option<RoomRecord>, sqlx::Error> {
-    sqlx::query_as::<_, RoomRecord>(
-        "SELECT s.id AS id, s.abitazione_id AS home_id, s.nome AS name, a.nome AS home_name \
-         FROM stanze s JOIN abitazioni a ON a.id = s.abitazione_id WHERE s.id = ?",
-    )
-    .bind(id)
-    .fetch_optional(pool)
-    .await
+    let sql = format!(
+        "SELECT s.id AS id, s.abitazione_id AS home_id, s.nome AS name, \
+                CASE WHEN ? = 1 THEN a.nome || ' · ' || sp.nome ELSE a.nome END AS home_name \
+         FROM stanze s JOIN abitazioni a ON a.id = s.abitazione_id JOIN spazi sp ON sp.id = a.spazio_id \
+         WHERE s.id = ? AND {}",
+        crate::identity::visible_space_sql("a")
+    );
+    sqlx::query_as::<_, RoomRecord>(&sql)
+        .bind(if crate::identity::current_view_all() {
+            1_i64
+        } else {
+            0_i64
+        })
+        .bind(id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_optional(pool)
+        .await
 }
 
 async fn list_rooms_for_home(
     pool: &SqlitePool,
     home_id: i64,
 ) -> Result<Vec<RoomRecord>, sqlx::Error> {
-    sqlx::query_as::<_, RoomRecord>(
-        "SELECT s.id AS id, s.abitazione_id AS home_id, s.nome AS name, a.nome AS home_name \
-         FROM stanze s JOIN abitazioni a ON a.id = s.abitazione_id \
-         WHERE s.abitazione_id = ? ORDER BY s.nome COLLATE NOCASE, s.id",
-    )
-    .bind(home_id)
-    .fetch_all(pool)
-    .await
+    let sql = format!(
+        "SELECT s.id AS id, s.abitazione_id AS home_id, s.nome AS name, \
+                CASE WHEN ? = 1 THEN a.nome || ' · ' || sp.nome ELSE a.nome END AS home_name \
+         FROM stanze s JOIN abitazioni a ON a.id = s.abitazione_id JOIN spazi sp ON sp.id = a.spazio_id \
+         WHERE s.abitazione_id = ? AND {} ORDER BY s.nome COLLATE NOCASE, s.id",
+        crate::identity::visible_space_sql("a")
+    );
+    sqlx::query_as::<_, RoomRecord>(&sql)
+        .bind(if crate::identity::current_view_all() {
+            1_i64
+        } else {
+            0_i64
+        })
+        .bind(home_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_all(pool)
+        .await
 }
 
 async fn count_rooms_for_home(pool: &SqlitePool, home_id: i64) -> Result<i64, sqlx::Error> {
-    sqlx::query_scalar("SELECT COUNT(*) FROM stanze WHERE abitazione_id = ?")
+    let sql = format!(
+        "SELECT COUNT(*) FROM stanze s JOIN abitazioni a ON a.id = s.abitazione_id \
+         WHERE s.abitazione_id = ? AND {}",
+        crate::identity::visible_space_sql("a")
+    );
+    sqlx::query_scalar(&sql)
         .bind(home_id)
+        .bind(crate::identity::visible_space_bind_id())
         .fetch_one(pool)
         .await
 }
 
 async fn count_items_for_home(pool: &SqlitePool, home_id: i64) -> Result<i64, sqlx::Error> {
-    sqlx::query_scalar("SELECT COUNT(*) FROM item_luogo WHERE abitazione_id = ?")
+    let sql = format!(
+        "SELECT COUNT(*) FROM item_luogo il JOIN items i ON i.id = il.item_id \
+         WHERE il.abitazione_id = ? AND {}",
+        crate::identity::visible_space_sql("i")
+    );
+    sqlx::query_scalar(&sql)
         .bind(home_id)
+        .bind(crate::identity::visible_space_bind_id())
         .fetch_one(pool)
         .await
 }
 
 async fn count_items_for_room(pool: &SqlitePool, room_id: i64) -> Result<i64, sqlx::Error> {
-    sqlx::query_scalar("SELECT COUNT(*) FROM item_luogo WHERE stanza_id = ?")
+    let sql = format!(
+        "SELECT COUNT(*) FROM item_luogo il JOIN items i ON i.id = il.item_id \
+         WHERE il.stanza_id = ? AND {}",
+        crate::identity::visible_space_sql("i")
+    );
+    sqlx::query_scalar(&sql)
         .bind(room_id)
+        .bind(crate::identity::visible_space_bind_id())
         .fetch_one(pool)
         .await
 }
 
 async fn count_containers_for_room(pool: &SqlitePool, room_id: i64) -> Result<i64, sqlx::Error> {
-    sqlx::query_scalar("SELECT COUNT(*) FROM contenitori WHERE stanza_id = ?")
+    let sql = format!(
+        "SELECT COUNT(*) FROM contenitori c JOIN abitazioni a ON a.id = c.abitazione_id \
+         WHERE c.stanza_id = ? AND {}",
+        crate::identity::visible_space_sql("a")
+    );
+    sqlx::query_scalar(&sql)
         .bind(room_id)
+        .bind(crate::identity::visible_space_bind_id())
         .fetch_one(pool)
         .await
 }
 
 async fn object_exists(pool: &SqlitePool, item_id: i64) -> Result<bool, sqlx::Error> {
-    let count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM items WHERE id = ? AND tipo = 'oggetto'")
-            .bind(item_id)
-            .fetch_one(pool)
-            .await?;
+    let sql = format!(
+        "SELECT COUNT(*) FROM items i WHERE i.id = ? AND i.tipo = 'oggetto' AND {}",
+        crate::identity::visible_space_sql("i")
+    );
+    let count: i64 = sqlx::query_scalar(&sql)
+        .bind(item_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_one(pool)
+        .await?;
     Ok(count == 1)
 }
 
@@ -2847,83 +3421,98 @@ async fn get_item_location(
     pool: &SqlitePool,
     item_id: i64,
 ) -> Result<Option<ItemLocation>, sqlx::Error> {
-    sqlx::query_as::<_, ItemLocation>(
-        "SELECT il.abitazione_id AS home_id, il.stanza_id AS room_id, \
-                il.contenitore_id AS container_id, \
-                a.nome AS home_name, s.nome AS room_name \
-         FROM item_luogo il \
+    let sql = format!(
+        "SELECT il.abitazione_id AS home_id, il.stanza_id AS room_id, il.contenitore_id AS container_id, \
+                a.nome AS home_name, ps.nome AS home_space_name, s.nome AS room_name \
+         FROM item_luogo il JOIN items i ON i.id = il.item_id \
          LEFT JOIN abitazioni a ON a.id = il.abitazione_id \
+         LEFT JOIN spazi ps ON ps.id = a.spazio_id \
          LEFT JOIN stanze s ON s.id = il.stanza_id \
-         WHERE il.item_id = ?",
-    )
-    .bind(item_id)
-    .fetch_optional(pool)
-    .await
+         WHERE il.item_id = ? AND {}",
+        crate::identity::visible_space_sql("i")
+    );
+    sqlx::query_as::<_, ItemLocation>(&sql)
+        .bind(item_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_optional(pool)
+        .await
 }
 
 async fn get_item_location_tx(
     tx: &mut Transaction<'_, Sqlite>,
     item_id: i64,
 ) -> Result<Option<ItemLocation>, sqlx::Error> {
-    sqlx::query_as::<_, ItemLocation>(
-        "SELECT il.abitazione_id AS home_id, il.stanza_id AS room_id, \
-                il.contenitore_id AS container_id, \
-                a.nome AS home_name, s.nome AS room_name \
-         FROM item_luogo il \
+    let sql = format!(
+        "SELECT il.abitazione_id AS home_id, il.stanza_id AS room_id, il.contenitore_id AS container_id, \
+                a.nome AS home_name, ps.nome AS home_space_name, s.nome AS room_name \
+         FROM item_luogo il JOIN items i ON i.id = il.item_id \
          LEFT JOIN abitazioni a ON a.id = il.abitazione_id \
+         LEFT JOIN spazi ps ON ps.id = a.spazio_id \
          LEFT JOIN stanze s ON s.id = il.stanza_id \
-         WHERE il.item_id = ?",
-    )
-    .bind(item_id)
-    .fetch_optional(&mut **tx)
-    .await
+         WHERE il.item_id = ? AND {}",
+        crate::identity::visible_space_sql("i")
+    );
+    sqlx::query_as::<_, ItemLocation>(&sql)
+        .bind(item_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_optional(&mut **tx)
+        .await
 }
 
 async fn set_item_home(pool: &SqlitePool, item_id: i64, home_id: i64) -> Result<(), sqlx::Error> {
+    let item_space = visible_item_space_id(pool, item_id)
+        .await?
+        .ok_or(sqlx::Error::RowNotFound)?;
+    let home_space = visible_home_space_id(pool, home_id)
+        .await?
+        .ok_or(sqlx::Error::RowNotFound)?;
+    crate::identity::ensure_can_write_space_sqlx(pool, item_space).await?;
+    crate::identity::ensure_can_write_space_sqlx(pool, home_space).await?;
     let mut tx = pool.begin().await?;
     let previous = get_item_location_tx(&mut tx, item_id).await?;
-
     if previous.as_ref().is_some_and(|location| {
         location.home_id == home_id && location.room_id.is_none() && location.container_id.is_none()
     }) {
         return Ok(());
     }
-
     let before = if let Some(previous) = previous.as_ref() {
         history_snapshot_from_item_location(&mut tx, previous).await?
     } else {
         crate::modules::storico::LocationSnapshot::default()
     };
     let after = history_location_snapshot(&mut tx, home_id, None, None).await?;
-
     sqlx::query(
         "INSERT INTO item_luogo (item_id, abitazione_id, stanza_id, contenitore_id) VALUES (?, ?, NULL, NULL) \
          ON CONFLICT(item_id) DO UPDATE SET abitazione_id = excluded.abitazione_id, stanza_id = NULL, contenitore_id = NULL",
-    )
-    .bind(item_id)
-    .bind(home_id)
-    .execute(&mut *tx)
-    .await?;
-
+    ).bind(item_id).bind(home_id).execute(&mut *tx).await?;
     let operation = if previous.is_some() {
         "spostamento"
     } else {
         "assegnazione"
     };
     record_item_location_event(&mut tx, item_id, operation, &before, &after, None).await?;
-
     tx.commit().await?;
     Ok(())
 }
 
 async fn set_item_room(pool: &SqlitePool, item_id: i64, room_id: i64) -> Result<(), sqlx::Error> {
-    let mut tx = pool.begin().await?;
-    let home_id: i64 = sqlx::query_scalar("SELECT abitazione_id FROM stanze WHERE id = ?")
+    let item_space = visible_item_space_id(pool, item_id)
+        .await?
+        .ok_or(sqlx::Error::RowNotFound)?;
+    let room_sql = format!(
+        "SELECT s.abitazione_id, a.spazio_id FROM stanze s JOIN abitazioni a ON a.id = s.abitazione_id \
+         WHERE s.id = ? AND {}",
+        crate::identity::visible_space_sql("a")
+    );
+    let (home_id, home_space): (i64, i64) = sqlx::query_as(&room_sql)
         .bind(room_id)
-        .fetch_one(&mut *tx)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_one(pool)
         .await?;
+    crate::identity::ensure_can_write_space_sqlx(pool, item_space).await?;
+    crate::identity::ensure_can_write_space_sqlx(pool, home_space).await?;
+    let mut tx = pool.begin().await?;
     let previous = get_item_location_tx(&mut tx, item_id).await?;
-
     if previous.as_ref().is_some_and(|location| {
         location.home_id == home_id
             && location.room_id == Some(room_id)
@@ -2931,31 +3520,22 @@ async fn set_item_room(pool: &SqlitePool, item_id: i64, room_id: i64) -> Result<
     }) {
         return Ok(());
     }
-
     let before = if let Some(previous) = previous.as_ref() {
         history_snapshot_from_item_location(&mut tx, previous).await?
     } else {
         crate::modules::storico::LocationSnapshot::default()
     };
     let after = history_location_snapshot(&mut tx, home_id, Some(room_id), None).await?;
-
     sqlx::query(
         "INSERT INTO item_luogo (item_id, abitazione_id, stanza_id, contenitore_id) VALUES (?, ?, ?, NULL) \
          ON CONFLICT(item_id) DO UPDATE SET abitazione_id = excluded.abitazione_id, stanza_id = excluded.stanza_id, contenitore_id = NULL",
-    )
-    .bind(item_id)
-    .bind(home_id)
-    .bind(room_id)
-    .execute(&mut *tx)
-    .await?;
-
+    ).bind(item_id).bind(home_id).bind(room_id).execute(&mut *tx).await?;
     let operation = if previous.is_some() {
         "spostamento"
     } else {
         "assegnazione"
     };
     record_item_location_event(&mut tx, item_id, operation, &before, &after, None).await?;
-
     tx.commit().await?;
     Ok(())
 }
@@ -2965,17 +3545,22 @@ async fn set_item_container(
     item_id: i64,
     container_id: i64,
 ) -> Result<(), sqlx::Error> {
+    let item_space = visible_item_space_id(pool, item_id)
+        .await?
+        .ok_or(sqlx::Error::RowNotFound)?;
+    let target_sql = format!(
+        "SELECT c.abitazione_id, c.stanza_id, a.spazio_id FROM contenitori c \
+         JOIN abitazioni a ON a.id = c.abitazione_id WHERE c.id = ? AND {}",
+        crate::identity::visible_space_sql("a")
+    );
+    let (home_id, room_id, home_space): (i64, Option<i64>, i64) = sqlx::query_as(&target_sql)
+        .bind(container_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_one(pool)
+        .await?;
+    crate::identity::ensure_can_write_space_sqlx(pool, item_space).await?;
+    crate::identity::ensure_can_write_space_sqlx(pool, home_space).await?;
     let mut tx = pool.begin().await?;
-    let Some((home_id, room_id)) = sqlx::query_as::<_, (i64, Option<i64>)>(
-        "SELECT abitazione_id, stanza_id FROM contenitori WHERE id = ?",
-    )
-    .bind(container_id)
-    .fetch_optional(&mut *tx)
-    .await?
-    else {
-        return Err(sqlx::Error::RowNotFound);
-    };
-
     let previous = get_item_location_tx(&mut tx, item_id).await?;
     if previous
         .as_ref()
@@ -2983,78 +3568,70 @@ async fn set_item_container(
     {
         return Ok(());
     }
-
     let before = if let Some(previous) = previous.as_ref() {
         history_snapshot_from_item_location(&mut tx, previous).await?
     } else {
         crate::modules::storico::LocationSnapshot::default()
     };
     let after = history_location_snapshot(&mut tx, home_id, room_id, Some(container_id)).await?;
-
     sqlx::query(
-        "INSERT INTO item_luogo (item_id, abitazione_id, stanza_id, contenitore_id) \
-         VALUES (?, ?, ?, ?) \
-         ON CONFLICT(item_id) DO UPDATE SET \
-             abitazione_id = excluded.abitazione_id, \
-             stanza_id = excluded.stanza_id, \
-             contenitore_id = excluded.contenitore_id",
-    )
-    .bind(item_id)
-    .bind(home_id)
-    .bind(room_id)
-    .bind(container_id)
-    .execute(&mut *tx)
-    .await?;
-
+        "INSERT INTO item_luogo (item_id, abitazione_id, stanza_id, contenitore_id) VALUES (?, ?, ?, ?) \
+         ON CONFLICT(item_id) DO UPDATE SET abitazione_id = excluded.abitazione_id, stanza_id = excluded.stanza_id, contenitore_id = excluded.contenitore_id",
+    ).bind(item_id).bind(home_id).bind(room_id).bind(container_id).execute(&mut *tx).await?;
     let operation = if previous.is_some() {
         "spostamento"
     } else {
         "assegnazione"
     };
-
     record_item_location_event(&mut tx, item_id, operation, &before, &after, None).await?;
-
     tx.commit().await?;
     Ok(())
 }
 
 async fn clear_item_location(pool: &SqlitePool, item_id: i64) -> Result<(), sqlx::Error> {
+    let item_space = visible_item_space_id(pool, item_id)
+        .await?
+        .ok_or(sqlx::Error::RowNotFound)?;
+    crate::identity::ensure_can_write_space_sqlx(pool, item_space).await?;
     let mut tx = pool.begin().await?;
     let Some(previous) = get_item_location_tx(&mut tx, item_id).await? else {
         return Ok(());
     };
     let before = history_snapshot_from_item_location(&mut tx, &previous).await?;
     let after = crate::modules::storico::LocationSnapshot::default();
-
     sqlx::query("DELETE FROM item_luogo WHERE item_id = ?")
         .bind(item_id)
         .execute(&mut *tx)
         .await?;
-
     record_item_location_event(&mut tx, item_id, "rimozione", &before, &after, None).await?;
-
     tx.commit().await?;
     Ok(())
 }
 
 async fn count_objects_for_home(pool: &SqlitePool, home_id: i64) -> Result<i64, sqlx::Error> {
-    sqlx::query_scalar(
+    let sql = format!(
         "SELECT COUNT(*) FROM items i JOIN item_luogo il ON il.item_id = i.id \
-         WHERE i.tipo = 'oggetto' AND il.abitazione_id = ?",
-    )
-    .bind(home_id)
-    .fetch_one(pool)
-    .await
+         WHERE i.tipo = 'oggetto' AND il.abitazione_id = ? AND {}",
+        crate::identity::visible_space_sql("i")
+    );
+    sqlx::query_scalar(&sql)
+        .bind(home_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_one(pool)
+        .await
 }
 
 async fn count_objects_for_room(pool: &SqlitePool, room_id: i64) -> Result<i64, sqlx::Error> {
-    sqlx::query_scalar(
+    let sql = format!(
         "SELECT COUNT(*) FROM items i JOIN item_luogo il ON il.item_id = i.id \
-         WHERE i.tipo = 'oggetto' AND il.stanza_id = ?",
-    )
-    .bind(room_id)
-    .fetch_one(pool)
-    .await
+         WHERE i.tipo = 'oggetto' AND il.stanza_id = ? AND {}",
+        crate::identity::visible_space_sql("i")
+    );
+    sqlx::query_scalar(&sql)
+        .bind(room_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_one(pool)
+        .await
 }
 
 async fn list_objects_for_home(
@@ -3062,7 +3639,7 @@ async fn list_objects_for_home(
     home_id: i64,
     limit: i64,
 ) -> Result<Vec<LocatedObjectSummary>, sqlx::Error> {
-    sqlx::query_as::<_, LocatedObjectSummary>(
+    let sql = format!(
         "SELECT i.id AS id, i.nome AS name, \
                 il.abitazione_id AS home_id, a.nome AS home_name, \
                 il.stanza_id AS room_id, s.nome AS room_name, il.contenitore_id AS container_id \
@@ -3071,13 +3648,16 @@ async fn list_objects_for_home(
          JOIN item_luogo il ON il.item_id = i.id \
          LEFT JOIN abitazioni a ON a.id = il.abitazione_id \
          LEFT JOIN stanze s ON s.id = il.stanza_id \
-         WHERE i.tipo = 'oggetto' AND il.abitazione_id = ? \
+         WHERE i.tipo = 'oggetto' AND il.abitazione_id = ? AND {} \
          ORDER BY i.nome COLLATE NOCASE, i.id LIMIT ?",
-    )
-    .bind(home_id)
-    .bind(limit)
-    .fetch_all(pool)
-    .await
+        crate::identity::visible_space_sql("i")
+    );
+    sqlx::query_as::<_, LocatedObjectSummary>(&sql)
+        .bind(home_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .bind(limit)
+        .fetch_all(pool)
+        .await
 }
 
 async fn list_objects_for_room(
@@ -3085,7 +3665,7 @@ async fn list_objects_for_room(
     room_id: i64,
     limit: i64,
 ) -> Result<Vec<LocatedObjectSummary>, sqlx::Error> {
-    sqlx::query_as::<_, LocatedObjectSummary>(
+    let sql = format!(
         "SELECT i.id AS id, i.nome AS name, \
                 il.abitazione_id AS home_id, a.nome AS home_name, \
                 il.stanza_id AS room_id, s.nome AS room_name, il.contenitore_id AS container_id \
@@ -3094,13 +3674,16 @@ async fn list_objects_for_room(
          JOIN item_luogo il ON il.item_id = i.id \
          LEFT JOIN abitazioni a ON a.id = il.abitazione_id \
          LEFT JOIN stanze s ON s.id = il.stanza_id \
-         WHERE i.tipo = 'oggetto' AND il.stanza_id = ? \
+         WHERE i.tipo = 'oggetto' AND il.stanza_id = ? AND {} \
          ORDER BY i.nome COLLATE NOCASE, i.id LIMIT ?",
-    )
-    .bind(room_id)
-    .bind(limit)
-    .fetch_all(pool)
-    .await
+        crate::identity::visible_space_sql("i")
+    );
+    sqlx::query_as::<_, LocatedObjectSummary>(&sql)
+        .bind(room_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .bind(limit)
+        .fetch_all(pool)
+        .await
 }
 
 fn locations_menu_keyboard() -> InlineKeyboardMarkup {
@@ -3114,14 +3697,14 @@ fn locations_menu_keyboard() -> InlineKeyboardMarkup {
             button("🌳 Struttura", "loc:tree"),
         ],
         vec![button("➕ Crea…", "loc:create")],
-        vec![button("🏠 Menu principale", "menu:main")],
+        vec![button("🏠 Menù principale", "menu:main")],
     ])
 }
 
 pub(crate) fn location_navigation_keyboard() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![vec![
         button("↩️ Case, stanze e contenitori", "loc:menu"),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]])
 }
 
@@ -3130,7 +3713,7 @@ fn home_list_keyboard(homes: &[HomeRecord]) -> InlineKeyboardMarkup {
         .iter()
         .map(|home| {
             vec![button(
-                &format!("🏠 #{} · {}", home.id, truncate_chars(&home.name, 38)),
+                &format!("🏠 {}", truncate_chars(&home.name, 44)),
                 &format!("loc:home:{}", home.id),
             )]
         })
@@ -3138,7 +3721,7 @@ fn home_list_keyboard(homes: &[HomeRecord]) -> InlineKeyboardMarkup {
     rows.push(vec![button("➕🏠 Casa", "loc:home:new")]);
     rows.push(vec![
         button("↩️ Case, stanze e contenitori", "loc:menu"),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     InlineKeyboardMarkup::new(rows)
 }
@@ -3182,7 +3765,7 @@ fn home_detail_keyboard(home_id: i64, rooms: &[RoomRecord]) -> InlineKeyboardMar
     )]);
     rows.push(vec![
         button("↩️ Elenco case", "loc:home:list"),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     InlineKeyboardMarkup::new(rows)
 }
@@ -3216,7 +3799,7 @@ fn room_detail_keyboard(room: &RoomRecord) -> InlineKeyboardMarkup {
         )],
         vec![
             button("↩️ Torna alla casa", &format!("loc:home:{}", room.home_id)),
-            button("🏠 Menu principale", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
         ],
     ])
 }
@@ -3229,7 +3812,7 @@ fn home_delete_keyboard(id: i64) -> InlineKeyboardMarkup {
         )],
         vec![
             button("↩️ Annulla", &format!("loc:home:{id}")),
-            button("🏠 Menu principale", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
         ],
     ])
 }
@@ -3242,7 +3825,7 @@ fn room_delete_keyboard(room: &RoomRecord) -> InlineKeyboardMarkup {
         )],
         vec![
             button("↩️ Annulla", &format!("loc:room:{}", room.id)),
-            button("🏠 Menu principale", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
         ],
     ])
 }
@@ -3264,7 +3847,7 @@ fn item_home_picker_keyboard(item_id: i64, homes: &[HomeRecord]) -> InlineKeyboa
     )]);
     rows.push(vec![
         button("↩️ Scheda oggetto", &format!("oggetti:view:{item_id}")),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     InlineKeyboardMarkup::new(rows)
 }
@@ -3287,14 +3870,14 @@ fn filtered_objects_keyboard(
         .iter()
         .map(|object| {
             vec![button(
-                &format!("🏷️ #{} · {}", object.id, truncate_chars(&object.name, 36)),
+                &format!("🏷️ {}", truncate_chars(&object.name, 42)),
                 &format!("oggetti:view:{}", object.id),
             )]
         })
         .collect::<Vec<_>>();
     rows.push(vec![
         button("↩️ Indietro", back_callback),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
     InlineKeyboardMarkup::new(rows)
 }
@@ -3932,6 +4515,7 @@ mod tests {
             room_id: Some(10),
             container_id: None,
             home_name: Some("Casa principale".to_string()),
+            home_space_name: Some("Spazio principale".to_string()),
             room_name: Some("Garage".to_string()),
         };
         let camera = ItemLocation {
@@ -3939,6 +4523,7 @@ mod tests {
             room_id: Some(11),
             container_id: None,
             home_name: Some("Casa principale".to_string()),
+            home_space_name: Some("Casa condivisa".to_string()),
             room_name: Some("Camera".to_string()),
         };
 
@@ -3952,6 +4537,11 @@ mod tests {
         assert!(spostamento.contains("A:"));
         assert!(spostamento.contains("Garage"));
         assert!(spostamento.contains("Camera"));
+
+        let garage_con_spazio = format_location_with_space(Some(&garage), true);
+        let camera_con_spazio = format_location_with_space(Some(&camera), true);
+        assert!(garage_con_spazio.contains("Casa principale · Spazio principale"));
+        assert!(camera_con_spazio.contains("Casa principale · Casa condivisa"));
 
         let invariato = location_change_message(Some(&camera), Some(&camera));
         assert!(invariato.contains("Nessuno spostamento effettuato"));
@@ -3967,6 +4557,32 @@ mod tests {
         assert_eq!(parse_location_command("/luogo_c33"), Some(('c', 33)));
         assert_eq!(parse_location_command("/luogo_x1"), None);
         assert_eq!(parse_location_command("/luogo_h0"), None);
+    }
+
+    #[test]
+    fn comandi_luogo_legibili_normalizzano_accenti_e_collisioni() {
+        assert_eq!(slugify_command_component("Città Ospiti"), "citta_ospiti");
+        assert!(!is_friendly_location_command("/casa_nuova"));
+        assert!(is_friendly_location_command("/stanza_camera"));
+        let seeds = vec![
+            FriendlyCommandSeed {
+                prefix: "/stanza_",
+                primary: "Camera".to_string(),
+                contexts: vec!["Casa principale".to_string(), "Personale".to_string()],
+                target: FriendlyLocationTarget::Room(10),
+                sort_id: 10,
+            },
+            FriendlyCommandSeed {
+                prefix: "/stanza_",
+                primary: "Camera".to_string(),
+                contexts: vec!["Casa Livorno".to_string(), "Personale".to_string()],
+                target: FriendlyLocationTarget::Room(11),
+                sort_id: 11,
+            },
+        ];
+        let commands = build_unique_friendly_commands(&seeds);
+        assert_eq!(commands[0].command, "/stanza_camera_casa_principale");
+        assert_eq!(commands[1].command, "/stanza_camera_casa_livorno");
     }
 
     #[test]
@@ -3994,11 +4610,18 @@ mod tests {
             },
         ];
 
-        let nodes = build_home_nodes(1, &rooms, &containers);
+        let room_commands = HashMap::from([(2, "/stanza_garage".to_string())]);
+        let container_commands = HashMap::from([
+            (10, "/contenitore_armadio".to_string()),
+            (11, "/contenitore_ripiano".to_string()),
+        ]);
+        let nodes = build_home_nodes(1, &rooms, &containers, &room_commands, &container_commands);
         assert_eq!(nodes.len(), 1);
-        assert_eq!(nodes[0].command, "/luogo_r2");
-        assert_eq!(nodes[0].children[0].command, "/luogo_c10");
-        assert_eq!(nodes[0].children[0].children[0].command, "/luogo_c11");
+        assert_eq!(nodes[0].label, "🚪 Garage");
+        assert_eq!(nodes[0].command, "/stanza_garage");
+        assert_eq!(nodes[0].children[0].label, "📦 Armadio");
+        assert_eq!(nodes[0].children[0].command, "/contenitore_armadio");
+        assert_eq!(nodes[0].children[0].children[0].label, "📦 Ripiano");
     }
 
     #[test]
@@ -4012,5 +4635,189 @@ mod tests {
             location_return_target(&state),
             LocationReturnTarget::Home(7)
         ));
+    }
+    #[tokio::test]
+    async fn case_con_lo_stesso_nome_restano_isolate_per_spazio() {
+        let pool = test_pool().await;
+        let space_two =
+            sqlx::query("INSERT INTO spazi (nome, tipo) VALUES ('Spazio due', 'personale')")
+                .execute(&pool)
+                .await
+                .expect("spazio due")
+                .last_insert_rowid();
+
+        let actor_one = crate::identity::AuditActor::system();
+        let actor_two = crate::identity::AuditActor {
+            utente_id: None,
+            nome_snapshot: "Sistema test".to_string(),
+            spazio_id: space_two,
+            spazio_nome_snapshot: "Spazio due".to_string(),
+            view_all: false,
+            origine: "sistema",
+            telegram_user_id: None,
+            telegram_username: None,
+        };
+
+        let home_one = crate::identity::with_actor(actor_one.clone(), async {
+            create_home(&pool, "Casa principale")
+                .await
+                .expect("casa spazio uno")
+        })
+        .await;
+        let home_two = crate::identity::with_actor(actor_two.clone(), async {
+            create_home(&pool, "Casa principale")
+                .await
+                .expect("casa spazio due")
+        })
+        .await;
+        assert_ne!(home_one, home_two);
+
+        crate::identity::with_actor(actor_one, async {
+            let homes = home_choices(&pool).await.expect("case spazio uno");
+            assert_eq!(homes.len(), 1);
+            assert_eq!(homes[0].id, home_one);
+            assert!(home_choice(&pool, home_two)
+                .await
+                .expect("casa cross-space")
+                .is_none());
+        })
+        .await;
+
+        crate::identity::with_actor(actor_two, async {
+            let homes = home_choices(&pool).await.expect("case spazio due");
+            assert_eq!(homes.len(), 1);
+            assert_eq!(homes[0].id, home_two);
+            assert!(home_choice(&pool, home_one)
+                .await
+                .expect("casa cross-space inversa")
+                .is_none());
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn vista_tutti_consente_oggetto_personale_in_casa_condivisa_senza_cambiarne_proprieta() {
+        let pool = test_pool().await;
+        let user_id = sqlx::query("INSERT INTO utenti (nome_visualizzato) VALUES ('Alessio')")
+            .execute(&pool)
+            .await
+            .expect("utente")
+            .last_insert_rowid();
+        let space_two = sqlx::query(
+            "INSERT INTO spazi (nome, tipo, creato_da_utente_id) VALUES ('Casa condivisa', 'condiviso', ?)",
+        )
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("spazio due")
+        .last_insert_rowid();
+        let space_three = sqlx::query(
+            "INSERT INTO spazi (nome, tipo) VALUES ('Spazio non accessibile', 'condiviso')",
+        )
+        .execute(&pool)
+        .await
+        .expect("spazio tre")
+        .last_insert_rowid();
+
+        sqlx::query(
+            "INSERT INTO membri_spazio (spazio_id, utente_id, ruolo) VALUES (1, ?, 'proprietario')",
+        )
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("membership personale");
+        sqlx::query(
+            "INSERT INTO membri_spazio (spazio_id, utente_id, ruolo) VALUES (?, ?, 'membro')",
+        )
+        .bind(space_two)
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("membership condivisa");
+
+        let personal_home =
+            sqlx::query("INSERT INTO abitazioni (spazio_id, nome) VALUES (1, 'Casa principale')")
+                .execute(&pool)
+                .await
+                .expect("casa personale")
+                .last_insert_rowid();
+        let shared_home =
+            sqlx::query("INSERT INTO abitazioni (spazio_id, nome) VALUES (?, 'Casa principale')")
+                .bind(space_two)
+                .execute(&pool)
+                .await
+                .expect("casa condivisa")
+                .last_insert_rowid();
+        let forbidden_home =
+            sqlx::query("INSERT INTO abitazioni (spazio_id, nome) VALUES (?, 'Casa terza')")
+                .bind(space_three)
+                .execute(&pool)
+                .await
+                .expect("casa non accessibile")
+                .last_insert_rowid();
+        let item_id = sqlx::query(
+            "INSERT INTO items (tipo, nome, spazio_id) VALUES ('oggetto', 'Portatile', 1)",
+        )
+        .execute(&pool)
+        .await
+        .expect("item")
+        .last_insert_rowid();
+        sqlx::query("INSERT INTO oggetti (item_id) VALUES (?)")
+            .bind(item_id)
+            .execute(&pool)
+            .await
+            .expect("oggetto");
+
+        let actor = crate::identity::AuditActor {
+            utente_id: Some(user_id),
+            nome_snapshot: "Alessio".to_string(),
+            spazio_id: 1,
+            spazio_nome_snapshot: "Spazio principale".to_string(),
+            view_all: true,
+            origine: "telegram",
+            telegram_user_id: None,
+            telegram_username: None,
+        };
+
+        crate::identity::with_actor(actor.clone(), async {
+            let homes = home_choices(&pool).await.expect("case visibili");
+            assert!(homes.iter().any(|home| home.id == personal_home));
+            assert!(homes.iter().any(|home| home.id == shared_home));
+            assert!(!homes.iter().any(|home| home.id == forbidden_home));
+
+            set_item_home(&pool, item_id, shared_home)
+                .await
+                .expect("spostamento cross-space consentito");
+            let owner: i64 = sqlx::query_scalar("SELECT spazio_id FROM items WHERE id = ?")
+                .bind(item_id)
+                .fetch_one(&pool)
+                .await
+                .expect("proprietario");
+            let location: i64 =
+                sqlx::query_scalar("SELECT abitazione_id FROM item_luogo WHERE item_id = ?")
+                    .bind(item_id)
+                    .fetch_one(&pool)
+                    .await
+                    .expect("posizione");
+            assert_eq!(owner, 1);
+            assert_eq!(location, shared_home);
+
+            assert!(set_item_home(&pool, item_id, forbidden_home).await.is_err());
+        })
+        .await;
+
+        sqlx::query(
+            "UPDATE membri_spazio SET ruolo = 'lettura' WHERE spazio_id = ? AND utente_id = ?",
+        )
+        .bind(space_two)
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("ruolo lettura");
+
+        crate::identity::with_actor(actor, async {
+            assert!(set_item_home(&pool, item_id, shared_home).await.is_err());
+        })
+        .await;
     }
 }

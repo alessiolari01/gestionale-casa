@@ -1,142 +1,94 @@
 # Gestionale Casa
 
-## Step 6C.5 — chiusura finale dello Step 6C
+Gestionale personale/condiviso basato su **Rust + SQLite + Telegram**, pensato
+per organizzare beni, luoghi e funzioni della vita quotidiana senza richiedere
+un'app dedicata.
 
-Base di chiusura: `fd4cbea` sul branch `step-6c-test`.
+## Stato corrente — Step 7
 
-Lo **Step 6C — Contenitori e sotto-posizioni** è funzionalmente completo e verificato sul Galaxy S9:
+Il branch di sviluppo è `step-7-alimentazione`. La baseline Git attualmente pubblicata prima della finalizzazione è `34d076c` (`Step 7.2G.1-7.2G.6: completa miglioramenti e UI Telegram`); sopra quella baseline è stato completato e collaudato il blocco **7.2H.0→7.2H.4F**.
 
-- gerarchia arbitraria di contenitori con spostamento sicuro del sottoalbero;
-- navigazione unificata casa → stanza → contenitore → sottocontenitore;
-- creazione contestuale e spostamento oggetti fino a qualunque contenitore;
-- storico container-aware con snapshot immutabili del percorso ed eventi padre/figlio;
-- migration `20260820230000_storico_contenitori.sql` applicata sul database reale dopo backup;
-- **69/69 test**, `cargo check --locked`, Clippy con `-D warnings`, `git diff --check` e prove Telegram runtime superati.
+Il blocco 7.2H ha reso operative le fondamenta dei **Profili alimentari** e la collaborazione tramite **Spazi**, inclusi membri e inviti privati. Ha inoltre chiuso le rifiniture del workflow Miglioramenti e introdotto un export tecnico sanitizzato del progetto.
 
-Il 6C.5 è una **chiusura documentale e di rilascio**: non introduce codice applicativo, migration o modifiche ai dati. Il branch è pronto per l'ultima verifica, Pull Request, CI GitHub e merge in `main`.
+Stato verificato sul Galaxy S9 al 29/08/2026:
 
-## Archivio Step 6C.4 — contenitori nello storico (verificato)
+- Profili alimentari come entità separate dagli account Telegram, con collegamento account opzionale;
+- UI di creazione, dettaglio, modifica, archiviazione e condivisione dei Profili;
+- gestione membri degli Spazi e inviti privati via deep-link Telegram;
+- inviti monouso/riutilizzabili, limite utilizzi, scadenza, calendario e orario;
+- notifiche e navigazione contestuale sugli eventi di membership;
+- input inattesi fuori dai wizard non distruggono la schermata corrente; dopo tre tentativi consecutivi viene suggerito `/start`;
+- `📦 Esporta miglioramenti` e `📦 Esporta progetto` disponibili dall'area Miglioramenti;
+- export progetto con codice, migration, documentazione e manifest tecnici, ma senza `.env`, token, database, `data/`, backup, `target/` o `.git/`;
+- `_project_handoff/CURRENT_STATE.md` viene generato da zero ad ogni export e fotografa il working tree reale;
+- migration SQL presenti nel repository: **36**, ultima `20260829005000_h4e_input_export_progetto.sql`;
+- controlli DB eseguiti durante i pacchetti H.4: `PRAGMA integrity_check = ok` e nessuna violazione foreign key;
+- collaudo manuale dell'escalation input inattesi e del nuovo export progetto completato.
 
-Base di partenza del 6C.4: `658e455` (`step-6c-test`), con 6C.3C già verificato e pushato.
+I test che richiedono un **secondo account Telegram** restano documentati come verifiche differite e non bloccano l'avanzamento: accettazione invito, notifica al creatore, cambio ruolo e rimozione membro vanno riprovati end-to-end quando il secondo account sarà disponibile.
 
-Il 6C.4 estende lo storico trasversale fino al livello contenitore:
-- `contenitore` diventa un tipo di entità storica con icona `📦`;
-- gli snapshot di luogo conservano casa, stanza, contenitore finale e **percorso completo dei contenitori**;
-- il percorso viene salvato come snapshot storico, quindi rinomine o eliminazioni future non riscrivono il passato;
-- creazione, rinomina, modifica descrizione, spostamento ed eliminazione di un contenitore generano eventi;
-- spostamento/eliminazione di un contenitore registra come eventi figli gli effetti sul sottoalbero e sugli oggetti contenuti tramite `evento_padre_id`;
-- eliminare una stanza storicizza la promozione dei contenitori e degli oggetti alla casa;
-- eliminare una casa conserva nello storico contenitori, percorsi e rimozione del luogo degli oggetti;
-- anche eventi ordinari di oggetti e foto conservano il percorso del contenitore corrente.
+La prossima area funzionale è **Porzioni e override per profilo/ingrediente**. Profili e condivisione non vanno ricostruiti: sono già la base su cui proseguire.
 
-Nuova migration: `migrations/20260820230000_storico_contenitori.sql`. La migration aggiunge solo campi/snapshot e fa il backfill delle **identità** dei contenitori già presenti: non crea eventi retroattivi.
+## Alimentazione
 
-Stato finale 6C.4: verificato sul Galaxy S9 e pushato come `fd4cbea`; **69/69 test**, Clippy `-D warnings` e runtime Telegram superati.
+Il modulo Alimentazione comprenderà alimenti strutturati, ricette, profili e
+porzioni personalizzate, turni/routine, pianificazione dei pasti, lista della
+spesa, reminder ed export.
 
-## Step 6C.3C — spostamento oggetti nei contenitori
+Il `README.md` centrale mantiene solo questa panoramica. La specifica completa è
+qui:
 
-Il selettore `🚚 Sposta` percorre ora tutta la gerarchia `casa -> stanza -> contenitore -> sottocontenitore`.
+**[docs/moduli/alimentazione/README.md](docs/moduli/alimentazione/README.md)**
 
-Comportamento previsto:
-- la posizione attuale mostra il percorso completo fino al contenitore;
-- scelta una casa, si può fermare l'oggetto direttamente nella casa, entrare in una stanza oppure scegliere un contenitore direttamente nella casa;
-- scelta una stanza, si può fermare l'oggetto direttamente nella stanza oppure entrare nei suoi contenitori;
-- dentro un contenitore si può scegliere `Sposta qui` oppure scendere nei sottocontenitori;
-- il ritorno segue il livello gerarchico precedente;
-- spostare un oggetto da un contenitore alla stanza/casa azzera correttamente `contenitore_id`;
-- scegliere lo stesso contenitore è un no-op;
-- nessuna migration: viene usata la struttura `item_luogo.contenitore_id` già introdotta nel 6C.1.
+## Moduli futuri già specificati
 
-Il 6C.3C manteneva ancora il contesto storico casa/stanza; il successivo 6C.4 ha completato lo storico di contenitori e percorsi.
+Alcune funzioni sono state documentate ora perché influenzano le fondamenta
+condivise, ma non fanno parte dell'implementazione immediata della macro-fase Alimentazione:
 
-## Step 6C.3B — rifiniture UX e posizione completa
-
-Il checkpoint di partenza è `413605e` (6C.3A verificato). Il 6C.3B rende coerente l'uso quotidiano dei luoghi:
-- `/annulla` esiste durante un'operazione/input e torna al contesto da cui l'azione è partita;
-- gli oggetti mostrano il percorso strutturato completo fino al contenitore e il riferimento `/luogo_*` del luogo più specifico;
-- ogni contenitore permette di aprire l'elenco degli oggetti direttamente contenuti;
-- dopo `Nuovo oggetto qui`, la scheda appena salvata offre `↩️ Torna a <luogo>` verso la casa, stanza o contenitore di partenza;
-- l'etichetta della scheda usa `📋 Elenco oggetti` invece del generico `📋 Elenco`;
-- oggetti e contenitori hanno simboli distinti: `🏷️` per gli oggetti e `📦` per i contenitori;
-- il vecchio campo libero `oggetti.posizione` è legacy: viene preservato per compatibilità ma non è più richiesto nei nuovi flussi.
-
-Le regole sono descritte in `docs/moduli/navigazione-luoghi.md` e `docs/moduli/contenitori.md`. L'infrastruttura PC ↔ S9 ↔ GitHub ↔ Telegram è descritta separatamente in `docs/INFRASTRUTTURA.md`.
-
-
-## Step 6C — Luoghi gerarchici e navigazione contestuale
-
-Il gestionale tratta **case, stanze e contenitori** come un unico sistema di luoghi. I checkpoint verificati sono `4c64798` (6C.2), `413605e` (6C.3A), `24944ac` (6C.3B), `658e455` (6C.3C) e `fd4cbea` (6C.4).
-
-Regola UI: le azioni dipendono dal luogo visualizzato e ogni schermata interna rilevante offre ritorno al livello logico precedente e `🏠 Menu principale`.
-
-Specifiche: `docs/moduli/navigazione-luoghi.md` e `docs/moduli/contenitori.md`.
-
-
-## Stato Step 6B
-
-Lo **Step 6B — Storico trasversale globale + individuale** è implementato e verificato sul Galaxy S9. Sono disponibili storico globale e individuale, dettaglio prima/dopo, paginazione e filtri combinabili per periodo, modulo, operazione, casa, stanza ed elemento.
-
-Lo Step 6B è già entrato nella baseline `main`; il suo storico trasversale è stato successivamente esteso dal 6C.4 con contenitori e snapshot dei percorsi.
-
-Documentazione tecnica: `docs/moduli/storico.md`.
-
-Gestionale personale per tenere traccia delle cose di casa (vestiti, veicoli,
-ricette, oggetti generici) tramite un bot Telegram. Nessuna app dedicata da
-installare per chi lo usa: basta scrivere al bot.
+- [Acquisti e prezzi](docs/moduli/acquisti/README.md) — prezzi base,
+  confezioni e confronto volantini;
+- [Viaggi](docs/moduli/viaggi/README.md) — bagagli, checklist, oggetti in
+  viaggio e controllo rientro;
+- [Spese](docs/moduli/spese/README.md) — spese personali/condivise, quote e saldi.
 
 ## Documentazione principale
 
 Prima di modificare il progetto, leggere nell'ordine:
 
-1. **[README.md](./README.md)** — stato sintetico, setup e workflow quotidiano;
-2. **[ARCHITETTURA.md](./ARCHITETTURA.md)** — scelte tecniche e motivazioni;
-3. **[CHANGELOG.md](./CHANGELOG.md)** — cronologia degli step e verifiche;
-4. **[docs/HANDOFF.md](./docs/HANDOFF.md)** — consegna completa per chi deve
-   continuare il progetto;
-5. **[docs/schema-core.md](./docs/schema-core.md)** — schema dati condiviso;
-6. **[docs/moduli/oggetti.md](./docs/moduli/oggetti.md)** — specifica del modulo Oggetti;
-7. **[docs/moduli/foto.md](./docs/moduli/foto.md)** — specifica Step 5B;
-8. **[docs/moduli/modifica-eliminazione.md](./docs/moduli/modifica-eliminazione.md)** — specifica Step 5C;
-9. **[docs/moduli/luoghi.md](./docs/moduli/luoghi.md)** — specifica Step 6A;
-10. **[docs/INFRASTRUTTURA.md](./docs/INFRASTRUTTURA.md)** — collegamenti PC/S9, Tailscale, SSH e GitHub;
-11. **[docs/ROADMAP.md](./docs/ROADMAP.md)** — sequenza approvata e future implementazioni.
+1. **[README.md](README.md)** — stato sintetico e workflow;
+2. **[docs/step7/README.md](docs/step7/README.md)** — step corrente;
+3. **[ARCHITETTURA.md](ARCHITETTURA.md)** — scelte tecniche e motivazioni;
+4. **[docs/moduli/alimentazione/README.md](docs/moduli/alimentazione/README.md)** — specifica del modulo corrente;
+5. **[docs/ROADMAP.md](docs/ROADMAP.md)** — roadmap generale;
+6. **[docs/HANDOFF.md](docs/HANDOFF.md)** — consegna operativa completa;
+7. **[CHANGELOG.md](CHANGELOG.md)** — cronologia degli step;
+8. **[docs/schema-core.md](docs/schema-core.md)** — schema core già implementato;
+9. **[docs/INFRASTRUTTURA.md](docs/INFRASTRUTTURA.md)** — PC/S9/Tailscale/SSH/GitHub;
+10. **[docs/moduli/README.md](docs/moduli/README.md)** — indice dei moduli.
 
 ## Stato del progetto
 
-- [x] Step 1 — Scheletro del progetto
+- [x] Step 1 — Scheletro
 - [x] Step 2 — Schema dati core
-- [x] Step 3 — Backend Telegram + whitelist, verificato sul Galaxy S9
-- [x] Step 3.1 — Handoff, workflow Git, CI e Dependabot
-- [x] Step 4 — SQLite operativo + migration automatiche + `/status`
-- [x] Step 5 — Modulo Oggetti
-  - [x] Step 5A — anagrafica, creazione, elenco, ricerca e scheda
-  - [x] Step 5B — foto locali + navigazione di avvio/status
-  - [x] Step 5C — modifica ed eliminazione sicura
-- [x] Step 6 — Luoghi e funzioni trasversali, implementazione verificata
-  - [x] Step 6A — case, stanze e posizione strutturata
-  - [x] Step 6B — storico globale + individuale
-  - [x] Step 6C — contenitori e sotto-posizioni; branch pronto per PR/CI/merge
-- [ ] Step 7 — documenti/garanzie, promemoria/scadenze, tag/ricerca globale
-- [ ] Modulo vestiti
-- [ ] Modulo veicoli
-- [ ] Modulo ricette
+- [x] Step 3/3.1 — Telegram, bootstrap accesso, Git/CI
+- [x] Step 4 — SQLite runtime + migration
+- [x] Step 5 — Oggetti, foto, modifica/eliminazione
+- [x] Step 6A — Case e stanze
+- [x] Step 6B — Storico trasversale
+- [x] Step 6C — Contenitori, navigazione gerarchica e storico container-aware
+- [ ] Step 7 — Fondazioni condivise + Alimentazione
+  - [x] fondazioni utenti/spazi, vista multi-spazio e ruoli;
+  - [x] Alimenti, categorie, prodotti commerciali, formati e nutrizione;
+  - [x] Ricette operative e procedimento guidato;
+  - [x] accesso Telegram approvato, amministrazione e workflow Miglioramenti;
+  - [x] rifiniture UI Telegram 7.2G.1→7.2G.6;
+  - [x] profili alimentari: fondazioni, UI, gestione e condivisione via Spazi;
+  - [ ] porzioni personali e override ingrediente;
+  - [ ] turni/routine;
+  - [ ] planner e lista della spesa;
+  - [ ] reminder/export/integrazioni residue.
 
-### Ultimo step funzionale verificato
-
-Lo **Step 6C.4 — Contenitori nello storico** è verificato sul Galaxy S9 e
-pushato come `fd4cbea`. La suite corrente è **69/69 test**; `cargo check`,
-Clippy `-D warnings`, migration sul database reale e prove Telegram dello
-storico container-aware sono verdi.
-
-Il warning di compatibilità futura relativo a `proc-macro-error2 v2.0.1` non ha
-bloccato build o test e resta una nota da rivalutare durante futuri aggiornamenti.
-
-### Passo corrente
-
-Lo **Step 6C.5** chiude documentazione e rilascio del 6C. Non aggiunge
-funzionalità: dopo l'ultima verifica del branch `step-6c-test` restano Pull
-Request, CI GitHub verde e merge in `main`. Solo dopo il merge si apre lo
-sviluppo dello **Step 7A — Documenti e garanzie**.
+Il checkpoint runtime 7.2H è stato collaudato sull'S9, incluso l'export progetto sanitizzato e la gestione non distruttiva degli input inattesi. La pipeline finale prima del commit/push è il controllo autorevole conclusivo.
 
 ## Fonte ufficiale e workflow corrente
 
@@ -225,23 +177,20 @@ Termux:Boot avvia wake lock e `sshd` dopo il reboot. Sul Galaxy S9 è stato osse
 
 La topologia completa, i comandi di diagnostica e le regole sui segreti sono in **`docs/INFRASTRUTTURA.md`**.
 
-## Evoluzione funzionale già approvata
+## Principi dello Step 7
 
-Dopo lo Step 6A la roadmap prevede funzioni trasversali che dovranno essere
-riusate dai moduli futuri invece di essere duplicate:
-
-- **Step 6B** — storico globale dell'account + storico individuale di ogni
-  entità, con data/ora, prima/dopo e filtri per modulo, casa, stanza, periodo e
-  tipo di operazione;
-- **Step 6C** — contenitori e sotto-posizioni strutturate;
-- **Step 7A** — documenti e garanzie;
-- **Step 7B** — promemoria e scadenze;
-- **Step 7C** — tag e ricerca globale.
-
-Sono inoltre approvate come direzioni future: manutenzioni, costi e valore,
-prestiti, QR code, archivio per elementi venduti/regalati/buttati/persi,
-registro acquisti e dashboard/statistiche. La descrizione completa e l'ordine
-di sviluppo sono mantenuti in `docs/ROADMAP.md`.
+- SQLite resta il database centrale e non viene condiviso fra account;
+- l'identità interna è separata dall'account Telegram;
+- l'accesso ordinario al bot è deciso dal database tramite richiesta e approvazione amministrativa; `ALLOWED_CHAT_IDS` resta solo bootstrap/emergenza;
+- utenti e dati condivisi sono organizzati in spazi;
+- proprietà, visibilità, membership e permessi sono concetti distinti;
+- condividere ≠ copiare;
+- lo storico conserva autore e distingue gli effetti automatici;
+- gli ID tecnici non devono comparire nella UI Telegram;
+- la UI Telegram tende a una sola schermata attiva per chat;
+- le migration applicate al DB reale sono immutabili: ogni evoluzione è append-only;
+- reminder Step 7 via Telegram/email, senza SMS;
+- Acquisti, Viaggi e Spese devono riusare le stesse fondamenta invece di creare sistemi paralleli.
 
 ## Requisiti
 
@@ -311,58 +260,58 @@ cargo build --release --locked
 Per l'avvio automatico si userà `systemd`; il relativo service verrà aggiunto
 quando il backend sarà pronto per il primo deploy stabile su Linux.
 
-## Struttura del repository
+## Struttura documentale principale
 
 ```text
-gestionale-casa/
-├── .github/
-│   ├── workflows/
-│   │   └── ci.yml           # controlli automatici Rust
-│   └── dependabot.yml       # aggiornamenti dipendenze via PR
-├── README.md                # quick start e stato sintetico
-├── CHANGELOG.md             # diario degli step e verifiche
-├── ARCHITETTURA.md          # architettura e motivazioni delle scelte
-├── Cargo.toml
-├── Cargo.lock               # versioni effettivamente bloccate/testate
-├── build.rs                  # ricompila se cambiano le migration
-├── src/
-│   ├── main.rs              # avvio bot e dispatcher Telegram
-│   ├── config.rs            # lettura e validazione configurazione
-│   ├── db.rs                # pool SQLite, migration e stato runtime
-│   ├── auth.rs              # whitelist chat autorizzate
-│   └── modules/
-│       ├── foto.rs             # foto locali collegate agli items
-│       ├── oggetti.rs
-│       ├── luoghi.rs
-│       ├── vestiti.rs
-│       ├── veicoli.rs
-│       └── ricette.rs
-├── migrations/              # file .sql di modifica schema
-├── scripts/                 # avvio e backup
-├── docs/
-│   ├── HANDOFF.md           # istruzioni complete per continuare
-│   ├── schema-core.md
-│   ├── ROADMAP.md
-│   └── moduli/
-└── data/                    # database e file locali, NON versionati
+docs/
+├── step7/
+│   ├── README.md
+│   ├── roadmap.md
+│   ├── decisioni-architetturali.md
+│   ├── modello-condivisione.md
+│   ├── storico-e-audit.md
+│   └── database-e-migrazioni.md
+└── moduli/
+    ├── alimentazione/
+    ├── acquisti/
+    ├── viaggi/
+    └── spese/
 ```
+
+Il codice applicativo rimane sotto `src/modules/`. La 7.1 aggiunge
+`src/identity.rs` come infrastruttura trasversale di identità/audit; i moduli
+dominio vengono creati solo quando l'implementazione reale li richiede.
 
 ## Regola per gli step futuri
 
-Ogni nuovo step deve:
+Ogni step deve documentare:
 
-1. partire dal `main` aggiornato (`git pull --ff-only`);
-2. modificare solo ciò che serve allo scopo dello step;
-3. aggiornare `CHANGELOG.md` con **stato precedente → modifiche → verifiche →
-   prossimo passo**;
-4. aggiornare lo stato sintetico nel README e, se cambia una decisione di
-   design, `ARCHITETTURA.md`;
-5. eseguire i controlli disponibili e verificare GitHub Actions dopo il push;
-6. effettuare sul Galaxy S9 i test runtime pertinenti;
-7. non dichiarare “fatto” ciò che non è stato realmente verificato;
-8. non committare mai `.env`, token Telegram, PAT GitHub, database reale o
-   altri segreti.
+1. stato precedente;
+2. decisioni;
+3. modifiche effettive;
+4. verifiche realmente eseguite;
+5. problemi/soluzioni;
+6. stato finale;
+7. prossimo passo.
+
+Le feature non ancora implementate devono essere marcate esplicitamente come
+PREVISTO o RIMANDATO.
 
 ## UX Telegram compatta
 
-Le tastiere inline raggruppano le azioni simili, usano `⚙️ Gestisci` per rinomina/modifica/eliminazione e mantengono `🗑 Elimina` isolato. Le azioni frequenti, come lo spostamento degli oggetti, restano direttamente accessibili. I figli gerarchici vengono mostrati prima dei comandi; le righe di creazione usano etichette compatte come `➕🚪 Stanza`, `➕📦 Contenitore`, `➕🏷️ Oggetto`, mentre gli elenchi usano `📋` + simbolo dell'entità.
+La UI corrente usa Telegram come frontend applicativo: una chat mantiene, quando possibile, **un solo messaggio UI principale attivo**. La navigazione modifica/sostituisce la schermata corrente, elimina media temporanei e rende non più validi i callback delle vecchie schermate.
+
+Regole consolidate:
+
+- massimo 5 elementi per pagina nelle liste operative;
+- pulsante centrale pagina/totale informativo dove previsto;
+- riga di navigazione standard con `⬅️ Indietro`, `🏠 Menù principale` e `💡 Migliora` quando il contesto lo consente;
+- nessun ID tecnico in UI;
+- niente elenco di comandi stringa esposto come interfaccia principale;
+- `💡 Migliora` conserva sezione, schermata e azioni recenti, con la più recente in cima;
+- gli input temporanei dell'utente vengono eliminati dopo acquisizione riuscita nei wizard compatibili;
+- lo stato del messaggio UI attivo è persistito in SQLite così riavvio e schermata offline/online non lasciano tastiere obsolete;
+- l'amministratore principale dispone di `⏻ Spegni gestionale` con seconda conferma;
+- il modulo Miglioramenti può generare e inviare lo ZIP di handoff direttamente da Telegram.
+
+La vista multi-spazio resta separata dallo spazio predefinito: `🌐 Tutti i miei spazi` amplia la lettura alle membership accessibili senza trasferire proprietà o aggirare i permessi.

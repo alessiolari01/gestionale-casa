@@ -14,6 +14,8 @@ use teloxide::{
     types::{InlineKeyboardButton, InlineKeyboardMarkup},
 };
 
+type Bot = crate::context_bot::ContextBot;
+
 const PAGE_SIZE: i64 = 8;
 const MAX_SEARCH_RESULTS: i64 = 12;
 
@@ -170,6 +172,7 @@ impl ObjectDraft {
 
 #[derive(Debug, Clone, FromRow)]
 struct ObjectHistorySnapshot {
+    owner_space_id: i64,
     name: String,
     description: Option<String>,
     brand: Option<String>,
@@ -226,6 +229,8 @@ impl ObjectCondition {
 struct ObjectRecord {
     id: i64,
     name: String,
+    owner_space_name: String,
+    location_space_name: Option<String>,
     description: Option<String>,
     brand: Option<String>,
     model: Option<String>,
@@ -248,6 +253,8 @@ struct ObjectRecord {
 struct ObjectSummary {
     id: i64,
     name: String,
+    owner_space_name: String,
+    location_space_name: Option<String>,
     home_id: Option<i64>,
     home_name: Option<String>,
     room_id: Option<i64>,
@@ -258,27 +265,45 @@ struct ObjectSummary {
 #[derive(Debug, Clone)]
 struct ObjectLocationDisplay {
     label: String,
-    command: String,
 }
 
-pub fn main_menu_keyboard() -> InlineKeyboardMarkup {
-    InlineKeyboardMarkup::new(vec![
+#[derive(Debug, Clone, Copy)]
+struct ObjectLocationInput<'a> {
+    home_id: Option<i64>,
+    home_name: Option<&'a str>,
+    location_space_name: Option<&'a str>,
+    owner_space_name: &'a str,
+    room_id: Option<i64>,
+    room_name: Option<&'a str>,
+    container_id: Option<i64>,
+}
+
+pub fn main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup {
+    let mut rows = vec![
         vec![button("📜 Storico", "history:global:0")],
+        vec![
+            button("👤 Profilo", "identity:profile"),
+            button("👥 Spazi", "identity:spaces"),
+        ],
         vec![button("🏷️ Oggetti", "oggetti:menu")],
         vec![button("🏠 Case, stanze e contenitori", "loc:menu")],
         vec![
             button("👕 Vestiti · prossimamente", "menu:soon"),
             button("🚗 Veicoli · prossimamente", "menu:soon"),
         ],
-        vec![button("🍝 Ricette · prossimamente", "menu:soon")],
-        vec![button("📊 Stato sistema", "system:status")],
-    ])
+        vec![button("🍽️ Alimentazione", "food:menu")],
+        vec![button("💡 Miglioramenti", "improve:menu")],
+    ];
+    if is_admin {
+        rows.push(vec![button("🛠️ Amministrazione", "admin:menu")]);
+    }
+    InlineKeyboardMarkup::new(rows)
 }
 
 pub async fn show_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
-        "🏷️ Oggetti generici\n\nScegli cosa vuoi fare. I pulsanti e i /comandi usano la stessa logica.",
+        "🏷️ Oggetti generici\n\nScegli cosa vuoi fare. Usa i pulsanti per scegliere cosa fare.",
     )
     .reply_markup(objects_menu_keyboard())
     .await?;
@@ -315,7 +340,7 @@ pub async fn handle_message(
                     sessions.set(chat_id, ConversationState::AwaitingSearch);
                     bot.send_message(
                         msg.chat.id,
-                        "🔎 Cerca oggetto\n\nScrivi nome, marca, modello, casa, stanza, contenitore, seriale o una parola presente nelle note.\n\n/annulla per uscire.",
+                        "🔎 Cerca oggetto\n\nScrivi nome, marca, modello, casa, stanza, contenitore, seriale o una parola presente nelle note.\n\nPremi ❌ Annulla per uscire.",
                     )
                     .await?;
                 } else {
@@ -329,8 +354,11 @@ pub async fn handle_message(
                 if let Some(id) = parse_positive_id(args) {
                     send_object_detail(bot, msg.chat.id, pool, id).await?;
                 } else {
-                    bot.send_message(msg.chat.id, "Uso: /oggetto <id>\nEsempio: /oggetto 12")
-                        .await?;
+                    bot.send_message(
+                        msg.chat.id,
+                        "Apri l'elenco Oggetti e scegli l'oggetto dai pulsanti.",
+                    )
+                    .await?;
                 }
                 return Ok(true);
             }
@@ -341,7 +369,7 @@ pub async fn handle_message(
                 } else {
                     bot.send_message(
                         msg.chat.id,
-                        "Uso: /oggetto_modifica <id>\nEsempio: /oggetto_modifica 12",
+                        "Apri l'oggetto dall'elenco e usa ⚙️ Gestisci → ✏️ Modifica dati.",
                     )
                     .await?;
                 }
@@ -354,7 +382,7 @@ pub async fn handle_message(
                 } else {
                     bot.send_message(
                         msg.chat.id,
-                        "Uso: /oggetto_elimina <id>\nEsempio: /oggetto_elimina 12",
+                        "Apri l'oggetto dall'elenco e usa ⚙️ Gestisci → 🗑 Elimina oggetto.",
                     )
                     .await?;
                 }
@@ -406,7 +434,7 @@ pub async fn handle_message(
             } else {
                 bot.send_message(
                     msg.chat.id,
-                    "Il nome non può essere vuoto e deve restare entro 120 caratteri. Riprova oppure usa /annulla.",
+                    "Il nome non può essere vuoto e deve restare entro 120 caratteri. Riprova oppure premi ❌ Annulla.",
                 )
                 .await?;
             }
@@ -426,7 +454,7 @@ pub async fn handle_message(
             let Some(field) = field else {
                 bot.send_message(
                     msg.chat.id,
-                    "Usa i pulsanti del pannello dettagli, oppure /annulla per uscire.",
+                    "Usa i pulsanti del pannello dettagli, oppure Premi ❌ Annulla per uscire.",
                 )
                 .await?;
                 return Ok(true);
@@ -466,7 +494,7 @@ pub async fn handle_callback(
             sessions.set(raw_chat_id, ConversationState::AwaitingSearch);
             bot.send_message(
                 chat_id,
-                "🔎 Cerca oggetto\n\nScrivi cosa vuoi cercare.\n\n/annulla per uscire.",
+                "🔎 Cerca oggetto\n\nScrivi cosa vuoi cercare.\n\nPremi ❌ Annulla per uscire.",
             )
             .await?;
         }
@@ -725,7 +753,7 @@ async fn start_new_object(
         );
         bot.send_message(
             telegram_chat_id,
-            "🏷️ Nuovo oggetto\n\nCome vuoi chiamarlo?\n\nEsempio: Trapano Bosch\n/annulla per uscire.",
+            "🏷️ Nuovo oggetto\n\nCome vuoi chiamarlo?\n\nEsempio: Trapano Bosch\nPremi ❌ Annulla per uscire.",
         )
         .reply_markup(cancel_keyboard())
         .await?;
@@ -786,7 +814,7 @@ async fn handle_new_object_here_callback(
             bot.send_message(
                 chat_id,
                 format!(
-                    "🏷️ Nuovo oggetto qui\n\n📍 {} ✅\n\nCome vuoi chiamarlo?\n\n/annulla per uscire.",
+                    "🏷️ Nuovo oggetto qui\n\n📍 {} ✅\n\nCome vuoi chiamarlo?\n\nPremi ❌ Annulla per uscire.",
                     preset_display_label(&preset)
                 ),
             )
@@ -814,7 +842,7 @@ async fn handle_new_object_here_callback(
         );
         bot.send_message(
             chat_id,
-            "🏷️ Nuovo oggetto\n\nCome vuoi chiamarlo? Dopo il nome sceglierai un'altra posizione.\n\n/annulla per uscire.",
+            "🏷️ Nuovo oggetto\n\nCome vuoi chiamarlo? Dopo il nome sceglierai un'altra posizione.\n\nPremi ❌ Annulla per uscire.",
         )
         .reply_markup(cancel_keyboard())
         .await?;
@@ -856,7 +884,7 @@ async fn handle_new_object_here_callback(
         )],
         vec![
             button("↩️ Indietro", &back_callback),
-            button("🏠 Menu principale", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
         ],
     ]))
     .await?;
@@ -958,7 +986,7 @@ async fn start_edit_object(
             send_draft_panel(bot, telegram_chat_id, &draft).await?;
         }
         Ok(None) => {
-            bot.send_message(telegram_chat_id, format!("Oggetto #{id} non trovato."))
+            bot.send_message(telegram_chat_id, "Oggetto non trovato.")
                 .reply_markup(objects_menu_keyboard())
                 .await?;
         }
@@ -1255,7 +1283,7 @@ async fn apply_field_input(
             } else {
                 bot.send_message(
                     chat_id,
-                    "Il nome non può essere vuoto e deve restare entro 120 caratteri. Riprova oppure usa /salta per mantenere quello attuale.",
+                    "Il nome non può essere vuoto e deve restare entro 120 caratteri. Riprova oppure premi ⏭ Salta per mantenere quello attuale.",
                 )
                 .await?;
             }
@@ -1296,7 +1324,7 @@ async fn apply_field_input(
             None => {
                 bot.send_message(
                     chat_id,
-                    "Data non valida. Usa GG/MM/AAAA oppure AAAA-MM-GG. Esempio: 14/05/2025.\nUsa /salta per non modificare il valore.",
+                    "Data non valida. Usa GG/MM/AAAA oppure AAAA-MM-GG. Esempio: 14/05/2025.\nPremi ⏭ Salta per non modificare il valore.",
                 )
                 .await?;
             }
@@ -1317,7 +1345,7 @@ async fn apply_field_input(
             None => {
                 bot.send_message(
                     chat_id,
-                    "Prezzo non valido. Esempi validi: 89,90 oppure 89.90 oppure 89.\nUsa /salta per non modificare il valore.",
+                    "Prezzo non valido. Esempi validi: 89,90 oppure 89.90 oppure 89.\nPremi ⏭ Salta per non modificare il valore.",
                 )
                 .await?;
             }
@@ -1342,7 +1370,7 @@ async fn apply_field_input(
             None => {
                 bot.send_message(
                     chat_id,
-                    "Valore non valido. Esempi validi: 250 oppure 250,00.\nUsa /salta per non modificare il valore.",
+                    "Valore non valido. Esempi validi: 250 oppure 250,00.\nPremi ⏭ Salta per non modificare il valore.",
                 )
                 .await?;
             }
@@ -1431,7 +1459,7 @@ async fn remove_current_field(
 
     match field {
         DraftField::Name => {
-            bot.send_message(chat_id, "Il nome è obbligatorio e non può essere rimosso. Usa /salta per mantenerlo oppure scrivi un nuovo nome.")
+            bot.send_message(chat_id, "Il nome è obbligatorio e non può essere rimosso. Premi ⏭ Salta per mantenerlo oppure scrivi un nuovo nome.")
                 .await?;
             return Ok(());
         }
@@ -1528,9 +1556,9 @@ async fn save_current_draft(
             let return_to = draft.return_to.clone();
             sessions.clear_chat(raw_chat_id);
             let message = if was_update {
-                format!("✅ Modifiche salvate per l'oggetto #{id}.")
+                format!("✅ Modifiche salvate: {}.", draft.name)
             } else {
-                format!("✅ Oggetto salvato con ID #{id}.")
+                format!("✅ Oggetto salvato: {}.", draft.name)
             };
             bot.send_message(chat_id, message).await?;
             if was_update {
@@ -1547,7 +1575,7 @@ async fn save_current_draft(
             );
             bot.send_message(
                 chat_id,
-                "⚠️ Non sono riuscito a salvare. La bozza resta aperta: puoi riprovare oppure usare /annulla.",
+                "⚠️ Non sono riuscito a salvare. La bozza resta aperta: puoi riprovare oppure premi ❌ Annulla.",
             )
             .await?;
         }
@@ -1574,7 +1602,7 @@ async fn send_object_list(
             if objects.is_empty() {
                 bot.send_message(
                     chat_id,
-                    "📋 Non ci sono ancora oggetti registrati.\n\nPuoi crearne uno con ➕ Nuovo oggetto oppure /oggetto_nuovo.",
+                    "📋 Non ci sono ancora oggetti registrati.\n\nPuoi crearne uno con ➕ Nuovo oggetto oppure usa il pulsante ➕ Nuovo oggetto.",
                 )
                 .reply_markup(objects_menu_keyboard())
                 .await?;
@@ -1584,7 +1612,7 @@ async fn send_object_list(
             let total_pages = ((total + PAGE_SIZE - 1) / PAGE_SIZE).max(1);
             let mut text = format!("📋 Oggetti · pagina {}/{}\n\n", page + 1, total_pages);
             for object in &objects {
-                text.push_str(&format!("#{} · {}", object.id, object.name));
+                text.push_str(&format!("{}\n👥 {}", object.name, object.owner_space_name));
                 push_summary_location(&mut text, pool, object).await;
                 text.push_str("\n\n");
             }
@@ -1617,7 +1645,7 @@ async fn send_search_results(
         Ok(objects) => {
             let mut text = format!("🔎 Risultati per: {query}\n\n");
             for object in &objects {
-                text.push_str(&format!("#{} · {}", object.id, object.name));
+                text.push_str(&format!("{}\n👥 {}", object.name, object.owner_space_name));
                 push_summary_location(&mut text, pool, object).await;
                 text.push_str("\n\n");
             }
@@ -1644,7 +1672,7 @@ async fn send_object_manage(
         Ok(Some(object)) => {
             bot.send_message(
                 chat_id,
-                format!("⚙️ Gestisci oggetto\n\n🏷️ #{} · {}", object.id, object.name),
+                format!("⚙️ Gestisci oggetto\n\n🏷️ {}", object.name),
             )
             .reply_markup(InlineKeyboardMarkup::new(vec![
                 vec![button("✏️ Modifica dati", &format!("oggetti:edit:{id}"))],
@@ -1654,13 +1682,13 @@ async fn send_object_manage(
                 )],
                 vec![
                     button("↩️ Torna all'oggetto", &format!("oggetti:view:{id}")),
-                    button("🏠 Menu principale", "menu:main"),
+                    button("🏠 Menù principale", "menu:main"),
                 ],
             ]))
             .await?;
         }
         Ok(None) => {
-            bot.send_message(chat_id, format!("Oggetto #{id} non trovato."))
+            bot.send_message(chat_id, "Oggetto non trovato.")
                 .reply_markup(objects_menu_keyboard())
                 .await?;
         }
@@ -1693,11 +1721,15 @@ async fn send_object_detail_with_return(
         Ok(Some(object)) => {
             let location = resolve_object_location(
                 pool,
-                object.home_id,
-                object.home_name.as_deref(),
-                object.room_id,
-                object.room_name.as_deref(),
-                object.container_id,
+                ObjectLocationInput {
+                    home_id: object.home_id,
+                    home_name: object.home_name.as_deref(),
+                    location_space_name: object.location_space_name.as_deref(),
+                    owner_space_name: &object.owner_space_name,
+                    room_id: object.room_id,
+                    room_name: object.room_name.as_deref(),
+                    container_id: object.container_id,
+                },
             )
             .await;
             let contextual_return = match return_to {
@@ -1713,7 +1745,7 @@ async fn send_object_detail_with_return(
                 .await?;
         }
         Ok(None) => {
-            bot.send_message(chat_id, format!("Oggetto #{id} non trovato."))
+            bot.send_message(chat_id, "Oggetto non trovato.")
                 .reply_markup(objects_menu_keyboard())
                 .await?;
         }
@@ -1780,17 +1812,16 @@ async fn send_delete_confirmation(
                     "⚠️ Eliminare definitivamente?
 
 🏷️ {}
-#{}
 
 Verranno eliminati anche i dati collegati nel database e le foto locali dell'oggetto. Questa operazione non può essere annullata.",
-                    object.name, object.id
+                    object.name
                 ),
             )
             .reply_markup(delete_confirmation_keyboard(id))
             .await?;
         }
         Ok(None) => {
-            bot.send_message(chat_id, format!("Oggetto #{id} non trovato."))
+            bot.send_message(chat_id, "Oggetto non trovato.")
                 .reply_markup(objects_menu_keyboard())
                 .await?;
         }
@@ -1816,12 +1847,9 @@ async fn delete_object_and_media(
     match delete_object(pool, id).await {
         Ok(true) => match crate::modules::foto::remove_object_media(id).await {
             Ok(()) => {
-                bot.send_message(
-                    chat_id,
-                    format!("🗑 Oggetto #{id} eliminato definitivamente."),
-                )
-                .reply_markup(objects_menu_keyboard())
-                .await?;
+                bot.send_message(chat_id, "🗑 Oggetto eliminato definitivamente.")
+                    .reply_markup(objects_menu_keyboard())
+                    .await?;
             }
             Err(error) => {
                 tracing::warn!(
@@ -1831,17 +1859,15 @@ async fn delete_object_and_media(
                 );
                 bot.send_message(
                     chat_id,
-                    format!(
-                        "🗑 Oggetto #{id} eliminato dal database.
-⚠️ Non sono riuscito a rimuovere tutti i file locali: controlla data/media/oggetti/{id}."
-                    ),
+                    "🗑 Oggetto eliminato dal database.
+⚠️ Non sono riuscito a rimuovere tutti i file locali dell'oggetto: controlla i log del backend.",
                 )
                 .reply_markup(objects_menu_keyboard())
                 .await?;
             }
         },
         Ok(false) => {
-            bot.send_message(chat_id, format!("Oggetto #{id} non trovato."))
+            bot.send_message(chat_id, "Oggetto non trovato.")
                 .reply_markup(objects_menu_keyboard())
                 .await?;
         }
@@ -2124,8 +2150,8 @@ async fn get_object_history_snapshot(
     tx: &mut Transaction<'_, Sqlite>,
     id: i64,
 ) -> Result<Option<ObjectHistorySnapshot>, sqlx::Error> {
-    sqlx::query_as::<_, ObjectHistorySnapshot>(
-        "SELECT i.nome AS name, \
+    sqlx::query_as::<_, ObjectHistorySnapshot>(&format!(
+        "SELECT i.spazio_id AS owner_space_id, i.nome AS name, \
                 o.descrizione AS description, o.marca AS brand, o.modello AS model, \
                 o.numero_serie AS serial_number, o.posizione AS position, \
                 o.data_acquisto AS purchase_date, \
@@ -2134,18 +2160,29 @@ async fn get_object_history_snapshot(
                 o.valore_stimato_centesimi AS estimated_value_cents, \
                 o.condizione AS condition, o.note AS notes \
          FROM items i JOIN oggetti o ON o.item_id = i.id \
-         WHERE i.id = ? AND i.tipo = 'oggetto'",
-    )
+         WHERE i.id = ? AND i.tipo = 'oggetto' AND {}",
+        crate::identity::visible_space_sql("i")
+    ))
     .bind(id)
+    .bind(crate::identity::visible_space_bind_id())
     .fetch_optional(&mut **tx)
     .await
 }
 
 async fn create_object(pool: &SqlitePool, draft: &ObjectDraft) -> anyhow::Result<i64> {
+    crate::identity::ensure_can_write(pool).await?;
+    crate::modules::luoghi::ensure_location_target_writable(
+        pool,
+        draft.home_id,
+        draft.container_id,
+    )
+    .await?;
+    let space_id = crate::identity::current_space_id();
     let mut tx = pool.begin().await?;
     let item_result: SqliteQueryResult =
-        sqlx::query("INSERT INTO items (tipo, nome) VALUES ('oggetto', ?)")
+        sqlx::query("INSERT INTO items (tipo, nome, spazio_id) VALUES ('oggetto', ?, ?)")
             .bind(&draft.name)
+            .bind(space_id)
             .execute(&mut *tx)
             .await?;
     let id = item_result.last_insert_rowid();
@@ -2235,6 +2272,8 @@ async fn update_object(pool: &SqlitePool, id: i64, draft: &ObjectDraft) -> anyho
     let Some(before) = get_object_history_snapshot(&mut tx, id).await? else {
         anyhow::bail!("oggetto #{id} non trovato durante l'aggiornamento");
     };
+    crate::identity::ensure_can_write_space(pool, before.owner_space_id).await?;
+    let space_id = before.owner_space_id;
     let changes = object_update_changes(&before, draft);
 
     // Salvare una modifica senza cambiare nulla non genera UPDATE né storico.
@@ -2246,10 +2285,11 @@ async fn update_object(pool: &SqlitePool, id: i64, draft: &ObjectDraft) -> anyho
         crate::modules::storico::ensure_entity(&mut tx, "oggetto", id, &before.name).await?;
 
     let item = sqlx::query(
-        "UPDATE items SET nome = ?, aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND tipo = 'oggetto'",
+        "UPDATE items SET nome = ?, aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND tipo = 'oggetto' AND spazio_id = ?",
     )
     .bind(&draft.name)
     .bind(id)
+    .bind(space_id)
     .execute(&mut *tx)
     .await?;
 
@@ -2319,6 +2359,8 @@ async fn delete_object(pool: &SqlitePool, id: i64) -> anyhow::Result<bool> {
     let Some(before) = get_object_history_snapshot(&mut tx, id).await? else {
         return Ok(false);
     };
+    crate::identity::ensure_can_write_space(pool, before.owner_space_id).await?;
+    let space_id = before.owner_space_id;
     let storico_id =
         crate::modules::storico::ensure_entity(&mut tx, "oggetto", id, &before.name).await?;
 
@@ -2346,10 +2388,12 @@ async fn delete_object(pool: &SqlitePool, id: i64) -> anyhow::Result<bool> {
     crate::modules::storico::record_field_changes(&mut tx, event_id, &deletion_changes).await?;
     crate::modules::storico::mark_entity_deleted(&mut tx, storico_id).await?;
 
-    let result = sqlx::query("DELETE FROM items WHERE id = ? AND tipo = 'oggetto'")
-        .bind(id)
-        .execute(&mut *tx)
-        .await?;
+    let result =
+        sqlx::query("DELETE FROM items WHERE id = ? AND tipo = 'oggetto' AND spazio_id = ?")
+            .bind(id)
+            .bind(space_id)
+            .execute(&mut *tx)
+            .await?;
     tx.commit().await?;
     Ok(result.rows_affected() == 1)
 }
@@ -2384,27 +2428,32 @@ async fn insert_object_details(
 }
 
 async fn get_object(pool: &SqlitePool, id: i64) -> Result<Option<ObjectRecord>, sqlx::Error> {
-    sqlx::query_as::<_, ObjectRecord>(
+    let sql = format!(
         "SELECT \
-            i.id AS id, i.nome AS name, \
+            i.id AS id, i.nome AS name, i.spazio_id AS owner_space_id, os.nome AS owner_space_name, \
             o.descrizione AS description, o.marca AS brand, o.modello AS model, \
             o.numero_serie AS serial_number, o.posizione AS position, \
             o.data_acquisto AS purchase_date, \
             o.prezzo_acquisto_centesimi AS purchase_price_cents, \
             o.venditore AS seller, o.valore_stimato_centesimi AS estimated_value_cents, \
             o.condizione AS condition, o.note AS notes, \
-            il.abitazione_id AS home_id, a.nome AS home_name, \
+            il.abitazione_id AS home_id, a.nome AS home_name, ps.nome AS location_space_name, \
             il.stanza_id AS room_id, s.nome AS room_name, il.contenitore_id AS container_id \
          FROM items i \
+         JOIN spazi os ON os.id = i.spazio_id \
          JOIN oggetti o ON o.item_id = i.id \
          LEFT JOIN item_luogo il ON il.item_id = i.id \
          LEFT JOIN abitazioni a ON a.id = il.abitazione_id \
+         LEFT JOIN spazi ps ON ps.id = a.spazio_id \
          LEFT JOIN stanze s ON s.id = il.stanza_id \
-         WHERE i.id = ? AND i.tipo = 'oggetto'",
-    )
-    .bind(id)
-    .fetch_optional(pool)
-    .await
+         WHERE i.id = ? AND i.tipo = 'oggetto' AND {}",
+        crate::identity::visible_space_sql("i")
+    );
+    sqlx::query_as::<_, ObjectRecord>(&sql)
+        .bind(id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_optional(pool)
+        .await
 }
 
 async fn list_objects(
@@ -2413,31 +2462,37 @@ async fn list_objects(
     page_size: i64,
 ) -> Result<(Vec<ObjectSummary>, i64), sqlx::Error> {
     let offset = page.max(0) * page_size;
-    let total: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) \
-         FROM items i \
-         JOIN oggetti o ON o.item_id = i.id \
-         WHERE i.tipo = 'oggetto'",
-    )
-    .fetch_one(pool)
-    .await?;
-    let objects = sqlx::query_as::<_, ObjectSummary>(
-        "SELECT i.id AS id, i.nome AS name, \
-                il.abitazione_id AS home_id, a.nome AS home_name, \
+    let visible = crate::identity::visible_space_sql("i");
+    let count_sql = format!(
+        "SELECT COUNT(*) FROM items i JOIN oggetti o ON o.item_id = i.id \
+         WHERE i.tipo = 'oggetto' AND {visible}"
+    );
+    let total: i64 = sqlx::query_scalar(&count_sql)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_one(pool)
+        .await?;
+    let list_sql = format!(
+        "SELECT i.id AS id, i.nome AS name, i.spazio_id AS owner_space_id, \
+                os.nome AS owner_space_name, \
+                il.abitazione_id AS home_id, a.nome AS home_name, ps.nome AS location_space_name, \
                 il.stanza_id AS room_id, s.nome AS room_name, il.contenitore_id AS container_id \
          FROM items i \
+         JOIN spazi os ON os.id = i.spazio_id \
          JOIN oggetti o ON o.item_id = i.id \
          LEFT JOIN item_luogo il ON il.item_id = i.id \
          LEFT JOIN abitazioni a ON a.id = il.abitazione_id \
+         LEFT JOIN spazi ps ON ps.id = a.spazio_id \
          LEFT JOIN stanze s ON s.id = il.stanza_id \
-         WHERE i.tipo = 'oggetto' \
-         ORDER BY i.nome COLLATE NOCASE, i.id \
-         LIMIT ? OFFSET ?",
-    )
-    .bind(page_size)
-    .bind(offset)
-    .fetch_all(pool)
-    .await?;
+         WHERE i.tipo = 'oggetto' AND {visible} \
+         ORDER BY os.nome COLLATE NOCASE, i.nome COLLATE NOCASE, i.id \
+         LIMIT ? OFFSET ?"
+    );
+    let objects = sqlx::query_as::<_, ObjectSummary>(&list_sql)
+        .bind(crate::identity::visible_space_bind_id())
+        .bind(page_size)
+        .bind(offset)
+        .fetch_all(pool)
+        .await?;
     Ok((objects, total))
 }
 
@@ -2447,53 +2502,55 @@ async fn search_objects(
     limit: i64,
 ) -> Result<Vec<ObjectSummary>, sqlx::Error> {
     let pattern = format!("%{}%", query.trim());
-    sqlx::query_as::<_, ObjectSummary>(
-        "SELECT i.id AS id, i.nome AS name, \
-                il.abitazione_id AS home_id, a.nome AS home_name, \
-                il.stanza_id AS room_id, s.nome AS room_name, il.contenitore_id AS container_id \
-         FROM items i \
-         JOIN oggetti o ON o.item_id = i.id \
-         LEFT JOIN item_luogo il ON il.item_id = i.id \
-         LEFT JOIN abitazioni a ON a.id = il.abitazione_id \
-         LEFT JOIN stanze s ON s.id = il.stanza_id \
-         LEFT JOIN contenitori c ON c.id = il.contenitore_id \
-         WHERE i.tipo = 'oggetto' AND (\
-            i.nome LIKE ? COLLATE NOCASE OR \
-            o.marca LIKE ? COLLATE NOCASE OR \
-            o.modello LIKE ? COLLATE NOCASE OR \
-            o.numero_serie LIKE ? COLLATE NOCASE OR \
-            o.posizione LIKE ? COLLATE NOCASE OR \
-            o.venditore LIKE ? COLLATE NOCASE OR \
-            o.descrizione LIKE ? COLLATE NOCASE OR \
-            o.note LIKE ? COLLATE NOCASE OR \
-            a.nome LIKE ? COLLATE NOCASE OR \
-            s.nome LIKE ? COLLATE NOCASE OR \
-            c.nome LIKE ? COLLATE NOCASE\
-         ) \
-         ORDER BY i.nome COLLATE NOCASE, i.id \
-         LIMIT ?",
-    )
-    .bind(&pattern)
-    .bind(&pattern)
-    .bind(&pattern)
-    .bind(&pattern)
-    .bind(&pattern)
-    .bind(&pattern)
-    .bind(&pattern)
-    .bind(&pattern)
-    .bind(&pattern)
-    .bind(&pattern)
-    .bind(&pattern)
-    .bind(limit)
-    .fetch_all(pool)
-    .await
+    let sql = format!(
+        r#"SELECT i.id AS id, i.nome AS name, i.spazio_id AS owner_space_id,
+                  os.nome AS owner_space_name,
+                  il.abitazione_id AS home_id, a.nome AS home_name, ps.nome AS location_space_name,
+                  il.stanza_id AS room_id, s.nome AS room_name, il.contenitore_id AS container_id
+           FROM items i
+           JOIN spazi os ON os.id = i.spazio_id
+           JOIN oggetti o ON o.item_id = i.id
+           LEFT JOIN item_luogo il ON il.item_id = i.id
+           LEFT JOIN abitazioni a ON a.id = il.abitazione_id
+           LEFT JOIN spazi ps ON ps.id = a.spazio_id
+           LEFT JOIN stanze s ON s.id = il.stanza_id
+           LEFT JOIN contenitori c ON c.id = il.contenitore_id
+           WHERE i.tipo = 'oggetto' AND {} AND (
+              i.nome LIKE ? COLLATE NOCASE OR o.marca LIKE ? COLLATE NOCASE OR
+              o.modello LIKE ? COLLATE NOCASE OR o.numero_serie LIKE ? COLLATE NOCASE OR
+              o.posizione LIKE ? COLLATE NOCASE OR o.venditore LIKE ? COLLATE NOCASE OR
+              o.descrizione LIKE ? COLLATE NOCASE OR o.note LIKE ? COLLATE NOCASE OR
+              a.nome LIKE ? COLLATE NOCASE OR s.nome LIKE ? COLLATE NOCASE OR
+              c.nome LIKE ? COLLATE NOCASE
+           )
+           ORDER BY os.nome COLLATE NOCASE, i.nome COLLATE NOCASE, i.id
+           LIMIT ?"#,
+        crate::identity::visible_space_sql("i")
+    );
+    sqlx::query_as::<_, ObjectSummary>(&sql)
+        .bind(crate::identity::visible_space_bind_id())
+        .bind(&pattern)
+        .bind(&pattern)
+        .bind(&pattern)
+        .bind(&pattern)
+        .bind(&pattern)
+        .bind(&pattern)
+        .bind(&pattern)
+        .bind(&pattern)
+        .bind(&pattern)
+        .bind(&pattern)
+        .bind(&pattern)
+        .bind(limit)
+        .fetch_all(pool)
+        .await
 }
 
 fn format_draft(draft: &ObjectDraft) -> String {
-    let title = draft.object_id.map_or_else(
-        || "🏷️ Nuovo oggetto".to_string(),
-        |id| format!("✏️ Modifica oggetto #{id}"),
-    );
+    let title = if draft.object_id.is_some() {
+        "✏️ Modifica oggetto".to_string()
+    } else {
+        "🏷️ Nuovo oggetto".to_string()
+    };
     let mut lines = vec![title, String::new(), format!("Nome: {}", draft.name)];
 
     push_optional_line(&mut lines, "Marca", draft.brand.as_deref());
@@ -2528,7 +2585,7 @@ fn format_draft(draft: &ObjectDraft) -> String {
     lines.push(String::new());
     if draft.is_update() {
         lines.push(
-            "Modifica solo ciò che serve. /salta mantiene il valore attuale; /rimuovi cancella il campo aperto. Poi premi 💾 Salva modifiche."
+            "Modifica solo ciò che serve. ⏭ Salta mantiene il valore attuale; 🗑 Rimuovi cancella il campo aperto. Poi premi 💾 Salva modifiche."
                 .to_string(),
         );
     } else {
@@ -2538,7 +2595,10 @@ fn format_draft(draft: &ObjectDraft) -> String {
 }
 
 fn format_object(object: &ObjectRecord, location: Option<&ObjectLocationDisplay>) -> String {
-    let mut lines = vec![format!("🏷️ {}", object.name), format!("#{}", object.id)];
+    let mut lines = vec![
+        format!("🏷️ {}", object.name),
+        format!("👥 Proprietà: {}", object.owner_space_name),
+    ];
 
     if object.brand.is_some() || object.model.is_some() {
         let brand_model = [object.brand.as_deref(), object.model.as_deref()]
@@ -2549,8 +2609,7 @@ fn format_object(object: &ObjectRecord, location: Option<&ObjectLocationDisplay>
         lines.push(format!("🏭 {brand_model}"));
     }
     if let Some(location) = location {
-        lines.push(format!("📍 {}", location.label));
-        lines.push(location.command.clone());
+        lines.push(format!("📍 Posizione: {}", location.label));
     }
     if let Some(position) = &object.position {
         lines.push(format!("📌 Posizione legacy: {position}"));
@@ -2594,7 +2653,7 @@ fn objects_menu_keyboard() -> InlineKeyboardMarkup {
             button("🔎 Cerca", "oggetti:search"),
         ],
         vec![button("🏠 Filtra per casa / stanza", "loc:home:list")],
-        vec![button("🏠 Menu principale", "menu:main")],
+        vec![button("🏠 Menù principale", "menu:main")],
     ])
 }
 
@@ -2648,7 +2707,7 @@ fn draft_keyboard(draft: &ObjectDraft) -> InlineKeyboardMarkup {
         ),
         button("❌ Annulla", "oggetti:draft:cancel"),
     ]);
-    rows.push(vec![button("🏠 Menu principale", "menu:main")]);
+    rows.push(vec![button("🏠 Menù principale", "menu:main")]);
     InlineKeyboardMarkup::new(rows)
 }
 
@@ -2669,7 +2728,7 @@ fn new_object_home_picker_keyboard(
         "oggetti:draft:location:skip-home",
     )]);
     rows.push(vec![button("↩️ Torna ai dettagli", "oggetti:draft:back")]);
-    rows.push(vec![button("🏠 Menu principale", "menu:main")]);
+    rows.push(vec![button("🏠 Menù principale", "menu:main")]);
     InlineKeyboardMarkup::new(rows)
 }
 
@@ -2693,7 +2752,7 @@ fn new_object_room_picker_keyboard(
     )]);
     rows.push(vec![button("↩️ Cambia casa", "oggetti:draft:location")]);
     rows.push(vec![button("↩️ Torna ai dettagli", "oggetti:draft:back")]);
-    rows.push(vec![button("🏠 Menu principale", "menu:main")]);
+    rows.push(vec![button("🏠 Menù principale", "menu:main")]);
     InlineKeyboardMarkup::new(rows)
 }
 
@@ -2731,7 +2790,7 @@ fn condition_keyboard() -> InlineKeyboardMarkup {
             "oggetti:draft:condition:clear",
         )],
         vec![button("⬅️ Dettagli", "oggetti:draft:back")],
-        vec![button("🏠 Menu principale", "menu:main")],
+        vec![button("🏠 Menù principale", "menu:main")],
     ])
 }
 
@@ -2745,14 +2804,14 @@ fn other_details_keyboard(draft: &ObjectDraft) -> InlineKeyboardMarkup {
         vec![button(&value, "oggetti:draft:value")],
         vec![button(&serial, "oggetti:draft:serial")],
         vec![button("⬅️ Dettagli", "oggetti:draft:back")],
-        vec![button("🏠 Menu principale", "menu:main")],
+        vec![button("🏠 Menù principale", "menu:main")],
     ])
 }
 
 fn cancel_keyboard() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
         vec![button("❌ Annulla", "oggetti:draft:cancel")],
-        vec![button("🏠 Menu principale", "menu:main")],
+        vec![button("🏠 Menù principale", "menu:main")],
     ])
 }
 
@@ -2788,7 +2847,7 @@ fn object_detail_keyboard(
     if let Some(return_button) = contextual_return {
         rows.push(vec![return_button]);
     }
-    rows.push(vec![button("🏠 Menu principale", "menu:main")]);
+    rows.push(vec![button("🏠 Menù principale", "menu:main")]);
     InlineKeyboardMarkup::new(rows)
 }
 
@@ -2799,7 +2858,7 @@ fn delete_confirmation_keyboard(id: i64) -> InlineKeyboardMarkup {
             &format!("oggetti:delete:do:{id}"),
         )],
         vec![button("↩️ Annulla", &format!("oggetti:view:{id}"))],
-        vec![button("🏠 Menu principale", "menu:main")],
+        vec![button("🏠 Menù principale", "menu:main")],
     ])
 }
 
@@ -2831,7 +2890,7 @@ fn list_keyboard(objects: &[ObjectSummary], page: i64, total_pages: i64) -> Inli
         button("➕ Nuovo", "oggetti:new"),
     ]);
     rows.push(vec![button("🏷️ Menu oggetti", "oggetti:menu")]);
-    rows.push(vec![button("🏠 Menu principale", "menu:main")]);
+    rows.push(vec![button("🏠 Menù principale", "menu:main")]);
     InlineKeyboardMarkup::new(rows)
 }
 
@@ -2846,61 +2905,81 @@ fn search_results_keyboard(objects: &[ObjectSummary]) -> InlineKeyboardMarkup {
         .collect::<Vec<_>>();
     rows.push(vec![button("🔎 Nuova ricerca", "oggetti:search")]);
     rows.push(vec![button("🏷️ Menu oggetti", "oggetti:menu")]);
-    rows.push(vec![button("🏠 Menu principale", "menu:main")]);
+    rows.push(vec![button("🏠 Menù principale", "menu:main")]);
     InlineKeyboardMarkup::new(rows)
 }
 
 async fn push_summary_location(text: &mut String, pool: &SqlitePool, object: &ObjectSummary) {
     if let Some(location) = resolve_object_location(
         pool,
-        object.home_id,
-        object.home_name.as_deref(),
-        object.room_id,
-        object.room_name.as_deref(),
-        object.container_id,
+        ObjectLocationInput {
+            home_id: object.home_id,
+            home_name: object.home_name.as_deref(),
+            location_space_name: object.location_space_name.as_deref(),
+            owner_space_name: &object.owner_space_name,
+            room_id: object.room_id,
+            room_name: object.room_name.as_deref(),
+            container_id: object.container_id,
+        },
     )
     .await
     {
-        text.push_str(&format!("\n📍 {}\n{}", location.label, location.command));
+        text.push_str(&format!("\n📍 {}", location.label));
     }
 }
 
 async fn resolve_object_location(
     pool: &SqlitePool,
-    home_id: Option<i64>,
-    home_name: Option<&str>,
-    room_id: Option<i64>,
-    room_name: Option<&str>,
-    container_id: Option<i64>,
+    location: ObjectLocationInput<'_>,
 ) -> Option<ObjectLocationDisplay> {
-    if let Some(container_id) = container_id {
+    let show_space = crate::identity::current_view_all()
+        || location
+            .location_space_name
+            .is_some_and(|space| space != location.owner_space_name);
+
+    if let Some(container_id) = location.container_id {
         if let Ok(Some(path)) =
             crate::modules::contenitori::container_path(pool, container_id).await
         {
             return Some(ObjectLocationDisplay {
-                label: crate::modules::contenitori::format_path_for_ui(&path),
-                command: format!("/luogo_c{container_id}"),
+                label: crate::modules::contenitori::format_path_for_ui_with_space(
+                    &path, show_space,
+                ),
             });
         }
     }
-    if let (Some(room_id), Some(home), Some(room)) = (room_id, home_name, room_name) {
+    if let (Some(_), Some(home), Some(room)) =
+        (location.room_id, location.home_name, location.room_name)
+    {
+        let home = object_location_home_label(home, location.location_space_name, show_space);
         return Some(ObjectLocationDisplay {
             label: format!("{home} / {room}"),
-            command: format!("/luogo_r{room_id}"),
         });
     }
-    if let (Some(home_id), Some(home)) = (home_id, home_name) {
+    if let (Some(_), Some(home)) = (location.home_id, location.home_name) {
         return Some(ObjectLocationDisplay {
-            label: home.to_string(),
-            command: format!("/luogo_h{home_id}"),
+            label: object_location_home_label(home, location.location_space_name, show_space),
         });
     }
     None
 }
 
+fn object_location_home_label(
+    home_name: &str,
+    location_space_name: Option<&str>,
+    show_space: bool,
+) -> String {
+    if show_space {
+        if let Some(space) = location_space_name {
+            return format!("{home_name} · {space}");
+        }
+    }
+    home_name.to_string()
+}
+
 fn object_button_label(object: &ObjectSummary) -> String {
     let short_name = truncate_chars(&object.name, 42);
-    format!("🏷️ #{} · {short_name}", object.id)
+    format!("🏷️ {short_name}")
 }
 
 fn truncate_chars(value: &str, max_chars: usize) -> String {
@@ -2952,17 +3031,17 @@ fn field_prompt(field: DraftField, draft: &ObjectDraft) -> String {
     if let Some(current) = current {
         if field == DraftField::Name {
             format!(
-                "{instruction}\n\nValore attuale:\n{current}\n\nScrivi un nuovo valore oppure usa /salta per mantenere quello attuale. Il nome è obbligatorio e non può essere rimosso."
+                "{instruction}\n\nValore attuale:\n{current}\n\nScrivi un nuovo valore oppure premi ⏭ Salta per mantenere quello attuale. Il nome è obbligatorio e non può essere rimosso."
             )
         } else {
             format!(
-                "{instruction}\n\nValore attuale:\n{current}\n\nScrivi un nuovo valore, usa /salta per mantenerlo oppure /rimuovi per cancellarlo."
+                "{instruction}\n\nValore attuale:\n{current}\n\nScrivi un nuovo valore, premi ⏭ Salta per mantenerlo oppure 🗑 Rimuovi per cancellarlo."
             )
         }
     } else if field == DraftField::Name {
         instruction
     } else {
-        format!("{instruction}\n\nUsa /salta per lasciare il campo vuoto.")
+        format!("{instruction}\n\nPremi ⏭ Salta per lasciare il campo vuoto.")
     }
 }
 
@@ -3112,6 +3191,16 @@ fn push_optional_line(lines: &mut Vec<String>, label: &str, value: Option<&str>)
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn menu_principale_mostra_amministrazione_solo_agli_admin() {
+        let normal = main_menu_keyboard(false);
+        let admin = main_menu_keyboard(true);
+        let normal_text = format!("{normal:?}");
+        let admin_text = format!("{admin:?}");
+        assert!(!normal_text.contains("Amministrazione"));
+        assert!(admin_text.contains("Amministrazione"));
+    }
+
     use super::*;
     use sqlx::sqlite::SqlitePoolOptions;
 
@@ -3177,8 +3266,8 @@ mod tests {
 
         assert!(prompt.contains("Valore attuale:"));
         assert!(prompt.contains("Bosch"));
-        assert!(prompt.contains("/salta per mantenerlo"));
-        assert!(prompt.contains("/rimuovi per cancellarlo"));
+        assert!(prompt.contains("⏭ Salta per mantenerlo"));
+        assert!(prompt.contains("🗑 Rimuovi per cancellarlo"));
     }
 
     #[test]
@@ -3241,6 +3330,8 @@ mod tests {
         let record = ObjectRecord {
             id: 42,
             name: "MacBook".to_string(),
+            owner_space_name: "Spazio principale".to_string(),
+            location_space_name: None,
             description: None,
             brand: Some("Apple".to_string()),
             model: Some("Pro".to_string()),
@@ -3293,10 +3384,11 @@ mod tests {
         assert_eq!(search.len(), 1);
         assert_eq!(search[0].id, id);
 
-        let home = sqlx::query("INSERT INTO abitazioni (nome) VALUES ('Casa principale')")
-            .execute(&pool)
-            .await
-            .expect("casa");
+        let home =
+            sqlx::query("INSERT INTO abitazioni (nome, spazio_id) VALUES ('Casa principale', 1)")
+                .execute(&pool)
+                .await
+                .expect("casa");
         let home_id = home.last_insert_rowid();
         let room = sqlx::query("INSERT INTO stanze (abitazione_id, nome) VALUES (?, 'Officina')")
             .bind(home_id)
@@ -3427,10 +3519,11 @@ mod tests {
     #[tokio::test]
     async fn nuovo_oggetto_salva_casa_stanza_e_dettaglio_nella_stessa_creazione() {
         let pool = test_pool().await;
-        let home = sqlx::query("INSERT INTO abitazioni (nome) VALUES ('Casa principale')")
-            .execute(&pool)
-            .await
-            .expect("casa");
+        let home =
+            sqlx::query("INSERT INTO abitazioni (nome, spazio_id) VALUES ('Casa principale', 1)")
+                .execute(&pool)
+                .await
+                .expect("casa");
         let home_id = home.last_insert_rowid();
         let room = sqlx::query("INSERT INTO stanze (abitazione_id, nome) VALUES (?, 'Garage')")
             .bind(home_id)
@@ -3494,10 +3587,11 @@ mod tests {
     async fn storico_oggetto_conserva_contesto_luogo_e_non_registra_noop() {
         let pool = test_pool().await;
 
-        let home = sqlx::query("INSERT INTO abitazioni (nome) VALUES ('Casa storico')")
-            .execute(&pool)
-            .await
-            .expect("casa");
+        let home =
+            sqlx::query("INSERT INTO abitazioni (nome, spazio_id) VALUES ('Casa storico', 1)")
+                .execute(&pool)
+                .await
+                .expect("casa");
         let home_id = home.last_insert_rowid();
 
         let room =
@@ -3622,11 +3716,12 @@ mod tests {
     #[tokio::test]
     async fn nuovo_oggetto_puo_nascere_direttamente_in_un_contenitore() {
         let pool = test_pool().await;
-        let home_id = sqlx::query("INSERT INTO abitazioni (nome) VALUES ('Casa principale')")
-            .execute(&pool)
-            .await
-            .expect("casa")
-            .last_insert_rowid();
+        let home_id =
+            sqlx::query("INSERT INTO abitazioni (nome, spazio_id) VALUES ('Casa principale', 1)")
+                .execute(&pool)
+                .await
+                .expect("casa")
+                .last_insert_rowid();
         let room_id = sqlx::query("INSERT INTO stanze (abitazione_id, nome) VALUES (?, 'Garage')")
             .bind(home_id)
             .execute(&pool)
@@ -3697,5 +3792,158 @@ mod tests {
         draft.object_id = Some(10);
         draft.return_to = DraftReturnTarget::Object(10);
         assert!(format_draft(&draft).contains("Dettaglio posizione legacy"));
+    }
+    #[tokio::test]
+    async fn oggetti_sono_isolati_dallo_spazio_attivo() {
+        let pool = test_pool().await;
+        let space_two =
+            sqlx::query("INSERT INTO spazi (nome, tipo) VALUES ('Spazio due', 'personale')")
+                .execute(&pool)
+                .await
+                .expect("spazio due")
+                .last_insert_rowid();
+
+        let actor_two = crate::identity::AuditActor {
+            utente_id: None,
+            nome_snapshot: "Sistema test".to_string(),
+            spazio_id: space_two,
+            spazio_nome_snapshot: "Spazio due".to_string(),
+            view_all: false,
+            origine: "sistema",
+            telegram_user_id: None,
+            telegram_username: None,
+        };
+        let actor_one = crate::identity::AuditActor::system();
+
+        let second_id = crate::identity::with_actor(actor_two.clone(), async {
+            create_object(
+                &pool,
+                &ObjectDraft::new("Oggetto stesso nome").expect("bozza spazio due"),
+            )
+            .await
+            .expect("oggetto spazio due")
+        })
+        .await;
+
+        let first_id = crate::identity::with_actor(actor_one.clone(), async {
+            create_object(
+                &pool,
+                &ObjectDraft::new("Oggetto stesso nome").expect("bozza spazio uno"),
+            )
+            .await
+            .expect("oggetto spazio uno")
+        })
+        .await;
+
+        crate::identity::with_actor(actor_one, async {
+            assert!(get_object(&pool, second_id)
+                .await
+                .expect("lettura cross-space")
+                .is_none());
+            assert!(get_object(&pool, first_id)
+                .await
+                .expect("lettura spazio corrente")
+                .is_some());
+
+            let (objects, total) = list_objects(&pool, 0, PAGE_SIZE).await.expect("elenco");
+            assert_eq!(total, 1);
+            assert_eq!(objects.len(), 1);
+            assert_eq!(objects[0].id, first_id);
+
+            let results = search_objects(&pool, "Oggetto stesso nome", 10)
+                .await
+                .expect("ricerca");
+            assert_eq!(results.len(), 1);
+            assert_eq!(results[0].id, first_id);
+
+            let cross_update = update_object(
+                &pool,
+                second_id,
+                &ObjectDraft::new("Tentativo cross-space").expect("bozza cross-space"),
+            )
+            .await;
+            assert!(cross_update.is_err());
+            assert!(!delete_object(&pool, second_id)
+                .await
+                .expect("delete cross-space deve essere un no-op"));
+        })
+        .await;
+
+        crate::identity::with_actor(actor_two, async {
+            assert!(get_object(&pool, first_id)
+                .await
+                .expect("lettura cross-space inversa")
+                .is_none());
+            let own = get_object(&pool, second_id)
+                .await
+                .expect("oggetto spazio due")
+                .expect("oggetto ancora presente");
+            assert_eq!(own.name, "Oggetto stesso nome");
+            let (_, total) = list_objects(&pool, 0, PAGE_SIZE).await.expect("elenco");
+            assert_eq!(total, 1);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn ruolo_lettura_blocca_crud_reale_degli_oggetti() {
+        let pool = test_pool().await;
+        let existing_id = create_object(
+            &pool,
+            &ObjectDraft::new("Oggetto protetto").expect("bozza iniziale"),
+        )
+        .await
+        .expect("oggetto iniziale");
+
+        let user_id = sqlx::query("INSERT INTO utenti (nome_visualizzato) VALUES ('Lettore')")
+            .execute(&pool)
+            .await
+            .expect("utente")
+            .last_insert_rowid();
+        sqlx::query(
+            "INSERT INTO membri_spazio (spazio_id, utente_id, ruolo) VALUES (1, ?, 'lettura')",
+        )
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("membership lettura");
+        sqlx::query("INSERT INTO preferenze_utente (utente_id, spazio_attivo_id) VALUES (?, 1)")
+            .bind(user_id)
+            .execute(&pool)
+            .await
+            .expect("preferenza");
+
+        let actor = crate::identity::AuditActor {
+            utente_id: Some(user_id),
+            nome_snapshot: "Lettore".to_string(),
+            spazio_id: 1,
+            spazio_nome_snapshot: "Spazio principale".to_string(),
+            view_all: false,
+            origine: "telegram",
+            telegram_user_id: Some(9001),
+            telegram_username: None,
+        };
+
+        crate::identity::with_actor(actor, async {
+            assert!(create_object(
+                &pool,
+                &ObjectDraft::new("Nuovo vietato").expect("bozza create"),
+            )
+            .await
+            .is_err());
+            assert!(update_object(
+                &pool,
+                existing_id,
+                &ObjectDraft::new("Modifica vietata").expect("bozza update"),
+            )
+            .await
+            .is_err());
+            assert!(delete_object(&pool, existing_id).await.is_err());
+            assert!(get_object(&pool, existing_id)
+                .await
+                .expect("lettura consentita")
+                .is_some());
+        })
+        .await;
     }
 }

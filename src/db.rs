@@ -21,6 +21,13 @@ pub struct DatabaseStatus {
     pub foreign_keys_enabled: bool,
     pub applied_migrations: i64,
     pub schema_core_present: bool,
+    pub shared_foundations_present: bool,
+    pub operational_spaces_present: bool,
+    pub multi_space_view_present: bool,
+    pub system_roles_present: bool,
+    pub access_improvements_present: bool,
+    pub product_formats_present: bool,
+    pub guided_recipes_present: bool,
 }
 
 /// Apre SQLite, crea il file se necessario e applica tutte le migration.
@@ -78,10 +85,86 @@ pub async fn status(pool: &SqlitePool) -> Result<DatabaseStatus> {
     .await
     .context("Impossibile verificare la presenza dello schema core")?;
 
+    let shared_tables: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sqlite_master \
+         WHERE type = 'table' \
+         AND name IN ('utenti', 'spazi', 'membri_spazio', 'account_telegram', 'preferenze_utente', 'inviti_spazio')",
+    )
+    .fetch_one(pool)
+    .await
+    .context("Impossibile verificare le fondazioni condivise Step 7")?;
+
+    let operational_spaces: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(\
+            SELECT 1 FROM _sqlx_migrations \
+            WHERE version = 20260823174500 AND success = 1\
+         )",
+    )
+    .fetch_one(pool)
+    .await
+    .context("Impossibile verificare la migration degli spazi operativi")?;
+
+    let multi_space_view: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(\
+            SELECT 1 FROM _sqlx_migrations \
+            WHERE version = 20260823200000 AND success = 1\
+         )",
+    )
+    .fetch_one(pool)
+    .await
+    .context("Impossibile verificare la migration della vista multi-spazio")?;
+
+    let system_roles: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(\
+            SELECT 1 FROM _sqlx_migrations \
+            WHERE version = 20260825003000 AND success = 1\
+         )",
+    )
+    .fetch_one(pool)
+    .await
+    .context("Impossibile verificare la migration dei ruoli di sistema")?;
+
+    let access_improvements: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(\
+            SELECT 1 FROM _sqlx_migrations \
+            WHERE version = 20260825153000 AND success = 1\
+         )",
+    )
+    .fetch_one(pool)
+    .await
+    .context("Impossibile verificare la migration accesso e miglioramenti")?;
+
+    let product_formats: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(\
+            SELECT 1 FROM _sqlx_migrations \
+            WHERE version = 20260825220000 AND success = 1\
+         )",
+    )
+    .fetch_one(pool)
+    .await
+    .context("Impossibile verificare la migration dei formati prodotto")?;
+
+    let guided_recipes: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(\
+            SELECT 1 FROM _sqlx_migrations \
+            WHERE version = 20260825231500 AND success = 1\
+         )",
+    )
+    .fetch_one(pool)
+    .await
+    .context("Impossibile verificare la migration delle Ricette operative")?;
+
     Ok(DatabaseStatus {
         foreign_keys_enabled: foreign_keys == 1,
         applied_migrations,
         schema_core_present: core_tables == 5,
+        shared_foundations_present: shared_tables == 6,
+        operational_spaces_present: operational_spaces == 1,
+        multi_space_view_present: multi_space_view == 1,
+        system_roles_present: system_roles == 1,
+        access_improvements_present: access_improvements == 1,
+        product_formats_present: product_formats == 1,
+        guided_recipes_present: guided_recipes == 1,
     })
 }
 

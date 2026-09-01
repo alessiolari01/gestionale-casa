@@ -1,294 +1,130 @@
 # Roadmap funzionale
 
+## Stato corrente — Step 7.2H chiuso, finalizzazione documentale
 
-## Stato Step 6C — implementazione completa, rilascio finale
+**Branch:** `step-7-alimentazione`
+**Baseline Git precedente:** `34d076c`
+**Stato runtime:** Profili, Spazi/Membri/Inviti, input inattesi ed export progetto collaudati sul Galaxy S9 entro il 29 agosto 2026.
 
-- 6C.1 ✅ backend gerarchia contenitori — `cc3ba4c`.
-- 6C.2 ✅ UI Telegram contenitori, verificata su S9 — `4c64798`.
-- 6C.3A ✅ navigazione unificata + creazione contestuale — `413605e`.
-- 6C.3B ✅ rifiniture UX, posizione completa e infrastruttura — `24944ac`.
-- 6C.3C ✅ spostamento oggetti fino a contenitori/sottocontenitori, **62/62 test + runtime S9** — `658e455`.
-- 6C.4 ✅ storico contenitori e cambi percorso, migration reale, **69/69 test + runtime S9** — `fd4cbea`.
-- 6C.5 🔧 chiusura documentale e preparazione PR/CI/merge; nessuna nuova funzionalità.
+Completato in 7.2H:
 
-Principio consolidato: navigare per **luogo corrente**, non per silos separati casa/stanza/contenitore. Lo storico usa snapshot immutabili dei percorsi e non inventa cronologia retroattiva.
+- fondazioni e UI Profili alimentari;
+- gestione membri degli Spazi;
+- inviti privati via deep-link con ruoli, utilizzi e scadenze;
+- rifiniture UX inviti/Miglioramenti;
+- verifiche guidate e differimento esplicito dei test che richiedono un secondo account;
+- input inatteso non distruttivo + suggerimento `/start` al terzo tentativo;
+- `📦 Esporta progetto` sanitizzato e auto-documentante.
 
-## Stato aggiornato dopo l'implementazione Step 6B
+Prossimo blocco funzionale: **Porzioni e override**. La finalizzazione corrente aggiorna documentazione e GitHub senza aggiungere nuove funzionalità.
+## Step 7 — Fondazioni condivise e Alimentazione
 
-- Step 1 ✅ Scheletro progetto
-- Step 2 ✅ Schema dati core
-- Step 3 ✅ Backend Telegram + whitelist
-- Step 3.1 ✅ Handoff, GitHub Actions, Dependabot e workflow Git
-- Step 4 ✅ SQLite runtime + migration automatiche + `/status`
-- Step 5A ✅ Oggetti generici
-- Step 5B ✅ Foto degli oggetti
-- Step 5C ✅ Modifica ed eliminazione oggetti
-- Step 6A ✅ Case, stanze e posizione strutturata
-- Step 6B ✅ Storico globale + individuale, mergiato su `main`
-- Step 6C ✅ Implementato e verificato su S9; PR/CI/merge finale in corso
-- Step 7A ⏳ Documenti e garanzie
-- Step 7B ⏳ Promemoria e scadenze
-- Step 7C ⏳ Tag + ricerca globale
-- Step 8 ⏳ Primo nuovo modulo applicativo: Veicoli o Vestiti
+### 7.0 — Specifica e organizzazione
 
-Il 6C è stato sviluppato dopo l'ingresso del 6B nella baseline ufficiale `main`.
+**VERIFICATO.** Requisiti, confini di dominio, politica migration e struttura documentale.
 
----
+### 7.1 — Fondazioni condivise
 
-Questo documento raccoglie la sequenza approvata degli sviluppi futuri e le
-scelte che devono restare visibili anche quando il progetto passa a un'altra
-persona o a un'altra AI.
+**OPERATIVE, con evoluzioni amministrative ancora possibili.**
 
-## Stato corrente
+Già presenti:
 
-- Step 1-4: **chiusi e verificati**.
-- Step 5A — Oggetti generici: **chiuso e verificato**.
-- Step 5B — Foto oggetti: **chiuso e verificato**.
-- Step 5C — Modifica/eliminazione oggetti: **chiuso e verificato**, mergiato su
-  `main` con CI verde.
-- Step 6A — Case, stanze e posizione strutturata: **chiuso e verificato**.
-- Step 6B — Storico globale + individuale: **chiuso e mergiato su `main`**.
-- Step 6C — Contenitori e sotto-posizioni: **implementazione/runtime verificati; rilascio finale in corso**.
+- utenti interni separati dagli account Telegram;
+- spazi, membership, spazio predefinito e vista multi-spazio;
+- ruoli di sistema e ruoli nello spazio;
+- proprietà separata da posizione/visibilità;
+- permessi riutilizzabili sulle risorse;
+- audit con autore/origine;
+- accesso Telegram tramite richiesta approvata dall'amministratore principale.
 
-## Sequenza approvata
+La gestione distruttiva/reset degli account (#7) non è parte della chiusura 7.2G e richiederà regole dedicate.
 
-### Step 6A — Case, stanze e posizione strutturata
+### 7.2 — Alimentazione completa
 
-Obiettivi:
+**IN SVILUPPO.**
 
-- più abitazioni nello stesso account;
-- stanze appartenenti a una casa;
-- oggetti assegnabili direttamente a una casa oppure a una stanza;
-- spostamento guidato dell'oggetto;
-- elenchi filtrati per casa e stanza;
-- ricerca oggetti anche per nome della casa/stanza;
-- mantenimento del vecchio campo `oggetti.posizione` come dettaglio libero;
-- base condivisa tramite `items`, riutilizzabile dai moduli futuri.
+#### Completato
 
-Architettura approvata: `abitazioni` + `stanze` + `item_luogo`. Dettagli in
-`docs/moduli/luoghi.md`.
+- Alimenti e unità;
+- catalogo base e categorie;
+- proprietà, visibilità e permessi;
+- prodotti commerciali, formati acquistabili e nutrizione;
+- Ricette operative con ingredienti strutturati;
+- prodotto commerciale opzionale nell'ingrediente, senza legare la ricetta al formato;
+- procedimento strutturato con foto/video e modalità guidata;
+- ricerca per nome/categoria/ingredienti e filtro categoria negli ingredienti;
+- rifiniture UI raccolte tramite `💡 Migliora`.
 
-### Step 6B — Storico globale + storico individuale
+#### Prossima sequenza funzionale
 
-Lo storico deve essere una funzione trasversale del gestionale, non un log
-specifico del modulo Oggetti.
+1. **porzioni personali** per Profilo e override per ingrediente;
+2. **turni/routine**;
+3. **planner pasti** su date reali e partecipanti, con snapshot/versione ricetta;
+4. **lista della spesa** aggregata e scelta dei formati;
+5. reminder/export Alimentazione e integrazioni residue.
 
-Due viste:
+### 7.3 — Integrazioni e condivisione operativa
 
-1. **storico individuale** dalla scheda di un'entità;
-2. **storico globale dell'account** con filtri.
+**PREVISTO.**
 
-Ogni evento dovrà conservare almeno:
+- gestione membri/inviti più completa dove ancora necessaria;
+- Google Calendar;
+- email;
+- inviti ai pasti;
+- impostazioni calendario/reminder;
+- account Google dedicato e possibile supporto futuro ad account personali.
 
-- data e ora;
-- tipo di operazione;
-- modulo/sezione;
-- entità interessata e relativo ID quando ancora esiste;
-- casa e stanza rilevanti, se presenti;
-- valori precedenti e nuovi per le modifiche;
-- una descrizione leggibile per Telegram.
+## Moduli futuri già specificati
 
-Filtri desiderati:
+### Acquisti e prezzi — RIMANDATO
 
-- periodo;
-- modulo (`oggetti`, `vestiti`, `veicoli`, `case`, `stanze`, ecc.);
-- casa;
-- stanza;
-- tipo di operazione;
-- elemento specifico.
+Prodotti/confezioni, prezzi base, negozi e confronto volantini. Deve riusare i formati commerciali già presenti in Alimentazione.
 
-Esempi di eventi: creazione, modifica, spostamento, foto aggiunta/rimossa,
-archiviazione, eliminazione, tag e promemoria. Gli eventi importanti devono
-restare consultabili anche dopo la cancellazione dell'entità originale.
+### Viaggi — RIMANDATO
 
-Per i luoghi, lo storico dovrà distinguere almeno tre eventi diversi:
+Bagagli, checklist, oggetti temporaneamente in viaggio, verifica partenza/rientro e collegamento alle spese.
 
-- prima assegnazione (`nessun luogo -> casa/stanza`);
-- spostamento (`casa/stanza A -> casa/stanza B`), conservando esplicitamente
-  origine e destinazione;
-- rimozione del luogo (`casa/stanza -> nessun luogo`).
+### Spese — RIMANDATO
 
-La UI dello Step 6A usa già questa distinzione, così il significato delle azioni
-rimane coerente quando verrà introdotto lo storico.
+Spese personali/condivise, quote, saldi, rimborsi e collegamenti con acquisti/viaggi/spazi.
 
-### Step 6C — Contenitori e sotto-posizioni
+## Evoluzione infrastrutturale finale — `🧪 Zona test`
 
-Implementato come estensione gerarchica della posizione fisica:
+**FUTURO / ULTIMA FASE, non prioritaria nell'uso personale corrente.**
+
+Obiettivo:
 
 ```text
-Casa principale
-→ Garage
-→ Scaffale 2
-→ Cassetta attrezzi
-→ Chiave dinamometrica
+versione stabile attiva per tutti
+→ preparazione/compilazione candidata
+→ pipeline automatica verde
+→ admin entra in 🧪 Zona test
+→ test su candidata e DB/snapshot separato
+→ ✅ Conferma versione
+→ 🚀 Installa e riavvia
+→ backup
+→ breve shutdown
+→ migration
+→ nuova stabile per tutti
+→ rollback automatico se i controlli falliscono
 ```
 
-La soluzione consolidata usa `contenitori` con `contenitore_padre_id` ricorsivo,
-sempre associato alla casa e opzionalmente alla stanza. `item_luogo.contenitore_id`
-collega l'item al nodo più specifico. Il percorso operativo è derivato dalle
-relazioni; lo storico ne conserva uno snapshot immutabile. Spostamenti ed
-eliminazioni mantengono gli oggetti e registrano gli effetti sul sottoalbero.
+Vincoli già decisi:
 
-### Step 7A — Documenti e garanzie
+- un solo ingresso Telegram; niente due long-poller concorrenti con lo stesso token;
+- candidata visibile soltanto all'admin finché non viene promossa;
+- dati di test isolati dalla produzione;
+- migration reali applicate soltanto nel passaggio finale, salvo migration esplicitamente compatibili;
+- strategia `expand → migrate → contract` per evoluzioni strutturali importanti;
+- versione stabile precedente conservata per rollback.
 
-Documenti collegabili alle entità, per esempio:
+## Principi trasversali
 
-- scontrini e fatture;
-- manuali;
-- garanzie;
-- libretti e certificati;
-- polizze e altri PDF/immagini.
-
-La funzione deve essere condivisa tra moduli quando possibile, evitando tabelle
-separate per Oggetti, Vestiti e Veicoli.
-
-### Step 7B — Promemoria e scadenze
-
-Sviluppare concretamente l'infrastruttura `promemoria` già prevista nel core:
-
-- scadenze collegate a un'entità;
-- notifiche Telegram anticipate;
-- ricorrenze;
-- completamento;
-- esempi: garanzia, revisione, assicurazione, manutenzione.
-
-### Step 7C — Tag + ricerca globale
-
-- tag condivisi tra moduli;
-- filtri combinabili per casa, stanza, modulo, stato e tag;
-- ricerca globale che non richieda di conoscere prima il modulo dell'elemento.
-
-Esempio futuro:
-
-```text
-/cerca casco
-→ oggetto
-→ vestito/accessorio
-→ documento
-→ manutenzione collegata
-```
-
-### Step 8 — Primo nuovo modulo applicativo
-
-Priorità da scegliere al momento tra:
-
-- **Veicoli**;
-- **Vestiti**.
-
-Entrambi dovranno riusare, dove sensato, luoghi, foto, documenti, tag,
-promemoria e storico invece di ricreare sistemi paralleli.
-
-## Funzioni future approvate da tenere in progettazione
-
-### Manutenzioni e interventi
-
-Registro di eventi reali, distinto dallo storico tecnico delle modifiche al
-gestionale. Particolarmente utile per veicoli, elettrodomestici e attrezzatura.
-
-Dati possibili: data, chilometraggio/ore, descrizione, costo, officina/persona,
-documenti e foto.
-
-### Costi e valore
-
-Per ogni entità potranno essere aggregati:
-
-- prezzo di acquisto;
-- manutenzioni;
-- accessori;
-- assicurazioni/spese ricorrenti;
-- valore stimato attuale.
-
-In futuro questi dati alimenteranno statistiche e dashboard.
-
-### Prestiti
-
-Stato temporaneo per oggetti prestati a una persona, con:
-
-- persona;
-- data prestito;
-- restituzione prevista;
-- restituzione effettiva;
-- promemoria opzionale;
-- eventi nello storico.
-
-### QR code e codici a barre
-
-Possibile generazione di QR per aprire direttamente la scheda di:
-
-- oggetto;
-- stanza;
-- contenitore.
-
-Particolarmente utile dopo lo Step 6C.
-
-### Archivio invece della sola eliminazione
-
-Oltre alla cancellazione definitiva introdotta nello Step 5C, il progetto dovrà
-valutare uno stato di archivio che conservi dati e storico per elementi non più
-attivi:
-
-- venduto;
-- regalato;
-- buttato;
-- perso;
-- dismesso.
-
-L'archivio sarà preferibile alla cancellazione quando si vuole conservare la
-storia dell'elemento.
-
-### Registro acquisti
-
-Flusso rapido che parte da un acquisto e crea/collega:
-
-- elemento;
-- prezzo;
-- venditore;
-- data;
-- scontrino/fattura;
-- garanzia.
-
-In futuro si potrà valutare l'estrazione assistita dei dati da foto/documenti,
-ma non è un requisito dei primi step.
-
-### Dashboard e statistiche
-
-Vista sintetica futura, per esempio:
-
-- numero di oggetti/veicoli/vestiti;
-- elementi per casa/stanza;
-- prossime scadenze;
-- elementi da riparare;
-- valore stimato e spese aggregate.
-
-## Principio architetturale trasversale
-
-Il progetto deve evitare di creare una versione diversa della stessa funzione
-per ogni modulo.
-
-Il pattern attuale `items` va evoluto mantenendo questa idea:
-
-```text
-                    ITEM / ENTITÀ
-                         |
-          +--------------+--------------+
-          |              |              |
-       Oggetto         Veicolo        Vestito
-          |              |              |
-          +---- Foto / Documenti / Tag / Promemoria / Storico ----+
-          +-------------------- Luogo condiviso --------------------+
-```
-
-Non significa che ogni futura entità debba per forza essere una riga `items`:
-case, stanze e altri concetti di sistema possono avere tabelle proprie. Significa
-che le funzionalità trasversali vanno progettate una volta e riusate quando il
-dominio lo consente.
-
-## Regola per le future decisioni
-
-Prima di introdurre una migration strutturale importante:
-
-1. descrivere il requisito;
-2. confrontare le alternative;
-3. scegliere e documentare il modello;
-4. solo dopo creare migration e codice;
-5. mantenere compatibilità con i dati reali già presenti quando possibile.
+- migration reali append-only e immutabili;
+- sicurezza backend fail-closed;
+- nessun ID tecnico nella UI utente;
+- proprietà, visibilità, membership e permessi separati;
+- Telegram è frontend, non dominio;
+- liste operative paginate a 5 elementi dove applicabile;
+- modifiche runtime verificate sull'S9 prima della chiusura di uno step;
+- ogni checkpoint importante aggiorna README, roadmap, architettura, handoff e changelog.

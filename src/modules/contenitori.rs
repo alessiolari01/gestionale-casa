@@ -13,6 +13,8 @@ use teloxide::{
     types::{InlineKeyboardButton, InlineKeyboardMarkup},
 };
 
+type Bot = crate::context_bot::ContextBot;
+
 #[derive(Clone, Default)]
 pub struct ContainerSessionStore {
     inner: Arc<Mutex<HashMap<i64, ContainerConversationState>>>,
@@ -111,6 +113,7 @@ pub struct ContainerBreadcrumb {
 pub struct ContainerPath {
     pub home_id: i64,
     pub home_name: String,
+    pub home_space_name: String,
     pub room_id: Option<i64>,
     pub room_name: Option<String>,
     pub containers: Vec<ContainerBreadcrumb>,
@@ -125,6 +128,7 @@ struct BreadcrumbRow {
 #[derive(Debug, FromRow)]
 struct ScopeNames {
     home_name: String,
+    home_space_name: String,
     room_name: Option<String>,
 }
 
@@ -253,6 +257,10 @@ pub async fn create_container(
     name: &str,
     description: Option<&str>,
 ) -> Result<i64> {
+    let home_space = visible_home_space_id(pool, home_id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("abitazione #{home_id} inesistente"))?;
+    crate::identity::ensure_can_write_space(pool, home_space).await?;
     let name = clean_required_name(name)?;
     let description = clean_optional_text(description);
     let mut tx = pool.begin().await?;
@@ -306,32 +314,44 @@ pub async fn create_container(
 }
 
 pub async fn get_container(pool: &SqlitePool, id: i64) -> Result<Option<ContainerRecord>> {
-    Ok(sqlx::query_as::<_, ContainerRecord>(
-        "SELECT id, abitazione_id AS home_id, stanza_id AS room_id, \
-                contenitore_padre_id AS parent_id, nome AS name, descrizione AS description \
-         FROM contenitori WHERE id = ?",
-    )
-    .bind(id)
-    .fetch_optional(pool)
-    .await?)
+    let sql = format!(
+        "SELECT c.id, c.abitazione_id AS home_id, c.stanza_id AS room_id, \
+                c.contenitore_padre_id AS parent_id, c.nome AS name, c.descrizione AS description \
+         FROM contenitori c JOIN abitazioni a ON a.id = c.abitazione_id \
+         WHERE c.id = ? AND {}",
+        crate::identity::visible_space_sql("a")
+    );
+    Ok(sqlx::query_as::<_, ContainerRecord>(&sql)
+        .bind(id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_optional(pool)
+        .await?)
 }
 
 pub async fn list_container_children(
     pool: &SqlitePool,
     parent_id: i64,
 ) -> Result<Vec<ContainerRecord>> {
-    Ok(sqlx::query_as::<_, ContainerRecord>(
-        "SELECT id, abitazione_id AS home_id, stanza_id AS room_id, \
-                contenitore_padre_id AS parent_id, nome AS name, descrizione AS description \
-         FROM contenitori WHERE contenitore_padre_id = ? \
-         ORDER BY nome COLLATE NOCASE, id",
-    )
-    .bind(parent_id)
-    .fetch_all(pool)
-    .await?)
+    let sql = format!(
+        "SELECT c.id, c.abitazione_id AS home_id, c.stanza_id AS room_id, \
+                c.contenitore_padre_id AS parent_id, c.nome AS name, c.descrizione AS description \
+         FROM contenitori c JOIN abitazioni a ON a.id = c.abitazione_id \
+         WHERE c.contenitore_padre_id = ? AND {} \
+         ORDER BY c.nome COLLATE NOCASE, c.id",
+        crate::identity::visible_space_sql("a")
+    );
+    Ok(sqlx::query_as::<_, ContainerRecord>(&sql)
+        .bind(parent_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_all(pool)
+        .await?)
 }
 
 pub async fn rename_container(pool: &SqlitePool, id: i64, name: &str) -> Result<bool> {
+    let Some(space_id) = visible_container_space_id(pool, id).await? else {
+        return Ok(false);
+    };
+    crate::identity::ensure_can_write_space(pool, space_id).await?;
     let name = clean_required_name(name)?;
     let mut tx = pool.begin().await?;
     let Some(current) = get_container_conn(&mut tx, id).await? else {
@@ -381,6 +401,10 @@ pub async fn set_container_description(
     id: i64,
     description: Option<&str>,
 ) -> Result<bool> {
+    let Some(space_id) = visible_container_space_id(pool, id).await? else {
+        return Ok(false);
+    };
+    crate::identity::ensure_can_write_space(pool, space_id).await?;
     let description = clean_optional_text(description);
     let mut tx = pool.begin().await?;
     let Some(current) = get_container_conn(&mut tx, id).await? else {
@@ -430,8 +454,10 @@ pub async fn container_path(pool: &SqlitePool, id: i64) -> Result<Option<Contain
     };
 
     let scope = sqlx::query_as::<_, ScopeNames>(
-        "SELECT a.nome AS home_name, s.nome AS room_name \
-         FROM abitazioni a LEFT JOIN stanze s ON s.id = ? WHERE a.id = ?",
+        "SELECT a.nome AS home_name, sp.nome AS home_space_name, s.nome AS room_name \
+         FROM abitazioni a \
+         JOIN spazi sp ON sp.id = a.spazio_id \
+         LEFT JOIN stanze s ON s.id = ? WHERE a.id = ?",
     )
     .bind(container.room_id)
     .bind(container.home_id)
@@ -459,6 +485,7 @@ pub async fn container_path(pool: &SqlitePool, id: i64) -> Result<Option<Contain
     Ok(Some(ContainerPath {
         home_id: container.home_id,
         home_name: scope.home_name,
+        home_space_name: scope.home_space_name,
         room_id: container.room_id,
         room_name: scope.room_name,
         containers,
@@ -470,16 +497,19 @@ pub async fn assign_item_to_container(
     item_id: i64,
     container_id: i64,
 ) -> Result<()> {
+    let item_space = visible_item_space_id(pool, item_id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("item #{item_id} inesistente"))?;
+    let container_space = visible_container_space_id(pool, container_id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("contenitore #{container_id} inesistente"))?;
+    crate::identity::ensure_can_write_space(pool, item_space).await?;
+    crate::identity::ensure_can_write_space(pool, container_space).await?;
+
     let mut tx = pool.begin().await?;
     let container = get_container_conn(&mut tx, container_id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("contenitore #{container_id} inesistente"))?;
-
-    let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM items WHERE id = ?)")
-        .bind(item_id)
-        .fetch_one(&mut *tx)
-        .await?;
-    ensure!(exists, "item #{item_id} inesistente");
 
     let already_here: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM item_luogo WHERE item_id = ? AND contenitore_id = ?)",
@@ -539,7 +569,7 @@ pub(crate) async fn insert_item_location_in_container(
     container_id: i64,
 ) -> Result<()> {
     let scope = sqlx::query_as::<_, (i64, Option<i64>)>(
-        "SELECT abitazione_id, stanza_id FROM contenitori WHERE id = ?",
+        "SELECT c.abitazione_id, c.stanza_id FROM contenitori c WHERE c.id = ?",
     )
     .bind(container_id)
     .fetch_optional(&mut **tx)
@@ -571,6 +601,18 @@ pub async fn move_container(
     new_room_id: Option<i64>,
     new_parent_id: Option<i64>,
 ) -> Result<bool> {
+    let current_space = visible_container_space_id(pool, id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("contenitore #{id} inesistente"))?;
+    let target_space = visible_home_space_id(pool, new_home_id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("abitazione #{new_home_id} inesistente"))?;
+    crate::identity::ensure_can_write_space(pool, current_space).await?;
+    crate::identity::ensure_can_write_space(pool, target_space).await?;
+    ensure!(
+        current_space == target_space,
+        "un contenitore non può essere trasferito tra spazi diversi; sposta i singoli oggetti"
+    );
     let mut tx = pool.begin().await?;
     let Some(current) = get_container_conn(&mut tx, id).await? else {
         return Ok(false);
@@ -701,6 +743,10 @@ pub async fn move_container(
 }
 
 pub async fn delete_container(pool: &SqlitePool, id: i64) -> Result<bool> {
+    let Some(space_id) = visible_container_space_id(pool, id).await? else {
+        return Ok(false);
+    };
+    crate::identity::ensure_can_write_space(pool, space_id).await?;
     let mut tx = pool.begin().await?;
     let Some(container) = get_container_conn(&mut tx, id).await? else {
         return Ok(false);
@@ -818,14 +864,55 @@ async fn get_container_conn(
     conn: &mut SqliteConnection,
     id: i64,
 ) -> Result<Option<ContainerRecord>> {
-    Ok(sqlx::query_as::<_, ContainerRecord>(
-        "SELECT id, abitazione_id AS home_id, stanza_id AS room_id, \
-                contenitore_padre_id AS parent_id, nome AS name, descrizione AS description \
-         FROM contenitori WHERE id = ?",
-    )
-    .bind(id)
-    .fetch_optional(conn)
-    .await?)
+    let sql = format!(
+        "SELECT c.id, c.abitazione_id AS home_id, c.stanza_id AS room_id, \
+                c.contenitore_padre_id AS parent_id, c.nome AS name, c.descrizione AS description \
+         FROM contenitori c JOIN abitazioni a ON a.id = c.abitazione_id \
+         WHERE c.id = ? AND {}",
+        crate::identity::visible_space_sql("a")
+    );
+    Ok(sqlx::query_as::<_, ContainerRecord>(&sql)
+        .bind(id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_optional(conn)
+        .await?)
+}
+
+async fn visible_home_space_id(pool: &SqlitePool, home_id: i64) -> Result<Option<i64>> {
+    let sql = format!(
+        "SELECT a.spazio_id FROM abitazioni a WHERE a.id = ? AND {}",
+        crate::identity::visible_space_sql("a")
+    );
+    Ok(sqlx::query_scalar(&sql)
+        .bind(home_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_optional(pool)
+        .await?)
+}
+
+async fn visible_container_space_id(pool: &SqlitePool, id: i64) -> Result<Option<i64>> {
+    let sql = format!(
+        "SELECT a.spazio_id FROM contenitori c JOIN abitazioni a ON a.id = c.abitazione_id \
+         WHERE c.id = ? AND {}",
+        crate::identity::visible_space_sql("a")
+    );
+    Ok(sqlx::query_scalar(&sql)
+        .bind(id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_optional(pool)
+        .await?)
+}
+
+async fn visible_item_space_id(pool: &SqlitePool, item_id: i64) -> Result<Option<i64>> {
+    let sql = format!(
+        "SELECT i.spazio_id FROM items i WHERE i.id = ? AND {}",
+        crate::identity::visible_space_sql("i")
+    );
+    Ok(sqlx::query_scalar(&sql)
+        .bind(item_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_optional(pool)
+        .await?)
 }
 
 async fn validate_scope(
@@ -957,7 +1044,7 @@ async fn show_container_return_target(
 pub async fn show_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
-        "📦 Contenitori\n\nGestisci armadi, scatole, ripiani e altre sotto-posizioni annidabili.\n\nPuoi creare un oggetto direttamente dal luogo corrente; la gestione completa degli spostamenti oggetto ↔ contenitore continua nel 6C.3.",
+        "📦 Contenitori\n\nGestisci armadi, scatole, ripiani e altre sotto-posizioni annidabili.\n\nPuoi creare oggetti direttamente dal luogo corrente e spostarli tra casa, stanza e contenitore.",
     )
     .reply_markup(containers_menu_keyboard())
     .await?;
@@ -987,7 +1074,7 @@ pub async fn handle_message(
                 } else {
                     bot.send_message(
                         msg.chat.id,
-                        "Uso: /contenitore <id>\nEsempio: /contenitore 3",
+                        "Apri Contenitori e scegli il contenitore dai pulsanti.",
                     )
                     .reply_markup(containers_menu_keyboard())
                     .await?;
@@ -1165,7 +1252,7 @@ pub async fn handle_callback(
                 ask_container_name(bot, chat_id, Some(&parent.name)).await?;
             }
             Ok(None) => {
-                bot.send_message(chat_id, format!("Contenitore #{parent_id} non trovato."))
+                bot.send_message(chat_id, "Contenitore non trovato.")
                     .reply_markup(containers_menu_keyboard())
                     .await?;
             }
@@ -1212,14 +1299,14 @@ pub async fn handle_callback(
                 bot.send_message(
                     chat_id,
                     format!(
-                        "✏️ Rinomina contenitore\n\nNome attuale: {}\n\nScrivi il nuovo nome oppure /annulla.",
+                        "✏️ Rinomina contenitore\n\nNome attuale: {}\n\nScrivi il nuovo nome oppure premi ❌ Annulla.",
                         container.name
                     ),
                 )
                 .await?;
             }
             Ok(None) => {
-                bot.send_message(chat_id, format!("Contenitore #{id} non trovato."))
+                bot.send_message(chat_id, "Contenitore non trovato.")
                     .reply_markup(containers_menu_keyboard())
                     .await?;
             }
@@ -1312,7 +1399,7 @@ async fn show_home_picker(
             vec![button("➕ Crea una casa", "loc:home:new")],
             vec![
                 button("↩️ Case, stanze e contenitori", "loc:menu"),
-                button("🏠 Menu principale", "menu:main"),
+                button("🏠 Menù principale", "menu:main"),
             ],
         ]))
         .await?;
@@ -1339,7 +1426,7 @@ async fn show_home_picker(
         .collect::<Vec<_>>();
     rows.push(vec![
         button("↩️ Contenitori", "c:menu"),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
 
     bot.send_message(chat_id, title)
@@ -1355,7 +1442,7 @@ async fn show_scope_picker_for_new(
     home_id: i64,
 ) -> ResponseResult<()> {
     let Some(home) = read_ui_home(pool, home_id).await.unwrap_or(None) else {
-        bot.send_message(chat_id, format!("Casa #{home_id} non trovata."))
+        bot.send_message(chat_id, "Casa non trovata.")
             .reply_markup(containers_menu_keyboard())
             .await?;
         return Ok(());
@@ -1375,7 +1462,7 @@ async fn show_scope_picker_for_new(
         )]);
     }
     rows.push(vec![button("↩️ Cambia casa", "c:n")]);
-    rows.push(vec![button("🏠 Menu principale", "menu:main")]);
+    rows.push(vec![button("🏠 Menù principale", "menu:main")]);
 
     bot.send_message(
         chat_id,
@@ -1396,15 +1483,16 @@ async fn ask_container_name(
 ) -> ResponseResult<()> {
     let text = if let Some(parent_name) = parent_name {
         format!(
-            "➕ Nuovo contenitore interno\n\nDentro: 📦 {parent_name}\n\nScrivi il nome del nuovo contenitore oppure /annulla."
+            "➕ Nuovo contenitore interno\n\nDentro: 📦 {parent_name}\n\nScrivi il nome del nuovo contenitore oppure premi ❌ Annulla."
         )
     } else {
-        "➕ Nuovo contenitore\n\nScrivi il nome del contenitore oppure /annulla.".to_string()
+        "➕ Nuovo contenitore\n\nScrivi il nome del contenitore oppure premi ❌ Annulla."
+            .to_string()
     };
     bot.send_message(chat_id, text)
         .reply_markup(InlineKeyboardMarkup::new(vec![vec![
             button("↩️ Contenitori", "c:menu"),
-            button("🏠 Menu principale", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
         ]]))
         .await?;
     Ok(())
@@ -1424,7 +1512,7 @@ async fn create_container_from_input(
     let Some(name) = clean_ui_name(input) else {
         bot.send_message(
             chat_id,
-            "⚠️ Il nome deve contenere da 1 a 120 caratteri. Riprova oppure usa /annulla.",
+            "⚠️ Il nome deve contenere da 1 a 120 caratteri. Riprova oppure premi ❌ Annulla.",
         )
         .await?;
         return Ok(());
@@ -1466,7 +1554,7 @@ async fn rename_container_from_input(
     let Some(name) = clean_ui_name(input) else {
         bot.send_message(
             chat_id,
-            "⚠️ Il nome deve contenere da 1 a 120 caratteri. Riprova oppure usa /annulla.",
+            "⚠️ Il nome deve contenere da 1 a 120 caratteri. Riprova oppure premi ❌ Annulla.",
         )
         .await?;
         return Ok(());
@@ -1476,7 +1564,7 @@ async fn rename_container_from_input(
         Ok(Some(container)) => container,
         Ok(None) => {
             sessions.clear_chat(chat_id.0);
-            bot.send_message(chat_id, format!("Contenitore #{id} non trovato."))
+            bot.send_message(chat_id, "Contenitore non trovato.")
                 .reply_markup(containers_menu_keyboard())
                 .await?;
             return Ok(());
@@ -1521,14 +1609,20 @@ async fn rename_container_from_input(
 }
 
 async fn show_all_containers(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> ResponseResult<()> {
-    let containers = sqlx::query_as::<_, ContainerRecord>(
-        "SELECT id, abitazione_id AS home_id, stanza_id AS room_id, \
-                contenitore_padre_id AS parent_id, nome AS name, descrizione AS description \
-         FROM contenitori ORDER BY nome COLLATE NOCASE, id LIMIT 100",
-    )
-    .fetch_all(pool)
-    .await
-    .unwrap_or_default();
+    let sql = format!(
+        "SELECT c.id, c.abitazione_id AS home_id, c.stanza_id AS room_id, \
+                c.contenitore_padre_id AS parent_id, c.nome AS name, c.descrizione AS description \
+         FROM contenitori c \
+         JOIN abitazioni a ON a.id = c.abitazione_id \
+         WHERE {} \
+         ORDER BY a.nome COLLATE NOCASE, c.nome COLLATE NOCASE, c.id LIMIT 100",
+        crate::identity::visible_space_sql("a")
+    );
+    let containers = sqlx::query_as::<_, ContainerRecord>(&sql)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
 
     if containers.is_empty() {
         bot.send_message(chat_id, "📦 Non ci sono ancora contenitori registrati.")
@@ -1546,16 +1640,9 @@ async fn show_all_containers(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> R
             .flatten()
             .map(|path| format_container_path(&path))
             .unwrap_or_else(|| "Percorso non disponibile".to_string());
-        text.push_str(&format!(
-            "#{} · {}\n📍 {}\n/luogo_c{}\n\n",
-            container.id, container.name, path, container.id
-        ));
+        text.push_str(&format!("{}\n📍 {}\n\n", container.name, path));
         rows.push(vec![button(
-            &format!(
-                "📦 #{} · {}",
-                container.id,
-                truncate_chars(&container.name, 32)
-            ),
+            &format!("📦 {}", truncate_chars(&container.name, 40)),
             &format!("c:v:{}", encode_id(container.id)),
         )]);
         if text.chars().count() > 3200 {
@@ -1567,7 +1654,7 @@ async fn show_all_containers(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> R
     }
     rows.push(vec![
         button("↩️ Contenitori", "c:menu"),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
 
     bot.send_message(chat_id, text)
@@ -1583,7 +1670,7 @@ async fn show_home_scope(
     home_id: i64,
 ) -> ResponseResult<()> {
     let Some(home) = read_ui_home(pool, home_id).await.unwrap_or(None) else {
-        bot.send_message(chat_id, format!("Casa #{home_id} non trovata."))
+        bot.send_message(chat_id, "Casa non trovata.")
             .reply_markup(containers_menu_keyboard())
             .await?;
         return Ok(());
@@ -1608,11 +1695,7 @@ async fn show_home_scope(
 
     for container in roots.iter().take(20) {
         rows.push(vec![button(
-            &format!(
-                "📦 #{} · {}",
-                container.id,
-                truncate_chars(&container.name, 34)
-            ),
+            &format!("📦 {}", truncate_chars(&container.name, 42)),
             &format!("c:v:{}", encode_id(container.id)),
         )]);
     }
@@ -1626,7 +1709,7 @@ async fn show_home_scope(
     ]);
     rows.push(vec![
         button("↩️ Torna alla casa", &format!("loc:home:{home_id}")),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
 
     bot.send_message(
@@ -1650,7 +1733,7 @@ async fn show_room_scope(
     room_id: i64,
 ) -> ResponseResult<()> {
     let Some(room) = read_ui_room(pool, room_id).await.unwrap_or(None) else {
-        bot.send_message(chat_id, format!("Stanza #{room_id} non trovata."))
+        bot.send_message(chat_id, "Stanza non trovata.")
             .reply_markup(containers_menu_keyboard())
             .await?;
         return Ok(());
@@ -1664,11 +1747,7 @@ async fn show_room_scope(
         .take(30)
         .map(|container| {
             vec![button(
-                &format!(
-                    "📦 #{} · {}",
-                    container.id,
-                    truncate_chars(&container.name, 34)
-                ),
+                &format!("📦 {}", truncate_chars(&container.name, 42)),
                 &format!("c:v:{}", encode_id(container.id)),
             )]
         })
@@ -1682,7 +1761,7 @@ async fn show_room_scope(
     ]);
     rows.push(vec![
         button("↩️ Torna alla stanza", &format!("loc:room:{}", room.id)),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
 
     let empty_note = if roots.is_empty() {
@@ -1715,7 +1794,7 @@ pub(crate) async fn show_container_detail(
     let container = match get_container(pool, id).await {
         Ok(Some(container)) => container,
         Ok(None) => {
-            bot.send_message(chat_id, format!("Contenitore #{id} non trovato."))
+            bot.send_message(chat_id, "Contenitore non trovato.")
                 .reply_markup(containers_menu_keyboard())
                 .await?;
             return Ok(());
@@ -1731,7 +1810,7 @@ pub(crate) async fn show_container_detail(
     let path = match container_path(pool, id).await {
         Ok(Some(path)) => path,
         Ok(None) => {
-            bot.send_message(chat_id, format!("Contenitore #{id} non trovato."))
+            bot.send_message(chat_id, "Contenitore non trovato.")
                 .await?;
             return Ok(());
         }
@@ -1781,7 +1860,7 @@ pub(crate) async fn show_container_detail(
                 "↩️ Contenitore superiore",
                 &format!("c:v:{}", encode_id(parent_id)),
             ),
-            button("🏠 Menu principale", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
         ]);
     } else if let Some(room_id) = container.room_id {
         rows.push(vec![
@@ -1789,7 +1868,7 @@ pub(crate) async fn show_container_detail(
                 "↩️ Contenitori della stanza",
                 &format!("c:lr:{}", encode_id(room_id)),
             ),
-            button("🏠 Menu principale", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
         ]);
     } else {
         rows.push(vec![
@@ -1797,15 +1876,14 @@ pub(crate) async fn show_container_detail(
                 "↩️ Contenitori della casa",
                 &format!("c:lh:{}", encode_id(container.home_id)),
             ),
-            button("🏠 Menu principale", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
         ]);
     }
 
     bot.send_message(
         chat_id,
         format!(
-            "📦 #{} · {}\n\n📍 {}\n\nContiene direttamente:\n📦 {} sottocontenitori\n🏷️ {} oggetti{}",
-            container.id,
+            "📦 {}\n\n📍 {}\n\nContiene direttamente:\n📦 {} sottocontenitori\n🏷️ {} oggetti{}",
             container.name,
             path_text,
             children.len(),
@@ -1825,7 +1903,7 @@ async fn show_container_manage(
     id: i64,
 ) -> ResponseResult<()> {
     let Some(container) = get_container(pool, id).await.unwrap_or(None) else {
-        bot.send_message(chat_id, format!("Contenitore #{id} non trovato."))
+        bot.send_message(chat_id, "Contenitore non trovato.")
             .reply_markup(containers_menu_keyboard())
             .await?;
         return Ok(());
@@ -1833,10 +1911,7 @@ async fn show_container_manage(
 
     bot.send_message(
         chat_id,
-        format!(
-            "⚙️ Gestisci contenitore\n\n📦 #{} · {}",
-            container.id, container.name
-        ),
+        format!("⚙️ Gestisci contenitore\n\n📦 {}", container.name),
     )
     .reply_markup(InlineKeyboardMarkup::new(vec![
         vec![
@@ -1846,7 +1921,7 @@ async fn show_container_manage(
         vec![button("🗑 Elimina", &format!("c:da:{}", encode_id(id)))],
         vec![
             button("↩️ Torna al contenitore", &format!("c:v:{}", encode_id(id))),
-            button("🏠 Menu principale", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
         ],
     ]))
     .await?;
@@ -1860,7 +1935,7 @@ async fn show_container_objects(
     id: i64,
 ) -> ResponseResult<()> {
     let Some(container) = get_container(pool, id).await.unwrap_or(None) else {
-        bot.send_message(chat_id, format!("Contenitore #{id} non trovato."))
+        bot.send_message(chat_id, "Contenitore non trovato.")
             .reply_markup(containers_menu_keyboard())
             .await?;
         return Ok(());
@@ -1879,22 +1954,22 @@ async fn show_container_objects(
         .iter()
         .map(|object| {
             vec![button(
-                &format!("🏷️ #{} · {}", object.id, truncate_chars(&object.name, 36)),
+                &format!("🏷️ {}", truncate_chars(&object.name, 42)),
                 &format!("oggetti:view:{}", object.id),
             )]
         })
         .collect::<Vec<_>>();
     rows.push(vec![
         button("↩️ Torna al contenitore", &format!("c:v:{}", encode_id(id))),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
 
     let text = if objects.is_empty() {
-        format!("📋 Oggetti in questo contenitore\n\n📍 {path}\n/luogo_c{id}\n\nNessun oggetto direttamente in questo contenitore.")
+        format!("📋 Oggetti in questo contenitore\n\n📍 {path}\n\nNessun oggetto direttamente in questo contenitore.")
     } else {
-        let mut text = format!("📋 Oggetti in questo contenitore\n\n📍 {path}\n/luogo_c{id}\n\n");
+        let mut text = format!("📋 Oggetti in questo contenitore\n\n📍 {path}\n\n");
         for object in &objects {
-            text.push_str(&format!("#{} · {}\n", object.id, object.name));
+            text.push_str(&format!("{}\n", object.name));
         }
         text
     };
@@ -1912,7 +1987,7 @@ async fn show_delete_confirmation(
     id: i64,
 ) -> ResponseResult<()> {
     let Some(container) = get_container(pool, id).await.unwrap_or(None) else {
-        bot.send_message(chat_id, format!("Contenitore #{id} non trovato."))
+        bot.send_message(chat_id, "Contenitore non trovato.")
             .reply_markup(containers_menu_keyboard())
             .await?;
         return Ok(());
@@ -1943,7 +2018,7 @@ async fn show_delete_confirmation(
         )],
         vec![
             button("↩️ Annulla", &format!("c:v:{}", encode_id(id))),
-            button("🏠 Menu principale", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
         ],
     ]))
     .await?;
@@ -1957,7 +2032,7 @@ async fn delete_container_and_report(
     id: i64,
 ) -> ResponseResult<()> {
     let Some(before) = get_container(pool, id).await.unwrap_or(None) else {
-        bot.send_message(chat_id, format!("Contenitore #{id} non trovato."))
+        bot.send_message(chat_id, "Contenitore non trovato.")
             .reply_markup(containers_menu_keyboard())
             .await?;
         return Ok(());
@@ -1982,7 +2057,7 @@ async fn delete_container_and_report(
             }
         }
         Ok(false) => {
-            bot.send_message(chat_id, format!("Contenitore #{id} non trovato."))
+            bot.send_message(chat_id, "Contenitore non trovato.")
                 .reply_markup(containers_menu_keyboard())
                 .await?;
         }
@@ -1997,7 +2072,7 @@ async fn delete_container_and_report(
                     "↩️ Torna al contenitore",
                     &format!("c:v:{}", encode_id(id)),
                 )],
-                vec![button("🏠 Menu principale", "menu:main")],
+                vec![button("🏠 Menù principale", "menu:main")],
             ]))
             .await?;
         }
@@ -2012,7 +2087,7 @@ async fn show_move_home_picker(
     id: i64,
 ) -> ResponseResult<()> {
     let Some(container) = get_container(pool, id).await.unwrap_or(None) else {
-        bot.send_message(chat_id, format!("Contenitore #{id} non trovato."))
+        bot.send_message(chat_id, "Contenitore non trovato.")
             .reply_markup(containers_menu_keyboard())
             .await?;
         return Ok(());
@@ -2030,7 +2105,7 @@ async fn show_move_home_picker(
         .collect::<Vec<_>>();
     rows.push(vec![
         button("↩️ Annulla", &format!("c:v:{}", encode_id(id))),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
 
     bot.send_message(
@@ -2053,13 +2128,13 @@ async fn show_move_scope_picker(
     home_id: i64,
 ) -> ResponseResult<()> {
     if get_container(pool, id).await.unwrap_or(None).is_none() {
-        bot.send_message(chat_id, format!("Contenitore #{id} non trovato."))
+        bot.send_message(chat_id, "Contenitore non trovato.")
             .reply_markup(containers_menu_keyboard())
             .await?;
         return Ok(());
     }
     let Some(home) = read_ui_home(pool, home_id).await.unwrap_or(None) else {
-        bot.send_message(chat_id, format!("Casa #{home_id} non trovata."))
+        bot.send_message(chat_id, "Casa non trovata.")
             .reply_markup(containers_menu_keyboard())
             .await?;
         return Ok(());
@@ -2084,7 +2159,7 @@ async fn show_move_scope_picker(
     }
     rows.push(vec![
         button("↩️ Cambia casa", &format!("c:m:{}", encode_id(id))),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
 
     bot.send_message(
@@ -2108,7 +2183,7 @@ async fn show_move_parent_picker(
     room_id: Option<i64>,
 ) -> ResponseResult<()> {
     let Some(container) = get_container(pool, id).await.unwrap_or(None) else {
-        bot.send_message(chat_id, format!("Contenitore #{id} non trovato."))
+        bot.send_message(chat_id, "Contenitore non trovato.")
             .reply_markup(containers_menu_keyboard())
             .await?;
         return Ok(());
@@ -2132,11 +2207,7 @@ async fn show_move_parent_picker(
     )]];
     for candidate in candidates.iter().take(30) {
         rows.push(vec![button(
-            &format!(
-                "📦 #{} · {}",
-                candidate.id,
-                truncate_chars(&candidate.name, 34)
-            ),
+            &format!("📦 {}", truncate_chars(&candidate.name, 42)),
             &move_target_callback(id, home_id, room_id, Some(candidate.id)),
         )]);
     }
@@ -2145,7 +2216,7 @@ async fn show_move_parent_picker(
             "↩️ Cambia stanza",
             &format!("c:mh:{}:{}", encode_id(id), encode_id(home_id)),
         ),
-        button("🏠 Menu principale", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
 
     let note = if candidates.is_empty() {
@@ -2207,7 +2278,7 @@ async fn move_container_and_report(
                     "↩️ Torna al contenitore",
                     &format!("c:v:{}", encode_id(id)),
                 )],
-                vec![button("🏠 Menu principale", "menu:main")],
+                vec![button("🏠 Menù principale", "menu:main")],
             ]))
             .await?;
         }
@@ -2216,16 +2287,36 @@ async fn move_container_and_report(
 }
 
 async fn list_ui_homes(pool: &SqlitePool) -> Result<Vec<UiHome>, sqlx::Error> {
-    sqlx::query_as::<_, UiHome>(
-        "SELECT id, nome AS name FROM abitazioni ORDER BY nome COLLATE NOCASE, id",
-    )
-    .fetch_all(pool)
-    .await
+    let name = if crate::identity::current_view_all() {
+        "a.nome || ' · ' || sp.nome"
+    } else {
+        "a.nome"
+    };
+    let sql = format!(
+        "SELECT a.id, {name} AS name FROM abitazioni a JOIN spazi sp ON sp.id = a.spazio_id \
+         WHERE {} ORDER BY sp.nome COLLATE NOCASE, a.nome COLLATE NOCASE, a.id",
+        crate::identity::visible_space_sql("a")
+    );
+    sqlx::query_as::<_, UiHome>(&sql)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_all(pool)
+        .await
 }
 
 async fn read_ui_home(pool: &SqlitePool, id: i64) -> Result<Option<UiHome>, sqlx::Error> {
-    sqlx::query_as::<_, UiHome>("SELECT id, nome AS name FROM abitazioni WHERE id = ?")
+    let name = if crate::identity::current_view_all() {
+        "a.nome || ' · ' || sp.nome"
+    } else {
+        "a.nome"
+    };
+    let sql = format!(
+        "SELECT a.id, {name} AS name FROM abitazioni a JOIN spazi sp ON sp.id = a.spazio_id \
+         WHERE a.id = ? AND {}",
+        crate::identity::visible_space_sql("a")
+    );
+    sqlx::query_as::<_, UiHome>(&sql)
         .bind(id)
+        .bind(crate::identity::visible_space_bind_id())
         .fetch_optional(pool)
         .await
 }
@@ -2234,24 +2325,42 @@ async fn list_ui_rooms_for_home(
     pool: &SqlitePool,
     home_id: i64,
 ) -> Result<Vec<UiRoom>, sqlx::Error> {
-    sqlx::query_as::<_, UiRoom>(
-        "SELECT s.id, s.abitazione_id AS home_id, s.nome AS name, a.nome AS home_name \
-         FROM stanze s JOIN abitazioni a ON a.id = s.abitazione_id \
-         WHERE s.abitazione_id = ? ORDER BY s.nome COLLATE NOCASE, s.id",
-    )
-    .bind(home_id)
-    .fetch_all(pool)
-    .await
+    let home_name = if crate::identity::current_view_all() {
+        "a.nome || ' · ' || sp.nome"
+    } else {
+        "a.nome"
+    };
+    let sql = format!(
+        "SELECT s.id, s.abitazione_id AS home_id, s.nome AS name, {home_name} AS home_name \
+         FROM stanze s JOIN abitazioni a ON a.id = s.abitazione_id JOIN spazi sp ON sp.id = a.spazio_id \
+         WHERE s.abitazione_id = ? AND {} \
+         ORDER BY s.nome COLLATE NOCASE, s.id",
+        crate::identity::visible_space_sql("a")
+    );
+    sqlx::query_as::<_, UiRoom>(&sql)
+        .bind(home_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_all(pool)
+        .await
 }
 
 async fn read_ui_room(pool: &SqlitePool, id: i64) -> Result<Option<UiRoom>, sqlx::Error> {
-    sqlx::query_as::<_, UiRoom>(
-        "SELECT s.id, s.abitazione_id AS home_id, s.nome AS name, a.nome AS home_name \
-         FROM stanze s JOIN abitazioni a ON a.id = s.abitazione_id WHERE s.id = ?",
-    )
-    .bind(id)
-    .fetch_optional(pool)
-    .await
+    let home_name = if crate::identity::current_view_all() {
+        "a.nome || ' · ' || sp.nome"
+    } else {
+        "a.nome"
+    };
+    let sql = format!(
+        "SELECT s.id, s.abitazione_id AS home_id, s.nome AS name, {home_name} AS home_name \
+         FROM stanze s JOIN abitazioni a ON a.id = s.abitazione_id JOIN spazi sp ON sp.id = a.spazio_id \
+         WHERE s.id = ? AND {}",
+        crate::identity::visible_space_sql("a")
+    );
+    sqlx::query_as::<_, UiRoom>(&sql)
+        .bind(id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_optional(pool)
+        .await
 }
 
 pub(crate) async fn list_root_containers(
@@ -2259,17 +2368,21 @@ pub(crate) async fn list_root_containers(
     home_id: i64,
     room_id: Option<i64>,
 ) -> Result<Vec<ContainerRecord>, sqlx::Error> {
-    sqlx::query_as::<_, ContainerRecord>(
-        "SELECT id, abitazione_id AS home_id, stanza_id AS room_id, \
-                contenitore_padre_id AS parent_id, nome AS name, descrizione AS description \
-         FROM contenitori \
-         WHERE abitazione_id = ? AND stanza_id IS ? AND contenitore_padre_id IS NULL \
-         ORDER BY nome COLLATE NOCASE, id",
-    )
-    .bind(home_id)
-    .bind(room_id)
-    .fetch_all(pool)
-    .await
+    let sql = format!(
+        "SELECT c.id, c.abitazione_id AS home_id, c.stanza_id AS room_id, \
+                c.contenitore_padre_id AS parent_id, c.nome AS name, c.descrizione AS description \
+         FROM contenitori c JOIN abitazioni a ON a.id = c.abitazione_id \
+         WHERE c.abitazione_id = ? AND c.stanza_id IS ? AND c.contenitore_padre_id IS NULL \
+           AND {} \
+         ORDER BY c.nome COLLATE NOCASE, c.id",
+        crate::identity::visible_space_sql("a")
+    );
+    sqlx::query_as::<_, ContainerRecord>(&sql)
+        .bind(home_id)
+        .bind(room_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_all(pool)
+        .await
 }
 
 async fn list_move_parent_candidates(
@@ -2278,7 +2391,7 @@ async fn list_move_parent_candidates(
     home_id: i64,
     room_id: Option<i64>,
 ) -> Result<Vec<ContainerRecord>, sqlx::Error> {
-    sqlx::query_as::<_, ContainerRecord>(
+    let sql = format!(
         "WITH RECURSIVE subtree(id) AS ( \
              SELECT id FROM contenitori WHERE id = ? \
              UNION ALL \
@@ -2286,61 +2399,75 @@ async fn list_move_parent_candidates(
          ) \
          SELECT c.id, c.abitazione_id AS home_id, c.stanza_id AS room_id, \
                 c.contenitore_padre_id AS parent_id, c.nome AS name, c.descrizione AS description \
-         FROM contenitori c \
-         WHERE c.abitazione_id = ? AND c.stanza_id IS ? \
+         FROM contenitori c JOIN abitazioni a ON a.id = c.abitazione_id \
+         WHERE c.abitazione_id = ? AND c.stanza_id IS ? AND {} \
            AND c.id NOT IN (SELECT id FROM subtree) \
          ORDER BY c.nome COLLATE NOCASE, c.id",
-    )
-    .bind(moving_id)
-    .bind(home_id)
-    .bind(room_id)
-    .fetch_all(pool)
-    .await
+        crate::identity::visible_space_sql("a")
+    );
+    sqlx::query_as::<_, ContainerRecord>(&sql)
+        .bind(moving_id)
+        .bind(home_id)
+        .bind(room_id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_all(pool)
+        .await
 }
 
 async fn count_items_in_container(pool: &SqlitePool, id: i64) -> Result<i64, sqlx::Error> {
-    sqlx::query_scalar(
+    let sql = format!(
         "SELECT COUNT(*) FROM item_luogo il JOIN items i ON i.id = il.item_id \
-         WHERE il.contenitore_id = ? AND i.tipo = 'oggetto'",
-    )
-    .bind(id)
-    .fetch_one(pool)
-    .await
+         WHERE il.contenitore_id = ? AND i.tipo = 'oggetto' AND {}",
+        crate::identity::visible_space_sql("i")
+    );
+    sqlx::query_scalar(&sql)
+        .bind(id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_one(pool)
+        .await
 }
 
 async fn list_objects_in_container(
     pool: &SqlitePool,
     id: i64,
 ) -> Result<Vec<UiObject>, sqlx::Error> {
-    sqlx::query_as::<_, UiObject>(
+    let sql = format!(
         "SELECT i.id, i.nome AS name \
          FROM items i JOIN item_luogo il ON il.item_id = i.id \
-         WHERE i.tipo = 'oggetto' AND il.contenitore_id = ? \
+         WHERE i.tipo = 'oggetto' AND il.contenitore_id = ? AND {} \
          ORDER BY i.nome COLLATE NOCASE, i.id LIMIT 50",
-    )
-    .bind(id)
-    .fetch_all(pool)
-    .await
+        crate::identity::visible_space_sql("i")
+    );
+    sqlx::query_as::<_, UiObject>(&sql)
+        .bind(id)
+        .bind(crate::identity::visible_space_bind_id())
+        .fetch_all(pool)
+        .await
 }
 
 async fn scope_exists(pool: &SqlitePool, home_id: i64, room_id: Option<i64>) -> bool {
-    match room_id {
-        Some(room_id) => sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM stanze WHERE id = ? AND abitazione_id = ?)",
-        )
-        .bind(room_id)
-        .bind(home_id)
+    let sql = match room_id {
+        Some(_) => format!(
+            "SELECT EXISTS(SELECT 1 FROM stanze s JOIN abitazioni a ON a.id = s.abitazione_id \
+             WHERE s.id = ? AND s.abitazione_id = ? AND {})",
+            crate::identity::visible_space_sql("a")
+        ),
+        None => format!(
+            "SELECT EXISTS(SELECT 1 FROM abitazioni a WHERE a.id = ? AND {})",
+            crate::identity::visible_space_sql("a")
+        ),
+    };
+    let mut query = sqlx::query_scalar::<_, bool>(&sql);
+    if let Some(room_id) = room_id {
+        query = query.bind(room_id).bind(home_id);
+    } else {
+        query = query.bind(home_id);
+    }
+    query
+        .bind(crate::identity::visible_space_bind_id())
         .fetch_one(pool)
         .await
-        .unwrap_or(false),
-        None => {
-            sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM abitazioni WHERE id = ?)")
-                .bind(home_id)
-                .fetch_one(pool)
-                .await
-                .unwrap_or(false)
-        }
-    }
+        .unwrap_or(false)
 }
 
 async fn scope_label(pool: &SqlitePool, home_id: i64, room_id: Option<i64>) -> String {
@@ -2352,20 +2479,29 @@ async fn scope_label(pool: &SqlitePool, home_id: i64, room_id: Option<i64>) -> S
     if let Ok(Some(home)) = read_ui_home(pool, home_id).await {
         return format!("🏠 {}", home.name);
     }
-    format!("casa #{home_id}")
+    "casa non disponibile".to_string()
 }
 
 fn format_container_path(path: &ContainerPath) -> String {
-    let mut parts = vec![path.home_name.clone()];
+    format_path_for_ui_with_space(path, crate::identity::current_view_all())
+}
+
+pub(crate) fn format_path_for_ui(path: &ContainerPath) -> String {
+    format_container_path(path)
+}
+
+pub(crate) fn format_path_for_ui_with_space(path: &ContainerPath, show_space: bool) -> String {
+    let home = if show_space {
+        format!("{} · {}", path.home_name, path.home_space_name)
+    } else {
+        path.home_name.clone()
+    };
+    let mut parts = vec![home];
     if let Some(room_name) = &path.room_name {
         parts.push(room_name.clone());
     }
     parts.extend(path.containers.iter().map(|entry| entry.name.clone()));
     parts.join(" / ")
-}
-
-pub(crate) fn format_path_for_ui(path: &ContainerPath) -> String {
-    format_container_path(path)
 }
 
 pub(crate) fn encode_callback_id(id: i64) -> String {
@@ -2390,7 +2526,7 @@ fn containers_menu_keyboard() -> InlineKeyboardMarkup {
         vec![button("📋 Tutti", "c:a"), button("🔎 Per casa", "c:l")],
         vec![
             button("↩️ Case, stanze e contenitori", "loc:menu"),
-            button("🏠 Menu principale", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
         ],
     ])
 }
@@ -2548,7 +2684,7 @@ mod tests {
     }
 
     async fn home(pool: &SqlitePool, name: &str) -> i64 {
-        sqlx::query("INSERT INTO abitazioni (nome) VALUES (?)")
+        sqlx::query("INSERT INTO abitazioni (nome, spazio_id) VALUES (?, 1)")
             .bind(name)
             .execute(pool)
             .await
@@ -2998,6 +3134,93 @@ mod tests {
         .expect("evento item");
         assert_eq!(item_parent, Some(delete_event));
     }
+    #[tokio::test]
+    async fn contenitori_rifiutano_letture_e_mutazioni_cross_space_per_id() {
+        let pool = test_pool().await;
+        let space_two =
+            sqlx::query("INSERT INTO spazi (nome, tipo) VALUES ('Spazio due', 'personale')")
+                .execute(&pool)
+                .await
+                .expect("spazio due")
+                .last_insert_rowid();
+
+        let home_one = sqlx::query("INSERT INTO abitazioni (nome, spazio_id) VALUES ('Casa', 1)")
+            .execute(&pool)
+            .await
+            .expect("casa uno")
+            .last_insert_rowid();
+        let home_two = sqlx::query("INSERT INTO abitazioni (nome, spazio_id) VALUES ('Casa', ?)")
+            .bind(space_two)
+            .execute(&pool)
+            .await
+            .expect("casa due")
+            .last_insert_rowid();
+
+        let actor_one = crate::identity::AuditActor::system();
+        let actor_two = crate::identity::AuditActor {
+            utente_id: None,
+            nome_snapshot: "Sistema test".to_string(),
+            spazio_id: space_two,
+            spazio_nome_snapshot: "Spazio due".to_string(),
+            view_all: false,
+            origine: "sistema",
+            telegram_user_id: None,
+            telegram_username: None,
+        };
+
+        let container_two = crate::identity::with_actor(actor_two.clone(), async {
+            create_container(&pool, home_two, None, None, "Armadio", Some("spazio due"))
+                .await
+                .expect("contenitore spazio due")
+        })
+        .await;
+
+        let container_one = crate::identity::with_actor(actor_one.clone(), async {
+            create_container(&pool, home_one, None, None, "Armadio", Some("spazio uno"))
+                .await
+                .expect("contenitore spazio uno")
+        })
+        .await;
+        assert_ne!(container_one, container_two);
+
+        crate::identity::with_actor(actor_one, async {
+            assert!(get_container(&pool, container_two)
+                .await
+                .expect("lettura cross-space")
+                .is_none());
+            assert!(container_path(&pool, container_two)
+                .await
+                .expect("percorso cross-space")
+                .is_none());
+            assert!(!rename_container(&pool, container_two, "Rubato")
+                .await
+                .expect("rinomina cross-space"));
+            assert!(
+                !set_container_description(&pool, container_two, Some("Rubato"))
+                    .await
+                    .expect("descrizione cross-space")
+            );
+            assert!(!delete_container(&pool, container_two)
+                .await
+                .expect("eliminazione cross-space"));
+            assert!(
+                create_container(&pool, home_two, None, None, "Intruso", None)
+                    .await
+                    .is_err()
+            );
+        })
+        .await;
+
+        crate::identity::with_actor(actor_two, async {
+            let own = get_container(&pool, container_two)
+                .await
+                .expect("lettura propria")
+                .expect("contenitore ancora presente");
+            assert_eq!(own.name, "Armadio");
+            assert_eq!(own.description.as_deref(), Some("spazio due"));
+        })
+        .await;
+    }
 }
 
 #[cfg(test)]
@@ -3023,7 +3246,7 @@ mod ui_tests {
     }
 
     async fn home(pool: &SqlitePool, name: &str) -> i64 {
-        sqlx::query("INSERT INTO abitazioni (nome) VALUES (?)")
+        sqlx::query("INSERT INTO abitazioni (nome, spazio_id) VALUES (?, 1)")
             .bind(name)
             .execute(pool)
             .await

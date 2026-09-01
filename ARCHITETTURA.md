@@ -1,10 +1,64 @@
+<!-- STEP7_2H_CHIUSURA_20260829 -->
+# Aggiornamento architetturale autorevole — Step 7.2H chiuso (29/08/2026)
+
+Il branch `step-7-alimentazione` ha completato il blocco **7.2H.0→7.2H.4F**. Le sezioni storiche più sotto restano valide per la cronologia; in caso di contrasto prevale questo aggiornamento.
+
+## Modello corrente
+
+- `utente/account` identifica chi usa il sistema;
+- `spazio` è un contesto di collaborazione, **non** una casa fisica;
+- case, stanze, contenitori e oggetti restano risorse fisiche assegnate a uno spazio e non diventano globali;
+- proprietà, visibilità, membership e permessi sono concetti distinti;
+- un Profilo alimentare rappresenta una persona alimentare ed è separato dall'account Telegram; il collegamento a un utente è opzionale;
+- i Profili possono essere privati o condivisi tramite Spazi, ma non globali;
+- contenuti globali sono ammessi solo per domini compatibili (es. cataloghi) e la pubblicazione globale resta un'azione amministrativa.
+
+## Runtime Telegram
+
+Gli handler principali continuano a ricevere `Arc<HandlerDependencies>` per evitare crescita dell'arità DPTree. `ContextBot` conserva la schermata UI principale e il contesto di navigazione.
+
+Gli input testuali fuori da un wizard non sostituiscono la schermata corrente: vengono trattati come input inattesi. Dopo tre tentativi consecutivi viene aggiunto il suggerimento `/start`; il contatore viene azzerato da una navigazione/comando valido o dall'ingresso in un flusso che richiede input.
+
+## Spazi e inviti
+
+`src/modules/spazi_membri.rs` gestisce membership e inviti privati. Gli inviti usano deep-link Telegram e supportano ruolo, modalità monouso/riutilizzabile, limite utilizzi e scadenza. L'apertura da parte del creatore o di un membro già presente non consuma l'invito.
+
+## Export tecnici
+
+`scripts/export_miglioramenti.py` esporta il backlog/archivio Miglioramenti. `scripts/export_progetto.py` crea un handoff tecnico completo ma sanitizzato. L'export progetto ricrea sempre `_project_handoff/` da zero e include `CURRENT_STATE.md`, manifest Git/file, albero e regole di esclusione. `.env`, token, DB, `data/`, `.git/`, `target/`, backup e file runtime sono esclusi; pattern sensibili nei file testuali fanno fallire l'export in modo conservativo.
+
+## Migration del blocco 7.2H
+
+```text
+20260827190000_profili_alimentari_fondazioni.sql
+20260828074000_catalogo_gallette.sql
+20260828101500_inviti_spazi_operativi.sql
+20260828202500_h4c_inviti_verifica_guidata.sql
+20260829002500_h4d_rifiniture_finali.sql
+20260829005000_h4e_input_export_progetto.sql
+```
+
+Sono append-only; se risultano applicate sul DB reale non devono essere modificate in-place.
+
 # Architettura
 
-## Stato architetturale dopo Step 6C
+## Stato architetturale corrente — Step 7
 
-Il branch `step-6c-test` ha completato e verificato l'estensione dei luoghi fino ai contenitori gerarchici. Il checkpoint funzionale è `fd4cbea` (6C.4): **69/69 test**, Clippy `-D warnings` e runtime Telegram verificati su Galaxy S9. Il 6C.5 è solo chiusura documentale/PR e non cambia schema o codice applicativo.
+Gli Step 1→6C sono chiusi e la baseline `main` resta il merge `219caba`.
+Il branch corrente `step-7-alimentazione` ha chiuso il checkpoint documentale
+7.0 con `135dd33` e sta implementando le fondazioni tecniche 7.1.
 
-La posizione corrente resta relazionale (`abitazioni` + `stanze` + `contenitori` + `item_luogo`); lo storico conserva invece snapshot immutabili del percorso per non riscrivere il passato quando la gerarchia cambia.
+Lo Step 7 estende il progetto da gestionale personale a gestionale
+personale/condiviso mediante utenti interni, spazi, membership e audit con
+autore. Sopra queste fondamenta viene sviluppato il modulo Alimentazione.
+
+La prima migration 7.1, `20260823153000_fondazioni_condivise.sql`, introduce
+utenti, spazi, membership, preferenze, inviti e audit. Il checkpoint successivo
+aggiunge `20260823174500_spazi_operativi.sql`: rimuove l'unicità globale legacy
+di case/tag, rende l'unicità per spazio e abilita lo **spazio attivo** come
+confine runtime per oggetti, luoghi, contenitori, foto e storico.
+
+Le decisioni correnti sono raccolte in `docs/step7/`.
 
 ## Snapshot storico dei contenitori — Step 6C.4
 
@@ -79,8 +133,9 @@ mano.
 
 ## 1. Obiettivo del progetto
 
-Un gestionale personale per tenere traccia delle cose di casa: vestiti,
-veicoli, ricette e oggetti generici. L'interfaccia è un bot Telegram, così
+Un gestionale personale e condivisibile per tenere traccia di beni, luoghi,
+alimentazione e altre attività quotidiane. Gli oggetti generici, i vestiti, i
+veicoli e le future aree applicative riusano servizi trasversali comuni. L'interfaccia è un bot Telegram, così
 chi lo usa (anche senza competenze informatiche) interagisce scrivendo
 messaggi normali, e l'accesso da fuori casa è gratuito dal punto di vista
 della rete: nessuna porta da aprire, nessun dominio da configurare.
@@ -207,7 +262,7 @@ percorso, ma il default e' `sqlite://data/db/gestionale.db`.
 **Perche'**: SQLite resta adatto a un gestionale personale su un solo host,
 mentre SQLx fornisce pool asincrono, gestione delle migration e una API Rust
 chiara senza introdurre un server database separato. La serie 0.8 viene usata
-intenzionalmente nello Step 4 per non imporre subito i requisiti toolchain piu'
+intenzionalmente nello Step 4 per non imporre subito i requisiti toolchain più
 nuovi della serie 0.9 sul Galaxy S9. Dependabot potra' proporre upgrade futuri
 senza applicarli automaticamente.
 
@@ -223,6 +278,93 @@ All'avvio `src/db.rs`:
 Il file `build.rs` fa osservare a Cargo la cartella `migrations/`, cosi' nuove
 migration vengono incorporate anche con Rust stable. Il comando `/status`
 interroga lo stato reale del database senza modificare dati applicativi.
+
+
+### 2.9 Utenti interni e spazi condivisi — Step 7
+
+**Implementazione iniziata nel 7.1**: l'identità utente interna è separata da
+Telegram/Google e gli **spazi** sono il confine logico dei dati
+personali/familiari/condivisi.
+
+SQLite rimane centrale sul backend: non si sincronizza il file DB fra utenti.
+Un utente può appartenere a più spazi. I ruoli iniziali previsti sono
+proprietario, amministratore, membro e sola lettura.
+
+Dettagli in `docs/step7/modello-condivisione.md`.
+
+### 2.10 Condivisione, copia e provenienza
+
+**Scelta**: condividere significa usare la stessa entità; copiare significa
+creare un'entità nuova e indipendente. Dove utile la copia può conservare un
+riferimento di provenienza, senza sincronizzazione automatica.
+
+La regola è applicata solo alle entità per cui ha senso, per esempio ricette,
+modelli turno/routine e checklist. Account/credenziali non sono condivisibili o
+copiabili con questo meccanismo.
+
+### 2.10 Spazio attivo e isolamento operativo — Step 7.1
+
+Ogni update Telegram viene risolto in un `AuditActor` che contiene anche lo
+`spazio_id` attivo. Le query dei moduli Step 6 devono usare questo spazio come
+confine di lettura e scrittura; conoscere un ID appartenente a un altro spazio
+non deve permettere di leggerlo o modificarlo.
+
+Il cambio spazio invalida le sessioni temporanee di oggetti, luoghi,
+contenitori e foto, evitando che una bozza avviata nello spazio A venga
+completata nello spazio B. Case e tag sono unici **dentro lo spazio**, non
+nell'intera installazione.
+
+La preferenza dello spazio attivo è valida solo insieme alla relativa
+`membri_spazio`: se la membership attiva viene rimossa, il database sceglie un
+altro spazio dell'utente oppure elimina la preferenza se non ne restano. La
+risoluzione dell'identità ricontrolla comunque la membership e ripara eventuali
+stati legacy incoerenti. In produzione l'assenza del contesto `AuditActor` non
+può usare implicitamente lo spazio bootstrap: l'operazione fallisce chiusa.
+
+### 2.11 Audit multiutente
+
+Lo storico Step 6B/6C è esteso nel 7.1 con autore, origine dell'azione e
+snapshot dello spazio. Una modifica deve rendere chiaro chi ha cambiato cosa.
+Gli effetti automatici restano collegati all'evento principale tramite il
+modello padre/figlio già esistente e vengono marcati esplicitamente come
+automatici. Gli eventi pre-Step 7 restano senza autore inventato.
+
+Dettagli in `docs/step7/storico-e-audit.md`.
+
+### 2.12 Alimentazione come dominio, non semplice file ricette
+
+Il vecchio placeholder `ricette` evolve concettualmente in un dominio più ampio:
+alimenti, unità, ricette, profili/porzioni, turni/routine, pianificazione,
+lista della spesa, reminder ed export.
+
+Alimento, prodotto acquistabile, scorta e oggetto posseduto restano concetti
+differenti. La specifica è in `docs/moduli/alimentazione/README.md`.
+
+Dal Step 7.2F.0 anche **prodotto commerciale** e **formato di vendita** sono
+concetti distinti:
+
+```text
+Alimento generico
+  ↓
+Prodotto commerciale (marca + nome)
+  ↓
+Formato acquistabile (quantità + unità + EAN)
+  ↓
+Futuri prezzo/disponibilità per punto vendita
+```
+
+Le Ricette possono scegliere il prodotto commerciale ma non devono fissare una
+confezione. La futura Lista spesa aggrega invece la quantità realmente
+necessaria e sceglie tra i formati disponibili la combinazione più adatta.
+
+### 2.13 Reminder trasversali
+
+Lo Step 7 progetta i reminder come servizio riutilizzabile. I canali previsti
+sono Telegram ed email. Gli SMS sono esclusi dalla specifica corrente.
+
+Il vecchio `promemoria` core non va eliminato o riscritto finché la nuova
+migration non definisce esplicitamente compatibilità e migrazione.
+
 
 ## 3. Flusso dei dati
 
@@ -271,6 +413,7 @@ gestionale-casa/
 ├── docs/
 │   ├── HANDOFF.md             # consegna e workflow operativo
 │   ├── schema-core.md
+│   ├── step7/                 # specifica architetturale dello step corrente
 │   └── moduli/                # documentazione dei moduli funzionali
 └── data/                      # database e file personali, NON su Git
 ```
@@ -361,31 +504,26 @@ Dettagli in `docs/moduli/luoghi.md`.
 
 ## 6. Roadmap di sviluppo
 
-- ~~**Step 1 — Scheletro iniziale**~~ — chiuso.
-- ~~**Step 2 — Schema dati core**~~ — chiuso.
-- ~~**Step 3 — Backend Telegram + whitelist**~~ — chiuso e verificato.
-- ~~**Step 3.1 — Handoff, Git e CI**~~ — chiuso e verificato.
-- ~~**Step 4 — SQLite runtime + migration + `/status`**~~ — chiuso e verificato.
-- ~~**Step 5A — Oggetti generici**~~ — chiuso e verificato.
-- ~~**Step 5B — Foto oggetti**~~ — chiuso e verificato.
-- ~~**Step 5C — Modifica/eliminazione**~~ — chiuso, mergiato su `main` con CI verde.
-- ~~**Step 6A — Case, stanze e posizione strutturata**~~ — chiuso e verificato.
-- ~~**Step 6B — Storico globale + individuale**~~ — chiuso, verificato e mergiato su `main`.
-- **Step 6C — Contenitori e sotto-posizioni** — implementazione e runtime verificati; PR/CI/merge finale in corso.
-- **Step 7A — Documenti e garanzie**.
-- **Step 7B — Promemoria e scadenze**.
-- **Step 7C — Tag e ricerca globale**.
-- **Step 8 — Primo nuovo modulo applicativo**, da scegliere fra Veicoli e
-  Vestiti; Ricette resta pianificato successivamente.
+- ~~Step 1→6C~~ — chiusi e confluiti in `main` (`219caba`).
+- **Step 7.0 — Specifica e organizzazione** — chiuso (`135dd33`), docs-only.
+- **Step 7.1 — Fondazioni condivise** — **in sviluppo**: utenti, spazi, ruoli, inviti, audit,
+  condivisione/copia e reminder trasversali.
+- **Step 7.2 — Alimentazione completa** — alimenti, ricette, profili, turni,
+  planner, lista della spesa ed export.
+- **Step 7.3 — Integrazioni** — condivisione operativa, Google Calendar ed
+  email.
 
-Funzioni già approvate come direzioni future: manutenzioni, costi/valore,
-prestiti, QR code, archivio degli elementi non più attivi, registro acquisti e
-dashboard/statistiche. La specifica e l'ordine aggiornato sono mantenuti in
-`docs/ROADMAP.md`.
+Acquisti/prezzi, Viaggi e Spese sono già specificati per garantire compatibilità
+architetturale, ma sono RIMANDATI a dopo lo Step 7. Documenti/garanzie, ricerca
+globale, Veicoli, Vestiti e le altre funzioni storiche restano in roadmap senza
+un numero definitivo finché Step 7 non è stabilizzato.
 
-Principio da preservare: foto, documenti, tag, promemoria, luoghi e storico
-vanno progettati come servizi trasversali quando possibile, senza creare una
-versione separata della stessa funzione per ogni modulo.
+La sequenza aggiornata è in `docs/ROADMAP.md`; la roadmap interna dello Step 7 è
+in `docs/step7/roadmap.md`.
+
+Principio da preservare: foto, documenti, tag, reminder, luoghi, storico,
+condivisione e audit vanno progettati come servizi trasversali quando possibile,
+senza creare una versione separata della stessa funzione per ogni modulo.
 
 ## 7. Estensioni future (non nel perimetro attuale)
 
@@ -468,3 +606,150 @@ Lo storico è un'infrastruttura condivisa, non specifica del modulo Oggetti. `st
 Il testo Telegram viene generato dai dati strutturati. Le rinomine o cancellazioni future non riscrivono il passato grazie agli snapshot. Le modifiche no-op e la scelta dello stesso luogo non generano eventi. Quando modifica applicativa e storico appartengono alla stessa operazione DB, vengono salvati nella stessa transazione.
 
 La UI espone storico globale, storico individuale, dettaglio, paginazione e filtri combinabili. Lo stato dei filtri è codificato nei callback Telegram in forma compatta. Dettagli: `docs/moduli/storico.md`.
+
+
+## Vista multi-spazio e proprietà (Step 7.1B)
+
+Lo spazio predefinito determina il contesto di creazione. La vista può includere tutte le membership dell'utente senza ridurre l'isolamento verso spazi non accessibili. Per gli `items`, proprietà (`items.spazio_id`) e posizione (`item_luogo`) sono indipendenti: un oggetto personale può trovarsi in una casa condivisa senza trasferimento di proprietà. `item_condivisioni` prepara la condivisione esplicita della stessa entità con permessi di lettura/modifica.
+
+### Permessi espliciti riutilizzabili per risorse condivise
+
+Visibilità e diritto di modifica sono separati. Una risorsa visibile in uno
+spazio non diventa automaticamente modificabile da tutti i membri. Il modello
+trasversale usa `inviti_risorsa` e `permessi_risorsa` con la coppia
+`(tipo_risorsa, risorsa_id)` e distingue `puo_modificare` da
+`puo_gestire_permessi`.
+
+Alimenti sono il primo tipo operativo. Ricette e future entità condivisibili
+devono riusare la stessa fondazione, aggiungendo i controlli di dominio e
+visibilità specifici. La sicurezza resta fail-closed.
+
+## Ruoli di sistema, frontend e amministrazione
+
+Il ruolo globale di un utente nel gestionale è separato dai ruoli negli spazi
+e dai permessi sulle singole risorse.
+
+I concetti sono indipendenti:
+
+```text
+ruolo di sistema
+≠
+ruolo nello spazio
+≠
+proprietà della risorsa
+≠
+visibilità della risorsa
+≠
+permesso di modifica
+```
+
+I ruoli di sistema iniziali sono `utente` e `admin`. Un amministratore può
+accedere alle funzioni tecniche e di gestione globale del gestionale, ma non
+diventa automaticamente proprietario o collaboratore delle risorse degli altri
+utenti.
+
+Le autorizzazioni amministrative devono essere verificate lato backend anche
+quando la relativa funzione non è mostrata nella UI. `/admin`, `/status` e le
+callback amministrative seguono quindi la stessa regola fail-closed adottata
+per le risorse condivise.
+
+Telegram è un frontend del gestionale, non il luogo in cui deve vivere la
+logica applicativa. Pulsanti inline e comandi testuali devono convergere, quando
+possibile, sulla stessa logica backend, così un futuro frontend differente può
+riusare autorizzazioni e casi d'uso senza duplicarli.
+
+La UI principale resta orientata ai pulsanti e non pubblicizza un elenco di
+“comandi rapidi”. I comandi testuali continuano però a esistere come interfaccia
+parallela. Nei Luoghi vengono mostrati comandi human-friendly contestuali, per
+esempio `/casa_casa_principale`, `/stanza_camera` e
+`/contenitore_scatola_attrezzi`; in caso di omonimia viene aggiunto contesto
+umano progressivo senza esporre gli ID del database.
+
+### Accesso applicativo al bot — operativo
+
+La whitelist Telegram statica non rappresenta il modello applicativo ordinario. Dal 7.2E il modello operativo è:
+
+```text
+account Telegram sconosciuto
+        ↓
+richiesta di accesso
+        ↓
+approvazione/rifiuto dell'amministratore principale
+        ↓
+utente normale autorizzato
+```
+
+Un account non autorizzato può utilizzare soltanto il flusso di richiesta accesso. L'approvazione all'uso del gestionale resta distinta dalla membership negli spazi e dai permessi sulle risorse. `ALLOWED_CHAT_IDS` resta bootstrap/emergenza e non sostituisce il controllo applicativo nel database.
+
+
+## Ricette operative e procedimento guidato — Step 7.2F.1
+
+Le Ricette sono una risorsa centrale con proprietario, visibilità multi-spazio e
+permessi espliciti. Gli ingredienti referenziano sempre l'alimento generico e
+possono opzionalmente fissare un prodotto commerciale; il formato acquistabile
+non appartiene alla ricetta.
+
+Il procedimento è normalizzato in `ricetta_step` e `ricetta_step_media`: ogni
+step ha ordine e testo e può possedere più foto/video. Gli stessi dati vengono
+letti sia in modalità completa sia in modalità guidata. La colonna legacy
+`ricette.procedimento` resta solo per compatibilità storica.
+
+## UI Telegram a schermata singola — Step 7.2G.2→G.5
+
+`src/context_bot.rs` incapsula il bot Teloxide e centralizza quattro responsabilità trasversali:
+
+1. schermata UI principale attiva per chat;
+2. media/messaggi temporanei da ripulire alla navigazione;
+3. contesto del pulsante `💡 Migliora`;
+4. protezione contro callback appartenenti a schermate obsolete.
+
+La schermata attiva non è soltanto memoria di processo: `telegram_ui_state` salva il `message_id` corrente in SQLite. In questo modo, dopo uno shutdown controllato, resta una sola schermata offline e al successivo avvio il runtime può rimuoverla/sostituirla invece di accumulare vecchie tastiere.
+
+Il modello è intenzionalmente frontend-only: lo stato persistito serve a mantenere coerente la chat Telegram e non sostituisce sessioni o dati di dominio.
+
+## Dipendenze degli handler Telegram
+
+Le dipendenze runtime sono raccolte in:
+
+```text
+Arc<HandlerDependencies>
+```
+
+Gli endpoint DPTree ricevono quindi solo `Bot`, update (`Message`/`CallbackQuery`) e il contenitore condiviso. Questa scelta elimina la dipendenza dall'arità massima delle implementazioni `Injectable` e permette di aggiungere nuovi servizi senza ampliare continuamente la firma degli handler.
+
+## Shutdown controllato
+
+`ShutdownController` conserva il `ShutdownToken` del dispatcher Teloxide. L'amministratore principale può avviare lo spegnimento da `🛠️ Amministrazione → ⏻ Spegni gestionale`, sempre con seconda conferma. Lo stesso percorso finale del `Ctrl+C` produce la schermata offline amministrativa e chiude il dispatcher in modo ordinato.
+
+Non devono essere avviate contemporaneamente due istanze long-polling con lo stesso token Telegram.
+
+## Miglioramenti come backlog verificabile
+
+Il ciclo corrente è:
+
+```text
+utente normale: da_approvare → da_fare → fatto → verificato → archivio
+admin:                         da_fare → fatto → verificato → archivio
+```
+
+`verificato` è rappresentato dai campi di verifica (`verifica_esito`, `verificato_il`, ecc.), non da un quinto valore del `CHECK` di `stato`. Uno stato `fatto` resta attivo finché l'amministratore non collauda e archivia esplicitamente.
+
+Modificare testo o allegati dopo il completamento invalida il collaudo e riporta l'elemento a `da_fare`. I piani di verifica possono includere istruzioni e callback Telegram per aprire direttamente la schermata da collaudare.
+
+## Export amministrativo dei Miglioramenti — Step 7.2G.6
+
+`scripts/export_miglioramenti.py` genera uno snapshot sanitizzato del repository e del dominio Miglioramenti. Il file viene creato sotto:
+
+```text
+data/tmp/miglioramenti_export/
+```
+
+L'export è in sola lettura rispetto a repository e database. Include working tree non committato, manifest Git, attivi, archivio, schema e allegati utili; esclude segreti, DB completo, `.git`, `target`, backup e runtime non necessario.
+
+Il bot invia lo ZIP come documento. La copia locale viene eliminata soltanto dopo conferma esplicita `✅ Ho scaricato il file`; gli export orfani vengono ripuliti automaticamente dopo 24 ore. Il backend verifica sia il ruolo di amministratore principale sia che il percorso da eliminare appartenga alla directory export prevista.
+
+## Evoluzione infrastrutturale futura — Zona test
+
+È documentata ma **non va implementata ora** una futura `🧪 Zona test` riservata all'amministratore principale. L'obiettivo è mantenere la versione stabile disponibile mentre una candidata viene compilata e testata, quindi promuoverla con backup, breve shutdown, migration, restart e rollback.
+
+La futura architettura non dovrà avviare due long-poller con lo stesso token. Dovrà invece usare un solo ingresso Telegram che instrada l'admin verso stabile/candidata e, per test mutativi o migration, un database di test/snapshot separato. Per modifiche strutturali importanti è preferita la strategia `expand → migrate → contract`.
