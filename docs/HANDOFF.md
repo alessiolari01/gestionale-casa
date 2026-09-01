@@ -55,10 +55,11 @@ invece di arrivare a SQLite e diventare `NULL`.
 
 ## 3. Stato tecnico verificato
 
-- **42 migration** nel repository;
-- applicate al database reale dell'S9 fino a `20260831191500`;
-- **`20260901013000_versione_contenuto_ricetta.sql` non e' ancora applicata**:
-  lo sara' al primo avvio, dopo il backup che lo script fa da solo;
+- **42 migration** nel repository, **tutte applicate** al database reale
+  dell'S9. Confermato dall'avvio del 1 settembre sera:
+  `applied_migrations=42`. Le versioni precedenti di questo file dicevano che
+  `20260901013000_versione_contenuto_ricetta.sql` fosse ancora da applicare:
+  non era vero, ed e' bastato leggere `_sqlx_migrations` per accorgersene;
 - pipeline verde: `fmt`, `check --locked`, `clippy --all-targets --locked
   -- -D warnings`, `test --locked` — **235 test** (erano 226 prima del lavoro
   sulle date: e' il numero da confrontare dopo ogni aggiornamento dell'S9);
