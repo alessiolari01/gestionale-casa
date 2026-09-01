@@ -1,3 +1,86 @@
+<!-- CHANGELOG_BUILD_S9_20260901 -->
+# 01/09/2026 — Il linker che segfaultava, e perche'
+
+Un `cargo run` dato a mano sull'S9 falliva spesso cosi':
+
+```text
+error: linking with `cc` failed: exit status: 1
+  = note: "cc" ".../symbols.o" "<257 object files omitted>" ...
+          cc: error: unable to execute command: Segmentation fault
+error: could not compile `gestionale-casa` (bin "gestionale-casa")
+```
+
+Sembrava casuale — riprovando spesso passava — e la riga finale non diceva
+niente di utile.
+
+## La causa
+
+**`257 object files`.** E' il numero che risolve il caso: 256 unita' di codegen
+piu' `symbols.o`, cioe' esattamente il default di cargo per il profilo `dev`.
+Ma il progetto girava sull'S9 con `codegen-units = 16`. Quindi in quella
+compilazione le impostazioni anti-memoria **non erano attive**.
+
+Non lo erano perche' vivevano soltanto come variabili d'ambiente esportate al
+passo 2 di `scripts/aggiorna-s9.sh`. Chi lancia `cargo run` a mano non passa da
+li' e ottiene i default: 256 unita' di codegen e le informazioni di debug
+complete. Il linker si trovava 257 file oggetto pieni di debuginfo da unire, su
+un telefono, e finiva la memoria a meta' collegamento. Su Android il sintomo non
+e' un messaggio chiaro: e' un segmentation fault di `cc`.
+
+Il "riprovando passa" era la memoria libera del telefono che cambiava fra un
+tentativo e l'altro, non una compilazione difettosa.
+
+## La correzione
+
+Le impostazioni che proteggono il collegamento sono state spostate **nel
+progetto**, dove valgono per chiunque compili, comunque lo faccia:
+
+- `Cargo.toml`, profili `dev` e `test`: `debug = 0` e `codegen-units = 16`;
+- `build.rs`: emette `-Wl,--threads=1` **solo quando il target e' Android**,
+  cosi' non tocca ne' il PC ne' la CI. Senza, LLD lancia un thread per core e
+  ognuno tiene la propria copia delle strutture di link.
+
+  Sta in `build.rs` e non in `.cargo/config.toml` per due motivi: e'
+  condizionato al target senza doverlo nominare, e non puo' essere annullato da
+  una `RUSTFLAGS` impostata nell'ambiente, che sostituirebbe il file di
+  configurazione invece di aggiungersi.
+
+Effetto misurato sullo stesso codice:
+
+```text
+file oggetto da linkare     257  →  ~17
+binario di debug           183 MB →  40 MB
+```
+
+Nello script restano solo le impostazioni che dipendono dalla macchina
+(`CARGO_BUILD_JOBS`, `CARGO_INCREMENTAL`), piu' un avviso se `RUSTFLAGS` e'
+impostata nell'ambiente: sostituisce la configurazione di cargo invece di
+aggiungersi, ed e' il primo posto dove guardare quando due compilazioni si
+comportano in modo diverso senza motivo apparente.
+
+## La lezione
+
+Una protezione che funziona solo se ti ricordi di usare lo script giusto non e'
+una protezione. Se una impostazione serve a far compilare il progetto, il posto
+giusto e' il progetto.
+
+## Manutenzione: backup e log
+
+Nello stesso passaggio, `aggiorna-s9.sh`:
+
+- tiene **solo gli ultimi 5 backup** del database e rimuove le copie
+  `gestionale_prova_*` orfane lasciate da esecuzioni interrotte;
+- scrive il **log completo dei controlli** in `data/log/`, ruotato a 5.
+  L'avvio del bot resta fuori dal log di proposito: un bot acceso per ore lo
+  farebbe crescere senza limite, cioe' il problema che stiamo risolvendo;
+- **controlla lo spazio libero** prima di partire e avvisa sotto 1,5 GB;
+- quando cargo fallisce, ripesca dal log le prime righe `error`, ricontrolla lo
+  spazio e riconosce i due casi che non sono errori di codice: disco pieno o
+  processo ucciso, e linker fermato per memoria.
+
+Questo log e' il motivo per cui l'errore del linker e' stato finalmente
+diagnosticabile: la riga che conta era scorsa via dallo schermo di Termux.
+
 <!-- CHANGELOG_STEP7_3_CALENDARIO_20260901 -->
 # 01/09/2026 — Aritmetica delle date in Rust
 

@@ -107,6 +107,23 @@ git push -u origin <nome-ramo>
 `git log --stat -1` deve elencare esattamente i file attesi: e' il controllo che
 distingue un commit vero da un commit vuoto, e va fatto **prima** del push.
 
+### Sull'S9 — configurazione della macchina, una volta sola
+
+Le impostazioni che proteggono il collegamento stanno nel progetto
+(`Cargo.toml` per i profili, `build.rs` per il flag del linker su Android),
+quindi valgono anche per un `cargo run` dato a mano. Restano da mettere sull'S9 quelle che dipendono dalla macchina, in
+`~/.cargo/config.toml` — **fuori dal repository**, perche' non riguardano il
+progetto ma questo telefono:
+
+```toml
+[build]
+jobs = 1
+incremental = false
+```
+
+Non impostare `RUSTFLAGS` nell'ambiente: sostituisce la configurazione di cargo
+invece di aggiungersi. Lo script avvisa se la trova.
+
 ### Sull'S9 — aggiornamento e collaudo
 
 Il vecchio giro zip → scp → unzip → installer python non serve piu'.
@@ -155,12 +172,15 @@ scripts/aggiorna-s9.sh              aggiornamento e avvio sul telefono
    aggiornare con `rustup update` su Termux.
 2. **Pasti liberi** non rappresentabili: `ricetta_nome_snapshot` e' NOT NULL.
    Decisione rimandata ora che esiste l'esito "saltato".
-3. **Un planner cercato sette volte.** `planner_load_meals` chiama
+3. **`cargo clean` ogni tanto sull'S9.** `target/` cresce fino a qualche GB e
+   lo spazio e' il vincolo vero del telefono. Lo script ora avvisa sotto
+   1,5 GB liberi.
+4. **Un planner cercato sette volte.** `planner_load_meals` chiama
    `planner_find_for_date` una volta per giorno: aprire una settimana costa
    sette letture identiche. Cercare il planner una volta sola e passarlo al
    ciclo toglie altre sei query. E' il seguito naturale del lavoro sulle date.
-4. **PR #6 di Dependabot** (sqlx 0.8.6 → 0.9.0) ancora da valutare.
-5. **Verifiche differite** che richiedono un secondo account Telegram: invito
+5. **PR #6 di Dependabot** (sqlx 0.8.6 → 0.9.0) ancora da valutare.
+6. **Verifiche differite** che richiedono un secondo account Telegram: invito
    accettato con apertura dello spazio, notifica al creatore, notifica di cambio
    ruolo, notifica di rimozione con perdita dell'accesso.
 

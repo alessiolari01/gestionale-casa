@@ -14,3 +14,31 @@ teloxide = { version = "0.17", default-features = false, features = ["rustls", "
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "time"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
+
+# Perche' questi profili sono nel progetto e non solo in `aggiorna-s9.sh`.
+#
+# Il 1 settembre un `cargo run` dato a mano sull'S9 ha fatto segfaultare il
+# linker. Il motivo era che le impostazioni anti-memoria vivevano soltanto
+# come variabili d'ambiente esportate dallo script: chi compila senza passare
+# dallo script ottiene i default di cargo, cioe' 256 unita' di codegen e le
+# informazioni di debug complete. Il linker si e' trovato 257 file oggetto
+# pieni di debuginfo da unire, su un telefono. Le impostazioni che proteggono
+# la build devono stare nel progetto, non in chi lo lancia.
+#
+# `debug = 0` e' gia' quello che usano sia la CI sia l'S9: qui smette solo di
+# essere una cosa da ricordarsi. `codegen-units = 16` porta i file oggetto da
+# 257 a una ventina, che e' il fattore che conta davvero per il linker.
+#
+# Il flag `--threads=1` per il linker su Android non e' qui perche' Cargo.toml
+# non sa distinguere i target: lo emette `build.rs`, solo quando serve.
+
+[profile.dev]
+debug = 0
+codegen-units = 16
+
+# Il profilo `test` erediterebbe da `dev`, ma il binario di test contiene
+# l'intero progetto in un solo eseguibile ed e' il piu' pesante da linkare:
+# meglio dichiararlo, cosi' resta vero anche se `dev` cambia.
+[profile.test]
+debug = 0
+codegen-units = 16
