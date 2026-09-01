@@ -1,3 +1,89 @@
+<!-- CHANGELOG_UX_TELEGRAM_20260901 -->
+# 01/09/2026 — Convenzioni dell'interfaccia, e primo giro di correzioni
+
+Primo giro completo del bot fatto guardandolo davvero, schermata per schermata,
+sull'istanza in esecuzione sull'S9. Il risultato e' `docs/ux/convenzioni-telegram.md`:
+cosa e' stato trovato, e dodici convenzioni per non ritrovarlo.
+
+## La scoperta
+
+I problemi visti nel planner **non erano del planner**. Sette degli otto sono
+sistemici e si ripetono in ogni sezione. Il piu' diffuso e' che **il testo del
+messaggio ripete i pulsanti sottostanti**: in `Elenco alimenti` cinque nomi nel
+testo e gli stessi cinque nei pulsanti, identici.
+
+Il caso che fa piu' danno e' lo Storico: nel testo ogni evento ha data, ora e
+autore, nel pulsante resta solo il titolo. Risultato: tre pulsanti identici
+`🍽 Porzione modificata · Giorgia`, distinguibili solo contandoli e
+confrontandoli con il testo sopra. **L'informazione che distingue le righe era
+finita nel posto dove non si puo' premere.**
+
+## Planner
+
+- **Vista settimana.** Sparisce l'elenco dei giorni nel testo, che ricompariva
+  identico nei pulsanti. I pulsanti portano conteggio e stato; il testo dice
+  l'unica cosa che i pulsanti non possono dire, cioe' **cosa si mangia oggi**.
+- **Oggi e' segnalato** con `👉`, nella settimana e nel giorno. Era il
+  riferimento piu' utile della schermata e non c'era.
+- **Un giorno vuoto tace** invece di scrivere `0 pasti`: su una settimana quasi
+  libera si vedevano sette righe di niente. Se la settimana e' vuota lo dice una
+  riga sola, con cosa fare.
+- **Date compatte** nei pulsanti (`Lun 31/08`): dentro una settimana l'anno e'
+  lo stesso su tutte e sette le righe e non distingue nulla, mentre lo spazio
+  serviva al marcatore di oggi.
+- **Vista giorno**: i pasti stanno solo sui pulsanti, non piu' anche nel testo.
+- **Concordanze**: il soggetto e' *il pasto*, quindi `✅ Segna come consumato` e
+  `⏭ Segna come saltato`. Erano al femminile.
+- **Un simbolo solo per stato**: il dettaglio diceva `📅 pianificata` mentre le
+  liste dicono `○`. Ora dicono entrambi `○`.
+- `➕ Aggiungi pasto` diventa `➕ Nuovo pasto`: creare si dice in un modo solo.
+
+## Il bug dietro le righe di navigazione
+
+`💡 Migliora` non e' scritto nelle tastiere: lo inserisce `context_bot.rs`,
+cercando nell'ultima riga il pulsante che porta al menu' principale e mettendosi
+davanti a quello. In Alimentazione e Storico **sia `⬅️ Indietro` sia `🏠 Menu'
+principale` puntavano a `menu:main`**, e la ricerca partiva dall'inizio: trovava
+l'Indietro, e Migliora finiva davanti a tutto. Da li' venivano le righe
+`Migliora | Indietro | Menu'`, diverse da ogni altra schermata.
+
+Corretto cercando dal fondo (`rposition`). E poiche' in una sezione di primo
+livello «indietro» e «menu' principale» sono lo stesso posto, l'`⬅️ Indietro`
+ridondante di Alimentazione e Storico e' stato tolto: la regola ora e' scritta,
+ed e' che quel pulsante esiste solo se porta da qualche altra parte.
+
+## Menù principale
+
+- **Ordinato per uso e non per architettura**: prima Alimentazione, Oggetti e
+  Case, poi lo Storico, poi Profilo e Spazi, in fondo gli strumenti. Lo Storico
+  era il primo pulsante del gestionale.
+- **I moduli non disponibili non compaiono.** `👕 Vestiti · prossimamente` e
+  `🚗 Veicoli · prossimamente` occupavano una riga senza fare niente e
+  costringevano il messaggio a spiegare cosa volesse dire «prossimamente».
+  Restano previsti e sono scritti in `docs/step7/roadmap.md`, con i moduli
+  segnaposto che gia' esistono.
+- `💡 Miglioramenti` diventa **`📋 Miglioramenti`**: c'erano due lampadine nello
+  stesso menu', con nomi quasi uguali e funzioni diverse. `💡 Migliora` resta
+  quello che segnala un problema sulla schermata corrente.
+- Via la frase che spiegava «prossimamente», ormai senza oggetto.
+
+## Frasi che leggevano i pulsanti ad alta voce
+
+- `🏷️ Oggetti generici` diceva: «Scegli cosa vuoi fare. Usa i pulsanti per
+  scegliere cosa fare.» La stessa frase due volte nella stessa riga. Ora la
+  schermata si chiama `🏷️ Oggetti`, come il pulsante che ci porta, e non dice
+  altro.
+- `🥕 Alimenti` elencava a parole i quattro pulsanti sottostanti e aggiungeva
+  «i dati vengono riletti automaticamente ogni volta che apri questa sezione»:
+  un dettaglio di implementazione che crea un dubbio che l'utente non aveva.
+
+## Verifica
+
+- pipeline verde: fmt, clippy `-D warnings`, **236 test**;
+- nessuna migration: nessuna modifica ai dati;
+- il resto — liste lunghe, Spazi e Profilo, conteggi sui pulsanti — e' nella
+  parte 3 del documento delle convenzioni, in ordine di applicazione.
+
 <!-- CHANGELOG_BUILD_S9_20260901 -->
 # 01/09/2026 — Il linker che segfaultava, e perche'
 

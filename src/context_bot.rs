@@ -626,9 +626,18 @@ where
                         })
                     }) {
                         if row.len() < 3 {
+                            // `rposition` e non `position`: quando una riga
+                            // contiene sia `⬅️ Indietro` sia `🏠 Menù
+                            // principale` ed entrambi puntano a `menu:main`,
+                            // cercando dall'inizio si trovava l'Indietro e
+                            // `💡 Migliora` finiva davanti a tutto. Da qui
+                            // venivano le righe `Migliora | Indietro | Menù`
+                            // di Alimentazione e Storico, diverse da ogni
+                            // altra schermata. Il pulsante del menù e'
+                            // l'ultimo della riga: si cerca dal fondo.
                             let menu_index = row
                                 .iter()
-                                .position(|button| {
+                                .rposition(|button| {
                                     matches!(
                                         &button.kind,
                                         InlineKeyboardButtonKind::CallbackData(data)
@@ -786,7 +795,7 @@ fn infer_section(text: &str, screen: &str, current_section: Option<&str>) -> Str
 }
 
 fn section_for_callback(data: &str) -> Option<String> {
-    let section = if data == "menu:main" || data == "menu:soon" {
+    let section = if data == "menu:main" {
         "Menù principale"
     } else if data.starts_with("planner:") {
         "Alimentazione › Planner"

@@ -55,6 +55,21 @@ Prossimi blocchi funzionali, nell'ordine:
 
 Google Calendar, email, inviti e completamento delle funzioni multiutente esterne.
 
+## Moduli previsti e non ancora disponibili
+
+Fino al 1 settembre 2026 il menù principale mostrava `👕 Vestiti · prossimamente`
+e `🚗 Veicoli · prossimamente`: due pulsanti che non facevano niente e che
+costringevano il messaggio del menù a spiegare cosa volesse dire
+«prossimamente». Sono stati tolti dall'interfaccia — un pulsante che non porta
+da nessuna parte e' un invito a premerlo per niente — ma **restano previsti**,
+e sono elencati qui perche' non vadano persi:
+
+- **👕 Vestiti** — `src/modules/vestiti.rs` esiste come segnaposto;
+- **🚗 Veicoli** — `src/modules/veicoli.rs` esiste come segnaposto.
+
+Torneranno nel menù quando avranno delle schermate vere dietro, insieme agli
+altri domini gia' specificati elencati qui sotto.
+
 ## Dopo i domini funzionali
 
 Rimangono già specificati Acquisti, Viaggi, Spese, documenti/garanzie, manutenzioni, prestiti, ricerca globale, QR/codici, Veicoli e Vestiti.

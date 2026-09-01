@@ -1078,13 +1078,6 @@ async fn handle_authorized_callback(
             recipe_sessions.clear_chat(chat_id.0);
             send_main_menu(&bot, chat_id, &pool, &actor).await?;
         }
-        "menu:soon" => {
-            bot.send_message(
-                chat_id,
-                "Questo modulo non è ancora implementato. Per ora sono disponibili 🏷️ Oggetti e 🏠 Case, stanze e contenitori.",
-            )
-            .await?;
-        }
         "identity:profile" => {
             send_profile(&bot, chat_id, &pool, &actor).await?;
         }
@@ -1355,12 +1348,9 @@ async fn send_main_menu(
             false
         }
     };
-    bot.send_message(
-        chat_id,
-        "🏠 Gestionale Casa\n\nScegli una sezione. I moduli non ancora disponibili sono indicati come prossimamente.",
-    )
-    .reply_markup(modules::oggetti::main_menu_keyboard(is_admin))
-    .await?;
+    bot.send_message(chat_id, "🏠 Gestionale Casa\n\nScegli una sezione.")
+        .reply_markup(modules::oggetti::main_menu_keyboard(is_admin))
+        .await?;
     Ok(())
 }
 

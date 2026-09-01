@@ -328,7 +328,7 @@ impl PlannerMealRow {
     }
 
     /// Simbolo di stato, con le stesse convenzioni del dettaglio del pasto:
-    /// consumata, saltata, da aggiornare, pianificata.
+    /// consumato, saltato, da aggiornare, pianificato.
     fn marker(&self, oggi: &str) -> &'static str {
         if self.state == "completato" {
             "✅"
@@ -823,9 +823,16 @@ async fn planner_show_week(
     let mut rows = Vec::new();
     let oggi = planner_today(pool).await;
     let mut settimana_da_aggiornare = false;
+    let mut settimana_vuota = true;
+    let mut pasti_di_oggi: Option<String> = None;
+
+    // Convenzione C1: il testo non ripete i pulsanti. Prima ogni giorno veniva
+    // elencato sopra e poi ricompariva identico come pulsante; qui i pulsanti
+    // portano conteggio e stato, e il testo dice l'unica cosa che i pulsanti
+    // non possono dire, cioè cosa si mangia oggi.
     let mut text = format!(
-        "📅 Planner alimentare\n\nSettimana {} → {}\n\n",
-        planner_display_date(week_start),
+        "📅 Planner alimentare\n\nSettimana {} → {}\n",
+        planner_display_day_month(week_start),
         planner_display_date(&week_end)
     );
 
@@ -835,31 +842,48 @@ async fn planner_show_week(
         // pasti da aggiornare, invece di interrogare il database tre volte.
         let meals = planner_load_meals(pool, &date).await.unwrap_or_default();
         let count = meals.len();
-        let weekday = planner_weekday(&date);
+        let e_oggi = date == oggi;
         let da_aggiornare = meals.iter().any(|meal| meal.needs_update(&oggi));
         if da_aggiornare {
             settimana_da_aggiornare = true;
         }
+        if count > 0 {
+            settimana_vuota = false;
+        }
+        if e_oggi && !meals.is_empty() {
+            pasti_di_oggi = Some(
+                meals
+                    .iter()
+                    .map(|meal| format!("{} {}", meal.marker(&oggi), meal.recipe_name))
+                    .collect::<Vec<_>>()
+                    .join(" · "),
+            );
+        }
+
+        // Convenzione C9: oggi è sempre segnalato. Convenzione C8: un giorno
+        // senza pasti non scrive "0 pasti", tace — così le righe piene si
+        // vedono a colpo d'occhio.
         rows.push(vec![planner_button(
             format!(
-                "{weekday} {} · {count} {}{}",
-                planner_display_date(&date),
-                if count == 1 { "pasto" } else { "pasti" },
+                "{}{} {}{}{}",
+                if e_oggi { "👉 " } else { "" },
+                planner_weekday_short(&date),
+                planner_display_day_month(&date),
+                if count == 0 {
+                    String::new()
+                } else {
+                    format!(" · {count} {}", if count == 1 { "pasto" } else { "pasti" })
+                },
                 if da_aggiornare { " 🔄" } else { "" }
             ),
             format!("planner:day:{date}"),
         )]);
-        if !meals.is_empty() {
-            let names: Vec<String> = meals
-                .iter()
-                .map(|meal| format!("{} {}", meal.marker(&oggi), meal.recipe_name))
-                .collect();
-            text.push_str(&format!(
-                "{}: {}\n",
-                planner_display_date(&date),
-                names.join(" · ")
-            ));
-        }
+    }
+
+    if let Some(oggi_riga) = pasti_di_oggi {
+        text.push_str(&format!("\nOggi: {oggi_riga}\n"));
+    } else if settimana_vuota {
+        text.push_str("\nNessun pasto pianificato in questa settimana.\nApri un giorno per aggiungerne uno.\n");
     }
 
     if settimana_da_aggiornare {
@@ -894,26 +918,29 @@ async fn planner_show_day(
     let oggi = planner_today(pool).await;
     let weekday = planner_weekday(date);
     let mut rows = Vec::new();
+    // Convenzione C9: oggi è segnalato anche qui, altrimenti si perde
+    // arrivando dalla settimana.
     let mut text = format!(
-        "{}📅 {weekday} · {}\n\n",
+        "{}📅 {weekday} · {}{}\n",
         notice
             .map(|value| format!("{value}\n\n"))
             .unwrap_or_default(),
-        planner_display_date(date)
+        planner_display_date(date),
+        if date == oggi { " · oggi" } else { "" }
     );
 
+    // Convenzione C1: prima ogni pasto compariva nel testo e poi, identico,
+    // come pulsante. Ora sta solo sul pulsante.
     if meals.is_empty() {
-        text.push_str("Nessun pasto pianificato.");
+        text.push_str("\nNessun pasto pianificato.\n");
     } else {
         for meal in &meals {
             let meal_type = MealType::from_token(&meal.meal_type);
             let label = meal_type
                 .map(|value| format!("{} {}", value.emoji(), value.label()))
                 .unwrap_or_else(|| "🍴 Pasto".to_string());
-            let marker = meal.marker(&oggi);
-            text.push_str(&format!("{marker} {label}: {}\n", meal.recipe_name));
             rows.push(vec![planner_button(
-                format!("{marker} {label} · {}", meal.recipe_name),
+                format!("{} {label} · {}", meal.marker(&oggi), meal.recipe_name),
                 format!("planner:view:{}", meal.id),
             )]);
         }
@@ -926,7 +953,7 @@ async fn planner_show_day(
     }
 
     rows.push(vec![planner_button(
-        "➕ Aggiungi pasto",
+        "➕ Nuovo pasto",
         format!("planner:add:{date}"),
     )]);
     let week = planner_week_start_for_date(date).unwrap_or_else(|| date.to_string());
@@ -1138,12 +1165,15 @@ async fn planner_show_meal_detail(
         } else {
             profiles.join(", ")
         },
+        // Convenzione C4: lo stesso simbolo delle liste, non un secondo
+        // simbolo solo per il dettaglio. Convenzione C10: il soggetto è "il
+        // pasto", quindi consumato e saltato, al maschile.
         if meal.state == "completato" {
-            "✅ consumata"
+            "✅ consumato"
         } else if meal.skipped_at.is_some() {
-            "⏭ saltata"
+            "⏭ saltato"
         } else {
-            "📅 pianificata"
+            "○ pianificato"
         }
     );
 
@@ -1172,12 +1202,12 @@ async fn planner_show_meal_detail(
         rows.push(vec![
             planner_button("✏️ Modifica", format!("planner:edit:{}", meal.id)),
             planner_button(
-                "✅ Segna come consumata",
+                "✅ Segna come consumato",
                 format!("planner:complete:{}", meal.id),
             ),
         ]);
         rows.push(vec![planner_button(
-            "⏭ Segna come saltata",
+            "⏭ Segna come saltato",
             format!("planner:skip:{}", meal.id),
         )]);
         rows.push(vec![planner_button(
@@ -1390,6 +1420,36 @@ async fn planner_current_week_start(pool: &SqlitePool) -> String {
         return PLANNER_SETTIMANA_DI_RIPIEGO.to_string();
     }
     planner_week_start_for_date(&oggi).unwrap_or(oggi)
+}
+
+/// Giorno della settimana abbreviato, per le etichette dei pulsanti.
+///
+/// Convenzione C1: quello che distingue una riga sta sul pulsante. In una
+/// settimana ci stanno sette righe, e la forma lunga non lascia spazio al
+/// marcatore di oggi.
+fn planner_weekday_short(date: &str) -> &'static str {
+    match planner_weekday(date) {
+        "Lunedì" => "Lun",
+        "Martedì" => "Mar",
+        "Mercoledì" => "Mer",
+        "Giovedì" => "Gio",
+        "Venerdì" => "Ven",
+        "Sabato" => "Sab",
+        "Domenica" => "Dom",
+        _ => "Giorno",
+    }
+}
+
+/// Data senza anno, `GG/MM`.
+///
+/// Dentro una settimana l'anno è lo stesso su tutte e sette le righe: ripeterlo
+/// costa spazio e non distingue niente.
+fn planner_display_day_month(value: &str) -> String {
+    if planner_valid_date(value) {
+        format!("{}/{}", &value[8..10], &value[5..7])
+    } else {
+        value.to_string()
+    }
 }
 
 fn planner_weekday(date: &str) -> &'static str {
@@ -2273,6 +2333,28 @@ mod telegram_tests {
         let fine = planner_shift_date(&inizio, 6).expect("data valida");
         assert_eq!(planner_weekday(&inizio), "Lunedì");
         assert_eq!(planner_weekday(&fine), "Domenica");
+    }
+
+    /// Le etichette dei pulsanti della settimana: sette righe devono starci
+    /// insieme al marcatore di oggi.
+    #[test]
+    fn giorni_abbreviati_e_date_senza_anno() {
+        let attesi = [
+            ("2026-08-31", "Lun", "31/08"),
+            ("2026-09-01", "Mar", "01/09"),
+            ("2026-09-02", "Mer", "02/09"),
+            ("2026-09-03", "Gio", "03/09"),
+            ("2026-09-04", "Ven", "04/09"),
+            ("2026-09-05", "Sab", "05/09"),
+            ("2026-09-06", "Dom", "06/09"),
+        ];
+        for (data, giorno, breve) in attesi {
+            assert_eq!(planner_weekday_short(data), giorno);
+            assert_eq!(planner_display_day_month(data), breve);
+        }
+        // Una data illeggibile non deve rompere la schermata.
+        assert_eq!(planner_weekday_short("2026-02-30"), "Giorno");
+        assert_eq!(planner_display_day_month("boh"), "boh");
     }
 
     #[test]
