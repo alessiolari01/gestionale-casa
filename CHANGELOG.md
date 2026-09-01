@@ -35,6 +35,41 @@ sezione "Due implementazioni parallele" qui sotto.
   `saltato_il`, incompatibile con il completamento, immutabile e non
   eliminabile una volta registrato.
 
+## Rifiniture del planner — segnalazione e aggiornamento della ricetta
+
+Collaudo su Telegram: l'avviso di ricetta cambiata compariva solo aprendo il
+singolo pasto. Su una settimana con piu' pasti sarebbe rimasto invisibile, e un
+avviso che si vede solo se gia' sai dove guardare non serve.
+
+- **La segnalazione sale alla settimana e al giorno.** La riga del pasto porta
+  ora con se' data, esito e versione della ricetta, cosi' le viste possono
+  decidere da sole. Nella settimana il giorno interessato mostra `🔄` accanto al
+  conteggio; nel giorno ogni pasto ha il proprio simbolo, con le stesse
+  convenzioni gia' scelte nel dettaglio: `✅` consumata, `⏭` saltata, `🔄` da
+  aggiornare, `○` pianificata. La spiegazione del `🔄` compare solo quando c'e'
+  almeno un pasto segnato.
+- **Il pasto saltato era indistinguibile.** Nella vista giorno compariva `○`
+  come un pasto ancora da consumare, perche' il suo `stato` resta `pianificato`
+  e la vista guardava solo quello.
+- **Solo i pasti non passati vengono segnalati.** Un pasto con data precedente a
+  oggi non mostra piu' il `🔄`: riscriverne le quantita' significherebbe
+  riscrivere la storia. Le date sono ISO, quindi il confronto fra stringhe
+  coincide con quello del calendario; coperto da test sui cambi di mese e anno.
+- **`🔄 Aggiorna alla ricetta attuale`.** Dal dettaglio di un pasto segnalato si
+  puo' riallinearlo, con una conferma esplicita che dichiara cosa cambia: le
+  quantita' vengono ricalcolate con la ricetta di adesso, i partecipanti e le
+  loro percentuali personali restano quelli scelti, gli altri pasti non vengono
+  toccati. L'operazione riusa il percorso della modifica gia' esistente, quindi
+  il ricalcolo degli snapshot resta scritto in un posto solo. Rifiuta pasti
+  consumati, saltati, con data passata o con la ricetta ormai eliminata.
+- **Sette query in meno per ogni apertura della settimana.** La vista faceva tre
+  interrogazioni per giorno — conteggio, nomi e giorno della settimana; ora la
+  lettura dei pasti e' una sola e ne ricava tutto. `planner_count_meals` e
+  `planner_meal_names` sono state rimosse.
+- Se il database non riesce a dire che giorno e', il codice considera tutti i
+  pasti passati e non segnala nulla: meglio un avviso mancante che un avviso
+  ovunque.
+
 ## Due implementazioni parallele — cosa e' successo
 
 Il 31 agosto il 7.3B e' stato sviluppato due volte in parallelo: una volta sul
@@ -94,7 +129,7 @@ e' uno stato condiviso.
 - migration nel repository: **42**; applicate al database reale dell'S9: fino a
   `20260831191500`. La `20260901013000` e' presente ma **non ancora applicata**;
 - `cargo fmt`, `cargo check --locked`, `cargo clippy --all-targets --locked
-  -- -D warnings` e `cargo test --locked`: verdi, **217 test**, verificati sia in
+  -- -D warnings` e `cargo test --locked`: verdi, **226 test**, verificati sia in
   ambiente esterno sia sul Galaxy S9;
 - tutte e 42 le migration si applicano in sequenza su un database vuoto, con
   `integrity_check` e `foreign_key_check` puliti.

@@ -32,7 +32,13 @@ Step 1-6C chiusi e mergiati su `main`. Step 7 sul branch di lavoro:
   snapshot;
 - **7.3B** planner operativo su Telegram: vista settimanale, giorno, aggiunta e
   modifica pasti, scelta ricetta, profili partecipanti, quantita' aggregate,
-  completamento con congelamento, esito "saltato", avviso di ricetta cambiata.
+  completamento con congelamento, esito "saltato", segnalazione della ricetta
+  cambiata su settimana, giorno e dettaglio, e riallineamento del pasto alla
+  ricetta attuale con conferma esplicita.
+
+La segnalazione riguarda solo i pasti di oggi o futuri: su un pasto passato
+riscrivere le quantita' significherebbe riscrivere la storia. L'aggiornamento
+non e' mai automatico ed e' sempre limitato al pasto scelto.
 
 La settimana del planner viene creata implicitamente alla prima apertura: non
 c'e' una creazione manuale, per non aggiungere concetti all'utente medio.
@@ -44,7 +50,7 @@ c'e' una creazione manuale, per non aggiungere concetti all'utente medio.
 - **`20260901013000_versione_contenuto_ricetta.sql` non e' ancora applicata**:
   lo sara' al primo avvio, dopo il backup che lo script fa da solo;
 - pipeline verde: `fmt`, `check --locked`, `clippy --all-targets --locked
-  -- -D warnings`, `test --locked` — **217 test**;
+  -- -D warnings`, `test --locked` — **226 test**;
 - la CI su GitHub Actions e' rossa per un motivo che non si riproduce in locale:
   vedi il punto 6.
 

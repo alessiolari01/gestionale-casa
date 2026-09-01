@@ -24,7 +24,9 @@ e non va usato: vedi `CHANGELOG.md`, voce "Due implementazioni parallele".
   lunedi'-domenica, dettaglio giornaliero, aggiunta e modifica dei pasti, tipo
   pasto, scelta ricetta paginata a 5, selezione multipla dei Profili, snapshot
   delle quantita' con percentuali e override, quantita' aggregate, completamento
-  con congelamento, esito "saltato" e avviso quando la ricetta viva cambia.
+  con congelamento, esito "saltato", segnalazione della ricetta cambiata su
+  settimana, giorno e dettaglio — limitata ai pasti di oggi o futuri — e
+  `🔄 Aggiorna alla ricetta attuale` con conferma esplicita.
 
 La settimana viene creata implicitamente alla prima apertura: non esiste una
 creazione manuale del planner. E' una scelta deliberata, per non aggiungere un
