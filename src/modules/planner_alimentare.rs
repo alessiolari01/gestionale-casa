@@ -301,6 +301,42 @@ struct PlannerMealRow {
     meal_type: String,
     recipe_name: String,
     state: String,
+    skipped_at: Option<String>,
+    recipe_snapshot_version: Option<String>,
+    current_recipe_version: Option<String>,
+}
+
+impl PlannerMealRow {
+    /// La ricetta e' cambiata dopo la pianificazione di questo pasto.
+    ///
+    /// Stessa regola del dettaglio: un pasto completato o saltato e' congelato
+    /// e non va mai segnalato come aggiornabile.
+    fn needs_update(&self) -> bool {
+        self.skipped_at.is_none()
+            && recipe_update_available(
+                if self.state == "completato" {
+                    PlannedMealState::Completed
+                } else {
+                    PlannedMealState::Planned
+                },
+                self.recipe_snapshot_version.as_deref(),
+                self.current_recipe_version.as_deref(),
+            )
+    }
+
+    /// Simbolo di stato, con le stesse convenzioni del dettaglio del pasto:
+    /// consumata, saltata, da aggiornare, pianificata.
+    fn marker(&self) -> &'static str {
+        if self.state == "completato" {
+            "✅"
+        } else if self.skipped_at.is_some() {
+            "⏭"
+        } else if self.needs_update() {
+            "🔄"
+        } else {
+            "○"
+        }
+    }
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -748,6 +784,7 @@ async fn planner_show_week(
         .unwrap_or_else(|_| week_start.to_string());
 
     let mut rows = Vec::new();
+    let mut settimana_da_aggiornare = false;
     let mut text = format!(
         "📅 Planner alimentare\n\nSettimana {} → {}\n\n",
         planner_display_date(week_start),
@@ -758,26 +795,41 @@ async fn planner_show_week(
         let date = planner_shift_date(pool, week_start, offset)
             .await
             .unwrap_or_else(|_| week_start.to_string());
-        let count = planner_count_meals(pool, &date).await.unwrap_or(0);
+        // Una sola lettura per giorno: da qui ricaviamo conteggio, nomi e
+        // pasti da aggiornare, invece di interrogare il database tre volte.
+        let meals = planner_load_meals(pool, &date).await.unwrap_or_default();
+        let count = meals.len();
         let weekday = planner_weekday(pool, &date).await.unwrap_or("Giorno");
+        let da_aggiornare = meals.iter().any(PlannerMealRow::needs_update);
+        if da_aggiornare {
+            settimana_da_aggiornare = true;
+        }
         rows.push(vec![planner_button(
             format!(
-                "{weekday} {} · {count} {}",
+                "{weekday} {} · {count} {}{}",
                 planner_display_date(&date),
-                if count == 1 { "pasto" } else { "pasti" }
+                if count == 1 { "pasto" } else { "pasti" },
+                if da_aggiornare { " 🔄" } else { "" }
             ),
             format!("planner:day:{date}"),
         )]);
-        if count > 0 {
-            let names = planner_meal_names(pool, &date).await.unwrap_or_default();
-            if !names.is_empty() {
-                text.push_str(&format!(
-                    "{}: {}\n",
-                    planner_display_date(&date),
-                    names.join(" · ")
-                ));
-            }
+        if !meals.is_empty() {
+            let names: Vec<String> = meals
+                .iter()
+                .map(|meal| format!("{} {}", meal.marker(), meal.recipe_name))
+                .collect();
+            text.push_str(&format!(
+                "{}: {}\n",
+                planner_display_date(&date),
+                names.join(" · ")
+            ));
         }
+    }
+
+    if settimana_da_aggiornare {
+        text.push_str(
+            "\n🔄 In questa settimana c'è almeno una ricetta cambiata dopo la pianificazione.\n",
+        );
     }
 
     rows.push(vec![
@@ -821,17 +873,19 @@ async fn planner_show_day(
             let label = meal_type
                 .map(|value| format!("{} {}", value.emoji(), value.label()))
                 .unwrap_or_else(|| "🍴 Pasto".to_string());
-            let marker = if meal.state == "completato" {
-                "✅"
-            } else {
-                "○"
-            };
+            let marker = meal.marker();
             text.push_str(&format!("{marker} {label}: {}\n", meal.recipe_name));
             rows.push(vec![planner_button(
                 format!("{marker} {label} · {}", meal.recipe_name),
                 format!("planner:view:{}", meal.id),
             )]);
         }
+    }
+
+    if meals.iter().any(PlannerMealRow::needs_update) {
+        text.push_str(
+            "\n🔄 Per i pasti segnati, la ricetta è cambiata dopo la pianificazione.\nApri il pasto per vedere cosa fare.",
+        );
     }
 
     rows.push(vec![planner_button(
@@ -1281,44 +1335,22 @@ async fn planner_find_for_date(pool: &SqlitePool, date: &str) -> anyhow::Result<
     .context("Impossibile cercare il Planner")
 }
 
-async fn planner_count_meals(pool: &SqlitePool, date: &str) -> anyhow::Result<i64> {
-    let Some(planner_id) = planner_find_for_date(pool, date).await? else {
-        return Ok(0);
-    };
-    sqlx::query_scalar("SELECT COUNT(*) FROM planner_pasti WHERE planner_id = ? AND data_pasto = ?")
-        .bind(planner_id)
-        .bind(date)
-        .fetch_one(pool)
-        .await
-        .context("Impossibile contare i pasti")
-}
-
-async fn planner_meal_names(pool: &SqlitePool, date: &str) -> anyhow::Result<Vec<String>> {
-    let Some(planner_id) = planner_find_for_date(pool, date).await? else {
-        return Ok(Vec::new());
-    };
-    sqlx::query_scalar(
-        "SELECT ricetta_nome_snapshot FROM planner_pasti \
-         WHERE planner_id = ? AND data_pasto = ? ORDER BY tipo_pasto, ordinamento, id",
-    )
-    .bind(planner_id)
-    .bind(date)
-    .fetch_all(pool)
-    .await
-    .context("Impossibile leggere i pasti")
-}
-
 async fn planner_load_meals(pool: &SqlitePool, date: &str) -> anyhow::Result<Vec<PlannerMealRow>> {
     let Some(planner_id) = planner_find_for_date(pool, date).await? else {
         return Ok(Vec::new());
     };
     sqlx::query_as(
-        "SELECT id, tipo_pasto AS meal_type, ricetta_nome_snapshot AS recipe_name, stato AS state \
-         FROM planner_pasti WHERE planner_id = ? AND data_pasto = ? \
-         ORDER BY CASE tipo_pasto \
+        "SELECT pp.id, pp.tipo_pasto AS meal_type, \
+                pp.ricetta_nome_snapshot AS recipe_name, pp.stato AS state, \
+                pp.saltato_il AS skipped_at, \
+                pp.ricetta_aggiornato_il_snapshot AS recipe_snapshot_version, \
+                (SELECT r.aggiornato_il FROM ricette r WHERE r.id = pp.ricetta_id) \
+                    AS current_recipe_version \
+         FROM planner_pasti pp WHERE pp.planner_id = ? AND pp.data_pasto = ? \
+         ORDER BY CASE pp.tipo_pasto \
            WHEN 'colazione' THEN 1 WHEN 'spuntino_mattina' THEN 2 \
            WHEN 'pranzo' THEN 3 WHEN 'spuntino_pomeriggio' THEN 4 \
-           WHEN 'cena' THEN 5 ELSE 6 END, ordinamento, id",
+           WHEN 'cena' THEN 5 ELSE 6 END, pp.ordinamento, pp.id",
     )
     .bind(planner_id)
     .bind(date)
@@ -1967,6 +1999,63 @@ mod telegram_tests {
     fn quantita_usa_virgola_italiana() {
         assert_eq!(planner_format_quantity(90.5), "90,5");
         assert_eq!(planner_format_quantity(100.0), "100");
+    }
+
+    fn riga_pasto(
+        state: &str,
+        skipped: Option<&str>,
+        snapshot: Option<&str>,
+        corrente: Option<&str>,
+    ) -> PlannerMealRow {
+        PlannerMealRow {
+            id: 1,
+            meal_type: "pranzo".to_string(),
+            recipe_name: "Pasta al pesto".to_string(),
+            state: state.to_string(),
+            skipped_at: skipped.map(str::to_string),
+            recipe_snapshot_version: snapshot.map(str::to_string),
+            current_recipe_version: corrente.map(str::to_string),
+        }
+    }
+
+    const PRIMA: &str = "2026-08-31T10:00:00Z";
+    const DOPO: &str = "2026-08-31T11:00:00Z";
+
+    #[test]
+    fn pasto_pianificato_con_ricetta_cambiata_e_da_aggiornare() {
+        let pasto = riga_pasto("pianificato", None, Some(PRIMA), Some(DOPO));
+        assert!(pasto.needs_update());
+        assert_eq!(pasto.marker(), "🔄");
+    }
+
+    #[test]
+    fn pasto_pianificato_con_ricetta_invariata_resta_neutro() {
+        let pasto = riga_pasto("pianificato", None, Some(PRIMA), Some(PRIMA));
+        assert!(!pasto.needs_update());
+        assert_eq!(pasto.marker(), "○");
+    }
+
+    #[test]
+    fn pasto_completato_resta_congelato_anche_se_la_ricetta_cambia() {
+        let pasto = riga_pasto("completato", None, Some(PRIMA), Some(DOPO));
+        assert!(!pasto.needs_update());
+        assert_eq!(pasto.marker(), "✅");
+    }
+
+    #[test]
+    fn pasto_saltato_non_viene_mai_segnalato_da_aggiornare() {
+        let pasto = riga_pasto("pianificato", Some(DOPO), Some(PRIMA), Some(DOPO));
+        assert!(!pasto.needs_update());
+        assert_eq!(pasto.marker(), "⏭");
+    }
+
+    #[test]
+    fn ricetta_eliminata_non_produce_falsi_aggiornamenti() {
+        // Senza ricetta viva non c'e' versione corrente da confrontare: il pasto
+        // sopravvive con il solo snapshot e non deve lampeggiare.
+        let pasto = riga_pasto("pianificato", None, Some(PRIMA), None);
+        assert!(!pasto.needs_update());
+        assert_eq!(pasto.marker(), "○");
     }
 
     #[test]
