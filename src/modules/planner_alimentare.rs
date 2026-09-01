@@ -298,6 +298,7 @@ struct PlannerProfileChoice {
 #[derive(Debug, Clone, FromRow)]
 struct PlannerMealRow {
     id: i64,
+    date: String,
     meal_type: String,
     recipe_name: String,
     state: String,
@@ -311,8 +312,9 @@ impl PlannerMealRow {
     ///
     /// Stessa regola del dettaglio: un pasto completato o saltato e' congelato
     /// e non va mai segnalato come aggiornabile.
-    fn needs_update(&self) -> bool {
+    fn needs_update(&self, oggi: &str) -> bool {
         self.skipped_at.is_none()
+            && !meal_is_past(&self.date, oggi)
             && recipe_update_available(
                 if self.state == "completato" {
                     PlannedMealState::Completed
@@ -326,17 +328,27 @@ impl PlannerMealRow {
 
     /// Simbolo di stato, con le stesse convenzioni del dettaglio del pasto:
     /// consumata, saltata, da aggiornare, pianificata.
-    fn marker(&self) -> &'static str {
+    fn marker(&self, oggi: &str) -> &'static str {
         if self.state == "completato" {
             "✅"
         } else if self.skipped_at.is_some() {
             "⏭"
-        } else if self.needs_update() {
+        } else if self.needs_update(oggi) {
             "🔄"
         } else {
             "○"
         }
     }
+}
+
+/// Un pasto e' passato quando la sua data precede oggi.
+///
+/// Le date sono ISO `AAAA-MM-GG`, quindi il confronto fra stringhe coincide con
+/// quello cronologico. Su un pasto passato non ha senso proporre di riallineare
+/// la ricetta: e' gia' stato, o non e' stato, e in entrambi i casi cambiarne le
+/// quantita' riscriverebbe la storia.
+fn meal_is_past(data_pasto: &str, oggi: &str) -> bool {
+    data_pasto < oggi
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -515,6 +527,38 @@ pub async fn handle_callback(
                     .await?;
             }
         }
+        return Ok(true);
+    }
+    if let Some(raw_id) = data.strip_prefix("planner:refresh:yes:") {
+        let Some(meal_id) = planner_positive_i64(raw_id) else {
+            planner_invalid(bot, chat_id).await?;
+            return Ok(true);
+        };
+        match planner_refresh_meal(pool, meal_id).await {
+            Ok(recipe_name) => {
+                planner_show_meal_detail(
+                    bot,
+                    chat_id,
+                    pool,
+                    meal_id,
+                    Some(&format!("🔄 Pasto aggiornato a «{recipe_name}».")),
+                )
+                .await?;
+            }
+            Err(error) => {
+                tracing::warn!(?error, meal_id, "Aggiornamento pasto Planner fallito");
+                planner_show_meal_detail(bot, chat_id, pool, meal_id, Some(&format!("⚠️ {error}")))
+                    .await?;
+            }
+        }
+        return Ok(true);
+    }
+    if let Some(raw_id) = data.strip_prefix("planner:refresh:ask:") {
+        let Some(meal_id) = planner_positive_i64(raw_id) else {
+            planner_invalid(bot, chat_id).await?;
+            return Ok(true);
+        };
+        planner_show_refresh_confirmation(bot, chat_id, pool, meal_id).await?;
         return Ok(true);
     }
     if let Some(token) = data.strip_prefix("planner:type:") {
@@ -784,6 +828,7 @@ async fn planner_show_week(
         .unwrap_or_else(|_| week_start.to_string());
 
     let mut rows = Vec::new();
+    let oggi = planner_today(pool).await;
     let mut settimana_da_aggiornare = false;
     let mut text = format!(
         "📅 Planner alimentare\n\nSettimana {} → {}\n\n",
@@ -800,7 +845,7 @@ async fn planner_show_week(
         let meals = planner_load_meals(pool, &date).await.unwrap_or_default();
         let count = meals.len();
         let weekday = planner_weekday(pool, &date).await.unwrap_or("Giorno");
-        let da_aggiornare = meals.iter().any(PlannerMealRow::needs_update);
+        let da_aggiornare = meals.iter().any(|meal| meal.needs_update(&oggi));
         if da_aggiornare {
             settimana_da_aggiornare = true;
         }
@@ -816,7 +861,7 @@ async fn planner_show_week(
         if !meals.is_empty() {
             let names: Vec<String> = meals
                 .iter()
-                .map(|meal| format!("{} {}", meal.marker(), meal.recipe_name))
+                .map(|meal| format!("{} {}", meal.marker(&oggi), meal.recipe_name))
                 .collect();
             text.push_str(&format!(
                 "{}: {}\n",
@@ -855,6 +900,7 @@ async fn planner_show_day(
     notice: Option<&str>,
 ) -> ResponseResult<()> {
     let meals = planner_load_meals(pool, date).await.unwrap_or_default();
+    let oggi = planner_today(pool).await;
     let weekday = planner_weekday(pool, date).await.unwrap_or("Giorno");
     let mut rows = Vec::new();
     let mut text = format!(
@@ -873,7 +919,7 @@ async fn planner_show_day(
             let label = meal_type
                 .map(|value| format!("{} {}", value.emoji(), value.label()))
                 .unwrap_or_else(|| "🍴 Pasto".to_string());
-            let marker = meal.marker();
+            let marker = meal.marker(&oggi);
             text.push_str(&format!("{marker} {label}: {}\n", meal.recipe_name));
             rows.push(vec![planner_button(
                 format!("{marker} {label} · {}", meal.recipe_name),
@@ -882,7 +928,7 @@ async fn planner_show_day(
         }
     }
 
-    if meals.iter().any(PlannerMealRow::needs_update) {
+    if meals.iter().any(|meal| meal.needs_update(&oggi)) {
         text.push_str(
             "\n🔄 Per i pasti segnati, la ricetta è cambiata dopo la pianificazione.\nApri il pasto per vedere cosa fare.",
         );
@@ -1075,7 +1121,9 @@ async fn planner_show_meal_detail(
         .await
         .unwrap_or_default();
     let meal_type = MealType::from_token(&meal.meal_type);
+    let oggi = planner_today(pool).await;
     let changed = meal.skipped_at.is_none()
+        && !meal_is_past(&meal.date, &oggi)
         && recipe_update_available(
             if meal.state == "completato" {
                 PlannedMealState::Completed
@@ -1112,7 +1160,7 @@ async fn planner_show_meal_detail(
 
     if changed {
         text.push_str(
-            "\n\n🔄 La ricetta è cambiata dopo la pianificazione. Il pasto è rimasto invariato.",
+            "\n\n🔄 La ricetta è cambiata dopo la pianificazione. Il pasto è rimasto invariato.\nPuoi allinearlo alla ricetta di oggi con 🔄 Aggiorna.",
         );
     }
 
@@ -1125,6 +1173,12 @@ async fn planner_show_meal_detail(
     }
 
     let mut rows = Vec::new();
+    if changed {
+        rows.push(vec![planner_button(
+            "🔄 Aggiorna alla ricetta attuale",
+            format!("planner:refresh:ask:{}", meal.id),
+        )]);
+    }
     if meal.state == "pianificato" && meal.skipped_at.is_none() {
         rows.push(vec![
             planner_button("✏️ Modifica", format!("planner:edit:{}", meal.id)),
@@ -1180,6 +1234,84 @@ async fn planner_show_delete_confirmation(
     ]))
     .await?;
     Ok(())
+}
+
+/// Data odierna secondo il fuso del dispositivo.
+async fn planner_today(pool: &SqlitePool) -> String {
+    sqlx::query_scalar("SELECT date('now','localtime')")
+        .fetch_one(pool)
+        .await
+        // Se la data non e' leggibile non segnaliamo nulla, invece di segnalare
+        // tutto: una data futura irraggiungibile rende ogni pasto "passato".
+        .unwrap_or_else(|_| "9999-12-31".to_string())
+}
+
+/// Chiede conferma prima di riallineare il pasto alla ricetta viva.
+///
+/// L'aggiornamento non e' mai automatico: e' l'utente a decidere quando una
+/// modifica della ricetta deve entrare in un pasto gia' pianificato.
+async fn planner_show_refresh_confirmation(
+    bot: &PlannerBot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    meal_id: i64,
+) -> ResponseResult<()> {
+    let Some(meal) = planner_load_meal_detail(pool, meal_id)
+        .await
+        .unwrap_or(None)
+    else {
+        planner_invalid(bot, chat_id).await?;
+        return Ok(());
+    };
+    let profiles = planner_meal_profiles(pool, meal_id)
+        .await
+        .unwrap_or_default();
+
+    bot.send_message(
+        chat_id,
+        format!(
+            "🔄 Aggiornare questo pasto?\n\n🍳 {}\n📅 {}\n👥 {}\n\n\
+             Le quantità vengono ricalcolate con la ricetta di adesso.\n\
+             I partecipanti e le loro percentuali personali restano quelli che hai scelto.\n\
+             Gli altri pasti non vengono toccati.",
+            meal.recipe_name,
+            planner_display_date(&meal.date),
+            if profiles.is_empty() {
+                "nessun profilo".to_string()
+            } else {
+                profiles.join(", ")
+            }
+        ),
+    )
+    .reply_markup(InlineKeyboardMarkup::new(vec![
+        vec![planner_button(
+            "✅ Sì, aggiorna",
+            format!("planner:refresh:yes:{}", meal.id),
+        )],
+        planner_global_nav(&format!("planner:view:{}", meal.id)),
+    ]))
+    .await?;
+    Ok(())
+}
+
+/// Riallinea il pasto alla ricetta viva riusando lo stesso percorso della
+/// modifica: cosi' il ricalcolo degli snapshot resta scritto in un posto solo.
+async fn planner_refresh_meal(pool: &SqlitePool, meal_id: i64) -> anyhow::Result<String> {
+    let Some(meal) = planner_load_meal_detail(pool, meal_id).await? else {
+        anyhow::bail!("Pasto non disponibile");
+    };
+    let oggi = planner_today(pool).await;
+    if meal_is_past(&meal.date, &oggi) {
+        anyhow::bail!("Un pasto già passato non si aggiorna");
+    }
+    let Some(draft) = planner_load_edit_draft(pool, meal_id).await? else {
+        anyhow::bail!("Il pasto non è più aggiornabile");
+    };
+    if draft.recipe_id.is_none() {
+        anyhow::bail!("La ricetta di questo pasto non esiste più");
+    }
+    planner_save_draft(pool, &draft).await?;
+    Ok(meal.recipe_name)
 }
 
 async fn planner_current_week_start(pool: &SqlitePool) -> anyhow::Result<String> {
@@ -1340,7 +1472,7 @@ async fn planner_load_meals(pool: &SqlitePool, date: &str) -> anyhow::Result<Vec
         return Ok(Vec::new());
     };
     sqlx::query_as(
-        "SELECT pp.id, pp.tipo_pasto AS meal_type, \
+        "SELECT pp.id, pp.data_pasto AS date, pp.tipo_pasto AS meal_type, \
                 pp.ricetta_nome_snapshot AS recipe_name, pp.stato AS state, \
                 pp.saltato_il AS skipped_at, \
                 pp.ricetta_aggiornato_il_snapshot AS recipe_snapshot_version, \
@@ -2001,7 +2133,12 @@ mod telegram_tests {
         assert_eq!(planner_format_quantity(100.0), "100");
     }
 
+    const OGGI: &str = "2026-09-01";
+    const PRIMA: &str = "2026-08-31T10:00:00Z";
+    const DOPO: &str = "2026-08-31T11:00:00Z";
+
     fn riga_pasto(
+        date: &str,
         state: &str,
         skipped: Option<&str>,
         snapshot: Option<&str>,
@@ -2009,6 +2146,7 @@ mod telegram_tests {
     ) -> PlannerMealRow {
         PlannerMealRow {
             id: 1,
+            date: date.to_string(),
             meal_type: "pranzo".to_string(),
             recipe_name: "Pasta al pesto".to_string(),
             state: state.to_string(),
@@ -2018,44 +2156,83 @@ mod telegram_tests {
         }
     }
 
-    const PRIMA: &str = "2026-08-31T10:00:00Z";
-    const DOPO: &str = "2026-08-31T11:00:00Z";
-
-    #[test]
-    fn pasto_pianificato_con_ricetta_cambiata_e_da_aggiornare() {
-        let pasto = riga_pasto("pianificato", None, Some(PRIMA), Some(DOPO));
-        assert!(pasto.needs_update());
-        assert_eq!(pasto.marker(), "🔄");
+    /// Pasto di oggi, pianificato, con la ricetta cambiata dopo: e' il caso in
+    /// cui l'aggiornamento ha senso.
+    fn pasto_aggiornabile(date: &str) -> PlannerMealRow {
+        riga_pasto(date, "pianificato", None, Some(PRIMA), Some(DOPO))
     }
 
     #[test]
-    fn pasto_pianificato_con_ricetta_invariata_resta_neutro() {
-        let pasto = riga_pasto("pianificato", None, Some(PRIMA), Some(PRIMA));
-        assert!(!pasto.needs_update());
-        assert_eq!(pasto.marker(), "○");
+    fn confronto_fra_date_iso_segue_il_calendario() {
+        assert!(meal_is_past("2026-08-31", OGGI));
+        assert!(!meal_is_past(OGGI, OGGI));
+        assert!(!meal_is_past("2026-09-02", OGGI));
+        // Cambi di mese e di anno, dove un confronto ingenuo sbaglierebbe.
+        assert!(meal_is_past("2025-12-31", "2026-01-01"));
+        assert!(!meal_is_past("2026-10-01", "2026-09-30"));
+    }
+
+    #[test]
+    fn pasto_di_oggi_con_ricetta_cambiata_e_da_aggiornare() {
+        let pasto = pasto_aggiornabile(OGGI);
+        assert!(pasto.needs_update(OGGI));
+        assert_eq!(pasto.marker(OGGI), "🔄");
+    }
+
+    #[test]
+    fn pasto_futuro_con_ricetta_cambiata_e_da_aggiornare() {
+        let pasto = pasto_aggiornabile("2026-09-05");
+        assert!(pasto.needs_update(OGGI));
+        assert_eq!(pasto.marker(OGGI), "🔄");
+    }
+
+    #[test]
+    fn pasto_passato_non_viene_segnalato_anche_se_la_ricetta_e_cambiata() {
+        // Riscrivere le quantita' di un pasto gia' passato significherebbe
+        // riscrivere la storia: resta neutro.
+        let pasto = pasto_aggiornabile("2026-08-30");
+        assert!(!pasto.needs_update(OGGI));
+        assert_eq!(pasto.marker(OGGI), "○");
+    }
+
+    #[test]
+    fn pasto_con_ricetta_invariata_resta_neutro() {
+        let pasto = riga_pasto(OGGI, "pianificato", None, Some(PRIMA), Some(PRIMA));
+        assert!(!pasto.needs_update(OGGI));
+        assert_eq!(pasto.marker(OGGI), "○");
     }
 
     #[test]
     fn pasto_completato_resta_congelato_anche_se_la_ricetta_cambia() {
-        let pasto = riga_pasto("completato", None, Some(PRIMA), Some(DOPO));
-        assert!(!pasto.needs_update());
-        assert_eq!(pasto.marker(), "✅");
+        let pasto = riga_pasto(OGGI, "completato", None, Some(PRIMA), Some(DOPO));
+        assert!(!pasto.needs_update(OGGI));
+        assert_eq!(pasto.marker(OGGI), "✅");
     }
 
     #[test]
     fn pasto_saltato_non_viene_mai_segnalato_da_aggiornare() {
-        let pasto = riga_pasto("pianificato", Some(DOPO), Some(PRIMA), Some(DOPO));
-        assert!(!pasto.needs_update());
-        assert_eq!(pasto.marker(), "⏭");
+        let pasto = riga_pasto(OGGI, "pianificato", Some(DOPO), Some(PRIMA), Some(DOPO));
+        assert!(!pasto.needs_update(OGGI));
+        assert_eq!(pasto.marker(OGGI), "⏭");
     }
 
     #[test]
     fn ricetta_eliminata_non_produce_falsi_aggiornamenti() {
         // Senza ricetta viva non c'e' versione corrente da confrontare: il pasto
         // sopravvive con il solo snapshot e non deve lampeggiare.
-        let pasto = riga_pasto("pianificato", None, Some(PRIMA), None);
-        assert!(!pasto.needs_update());
-        assert_eq!(pasto.marker(), "○");
+        let pasto = riga_pasto(OGGI, "pianificato", None, Some(PRIMA), None);
+        assert!(!pasto.needs_update(OGGI));
+        assert_eq!(pasto.marker(OGGI), "○");
+    }
+
+    #[test]
+    fn callback_di_aggiornamento_restano_sotto_il_limite_telegram() {
+        for callback in [
+            format!("planner:refresh:ask:{}", i64::MAX),
+            format!("planner:refresh:yes:{}", i64::MAX),
+        ] {
+            assert!(callback.len() <= 64, "callback troppo lunga: {callback}");
+        }
     }
 
     #[test]
