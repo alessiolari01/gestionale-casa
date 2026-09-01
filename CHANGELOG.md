@@ -77,9 +77,29 @@ ed e' che quel pulsante esiste solo se porta da qualche altra parte.
   «i dati vengono riletti automaticamente ogni volta che apri questa sezione»:
   un dettaglio di implementazione che crea un dubbio che l'utente non aveva.
 
+## `aggiorna-s9.sh --ramo`
+
+Consegnando questo lavoro su un ramo nuovo, sull'S9 non e' arrivato niente: lo
+script aggiorna soltanto il ramo su cui si trova gia'. Il collaudo e' girato
+sul codice di prima, verde, senza che nulla lo segnalasse — la stessa forma
+dell'errore del ramo vuoto di poche ore prima.
+
+```bash
+./scripts/aggiorna-s9.sh --ramo ux-convenzioni-telegram
+```
+
+Dopo il `git checkout` lo script **si riavvia da solo**: bash legge il file man
+mano che lo esegue, e il cambio di ramo puo' averlo appena riscritto;
+proseguire significherebbe eseguire meta' della versione vecchia e meta' di
+quella nuova. Il riavvio riparte dalla versione appena scaricata e tiene lo
+stesso file di log.
+
 ## Verifica
 
 - pipeline verde: fmt, clippy `-D warnings`, **236 test**;
+- `--ramo` provato su un repository finto: cambio di ramo, riavvio, file del
+  ramo nuovo presenti, un solo log; piu' gli argomenti sbagliati che si
+  fermano con un messaggio invece di essere ignorati;
 - nessuna migration: nessuna modifica ai dati;
 - il resto — liste lunghe, Spazi e Profilo, conteggi sui pulsanti — e' nella
   parte 3 del documento delle convenzioni, in ordine di applicazione.
