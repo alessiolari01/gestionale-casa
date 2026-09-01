@@ -1,46 +1,45 @@
 # Step 7 — Fondazioni condivise e Alimentazione
 
-**Stato: IN SVILUPPO — Step 7.2H chiuso; prossimo blocco Porzioni e override.**
-**Branch:** `step-7-alimentazione`.
+**Stato: 7.3B chiuso e verificato. Branch di lavoro `step-7-alimentazione-s9`.**
+
+Il branch `step-7-alimentazione` contiene un 7.3B parallelo scartato il 31 agosto
+e non va usato: vedi `CHANGELOG.md`, voce "Due implementazioni parallele".
 
 ## Macro-fasi
 
 | Macro-fase | Stato | Contenuto |
 |---|---|---|
 | 7.0 — Specifica e organizzazione | VERIFICATO | decisioni, confini e piano migration |
-| 7.1 — Fondazioni condivise | OPERATIVE | utenti, spazi, membership, ruoli, vista multi-spazio, audit, accesso DB-driven |
-| 7.2 — Alimentazione | IN SVILUPPO | Alimenti/Ricette/Profili operativi; Porzioni/Turni/Planner/Spesa da completare |
-| 7.3 — Integrazioni | PREVISTO | Google Calendar, email e altre integrazioni |
+| 7.1 — Fondazioni condivise | OPERATIVE | utenti, spazi, membership, ruoli, vista multi-spazio, audit |
+| 7.2 — Alimentazione | VERIFICATO | alimenti, ricette, profili, porzioni e override completi |
+| 7.3 — Planner | IN SVILUPPO | 7.3A e 7.3B chiusi; restano spesa, turni e reminder |
+| 7.4 — Integrazioni | PREVISTO | Google Calendar, email e integrazioni residue |
 
-## Stato 7.2
+## Stato 7.3
 
-Completati:
+- **7.3A VERIFICATO** — fondazioni: `planner_alimentari`, `planner_pasti`,
+  `planner_pasto_profili`, `planner_pasto_ingredienti_snapshot`, piu' il dominio
+  degli snapshot in `planner_alimentare.rs`.
+- **7.3B VERIFICATO** — planner operativo su Telegram: vista settimanale
+  lunedi'-domenica, dettaglio giornaliero, aggiunta e modifica dei pasti, tipo
+  pasto, scelta ricetta paginata a 5, selezione multipla dei Profili, snapshot
+  delle quantita' con percentuali e override, quantita' aggregate, completamento
+  con congelamento, esito "saltato" e avviso quando la ricetta viva cambia.
 
-- Alimenti/unità/categorie/catalogo/compatibilità;
-- prodotti commerciali, formati e nutrizione;
-- Ricette con ingredienti strutturati e procedimento guidato;
-- accesso approvato e amministrazione;
-- workflow Miglioramenti, verifica guidata e export;
-- Profili alimentari separati dagli account;
-- condivisione Profili tramite Spazi;
-- membri degli Spazi e inviti privati Telegram;
-- export progetto sanitizzato;
-- gestione non distruttiva dell'input inatteso.
-
-## Step 7.2H — chiuso
-
-Dettaglio: [step-7.2h-profili-spazi-inviti.md](step-7.2h-profili-spazi-inviti.md).
-
-Le verifiche che richiedono un secondo account restano differite e documentate nell'handoff; non bloccano il prossimo sviluppo.
+La settimana viene creata implicitamente alla prima apertura: non esiste una
+creazione manuale del planner. E' una scelta deliberata, per non aggiungere un
+concetto in piu' all'utente medio.
 
 ## Prossimo ordine
 
-1. Porzioni personali per Profilo;
-2. override quantità/esclusione ingrediente;
-3. turni/routine;
-4. planner versionato;
-5. lista della spesa;
-6. reminder/export e integrazioni residue.
+1. lista della spesa aggregata dagli snapshot dei pasti non completati;
+2. turni e routine;
+3. reminder ed export Alimentazione;
+4. integrazioni residue.
+
+Fuori sequenza, gia' individuati e non urgenti: aritmetica delle date in Rust al
+posto delle query di calendario, decisione sui pasti liberi, riallineamento di
+`main`.
 
 ## Documenti Step 7
 

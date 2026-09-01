@@ -1,3 +1,124 @@
+<!-- CHANGELOG_STEP7_3_20260901 -->
+# 01/09/2026 — Step 7.2I, 7.3A e 7.3B: porzioni, planner operativo e riallineamento
+
+**Branch di lavoro: `step-7-alimentazione-s9`.** Il branch `step-7-alimentazione`
+contiene un 7.3B parallelo scartato e non va piu' usato: la spiegazione e' nella
+sezione "Due implementazioni parallele" qui sotto.
+
+## Porzioni e override — Step 7.2I
+
+- 7.2I.0: fondazioni porzioni e override, con `profilo_ricetta_porzioni` e
+  `profilo_ricetta_ingredienti_override`; l'esclusione di un ingrediente resta
+  distinta da una quantita' pari a zero;
+- 7.2I.1: porzione della ricetta per profilo;
+- 7.2I.2: personalizzazione combinata percentuale + override del singolo
+  ingrediente, con l'override assoluto che prevale sulla percentuale;
+- 7.2I.3: calcolo multi-profilo, con i profilo esclusi mantenuti separati per
+  non confonderli con un contributo nullo.
+
+## Planner alimentare — Step 7.3A e 7.3B
+
+- 7.3A: fondazioni persistenti (`planner_alimentari`, `planner_pasti`,
+  `planner_pasto_profili`, `planner_pasto_ingredienti_snapshot`) piu' il dominio
+  minimo in `planner_alimentare.rs`, senza UI;
+- 7.3B: planner operativo su Telegram, sviluppato direttamente sul Galaxy S9.
+  Apertura da Alimentazione o con `/planner`, vista settimanale lunedi'-domenica
+  con settimana precedente e successiva, dettaglio giornaliero, aggiunta pasto
+  con tipo, scelta ricetta paginata a 5 e selezione multipla dei Profili,
+  snapshot delle quantita' calcolate con percentuali e override, quantita'
+  aggregate nel dettaglio, modifica e rimozione dei pasti pianificati,
+  completamento con congelamento e avviso quando la ricetta viva cambia dopo la
+  pianificazione. La settimana viene creata implicitamente alla prima apertura:
+  non esiste una creazione manuale del planner, per non aggiungere un concetto
+  in piu' all'utente medio.
+- migration `20260831191500_planner_pasto_saltato.sql`: esito "saltato" con
+  `saltato_il`, incompatibile con il completamento, immutabile e non
+  eliminabile una volta registrato.
+
+## Due implementazioni parallele — cosa e' successo
+
+Il 31 agosto il 7.3B e' stato sviluppato due volte in parallelo: una volta sul
+Galaxy S9 e una volta in una sessione che leggeva soltanto lo stato pubblicato.
+La causa e' stata una somma di disallineamenti: `main` fermo al 6C, la
+documentazione ferma al 7.2H e il lavoro del planner presente solo come
+modifiche non committate sul telefono.
+
+La versione sviluppata sull'S9 e' stata mantenuta perche' piu' completa e gia'
+provata su dati reali. La versione parallela (`src/modules/planner_elenco.rs`,
+con planner nominati e periodo scelto a mano) e' stata scartata insieme al suo
+branch.
+
+**Regola adottata:** ogni lavoro deve passare da un branch pushato prima che una
+seconda sessione ci metta mano. Uno stato che esiste solo su un dispositivo non
+e' uno stato condiviso.
+
+## Correzioni di questo blocco
+
+- **Test di navigazione del planner.** `navigazione_globale_ha_indietro_migliora_menu`
+  falliva (atteso 3, ottenuto 2). Il codice era corretto e il test sbagliato:
+  `💡 Migliora` non lo aggiunge `planner_global_nav`, lo inserisce il ContextBot
+  prima di `🏠 Menù principale` quando la riga ha meno di tre pulsanti. Il test
+  ora verifica cio' che la funzione deve davvero garantire: due pulsanti con
+  `menu:main` in ultima posizione, altrimenti l'inserimento cadrebbe nel punto
+  sbagliato.
+- **`ricette.aggiornato_il` non era una versione del contenuto.** Veniva scritto
+  solo da rinomina, cambio `porzioni_base` e archiviazione; modificare un
+  ingrediente non lo toccava e nessun trigger lo faceva. Poiche' il planner
+  confronta proprio quel campo per decidere se mostrare l'avviso di ricetta
+  cambiata, l'avviso non sarebbe mai comparso nel caso piu' importante, quello
+  in cui cambiano le quantita'. La migration
+  `20260901013000_versione_contenuto_ricetta.sql` aggiunge i tre trigger su
+  `ricetta_ingredienti`. Il procedimento (`ricetta_step`) resta escluso di
+  proposito: non cambia le quantita'.
+- **Partecipanti storici di un pasto.** `planner_pasto_profili` ha una primary
+  key composita con la colonna profilo `ON DELETE SET NULL`, e SQLite ammette
+  NULL nelle primary key composite: due profili eliminati avrebbero prodotto due
+  righe `(pasto, NULL)` indistinguibili. Aggiunto un indice unico parziale su
+  `(pasto_id, profilo_nome_snapshot)` per le sole righe orfane.
+- **Lint Clippy in `ricette.rs`**: condizione booleana non minimale nel
+  dispatcher delle callback, estratta in una variabile leggibile.
+
+## Infrastruttura
+
+- la CI si attiva ora anche sui branch `step-*`, non piu' solo su `main`: fino al
+  31 agosto nessuno dei 22 commit dello Step 7 era mai passato da GitHub Actions;
+- aggiunto `scripts/aggiorna-s9.sh`, che sostituisce il giro
+  zip → scp → unzip → installer python con un aggiornamento via git. Rifiuta di
+  partire se sull'S9 ci sono modifiche non committate, imposta le variabili che
+  evitano l'esaurimento di memoria in fase di link, esegue l'intera pipeline,
+  fa il backup del database e prova su una copia **le sole migration non ancora
+  applicate**, lette da `_sqlx_migrations`, quindi non va aggiornato a ogni step.
+
+## Stato verificato
+
+- migration nel repository: **42**; applicate al database reale dell'S9: fino a
+  `20260831191500`. La `20260901013000` e' presente ma **non ancora applicata**;
+- `cargo fmt`, `cargo check --locked`, `cargo clippy --all-targets --locked
+  -- -D warnings` e `cargo test --locked`: verdi, **217 test**, verificati sia in
+  ambiente esterno sia sul Galaxy S9;
+- tutte e 42 le migration si applicano in sequenza su un database vuoto, con
+  `integrity_check` e `foreign_key_check` puliti.
+
+## Aperti
+
+1. **CI rossa su GitHub Actions**, con codice 101 dopo circa quattro minuti. Non
+   si riproduce ne' sull'S9 ne' in ambiente esterno, dove tutti e quattro i passi
+   passano. Ipotesi principale: memoria esaurita durante il link del binario di
+   test sul runner, lo stesso problema gia' noto sull'S9 e risolto li' con
+   `CARGO_BUILD_JOBS=1` e `debuginfo=0`. Da verificare aggiungendo
+   `CARGO_PROFILE_TEST_DEBUG: 0` al blocco `env:` del workflow. `actions/checkout@v7`
+   e' stato controllato ed esiste, quindi quella pista e' esclusa.
+2. **Pasti liberi** ("cena fuori", "avanzi"): non rappresentabili, perche'
+   `ricetta_nome_snapshot` e' NOT NULL. Decisione rimandata ora che esiste
+   l'esito "saltato", che copre una parte dello stesso bisogno.
+3. **Aritmetica delle date in Rust.** `planner_show_week` calcola il calendario
+   con query a SQLite: una singola schermata settimanale ne esegue una ventina
+   solo per spostare date e ricavare il giorno della settimana. Spostare quei
+   conti in Rust le azzera, ed e' coerente con l'obiettivo di ottimizzare su
+   hardware limitato.
+4. **`main` fermo allo Step 6C** del 21 agosto, e branch `step-7-alimentazione`
+   da abbandonare.
+
 <!-- CHANGELOG_STEP7_2H_20260829 -->
 # 29/08/2026 — Step 7.2H: Profili, membri/inviti Spazi e chiusura UX
 

@@ -1,10 +1,21 @@
 # Roadmap Step 7
 
-## Stato corrente
+## Stato corrente — 01/09/2026
 
-Il blocco **7.2H.0→7.2H.4F** è chiuso funzionalmente e in finalizzazione documentale/GitHub. Profili alimentari, membri/inviti Spazi, verifiche guidate, input inattesi ed export progetto sono operativi. Le sole prove residue sono quattro collaudi end-to-end che richiedono un secondo account Telegram e restano differiti.
+Branch di lavoro: **`step-7-alimentazione-s9`**.
 
-La prossima funzione da sviluppare è **Porzioni e override per Profilo/ingrediente**.
+Chiusi e verificati: 7.0, 7.1, tutta la 7.2 fino a 7.2I.3, e il planner 7.3A e
+7.3B. Pipeline verde con 217 test; 42 migration, di cui l'ultima
+(`20260901013000`) presente ma non ancora applicata al database reale.
+
+La prossima funzione e' la **lista della spesa aggregata**, costruita sugli
+snapshot dei pasti non completati, con aggiornamento esplicito e separato da
+quello del planner.
+
+Aperti non bloccanti: CI rossa sul runner GitHub (probabile memoria in fase di
+link), decisione sui pasti liberi, aritmetica delle date in Rust, riallineamento
+di `main` che e' ancora allo Step 6C.
+
 ## Sequenza
 
 ### 7.0 — Specifica e organizzazione — VERIFICATO
