@@ -1,3 +1,67 @@
+<!-- CHANGELOG_CALENDARIO_20260902 -->
+# 02/09/2026 — Un calendario solo, e il planner impara a saltare
+
+Il calendario delle scadenze degli inviti era la cosa meglio riuscita
+dell'interfaccia: spaziale invece che testuale, un tocco per una data, i limiti
+visibili invece che spiegati. Il modo giusto di riusarlo non era copiarlo.
+
+## Due calendari gregoriani nello stesso progetto
+
+`spazi_membri.rs` conteneva una implementazione a mano delle regole del
+calendario — congruenza di Zeller per il giorno della settimana, anni
+bisestili, giorni del mese — accanto a quella basata su `chrono` introdotta il
+1 settembre nel planner. Due copie delle stesse regole in due moduli sono due
+occasioni di divergere.
+
+Ora c'e' **`src/modules/calendario.rs`**: le primitive sulle date e la griglia
+del mese, in un posto solo. Gli inviti e il planner lo usano entrambi; il
+codice scritto a mano e' stato tolto.
+
+La griglia si configura con: la data di oggi, una funzione che per ogni giorno
+dice se e' selezionabile e se porta un **marcatore**, e un mese minimo
+opzionale. Il marcatore e' la parte che la rende piu' di un selettore di date:
+il calendario puo' mostrare *cosa c'e'* nei giorni.
+
+## `📅 Vai a una data` nel planner
+
+Per raggiungere una settimana di tre mesi avanti servivano dodici pressioni
+della freccia. Ora c'e' la griglia del mese, e i giorni che hanno gia' dei
+pasti portano un `•`:
+
+```text
+|  ⬅️   |Settembre 2026|  ➡️   |
+| Lun | Mar | Mer | Gio | Ven | Sab | Dom |
+|  ·  |[1] •|  2  |  3  | 4 • |  5  |  6  |
+|  7  |  8  |  9  | 10  | 11  |12 • | 13  |
+```
+
+I conteggi del mese arrivano da **una sola query**, non una per giorno.
+
+## Due difetti del calendario originale, corretti
+
+- **Oggi non era segnalato.** In un calendario e' il riferimento principale.
+  Ora e' il numero fra parentesi quadre. Niente emoji: su sette colonne
+  allargherebbe la cella, e `·` era gia' il riempitivo dei giorni fuori dal
+  mese — un simbolo, un significato.
+- **`⬅️ ❌`** per la freccia disattivata faceva sembrare che «indietro» fosse
+  rotto. Una freccia che non porta da nessuna parte si spegne e basta.
+
+## Una trappola, chiusa dentro il modulo
+
+I campi della configurazione sono `&dyn Fn`, che senza `+ Sync` non e' `Send`:
+una schermata che tiene la configurazione a cavallo di un `.await` produce un
+future non-`Send`, e teloxide lo rifiuta con un errore che parla di
+`Injectable` e non nomina mai `Send`. Il `+ Sync` e' nella firma del modulo, con
+il commento che spiega perche', cosi' chi lo usera' dopo non ci ricasca.
+
+## Verifica
+
+- pipeline verde: fmt, clippy `-D warnings`, **247 test** (da 236);
+- 10 test nuovi sulla griglia: sette colonne per riga, oggi marcato una volta
+  sola, marcatore accanto al numero, giorno bloccato non premibile, freccia che
+  si spegne al limite, bisestili con le eccezioni secolari;
+- nessuna migration.
+
 <!-- CHANGELOG_UX_TELEGRAM_20260901 -->
 # 01/09/2026 — Convenzioni dell'interfaccia, e primo giro di correzioni
 

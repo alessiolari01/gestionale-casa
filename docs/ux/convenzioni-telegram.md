@@ -244,9 +244,47 @@ serve a rimediare.
 
 ### C9. Oggi è sempre segnalato
 
-In ogni vista che contiene date, il giorno corrente è marcato in modo visibile
-(`👉` sulla riga, o `· oggi` nell'etichetta). È il riferimento più usato e
-costa una riga di codice.
+In ogni vista che contiene date, il giorno corrente è marcato in modo visibile:
+
+- in una **lista di righe**: `👉` all'inizio dell'etichetta, o `· oggi` nel
+  titolo della schermata;
+- in una **griglia** (il calendario): il numero fra parentesi quadre, `[1]`.
+  Un'emoji allargherebbe la cella su sette colonne, e `·` è già il riempitivo
+  dei giorni fuori dal mese.
+
+È il riferimento più usato di qualunque schermata con date, e costa una riga di
+codice.
+
+### C13. Le date si scelgono da un calendario
+
+Dove serve una data, si mostra la griglia del mese: è spaziale invece che
+testuale, un tocco vale una data senza digitare, e i limiti si vedono invece di
+essere spiegati.
+
+La griglia è una sola, in `modules::calendario`, e si configura:
+
+- `oggi`, che viene marcato;
+- una funzione che, per ogni giorno, dice se è selezionabile e se porta un
+  **marcatore** — così il calendario mostra anche *cosa c'è* in quei giorni,
+  invece di essere solo un selettore;
+- un `mese_minimo` opzionale, che spegne la freccia indietro quando non ha più
+  senso.
+
+Una freccia che non porta da nessuna parte **si spegne**, non si etichetta con
+una croce: `⬅️ ❌` faceva sembrare che «indietro» fosse rotto.
+
+Esempio, il calendario del planner: `[1]` è oggi, `•` segna i giorni che hanno
+già dei pasti, `·` sono i giorni di altri mesi.
+
+```text
+|  ⬅️   |Settembre 2026|  ➡️   |
+| Lun | Mar | Mer | Gio | Ven | Sab | Dom |
+|  ·  |[1] •|  2  |  3  | 4 • |  5  |  6  |
+|  7  |  8  |  9  | 10  | 11  |12 • | 13  |
+```
+
+Il campo di testo resta accettato dove già c'è (orari, quantità): il calendario
+aggiunge una strada, non ne toglie una.
 
 ### C10. Un verbo solo per ogni azione
 
@@ -297,7 +335,8 @@ di applicazione è questo, dal più visibile al meno:
 2. **liste** (alimenti, ricette, storico, miglioramenti) — C1, C6, C7;
 3. **menù di sezione** — C2, C3, C10, C11;
 4. **Spazi e Profilo** — C5, la parte concettualmente più difficile;
-5. **menù principale** — C12.
+5. **menù principale** — C12;
+6. **date** — C13, ovunque se ne inserisca una a mano.
 
 Ogni blocco chiude con il collaudo su Telegram sull'S9, e questo documento si
 aggiorna quando una convenzione si rivela sbagliata all'uso — non quando è
