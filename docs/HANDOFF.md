@@ -51,8 +51,7 @@ c'e' una creazione manuale, per non aggiungere concetti all'utente medio.
   lo sara' al primo avvio, dopo il backup che lo script fa da solo;
 - pipeline verde: `fmt`, `check --locked`, `clippy --all-targets --locked
   -- -D warnings`, `test --locked` — **226 test**;
-- la CI su GitHub Actions e' rossa per un motivo che non si riproduce in locale:
-  vedi il punto 6.
+- CI su GitHub Actions **verde** dalla run #42, la prima dello Step 7.
 
 Regola invariata: una migration applicata al database reale e' immutabile. Ogni
 correzione richiede una nuova migration append-only.
@@ -90,12 +89,12 @@ scripts/aggiorna-s9.sh              aggiornamento e avvio sul telefono
 
 ## 6. Punti aperti
 
-1. **CI rossa.** Codice 101 dopo circa quattro minuti; sull'S9 e in ambiente
-   esterno tutti e quattro i passi passano. Ipotesi principale: memoria esaurita
-   durante il link del binario di test sul runner, lo stesso problema gia' noto
-   sull'S9. Prova da fare: aggiungere `CARGO_PROFILE_TEST_DEBUG: 0` al blocco
-   `env:` di `.github/workflows/ci.yml`. `actions/checkout@v7` esiste, quella
-   pista e' esclusa.
+1. **Toolchain dell'S9 piu' vecchia di quella della CI.** La Clippy del
+   telefono non emette lint che il runner invece applica: e' cosi' che
+   `drain_collect` e' rimasto invisibile finche' la CI non ha iniziato a girare
+   sui branch. Un controllo locale che passa non e' una prova se la toolchain
+   non e' la stessa; quando i due esiti divergono, ha ragione la CI. Da
+   aggiornare con `rustup update` su Termux.
 2. **Pasti liberi** non rappresentabili: `ricetta_nome_snapshot` e' NOT NULL.
    Decisione rimandata ora che esiste l'esito "saltato".
 3. **Aritmetica delle date in Rust.** `planner_show_week` esegue una ventina di

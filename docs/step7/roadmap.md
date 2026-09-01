@@ -12,9 +12,9 @@ La prossima funzione e' la **lista della spesa aggregata**, costruita sugli
 snapshot dei pasti non completati, con aggiornamento esplicito e separato da
 quello del planner.
 
-Aperti non bloccanti: CI rossa sul runner GitHub (probabile memoria in fase di
-link), decisione sui pasti liberi, aritmetica delle date in Rust, riallineamento
-di `main` che e' ancora allo Step 6C.
+CI verde dalla run #42. Aperti non bloccanti: toolchain dell'S9 da aggiornare
+per allinearla a quella del runner, decisione sui pasti liberi, aritmetica delle
+date in Rust, riallineamento di `main` che e' ancora allo Step 6C.
 
 ## Sequenza
 

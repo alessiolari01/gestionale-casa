@@ -70,6 +70,40 @@ avviso che si vede solo se gia' sai dove guardare non serve.
   pasti passati e non segnala nulla: meglio un avviso mancante che un avviso
   ovunque.
 
+## La CI rossa: causa trovata
+
+Attivare la CI sui branch `step-*` ha immediatamente prodotto una serie di run
+rosse, con codice 101 dopo circa quattro minuti. Il codice era sano: la stessa
+pipeline con `--locked` passava sia sul Galaxy S9 sia in un ambiente esterno.
+
+**Causa reale:** il lint `clippy::drain_collect`, introdotto in una versione di
+Clippy piu' recente di quelle usate in locale, su `take_transient_media` in
+`src/context_bot.rs`. La funzione faceva `.drain(..).collect()` su un
+`Vec<MessageId>` per ottenere un altro `Vec<MessageId>`, allocando un vettore
+nuovo senza motivo. Sostituito con `std::mem::take`, che restituisce il
+contenuto lasciando il vettore vuoto: stesso comportamento, un'allocazione in
+meno. Nel codice resta un commento che spiega perche' e' scritto cosi', per non
+farlo "semplificare" di nuovo in futuro.
+
+**Perche' nessuno l'aveva visto:**
+
+1. la CI girava solo su `main`, quindi i 22 commit dello Step 7 non erano mai
+   passati da GitHub Actions;
+2. il controllo Clippy sull'S9 usa una versione diversa da quella del runner e
+   non emette quel lint. Un controllo locale che passa **non e' una prova** se la
+   toolchain non e' la stessa: quando i due esiti divergono, ha ragione la CI.
+
+Piste escluse durante la diagnosi, tutte verificate e nessuna colpevole:
+`actions/checkout@v7` (esiste), memoria esaurita in fase di link (la riduzione
+delle informazioni di debug non ha cambiato l'esito), parallelismo dei test (226
+test passano anche a otto thread).
+
+Le due variabili `CARGO_PROFILE_TEST_DEBUG` e `CARGO_PROFILE_DEV_DEBUG` sono
+state mantenute: non erano la causa, ma fanno risparmiare tempo e memoria e non
+tolgono nulla ai quattro controlli.
+
+**Prima run verde dello Step 7:** Rust CI #42.
+
 ## Due implementazioni parallele — cosa e' successo
 
 Il 31 agosto il 7.3B e' stato sviluppato due volte in parallelo: una volta sul
@@ -136,13 +170,9 @@ e' uno stato condiviso.
 
 ## Aperti
 
-1. **CI rossa su GitHub Actions**, con codice 101 dopo circa quattro minuti. Non
-   si riproduce ne' sull'S9 ne' in ambiente esterno, dove tutti e quattro i passi
-   passano. Ipotesi principale: memoria esaurita durante il link del binario di
-   test sul runner, lo stesso problema gia' noto sull'S9 e risolto li' con
-   `CARGO_BUILD_JOBS=1` e `debuginfo=0`. Da verificare aggiungendo
-   `CARGO_PROFILE_TEST_DEBUG: 0` al blocco `env:` del workflow. `actions/checkout@v7`
-   e' stato controllato ed esiste, quindi quella pista e' esclusa.
+1. **Toolchain dell'S9 disallineata da quella della CI.** E' il motivo per cui
+   il lint `drain_collect` non compariva in locale. Conviene aggiornarla, cosi'
+   il controllo sul telefono torna equivalente a quello del runner.
 2. **Pasti liberi** ("cena fuori", "avanzi"): non rappresentabili, perche'
    `ricetta_nome_snapshot` e' NOT NULL. Decisione rimandata ora che esiste
    l'esito "saltato", che copre una parte dello stesso bisogno.
