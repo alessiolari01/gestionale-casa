@@ -246,6 +246,7 @@ mod tests {
 // ===== Step 7.3B · Planner Telegram operativo =====
 
 use anyhow::Context as _;
+use chrono::{Datelike, Days, NaiveDate, Weekday};
 use sqlx::{FromRow, SqliteConnection, SqlitePool};
 use std::{
     collections::HashMap,
@@ -805,9 +806,7 @@ async fn planner_show_menu(
     chat_id: ChatId,
     pool: &SqlitePool,
 ) -> ResponseResult<()> {
-    let week = planner_current_week_start(pool)
-        .await
-        .unwrap_or_else(|_| "1970-01-05".to_string());
+    let week = planner_current_week_start(pool).await;
     planner_show_week(bot, chat_id, pool, &week).await
 }
 
@@ -817,15 +816,9 @@ async fn planner_show_week(
     pool: &SqlitePool,
     week_start: &str,
 ) -> ResponseResult<()> {
-    let week_end = planner_shift_date(pool, week_start, 6)
-        .await
-        .unwrap_or_else(|_| week_start.to_string());
-    let previous = planner_shift_date(pool, week_start, -7)
-        .await
-        .unwrap_or_else(|_| week_start.to_string());
-    let next = planner_shift_date(pool, week_start, 7)
-        .await
-        .unwrap_or_else(|_| week_start.to_string());
+    let week_end = planner_shift_date(week_start, 6).unwrap_or_else(|| week_start.to_string());
+    let previous = planner_shift_date(week_start, -7).unwrap_or_else(|| week_start.to_string());
+    let next = planner_shift_date(week_start, 7).unwrap_or_else(|| week_start.to_string());
 
     let mut rows = Vec::new();
     let oggi = planner_today(pool).await;
@@ -837,14 +830,12 @@ async fn planner_show_week(
     );
 
     for offset in 0..7 {
-        let date = planner_shift_date(pool, week_start, offset)
-            .await
-            .unwrap_or_else(|_| week_start.to_string());
+        let date = planner_shift_date(week_start, offset).unwrap_or_else(|| week_start.to_string());
         // Una sola lettura per giorno: da qui ricaviamo conteggio, nomi e
         // pasti da aggiornare, invece di interrogare il database tre volte.
         let meals = planner_load_meals(pool, &date).await.unwrap_or_default();
         let count = meals.len();
-        let weekday = planner_weekday(pool, &date).await.unwrap_or("Giorno");
+        let weekday = planner_weekday(&date);
         let da_aggiornare = meals.iter().any(|meal| meal.needs_update(&oggi));
         if da_aggiornare {
             settimana_da_aggiornare = true;
@@ -901,7 +892,7 @@ async fn planner_show_day(
 ) -> ResponseResult<()> {
     let meals = planner_load_meals(pool, date).await.unwrap_or_default();
     let oggi = planner_today(pool).await;
-    let weekday = planner_weekday(pool, date).await.unwrap_or("Giorno");
+    let weekday = planner_weekday(date);
     let mut rows = Vec::new();
     let mut text = format!(
         "{}📅 {weekday} · {}\n\n",
@@ -938,9 +929,7 @@ async fn planner_show_day(
         "➕ Aggiungi pasto",
         format!("planner:add:{date}"),
     )]);
-    let week = planner_week_start_for_date(pool, date)
-        .await
-        .unwrap_or_else(|_| date.to_string());
+    let week = planner_week_start_for_date(date).unwrap_or_else(|| date.to_string());
     rows.push(planner_global_nav(&format!("planner:week:{week}")));
 
     bot.send_message(chat_id, text)
@@ -1139,7 +1128,7 @@ async fn planner_show_meal_detail(
         notice
             .map(|value| format!("{value}\n\n"))
             .unwrap_or_default(),
-        planner_weekday(pool, &meal.date).await.unwrap_or("Giorno"),
+        planner_weekday(&meal.date),
         planner_display_date(&meal.date),
         meal_type.map(MealType::emoji).unwrap_or("🍴"),
         meal_type.map(MealType::label).unwrap_or("Pasto"),
@@ -1237,13 +1226,23 @@ async fn planner_show_delete_confirmation(
 }
 
 /// Data odierna secondo il fuso del dispositivo.
+/// Data usata quando SQLite non risponde: lontana nel futuro, cosi' nessun
+/// pasto risulta passato e nessuna segnalazione parte a vuoto.
+const PLANNER_DATA_SCONOSCIUTA: &str = "9999-12-31";
+
+/// Settimana mostrata quando nemmeno la data di oggi e' leggibile.
+///
+/// E' un lunedi': meglio una settimana palesemente vuota che spostare l'utente
+/// nell'anno 9999 per un errore di lettura.
+const PLANNER_SETTIMANA_DI_RIPIEGO: &str = "1970-01-05";
+
 async fn planner_today(pool: &SqlitePool) -> String {
     sqlx::query_scalar("SELECT date('now','localtime')")
         .fetch_one(pool)
         .await
         // Se la data non e' leggibile non segnaliamo nulla, invece di segnalare
         // tutto: una data futura irraggiungibile rende ogni pasto "passato".
-        .unwrap_or_else(|_| "9999-12-31".to_string())
+        .unwrap_or_else(|_| PLANNER_DATA_SCONOSCIUTA.to_string())
 }
 
 /// Chiede conferma prima di riallineare il pasto alla ricetta viva.
@@ -1314,67 +1313,100 @@ async fn planner_refresh_meal(pool: &SqlitePool, meal_id: i64) -> anyhow::Result
     Ok(meal.recipe_name)
 }
 
-async fn planner_current_week_start(pool: &SqlitePool) -> anyhow::Result<String> {
-    sqlx::query_scalar(
-        "SELECT date('now','localtime', printf('-%d days', (CAST(strftime('%w','now','localtime') AS INTEGER) + 6) % 7))",
-    )
-    .fetch_one(pool)
-    .await
-    .context("Impossibile calcolare l'inizio settimana")
+// ===== Aritmetica di calendario =====
+//
+// Fino allo Step 7.3B ognuna di queste operazioni era una query a SQLite.
+// `planner_show_week` ne eseguiva diciassette per soli conti di calendario,
+// a ogni apertura della schermata: su un telefono che fa da server sono
+// diciassette round-trip che non leggono alcun dato.
+//
+// `chrono` era gia' nel grafo delle dipendenze — lo usa `teloxide-core`, con
+// `default-features = false` — quindi dichiararlo diretto non aggiunge nulla
+// al binario e ci evita di riscrivere a mano l'aritmetica gregoriana.
+
+/// Interpreta una data ISO `YYYY-MM-DD`.
+///
+/// Piu' severa del controllo di sola forma che sostituisce: `2026-02-30` ha la
+/// forma giusta ma non esiste, e prima veniva accettata.
+fn planner_parse_date(value: &str) -> Option<NaiveDate> {
+    let bytes = value.as_bytes();
+    if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
+        return None;
+    }
+    if !bytes
+        .iter()
+        .enumerate()
+        .all(|(index, byte)| index == 4 || index == 7 || byte.is_ascii_digit())
+    {
+        return None;
+    }
+    let year: i32 = value[..4].parse().ok()?;
+    let month: u32 = value[5..7].parse().ok()?;
+    let day: u32 = value[8..10].parse().ok()?;
+    NaiveDate::from_ymd_opt(year, month, day)
 }
 
-async fn planner_week_start_for_date(pool: &SqlitePool, date: &str) -> anyhow::Result<String> {
-    sqlx::query_scalar(
-        "SELECT date(?, printf('-%d days', (CAST(strftime('%w', ?) AS INTEGER) + 6) % 7))",
-    )
-    .bind(date)
-    .bind(date)
-    .fetch_one(pool)
-    .await
-    .context("Impossibile calcolare la settimana")
+/// Formatta una data in ISO `YYYY-MM-DD`.
+///
+/// Restituisce `None` fuori dall'intervallo a quattro cifre: una data che il
+/// nostro stesso parser non saprebbe rileggere non deve mai uscire da qui,
+/// altrimenti finirebbe in un callback Telegram e tornerebbe indietro rotta.
+fn planner_format_iso(date: NaiveDate) -> Option<String> {
+    let year = date.year();
+    (0..=9999)
+        .contains(&year)
+        .then(|| format!("{year:04}-{:02}-{:02}", date.month(), date.day()))
 }
 
-async fn planner_shift_date(pool: &SqlitePool, date: &str, days: i64) -> anyhow::Result<String> {
-    let modifier = if days >= 0 {
-        format!("+{days} days")
+/// Sposta una data di `days` giorni.
+///
+/// Restituisce `None` se la data non e' valida o se il risultato uscirebbe
+/// dall'intervallo rappresentabile: chi chiama decide come degradare.
+fn planner_shift_date(date: &str, days: i64) -> Option<String> {
+    let parsed = planner_parse_date(date)?;
+    let passo = Days::new(days.unsigned_abs());
+    let shifted = if days >= 0 {
+        parsed.checked_add_days(passo)?
     } else {
-        format!("{days} days")
+        parsed.checked_sub_days(passo)?
     };
-    sqlx::query_scalar("SELECT date(?, ?)")
-        .bind(date)
-        .bind(modifier)
-        .fetch_one(pool)
-        .await
-        .context("Impossibile spostare la data")
+    planner_format_iso(shifted)
 }
 
-async fn planner_weekday(pool: &SqlitePool, date: &str) -> anyhow::Result<&'static str> {
-    let day: String = sqlx::query_scalar("SELECT strftime('%w', ?)")
-        .bind(date)
-        .fetch_one(pool)
-        .await
-        .context("Impossibile leggere il giorno")?;
-    Ok(match day.as_str() {
-        "1" => "Lunedì",
-        "2" => "Martedì",
-        "3" => "Mercoledì",
-        "4" => "Giovedì",
-        "5" => "Venerdì",
-        "6" => "Sabato",
-        "0" => "Domenica",
-        _ => "Giorno",
-    })
+/// Lunedi' della settimana che contiene la data.
+fn planner_week_start_for_date(date: &str) -> Option<String> {
+    let parsed = planner_parse_date(date)?;
+    let indietro = u64::from(parsed.weekday().num_days_from_monday());
+    planner_format_iso(parsed.checked_sub_days(Days::new(indietro))?)
+}
+
+/// Inizio della settimana corrente.
+///
+/// Resta l'unica lettura al database di questo gruppo: la data di oggi dipende
+/// dal fuso orario del telefono, che solo SQLite conosce con `localtime`.
+async fn planner_current_week_start(pool: &SqlitePool) -> String {
+    let oggi = planner_today(pool).await;
+    if oggi == PLANNER_DATA_SCONOSCIUTA {
+        return PLANNER_SETTIMANA_DI_RIPIEGO.to_string();
+    }
+    planner_week_start_for_date(&oggi).unwrap_or(oggi)
+}
+
+fn planner_weekday(date: &str) -> &'static str {
+    match planner_parse_date(date).map(|parsed| parsed.weekday()) {
+        Some(Weekday::Mon) => "Lunedì",
+        Some(Weekday::Tue) => "Martedì",
+        Some(Weekday::Wed) => "Mercoledì",
+        Some(Weekday::Thu) => "Giovedì",
+        Some(Weekday::Fri) => "Venerdì",
+        Some(Weekday::Sat) => "Sabato",
+        Some(Weekday::Sun) => "Domenica",
+        None => "Giorno",
+    }
 }
 
 fn planner_valid_date(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    bytes.len() == 10
-        && bytes[4] == b'-'
-        && bytes[7] == b'-'
-        && bytes
-            .iter()
-            .enumerate()
-            .all(|(index, byte)| index == 4 || index == 7 || byte.is_ascii_digit())
+    planner_parse_date(value).is_some()
 }
 
 fn planner_display_date(value: &str) -> String {
@@ -1497,11 +1529,8 @@ async fn planner_ensure_week_conn(
 ) -> anyhow::Result<i64> {
     let actor = crate::identity::current_actor();
     let user_id = actor.utente_id.context("Utente non disponibile")?;
-    let week_end: String = sqlx::query_scalar("SELECT date(?, '+6 days')")
-        .bind(week_start)
-        .fetch_one(&mut *conn)
-        .await
-        .context("Impossibile calcolare fine settimana")?;
+    let week_end =
+        planner_shift_date(week_start, 6).context("Impossibile calcolare fine settimana")?;
 
     if let Some(id) = sqlx::query_scalar::<_, i64>(
         "SELECT id FROM planner_alimentari \
@@ -1729,7 +1758,8 @@ async fn planner_save_draft(pool: &SqlitePool, draft: &PlannerDraft) -> anyhow::
         }
     }
 
-    let week_start = planner_week_start_for_date(pool, &draft.date).await?;
+    let week_start =
+        planner_week_start_for_date(&draft.date).context("Data del pasto non valida")?;
     let mut tx = pool
         .begin()
         .await
@@ -2118,6 +2148,149 @@ mod telegram_tests {
         assert!(planner_valid_date("2026-08-31"));
         assert!(!planner_valid_date("31/08/2026"));
         assert_eq!(planner_display_date("2026-08-31"), "31/08/2026");
+    }
+
+    /// La validazione ora e' semantica, non piu' di sola forma: prima queste
+    /// stringhe passavano e arrivavano fino a SQLite.
+    #[test]
+    fn data_con_forma_giusta_ma_inesistente_viene_rifiutata() {
+        for value in [
+            "2026-02-30", // febbraio non ha 30 giorni
+            "2026-13-01", // mese inesistente
+            "2026-00-10", // mese zero
+            "2026-04-31", // aprile ha 30 giorni
+            "2026-08-00", // giorno zero
+        ] {
+            assert!(
+                !planner_valid_date(value),
+                "{value} non dovrebbe essere valida"
+            );
+        }
+        assert!(!planner_valid_date("2026-8-31"));
+        assert!(!planner_valid_date("2026-08-311"));
+        assert!(!planner_valid_date(""));
+    }
+
+    #[test]
+    fn spostamento_data_attraversa_mese_e_anno() {
+        assert_eq!(
+            planner_shift_date("2026-08-31", 1).as_deref(),
+            Some("2026-09-01")
+        );
+        assert_eq!(
+            planner_shift_date("2026-09-01", -1).as_deref(),
+            Some("2026-08-31")
+        );
+        assert_eq!(
+            planner_shift_date("2026-12-31", 1).as_deref(),
+            Some("2027-01-01")
+        );
+        assert_eq!(
+            planner_shift_date("2026-01-01", -1).as_deref(),
+            Some("2025-12-31")
+        );
+        assert_eq!(
+            planner_shift_date("2026-08-31", 0).as_deref(),
+            Some("2026-08-31")
+        );
+    }
+
+    /// Le regole dei bisestili, comprese le eccezioni secolari: e' il caso in
+    /// cui un'aritmetica scritta a mano sbaglia piu' facilmente.
+    #[test]
+    fn spostamento_data_rispetta_gli_anni_bisestili() {
+        assert_eq!(
+            planner_shift_date("2028-02-28", 1).as_deref(),
+            Some("2028-02-29")
+        );
+        assert_eq!(
+            planner_shift_date("2026-02-28", 1).as_deref(),
+            Some("2026-03-01")
+        );
+        // 2000 e' bisestile (divisibile per 400), 1900 no (divisibile per 100).
+        assert_eq!(
+            planner_shift_date("2000-02-28", 1).as_deref(),
+            Some("2000-02-29")
+        );
+        assert_eq!(
+            planner_shift_date("1900-02-28", 1).as_deref(),
+            Some("1900-03-01")
+        );
+    }
+
+    #[test]
+    fn spostamento_data_e_reversibile_su_tutta_la_settimana() {
+        let mut data = "2026-01-01".to_string();
+        for _ in 0..400 {
+            let avanti = planner_shift_date(&data, 7).expect("data valida");
+            let indietro = planner_shift_date(&avanti, -7).expect("data valida");
+            assert_eq!(indietro, data);
+            data = avanti;
+        }
+    }
+
+    #[test]
+    fn spostamento_data_rifiuta_input_non_validi() {
+        assert_eq!(planner_shift_date("2026-02-30", 1), None);
+        assert_eq!(planner_shift_date("oggi", 1), None);
+        // Oltre l'anno a quattro cifre non produciamo una data che il nostro
+        // stesso parser rifiuterebbe.
+        assert_eq!(planner_shift_date("9999-12-31", 1), None);
+        assert_eq!(planner_shift_date("0000-01-01", -1), None);
+    }
+
+    #[test]
+    fn la_settimana_comincia_di_lunedi() {
+        // 31/08/2026 e' un lunedi': tutti i giorni fino a domenica devono
+        // ricadere sulla stessa settimana.
+        for (data, atteso) in [
+            ("2026-08-31", "2026-08-31"),
+            ("2026-09-01", "2026-08-31"),
+            ("2026-09-04", "2026-08-31"),
+            ("2026-09-06", "2026-08-31"),
+            ("2026-09-07", "2026-09-07"),
+        ] {
+            assert_eq!(planner_week_start_for_date(data).as_deref(), Some(atteso));
+        }
+        assert_eq!(planner_week_start_for_date("2026-02-30"), None);
+    }
+
+    /// Il ripiego deve essere un lunedi' reale, altrimenti la schermata
+    /// settimana partirebbe da meta' settimana.
+    #[test]
+    fn la_settimana_di_ripiego_e_un_lunedi() {
+        assert_eq!(planner_weekday(PLANNER_SETTIMANA_DI_RIPIEGO), "Lunedì");
+        assert!(planner_valid_date(PLANNER_DATA_SCONOSCIUTA));
+        assert_eq!(
+            planner_week_start_for_date(PLANNER_SETTIMANA_DI_RIPIEGO).as_deref(),
+            Some(PLANNER_SETTIMANA_DI_RIPIEGO)
+        );
+    }
+
+    #[test]
+    fn settimana_e_giorno_restano_coerenti() {
+        let inizio = planner_week_start_for_date("2026-09-03").expect("settimana valida");
+        let fine = planner_shift_date(&inizio, 6).expect("data valida");
+        assert_eq!(planner_weekday(&inizio), "Lunedì");
+        assert_eq!(planner_weekday(&fine), "Domenica");
+    }
+
+    #[test]
+    fn nomi_dei_giorni_in_italiano() {
+        let attesi = [
+            ("2026-08-31", "Lunedì"),
+            ("2026-09-01", "Martedì"),
+            ("2026-09-02", "Mercoledì"),
+            ("2026-09-03", "Giovedì"),
+            ("2026-09-04", "Venerdì"),
+            ("2026-09-05", "Sabato"),
+            ("2026-09-06", "Domenica"),
+        ];
+        for (data, atteso) in attesi {
+            assert_eq!(planner_weekday(data), atteso);
+        }
+        // Una data illeggibile non deve rompere la schermata.
+        assert_eq!(planner_weekday("2026-02-30"), "Giorno");
     }
 
     #[test]

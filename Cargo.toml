@@ -5,6 +5,9 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1"
+# Gia' presente nel grafo tramite teloxide-core con le stesse feature:
+# dichiararlo diretto non aggiunge nulla al binario.
+chrono = { version = "0.4", default-features = false }
 dotenvy = "0.15"
 sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
 teloxide = { version = "0.17", default-features = false, features = ["rustls", "ctrlc_handler"] }

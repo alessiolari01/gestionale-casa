@@ -1,3 +1,112 @@
+<!-- CHANGELOG_STEP7_3_CALENDARIO_20260901 -->
+# 01/09/2026 — Aritmetica delle date in Rust
+
+Punto aperto n. 3 dell'handoff, chiuso. Non aggiunge funzioni: toglie lavoro
+inutile al telefono.
+
+## Il problema
+
+`planner_show_week` chiedeva a SQLite ogni singolo conto di calendario:
+l'inizio settimana, la fine settimana, la settimana precedente, quella
+successiva, e poi, per ognuno dei sette giorni, la data del giorno e il nome
+del giorno della settimana. **Diciannove query per aprire una schermata**, di
+cui diciassette non leggevano alcun dato: calcolavano soltanto date. Su un
+Galaxy S9 che fa da server, ogni query e' un round-trip attraverso il pool di
+connessioni per ottenere una cosa che il processo sapeva gia' fare da solo.
+
+Lo stesso schema era nella vista giorno (tre query di calendario), nel
+dettaglio del pasto (due) e nel salvataggio di un pasto (due).
+
+## La soluzione
+
+Le funzioni di calendario diventano funzioni pure Rust:
+
+```text
+planner_parse_date          "YYYY-MM-DD" → NaiveDate, con validazione vera
+planner_format_iso          NaiveDate → "YYYY-MM-DD", solo anni a 4 cifre
+planner_shift_date          sposta di N giorni
+planner_week_start_for_date lunedi' della settimana che contiene la data
+planner_weekday             nome italiano del giorno
+```
+
+`chrono` viene dichiarato come dipendenza diretta con
+`default-features = false`. **Non aggiunge nulla al binario**: era gia' nel
+grafo, con le stesse feature, perche' lo usa `teloxide-core`. La scelta e' fra
+riusare un'aritmetica gregoriana gia' collaudata e riscriverla a mano; la
+prima costa zero byte in piu'.
+
+Resta **una sola** query di calendario, ed e' necessaria:
+`SELECT date('now','localtime')`. La data di oggi dipende dal fuso orario del
+telefono, che solo SQLite conosce.
+
+## Query risparmiate per schermata
+
+```text
+schermata settimana (dal menu')   19 → 2      -17
+navigazione fra settimane         18 → 1      -17
+schermata giorno                   3 → 1       -2
+dettaglio pasto                    2 → 1       -1
+salvataggio di un pasto            2 → 0       -2
+```
+
+## Effetto collaterale utile: la validazione diventa vera
+
+`planner_valid_date` controllava solo la forma. `2026-02-30`, `2026-13-01` e
+`2026-04-31` hanno la forma giusta e non esistono: passavano il controllo e
+arrivavano fino a SQLite, che le trasformava in `NULL`. Ora la validazione
+costruisce davvero la data e le rifiuta all'ingresso, dove arrivano — dai
+callback Telegram.
+
+Simmetricamente, `planner_format_iso` rifiuta gli anni fuori dalle quattro
+cifre: una data che il nostro stesso parser non saprebbe rileggere non deve
+uscire dal modulo, altrimenti finisce in un callback e torna indietro rotta.
+
+## Comportamento di ripiego
+
+Se la data di oggi non e' leggibile, `planner_today` restituisce la sentinella
+`9999-12-31`, che tiene ogni pasto "non passato" e non fa partire segnalazioni
+a vuoto. Quella sentinella pero' non deve diventare una settimana: la
+schermata aprirebbe l'anno 9999. Il ripiego resta `1970-01-05`, che e' un
+lunedi', com'era prima. Le due costanti ora hanno un nome e un test.
+
+## Verifica
+
+- 9 test nuovi: cambi di mese e di anno, anni bisestili comprese le eccezioni
+  secolari (2000 bisestile, 1900 no), reversibilita' dello spostamento su 400
+  settimane consecutive, date con forma giusta ma inesistenti, inizio
+  settimana su tutti e sette i giorni, nomi italiani dei giorni, coerenza
+  della settimana di ripiego;
+- pipeline: `fmt`, `check`, `clippy --all-targets -- -D warnings`,
+  `test` — **235 test**, da 226;
+- nessuna migration: il database non viene toccato.
+
+## Nota di processo: un ramo vuoto
+
+Il primo tentativo di consegna e' finito su GitHub come **ramo vuoto**. I
+comandi `git checkout -b`, `git add`, `git commit`, `git push` sono stati dati
+sull'S9 invece che sul PC. Sull'S9 l'albero era pulito — le modifiche esistevano
+solo sul PC — quindi `git add` non ha trovato nulla e `git commit` non ha creato
+nulla. Nessuno dei due ha fallito in modo visibile: il push ha semplicemente
+pubblicato un ramo che puntava al commit di partenza.
+
+Il collaudo e' poi girato regolarmente, verde, **sul codice di prima**. L'unico
+segnale era il conteggio: 226 test invece di 235.
+
+Due controlli che lo intercettano, entrambi da un secondo:
+
+- sul PC, prima del push: `git log --stat -1` deve elencare i file attesi;
+- sull'S9, dopo il collaudo: il numero dei test deve essere quello nuovo.
+
+La distinzione fra le due macchine e' ora scritta nella sezione 4 di
+`docs/HANDOFF.md`, con percorsi e shell.
+
+## Resta da fare, nella stessa direzione
+
+`planner_load_meals` chiama `planner_find_for_date` una volta per giorno: sono
+sette letture identiche per aprire una settimana. Cercare il planner una volta
+sola e passarlo al ciclo toglie altre sei query, ed e' il passo successivo
+naturale.
+
 <!-- CHANGELOG_STEP7_3_20260901 -->
 # 01/09/2026 — Step 7.2I, 7.3A e 7.3B: porzioni, planner operativo e riallineamento
 

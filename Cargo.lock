@@ -613,6 +613,7 @@ name = "gestionale-casa"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "dotenvy",
  "sqlx",
  "teloxide",
