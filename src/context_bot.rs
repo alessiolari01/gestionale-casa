@@ -271,13 +271,11 @@ impl ImproveContextStore {
             .inner
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        state
-            .ui
-            .entry(chat_id)
-            .or_default()
-            .transient_media
-            .drain(..)
-            .collect()
+        let ui = state.ui.entry(chat_id).or_default();
+        // `mem::take` restituisce il contenuto lasciando il vettore vuoto, senza
+        // allocarne uno nuovo: e' equivalente a `drain(..).collect()` ed e' la
+        // forma richiesta dal lint `drain_collect` di Clippy 1.98.
+        std::mem::take(&mut ui.transient_media)
     }
 
     fn claim_callback(&self, chat_id: i64, message_id: MessageId, data: &str) -> bool {
