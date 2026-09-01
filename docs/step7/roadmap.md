@@ -1,20 +1,24 @@
 # Roadmap Step 7
 
-## Stato corrente — 01/09/2026
+## Stato corrente — 01/09/2026 (sera)
 
-Branch di lavoro: **`step-7-alimentazione-s9`**.
+**Tutto lo Step 7 e' su `main`**: la PR #9 e' stata mergiata. Il lavoro nuovo
+riparte da `main`.
 
 Chiusi e verificati: 7.0, 7.1, tutta la 7.2 fino a 7.2I.3, e il planner 7.3A e
-7.3B. Pipeline verde con 217 test; 42 migration, di cui l'ultima
+7.3B. Pipeline verde con 235 test; 42 migration, di cui l'ultima
 (`20260901013000`) presente ma non ancora applicata al database reale.
+
+Chiusa anche l'aritmetica delle date: i conti di calendario sono funzioni pure
+Rust e non piu' query a SQLite (schermata settimana da 19 query a 2).
 
 La prossima funzione e' la **lista della spesa aggregata**, costruita sugli
 snapshot dei pasti non completati, con aggiornamento esplicito e separato da
 quello del planner.
 
 CI verde dalla run #42. Aperti non bloccanti: toolchain dell'S9 da aggiornare
-per allinearla a quella del runner, decisione sui pasti liberi, aritmetica delle
-date in Rust, riallineamento di `main` che e' ancora allo Step 6C.
+per allinearla a quella del runner, decisione sui pasti liberi, il planner
+cercato sette volte per aprire una settimana, PR #6 di Dependabot.
 
 ## Sequenza
 
