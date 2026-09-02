@@ -914,7 +914,10 @@ async fn planner_show_week(
     // pressioni della freccia.
     rows.push(vec![planner_button(
         "📅 Vai a una data",
-        format!("planner:cal:{}", &week_start[..7]),
+        format!(
+            "planner:cal:{}",
+            planner_month_of_week(week_start).unwrap_or_else(|| week_start[..7].to_string())
+        ),
     )]);
     rows.push(planner_global_nav("food:menu"));
 
@@ -965,15 +968,16 @@ async fn planner_show_calendar(
         .unwrap_or_else(|| oggi.clone());
     rows.push(planner_global_nav(&format!("planner:week:{settimana}")));
 
-    bot.send_message(
-        chat_id,
-        format!(
-            "📅 Vai a una data\n\n{} {year}\n\nI giorni con • hanno gia' dei pasti.",
-            calendario::month_name(month)
-        ),
-    )
-    .reply_markup(InlineKeyboardMarkup::new(rows))
-    .await?;
+    // Il mese e l'anno sono già scritti nell'intestazione della griglia: qui
+    // resta solo la legenda del marcatore, e solo se c'è qualcosa da spiegare.
+    let mut text = "📅 Vai a una data".to_string();
+    if !conteggi.is_empty() {
+        text.push_str("\n\nI giorni con • hanno già dei pasti.");
+    }
+
+    bot.send_message(chat_id, text)
+        .reply_markup(InlineKeyboardMarkup::new(rows))
+        .await?;
     Ok(())
 }
 
@@ -1006,6 +1010,18 @@ async fn planner_month_counts(
     .await
     .context("Impossibile leggere i giorni con pasti")?;
     Ok(date.into_iter().collect())
+}
+
+/// Mese a cui appartiene una settimana: quello del giovedì.
+///
+/// Una settimana a cavallo di due mesi appartiene al mese in cui cade il
+/// giovedì — la stessa regola dei numeri di settimana ISO. Senza questa, la
+/// settimana 31/08 → 06/09 apriva il calendario su agosto, e oggi, che è il 2
+/// settembre, non era nemmeno visibile: il marcatore di oggi si perdeva
+/// proprio all'apertura.
+fn planner_month_of_week(week_start: &str) -> Option<String> {
+    let giovedi = calendario::shift_date(week_start, 3)?;
+    Some(giovedi[..7].to_string())
 }
 
 /// Interpreta `planner:cal:AAAA-MM`.
@@ -2377,6 +2393,33 @@ mod telegram_tests {
         }
         // Una data illeggibile non deve rompere la schermata.
         assert_eq!(calendario::weekday_name("2026-02-30"), "Giorno");
+    }
+
+    /// Una settimana a cavallo di due mesi appartiene a quello del giovedì:
+    /// altrimenti il calendario si apre dove oggi non si vede.
+    #[test]
+    fn la_settimana_appartiene_al_mese_del_giovedi() {
+        // 31/08 → 06/09: il giovedì è il 3 settembre.
+        assert_eq!(
+            planner_month_of_week("2026-08-31").as_deref(),
+            Some("2026-09")
+        );
+        // 24/08 → 30/08: tutta in agosto.
+        assert_eq!(
+            planner_month_of_week("2026-08-24").as_deref(),
+            Some("2026-08")
+        );
+        // 28/12/2026 → 03/01/2027: il giovedì è il 31 dicembre.
+        assert_eq!(
+            planner_month_of_week("2026-12-28").as_deref(),
+            Some("2026-12")
+        );
+        // 29/12/2025 → 04/01/2026: il giovedì è il 1 gennaio.
+        assert_eq!(
+            planner_month_of_week("2025-12-29").as_deref(),
+            Some("2026-01")
+        );
+        assert_eq!(planner_month_of_week("non-una-data"), None);
     }
 
     #[test]

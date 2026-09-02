@@ -54,10 +54,27 @@ future non-`Send`, e teloxide lo rifiuta con un errore che parla di
 `Injectable` e non nomina mai `Send`. Il `+ Sync` e' nella firma del modulo, con
 il commento che spiega perche', cosi' chi lo usera' dopo non ci ricasca.
 
+## Tre correzioni dopo averlo visto sul telefono
+
+La griglia sta bene anche su schermo stretto: sette colonne leggibili, numeri
+chiari. Ma guardandola sono uscite tre cose che dal codice non si vedevano.
+
+- **Si apriva sul mese sbagliato.** Il pulsante portava il mese dell'inizio
+  settimana, e la settimana 31/08 → 06/09 apriva agosto: il 2 settembre, cioe'
+  oggi, non era nemmeno nella schermata, e il marcatore di oggi si perdeva
+  proprio all'apertura. Ora vale la regola dei numeri di settimana ISO: la
+  settimana appartiene al mese in cui cade il **giovedi'**.
+- **Il mese era scritto due volte**, nel testo del messaggio e
+  nell'intestazione della griglia. E' la convenzione C1, e l'avevo violata io
+  scrivendola. Nel testo resta solo la legenda del `•`, e solo quando c'e'
+  almeno un giorno da spiegare.
+- **`gia'` invece di `già`** nella legenda, contro la regola del progetto sugli
+  accenti italiani corretti.
+
 ## Verifica
 
-- pipeline verde: fmt, clippy `-D warnings`, **247 test** (da 236);
-- 10 test nuovi sulla griglia: sette colonne per riga, oggi marcato una volta
+- pipeline verde: fmt, clippy `-D warnings`, **248 test** (da 236);
+- 11 test nuovi sulla griglia e sul mese della settimana: sette colonne per riga, oggi marcato una volta
   sola, marcatore accanto al numero, giorno bloccato non premibile, freccia che
   si spegne al limite, bisestili con le eccezioni secolari;
 - nessuna migration.
