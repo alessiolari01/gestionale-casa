@@ -1,11 +1,25 @@
-name: Rust CI
+﻿name: Rust CI
 
 on:
+  # Ogni ramo, non solo quelli che si chiamano in un certo modo.
+  #
+  # Il filtro era `[main, 'step-*']`, nato quando i rami si chiamavano
+  # `step-7-...`. Il ramo `ux-convenzioni-telegram` non combaciava, quindi sei
+  # push di seguito non hanno fatto partire nessun controllo: il verde arrivava
+  # solo dalla pull request, cioe' quando gli errori da bisezionare erano gia'
+  # sei. Un filtro sui nomi dei rami e' una rete che si buca appena si cambia
+  # convenzione di nome.
   push:
-    branches: [main, 'step-*']
+    branches: ['**']
   pull_request:
     branches: [main]
   workflow_dispatch:
+
+# Su una raffica di push allo stesso ramo tiene solo l'ultimo controllo: e' la
+# meta' del costo di girare su tutti i rami.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -31,6 +45,9 @@ jobs:
           rustup default stable
           rustc --version
           cargo --version
+
+      - name: Coerenza dei documenti
+        run: ./scripts/controlla-documenti.sh
 
       - name: Check formatting
         run: cargo fmt --all -- --check

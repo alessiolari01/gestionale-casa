@@ -2,6 +2,50 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_CI_MAIUSCOLE_20260902 -->
+# 02/09/2026 — La CI su tutti i rami, e due nomi di file sbagliati
+
+## Sei push senza nessun controllo
+
+La CI partiva su `push: branches: [main, 'step-*']`, un filtro nato quando i
+rami si chiamavano `step-7-...`. Il ramo `ux-convenzioni-telegram` non
+combaciava: **sei push di seguito non hanno fatto partire niente.** Il verde
+arrivava solo dalla pull request, cioe' quando gli errori da bisezionare erano
+gia' sei.
+
+Un filtro sui nomi dei rami e' una rete che si buca appena si cambia
+convenzione di nome. Ora la CI gira su `branches: ['**']`, e un blocco
+`concurrency` con `cancel-in-progress` tiene solo l'ultimo controllo di una
+raffica di push allo stesso ramo: e' meta' del costo di girare su tutti.
+
+## Due nomi di file sbagliati, e come sono nati
+
+Il riordino dei documenti e' stato committato dal PC, dove il filesystem **non
+distingue le maiuscole**. Estratto l'archivio e dato `git add -A`, Git ha visto
+`docs/infrastruttura.md` come lo *stesso percorso* di `docs/INFRASTRUTTURA.md`
+e ha tenuto il nome vecchio con il contenuto nuovo. Idem per `ROADMAP.md`.
+
+Su Linux — cioe' su GitHub e nella CI — sono due file diversi, e quattro
+documenti rimandavano al nome minuscolo, che non esisteva.
+
+La verifica «zero rimandi rotti» era stata fatta sulla **copia di lavoro** in un
+ambiente Linux, non sull'albero committato da Windows. Era vera dove e' stata
+fatta e falsa dove conta.
+
+## `scripts/controlla-documenti.sh`
+
+Gira in CI prima ancora di `cargo fmt`, non serve rete ne' cargo, e verifica due
+cose sull'albero **tracciato da Git**, non sui file su disco:
+
+1. **nessun rimando rotto**: ogni `percorso/file.md` citato in un documento
+   deve esistere. Il `CHANGELOG.md` e' escluso: e' un verbale, e le voci
+   vecchie citano percorsi dell'epoca;
+2. **nessuna coppia di percorsi che differisce solo per maiuscole**, che su
+   Windows e macOS e' un file solo e su Linux sono due.
+
+Provato su entrambi i casi: sul commit rotto trova i sei rimandi, e su una
+collisione di maiuscole introdotta apposta la segnala.
+
 <!-- CHANGELOG_DOCUMENTI_20260902 -->
 # 02/09/2026 — I documenti riordinati, e la regola che li tiene allineati
 

@@ -40,9 +40,13 @@ Tre divieti, ognuno nato da un errore realmente commesso:
    finiscono per affermarne due diversi: e' gia' successo con il conteggio
    delle migration e dei test.
 
-Lo script `scripts/aggiorna-s9.sh` confronta il conteggio dei test dichiarato
-qui con quello reale e avvisa se non coincidono: e' il controllo piu' rapido
-che i documenti siano rimasti indietro.
+Due controlli automatici, perche' una regola che nessuno verifica dura poco:
+
+- `scripts/aggiorna-s9.sh` confronta il conteggio dei test dichiarato qui con
+  quello reale e avvisa se non coincidono;
+- `scripts/controlla-documenti.sh`, che gira in CI su ogni push, verifica che
+  nessun documento rimandi a un file inesistente e che non esistano due
+  percorsi che differiscono solo per maiuscole.
 
 ---
 
