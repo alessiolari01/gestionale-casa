@@ -2,6 +2,34 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_SQLX_RINVIO_20260902 -->
+# 02/09/2026 — sqlx 0.9.0 rinviata, con il perche'
+
+La PR #6 di Dependabot (sqlx 0.8.6 → 0.9.0) era aperta da giorni come «da
+valutare». Valutata e **rinviata**: la decisione e' scritta nei punti aperti di
+`STATO.md`, perche' un rinvio senza motivo scritto e' solo una cosa dimenticata.
+
+**Non e' un aggiornamento di sicurezza**: RUSTSEC-2024-0363 e' chiusa dalla
+0.8.1, e la 0.9.0 e' una release con rotture di compatibilita' (6 maggio 2026).
+
+Costo misurato sul nostro codice:
+
+- **Rust 1.94 come minimo**, mentre la toolchain dell'S9 e' piu' vecchia: si
+  finirebbe per cambiare libreria e toolchain insieme sulla macchina piu'
+  fragile;
+- **27 query costruite dinamicamente** da riscrivere con `AssertSqlSafe`, in
+  `luoghi.rs`, `contenitori.rs` e `ricette.rs`, perche' le funzioni ora
+  accettano solo `&'static str`;
+- **cambiamenti significativi al trait `Migrate`**, cioe' proprio alla parte su
+  cui poggiano 42 migration immutabili gia' applicate a un database vivo.
+
+Il progetto non usa le macro `query!` a compile-time (zero occorrenze), quindi
+quella meta' delle rotture non ci tocca.
+
+Rientra in agenda se esce una vulnerabilita' sulla 0.8.x o se serve `sqlx.toml`.
+Da rifare comunque dopo l'aggiornamento della toolchain dell'S9, per tenere un
+cambiamento alla volta.
+
 <!-- CHANGELOG_CI_MAIUSCOLE_20260902 -->
 # 02/09/2026 — La CI su tutti i rami, e due nomi di file sbagliati
 

@@ -252,7 +252,29 @@ scripts/aggiorna-s9.sh              aggiornamento e avvio sul telefono
    `planner_find_for_date` una volta per giorno: aprire una settimana costa
    sette letture identiche. Cercare il planner una volta sola e passarlo al
    ciclo toglie altre sei query. E' il seguito naturale del lavoro sulle date.
-5. **PR #6 di Dependabot** (sqlx 0.8.6 → 0.9.0) ancora da valutare.
+5. **PR #6 di Dependabot, sqlx 0.8.6 → 0.9.0: rinviata**, decisione presa il
+   2 settembre 2026 dopo averla valutata. **Non e' un aggiornamento di
+   sicurezza** — la falla RUSTSEC-2024-0363 era gia' chiusa in 0.8.1, e la
+   0.9.0 e' una release con rotture di compatibilita'. Costa piu' di quanto
+   renda, adesso, per tre motivi concreti:
+
+   - **richiede Rust 1.94 come minimo**, e la toolchain dell'S9 e' piu' vecchia
+     (punto 1 di questa lista). L'aggiornamento della libreria obbligherebbe a
+     fare prima quello del telefono, cioe' due cambiamenti insieme sulla
+     macchina piu' fragile;
+   - **27 query costruite dinamicamente** vanno riscritte: in 0.9.0 le funzioni
+     accettano solo `&'static str`, e una stringa composta a runtime va
+     avvolta in `AssertSqlSafe`. Sono in `luoghi.rs`, `contenitori.rs` e
+     `ricette.rs`;
+   - **il trait `Migrate` cambia in modo significativo.** E' la parte piu'
+     delicata del progetto: 42 migration immutabili gia' applicate a un
+     database vivo, con un rituale di backup e prova su copia costruito
+     attorno a `_sqlx_migrations`.
+
+   Cosa la farebbe rientrare in agenda: una vulnerabilita' annunciata sulla
+   0.8.x, oppure il bisogno di `sqlx.toml` o delle altre funzioni nuove. Fino
+   ad allora la 0.8.6 fa quello che serve. Da rifare quando la toolchain
+   dell'S9 sara' allineata, cosi' resta un cambiamento alla volta.
 6. **Verifiche differite** che richiedono un secondo account Telegram: invito
    accettato con apertura dello spazio, notifica al creatore, notifica di cambio
    ruolo, notifica di rimozione con perdita dell'accesso.
