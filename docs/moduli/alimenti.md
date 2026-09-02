@@ -34,8 +34,20 @@ un pulsante non può dire:
 - la **legenda** `👤 tuo · 👥 condiviso`, mostrata solo quando in pagina c'è
   almeno un marcatore da spiegare. Il catalogo base non ne porta;
 - nella ricerca, **perché** un alimento è fra i risultati quando il suo nome
-  non contiene la parola cercata: è finito lì per un prodotto commerciale
-  collegato, e senza quella riga sembra un errore del bot.
+  non contiene la parola cercata, e per quale delle due strade: un **alias** o
+  un **prodotto commerciale** collegato. Senza quella riga il risultato sembra
+  un errore del bot.
+
+  ```text
+  Perché sono nei risultati:
+  Formaggio spalmabile → prodotto Philadelphia · Original
+  Formaggio spalmabile → anche «Crema spalmabile»
+  ```
+
+  Le strade sono quelle di `list_foods_with_offset`: nome, alias, e
+  `marca + nome commerciale` dei prodotti attivi. Il caso è coperto dal test
+  `la_ricerca_spiega_perche_un_alimento_e_nei_risultati`, che verifica anche
+  che un alimento trovato **per nome** non produca nessuna riga.
 
 Con 422 alimenti l'elenco è lungo 85 pagine, quindi nel menu `🥕 Alimenti` la
 prima azione è `🔎 Cerca` e la seconda `📋 Elenco alimenti · 422`, con il

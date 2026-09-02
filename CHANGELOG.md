@@ -2,6 +2,49 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_LISTE_RICERCA_CORREZIONE_20260902 -->
+# 02/09/2026 — Un esempio inventato, e il buco che nascondeva
+
+Nella voce precedente e nel commento della funzione stava scritto che «cercando
+*barilla* compare `Amido di mais`». **Non era vero: l'esempio era inventato.**
+Non e' stato osservato su nessuna schermata ne' su nessun dato, e sul database
+reale quella ricerca non restituisce quell'alimento. E' il divieto n.1 della
+sezione 0 di questo progetto — non dichiarare fatto cio' che non e' stato
+verificato — e va segnato perche' un esempio falso in un documento e' peggio di
+un esempio mancante: chi lo legge lo prende per una verifica gia' fatta.
+
+Al suo posto c'e' **Philadelphia su `Formaggio spalmabile`**, che non e'
+inventato: e' l'esempio gia' presente in `docs/moduli/alimenti.md` ed e'
+esercitato dal test `ricerca_alimenti_trova_anche_marca_e_nome_commerciale`.
+
+## Il difetto che l'esempio finto copriva
+
+Cercando l'esempio vero e' saltato fuori che la funzione era **incompleta**.
+`list_foods_with_offset` fa comparire un alimento per tre strade — il nome, gli
+**alias**, e marca piu' nome dei prodotti commerciali collegati — mentre la
+riga di spiegazione ne copriva una sola, quella dei prodotti. Un alimento
+trovato per alias restava inspiegato esattamente come prima del lavoro sulle
+liste: il difetto che C1 doveva chiudere era chiuso a meta'.
+
+Ora la riga copre tutte e due le strade e dice quale delle due e' stata:
+
+```text
+Perché sono nei risultati:
+Formaggio spalmabile → prodotto Philadelphia · Original
+Formaggio spalmabile → anche «Crema spalmabile»
+```
+
+Il nuovo test `la_ricerca_spiega_perche_un_alimento_e_nei_risultati` verifica
+tutti e tre i casi su un database vero: trovato per prodotto, trovato per
+alias, e trovato per nome — quest'ultimo non deve produrre nessuna riga, perche'
+non c'e' niente da spiegare.
+
+Corretto anche `Perche'` in `Perché` nel testo mostrato su Telegram: la
+sezione 7 di `STATO.md` chiede accenti italiani corretti, e l'apostrofo va bene
+nei commenti del codice, non in quello che legge una persona.
+
+**269 test** (erano 268).
+
 <!-- CHANGELOG_LISTE_CONVENZIONI_20260902 -->
 # 02/09/2026 — Le liste smettono di dire due volte la stessa cosa
 
@@ -56,8 +99,10 @@ tiene solo tre eccezioni, tutte informazioni che sui pulsanti non stanno:
   condivisi, poi il catalogo base) e che C6 impone di dichiarare. Le ricette
   sono ordinate alfabeticamente e quindi non dichiarano niente;
 - nella ricerca alimenti, **perche'** un alimento e' fra i risultati quando il
-  suo nome non contiene la parola cercata: cercando «barilla» compare `Amido di
-  mais`, e senza quella riga sembra un errore del bot.
+  suo nome non contiene la parola cercata — e' finito li' per un alias o per un
+  prodotto commerciale collegato, e senza quella riga sembra un errore del bot.
+  (La prima stesura di questa voce portava qui un esempio inventato e una
+  funzione incompleta: vedi la voce successiva, del 2 settembre.)
 
 E' sparita «Tocca un evento sotto per vedere il dettaglio» (C2).
 

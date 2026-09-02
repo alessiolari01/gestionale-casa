@@ -142,7 +142,7 @@ invece di arrivare a SQLite e diventare `NULL`.
   `20260901013000_versione_contenuto_ricetta.sql` fosse ancora da applicare:
   non era vero, ed e' bastato leggere `_sqlx_migrations` per accorgersene;
 - pipeline verde: `fmt`, `check --locked`, `clippy --all-targets --locked
-  -- -D warnings`, `test --locked` — **268 test** (248 prima del 2 settembre:
+  -- -D warnings`, `test --locked` — **269 test** (248 prima del 2 settembre:
   e' il numero da confrontare dopo ogni aggiornamento dell'S9);
 - CI su GitHub Actions **verde** dalla run #42, la prima dello Step 7.
 

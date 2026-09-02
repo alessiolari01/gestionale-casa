@@ -5268,10 +5268,15 @@ fn note_elenco_alimenti(foods: &[FoodRecord], current_user: Option<i64>) -> Stri
 /// alimento e' finito fra i risultati quando il suo nome non contiene la
 /// parola cercata.
 ///
-/// Cercando «barilla» compare `Amido di mais`, e senza questa riga sembra un
-/// errore del bot: e' li' perche' un prodotto commerciale associato si chiama
-/// cosi'. Gli alimenti trovati per nome non producono nessuna riga, perche'
+/// La ricerca guarda tre cose (`list_foods_with_offset`): il nome, gli alias e
+/// marca piu' nome dei prodotti commerciali collegati. Quando a farlo comparire
+/// non e' stato il nome, senza una riga di spiegazione il risultato sembra un
+/// errore del bot. Gli alimenti trovati per nome non producono nessuna riga:
 /// per loro non c'e' niente da spiegare.
+///
+/// Le due strade sono trattate insieme perche' il difetto e' lo stesso: la
+/// prima versione di questa funzione copriva solo i prodotti, e un alimento
+/// trovato per alias restava inspiegato esattamente come prima.
 async fn append_search_food_lines(
     pool: &SqlitePool,
     text: &mut String,
@@ -5284,13 +5289,27 @@ async fn append_search_food_lines(
         if normalize_name(&food.name).contains(normalized_query) {
             continue;
         }
+        let etichetta = food_summary_line(food, current_user);
+
+        match matching_aliases_for_food(pool, food.id, normalized_query).await {
+            Ok(aliases) => {
+                for alias in aliases {
+                    spiegazioni.push(format!("{etichetta} → anche «{alias}»"));
+                }
+            }
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    food_id = food.id,
+                    "Errore alias corrispondenti ricerca"
+                );
+            }
+        }
+
         match matching_products_for_food(pool, food.id, normalized_query).await {
             Ok(products) => {
                 for (brand, product_name) in products {
-                    spiegazioni.push(format!(
-                        "{} → 🛒 {brand} · {product_name}",
-                        food_summary_line(food, current_user)
-                    ));
+                    spiegazioni.push(format!("{etichetta} → prodotto {brand} · {product_name}"));
                 }
             }
             Err(error) => {
@@ -5304,7 +5323,7 @@ async fn append_search_food_lines(
     }
 
     if !spiegazioni.is_empty() {
-        text.push_str("\n\nTrovati per il prodotto associato:\n");
+        text.push_str("\n\nPerché sono nei risultati:\n");
         text.push_str(&spiegazioni.join("\n"));
     }
 
@@ -5438,6 +5457,33 @@ async fn send_food_products(
         .reply_markup(food_products_keyboard(food_id, &products, can_edit))
         .await?;
     Ok(())
+}
+
+/// Gli alias di un alimento che contengono la parola cercata.
+///
+/// Serve alla riga che spiega perche' un alimento e' fra i risultati: la
+/// ricerca guarda il nome, **gli alias** e i prodotti commerciali collegati, e
+/// senza questa query il caso dell'alias restava senza spiegazione.
+async fn matching_aliases_for_food(
+    pool: &SqlitePool,
+    food_id: i64,
+    normalized_query: &str,
+) -> Result<Vec<String>> {
+    if normalized_query.is_empty() {
+        return Ok(Vec::new());
+    }
+    sqlx::query_scalar::<_, String>(
+        "SELECT alias \
+         FROM alimento_alias \
+         WHERE alimento_id = ? AND instr(alias_normalizzato, ?) > 0 \
+         ORDER BY alias COLLATE NOCASE, id \
+         LIMIT 3",
+    )
+    .bind(food_id)
+    .bind(normalized_query)
+    .fetch_all(pool)
+    .await
+    .context("Impossibile leggere gli alias corrispondenti alla ricerca")
 }
 
 async fn matching_products_for_food(
@@ -7844,6 +7890,77 @@ mod tests {
         assert_eq!(formats.len(), 2);
         assert_eq!(formats[0].package_quantity, 200.0);
         assert_eq!(formats[1].package_quantity, 350.0);
+    }
+
+    #[tokio::test]
+    async fn la_ricerca_spiega_perche_un_alimento_e_nei_risultati() {
+        // La ricerca guarda nome, alias e marca/nome dei prodotti collegati.
+        // Quando a far comparire un alimento non e' il suo nome, il risultato
+        // sembra un errore del bot: questa e' la riga che lo spiega (C1).
+        let pool = test_pool().await;
+        let admin_id = create_user(&pool, "Admin spiegazione ricerca").await;
+        add_membership(&pool, 1, admin_id, "proprietario").await;
+        sqlx::query("UPDATE utenti SET ruolo_sistema = 'admin' WHERE id = ?")
+            .bind(admin_id)
+            .execute(&pool)
+            .await
+            .expect("promozione admin");
+        let food_id: i64 = sqlx::query_scalar(
+            "SELECT id FROM alimenti WHERE catalogo_globale = 1 AND nome_normalizzato = 'formaggio spalmabile'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("formaggio spalmabile");
+        let unit_id: i64 = sqlx::query_scalar("SELECT id FROM unita_misura WHERE simbolo = 'g'")
+            .fetch_one(&pool)
+            .await
+            .expect("grammi");
+
+        let actor = actor(admin_id, 1, true, "Admin spiegazione ricerca");
+        identity::with_actor(actor, async {
+            create_product_association(&pool, food_id, "Philadelphia", "Original", 200.0, unit_id)
+                .await
+                .expect("prodotto");
+            sqlx::query(
+                "INSERT INTO alimento_alias (alimento_id, alias, alias_normalizzato) VALUES (?, ?, ?)",
+            )
+            .bind(food_id)
+            .bind("Crema spalmabile")
+            .bind(normalize_name("Crema spalmabile"))
+            .execute(&pool)
+            .await
+            .expect("alias");
+
+            // Trovato per il prodotto commerciale.
+            let foods = list_foods(&pool, Some("philadelphia"), None, 20)
+                .await
+                .expect("ricerca marca");
+            let mut testo = String::new();
+            append_search_food_lines(&pool, &mut testo, &foods, Some(admin_id), "philadelphia")
+                .await;
+            assert!(testo.contains("Perché sono nei risultati:"), "{testo}");
+            assert!(
+                testo.contains("prodotto Philadelphia · Original"),
+                "{testo}"
+            );
+
+            // Trovato per un alias: prima questa strada restava inspiegata.
+            let foods = list_foods(&pool, Some("crema"), None, 20)
+                .await
+                .expect("ricerca alias");
+            let mut testo = String::new();
+            append_search_food_lines(&pool, &mut testo, &foods, Some(admin_id), "crema").await;
+            assert!(testo.contains("anche «Crema spalmabile»"), "{testo}");
+
+            // Trovato per il proprio nome: non c'e' niente da spiegare.
+            let foods = list_foods(&pool, Some("formaggio"), None, 20)
+                .await
+                .expect("ricerca nome");
+            let mut testo = String::new();
+            append_search_food_lines(&pool, &mut testo, &foods, Some(admin_id), "formaggio").await;
+            assert!(!testo.contains("Perché sono nei risultati:"), "{testo}");
+        })
+        .await;
     }
 
     #[tokio::test]
