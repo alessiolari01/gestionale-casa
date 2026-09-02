@@ -27,6 +27,8 @@ use crate::identity;
 type Bot = crate::context_bot::ContextBot;
 
 const MEDIA_ROOT: &str = "data/media/miglioramenti";
+use crate::modules::liste;
+
 const LIST_PAGE_SIZE: i64 = 5;
 const MAX_DESCRIPTION_CHARS: usize = 50_000;
 const DESCRIPTION_PAGE_CHARS: usize = 3000;
@@ -216,6 +218,37 @@ enum ListScope {
     Todo,
     Done,
     Discarded,
+}
+
+/// I conteggi mostrati sulle etichette del menu' Miglioramenti (C7).
+#[derive(Debug, Clone, Copy, Default)]
+struct ConteggiMiglioramenti {
+    miei: i64,
+    attivi: i64,
+    da_approvare: i64,
+    da_fare: i64,
+    da_verificare: i64,
+    scartati: i64,
+}
+
+impl ConteggiMiglioramenti {
+    fn solo_miei(miei: i64) -> Self {
+        Self {
+            miei,
+            ..Self::default()
+        }
+    }
+
+    fn per(self, scope: ListScope) -> i64 {
+        match scope {
+            ListScope::Mine => self.miei,
+            ListScope::All => self.attivi,
+            ListScope::Pending => self.da_approvare,
+            ListScope::Todo => self.da_fare,
+            ListScope::Done => self.da_verificare,
+            ListScope::Discarded => self.scartati,
+        }
+    }
 }
 
 impl ListScope {
@@ -1956,19 +1989,39 @@ async fn start_new(
 
 pub async fn show_menu(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> ResponseResult<()> {
     let admin = is_primary_admin(pool).await.unwrap_or(false);
+
+    // C7: questa schermata era l'esempio da cui nasce la convenzione. I
+    // conteggi c'erano gia', ma stavano in un blocco di testo sopra i
+    // pulsanti — «🟡 Da approvare: 0» sopra un pulsante `🟡 Da approvare` —
+    // e con loro c'era la frase «Usa i pulsanti qui sotto», che C2 vieta.
+    // Ora il numero e' sull'etichetta e il testo non ha piu' niente da dire
+    // che i pulsanti non dicano gia'.
+    let conteggi = if admin {
+        Some(ConteggiMiglioramenti {
+            da_approvare: count_scope(pool, ListScope::Pending).await.unwrap_or(0),
+            da_fare: count_scope(pool, ListScope::Todo).await.unwrap_or(0),
+            da_verificare: count_scope(pool, ListScope::Done).await.unwrap_or(0),
+            attivi: count_scope(pool, ListScope::All).await.unwrap_or(0),
+            scartati: count_scope(pool, ListScope::Discarded).await.unwrap_or(0),
+            miei: count_scope(pool, ListScope::Mine).await.unwrap_or(0),
+        })
+    } else {
+        count_scope(pool, ListScope::Mine)
+            .await
+            .ok()
+            .map(ConteggiMiglioramenti::solo_miei)
+    };
+
     let text = if admin {
-        let pending = count_scope(pool, ListScope::Pending).await.unwrap_or(0);
-        let todo = count_scope(pool, ListScope::Todo).await.unwrap_or(0);
-        let done = count_scope(pool, ListScope::Done).await.unwrap_or(0);
-        let all = count_scope(pool, ListScope::All).await.unwrap_or(0);
-        format!(
-            "💡 Miglioramenti\n\n🟡 Da approvare: {pending}\n🟢 Da fare: {todo}\n✅ Fatti da verificare: {done}\n📦 Verificati: archiviazione diretta\n🗂️ Attivi totali: {all}\n\nUsa i pulsanti qui sotto per aprire la sezione desiderata."
-        )
+        // Resta la sola riga che nessun pulsante dice: dove finiscono i
+        // miglioramenti una volta verificati.
+        "💡 Miglioramenti\n\n📦 Un miglioramento verificato viene archiviato direttamente."
+            .to_string()
     } else {
         "💡 Miglioramenti\n\nPuoi creare suggerimenti e gestire soltanto i tuoi: testo, screenshot ed eliminazione del suggerimento attivo. Lo stato amministrativo viene gestito dall'amministratore.".to_string()
     };
     bot.send_message(chat_id, text)
-        .reply_markup(menu_keyboard(admin))
+        .reply_markup(menu_keyboard_con_conteggi(admin, conteggi))
         .await?;
     Ok(())
 }
@@ -2017,12 +2070,11 @@ async fn show_list(
         return Ok(());
     }
 
-    let mut lines = vec![format!(
-        "{}\nTotale: {total} · Pagina {}/{}",
-        scope.title(),
-        page + 1,
-        pages
-    )];
+    // C1: il testo non elenca piu' i miglioramenti — stanno sui pulsanti —
+    // e l'etichetta porta cio' che li distingue: lo stato, il testo del
+    // suggerimento, il segno di «non letto» e l'esito del collaudo, che prima
+    // stava solo nel messaggio. Autore e allegati sono nel dettaglio.
+    let lines = [liste::intestazione(scope.title(), total, page)];
     let mut buttons = Vec::new();
     let admin = is_primary_admin(pool).await.unwrap_or(false);
     for item in rows {
@@ -2031,37 +2083,30 @@ async fn show_list(
         } else {
             ""
         };
+        // Sul pulsante l'esito del collaudo e' la sola icona: la parola sta
+        // nel dettaglio, dove c'e' lo spazio per scriverla.
         let verification_suffix = match item.verifica_esito.as_deref() {
-            Some("problema") => " · ⚠️ Problema collaudo",
-            Some("ok") => " · 🧪 Verificato",
-            _ if item.stato == "fatto" => " · 🧪 Da verificare",
+            Some("problema") => " ⚠️",
+            Some("ok") => " 🧪",
+            _ if item.stato == "fatto" => " 🧪",
             _ => "",
         };
-        lines.push(String::new());
-        lines.push(format!(
-            "{} {}{}{}\n{}{}",
-            display_status_icon(&item),
-            truncate(&item.descrizione, 90),
-            unread_suffix,
-            verification_suffix,
-            if admin {
-                format!("👤 {} · ", item.autore_nome)
-            } else {
-                String::new()
-            },
-            attachment_summary(item.allegati, item.prove),
-        ));
         buttons.push(vec![InlineKeyboardButton::callback(
             format!(
-                "{} {}{}",
+                "{} {}{}{}",
                 display_status_icon(&item),
-                truncate(&item.descrizione, 38),
-                unread_suffix
+                liste::tronca(&item.descrizione, 32),
+                unread_suffix,
+                verification_suffix
             ),
             format!("improve:view:{}:{}:{}", item.id, scope.token(), page),
         )]);
     }
-    buttons.push(pagination_buttons(scope, page, pages));
+    if let Some(riga) = liste::riga_paginazione(page, total, "improve:noop", |pagina| {
+        format!("improve:list:{}:{}", scope.token(), pagina)
+    }) {
+        buttons.push(riga);
+    }
     if scope == ListScope::Discarded && total > 0 {
         buttons.push(vec![InlineKeyboardButton::callback(
             "🗑 Elimina tutti gli scartati".to_string(),
@@ -2129,9 +2174,8 @@ async fn show_archive(
         return Ok(());
     }
     let mut lines = vec![format!(
-        "📦 Archivio miglioramenti\nTotale: {total} · Pagina {}/{}",
-        page + 1,
-        pages
+        "{}",
+        liste::intestazione("📦 Archivio miglioramenti", total, page)
     )];
     for item in rows {
         lines.push(String::new());
@@ -2143,7 +2187,12 @@ async fn show_archive(
             attachment_summary(item.allegati, item.prove),
         ));
     }
-    let mut keyboard = vec![archive_pagination_buttons(page, pages)];
+    let mut keyboard = Vec::new();
+    if let Some(riga) = liste::riga_paginazione(page, total, "improve:noop", |pagina| {
+        format!("improve:archive:page:{pagina}")
+    }) {
+        keyboard.push(riga);
+    }
     keyboard.push(vec![InlineKeyboardButton::callback(
         "⬅️ Miglioramenti".to_string(),
         "improve:menu".to_string(),
@@ -3270,35 +3319,38 @@ async fn is_primary_admin(pool: &SqlitePool) -> Result<bool> {
 }
 
 fn menu_keyboard(admin: bool) -> InlineKeyboardMarkup {
+    menu_keyboard_con_conteggi(admin, None)
+}
+
+/// Menu' Miglioramenti con il conteggio sulle etichette (C7).
+///
+/// Senza conteggi (quando non si riescono a leggere) le etichette restano
+/// quelle di prima: una sezione raggiungibile vale piu' di un numero esatto.
+/// Il nome di ogni voce viene da `ListScope::title`, cosi' il pulsante e il
+/// titolo della schermata a cui porta non possono divergere (C10).
+fn menu_keyboard_con_conteggi(
+    admin: bool,
+    conteggi: Option<ConteggiMiglioramenti>,
+) -> InlineKeyboardMarkup {
+    let voce = |scope: ListScope| {
+        let etichetta = match conteggi {
+            Some(conteggi) => liste::etichetta_con_conteggio(scope.title(), conteggi.per(scope)),
+            None => scope.title().to_string(),
+        };
+        InlineKeyboardButton::callback(etichetta, format!("improve:list:{}:0", scope.token()))
+    };
+
     let mut rows = vec![
         vec![InlineKeyboardButton::callback(
             "➕ Nuovo miglioramento".to_string(),
             "improve:new".to_string(),
         )],
-        vec![InlineKeyboardButton::callback(
-            "📋 I miei miglioramenti".to_string(),
-            "improve:list:mine:0".to_string(),
-        )],
+        vec![voce(ListScope::Mine)],
     ];
     if admin {
-        rows.push(vec![
-            InlineKeyboardButton::callback(
-                "🟡 Da approvare".to_string(),
-                "improve:list:pending:0".to_string(),
-            ),
-            InlineKeyboardButton::callback(
-                "🟢 Da fare".to_string(),
-                "improve:list:todo:0".to_string(),
-            ),
-        ]);
-        rows.push(vec![InlineKeyboardButton::callback(
-            "✅ Fatti da verificare".to_string(),
-            "improve:list:done:0".to_string(),
-        )]);
-        rows.push(vec![InlineKeyboardButton::callback(
-            "🗂️ Tutti i miglioramenti".to_string(),
-            "improve:list:all:0".to_string(),
-        )]);
+        rows.push(vec![voce(ListScope::Pending), voce(ListScope::Todo)]);
+        rows.push(vec![voce(ListScope::Done)]);
+        rows.push(vec![voce(ListScope::All)]);
         rows.push(vec![
             InlineKeyboardButton::callback(
                 "📦 Esporta miglioramenti".to_string(),
@@ -3310,10 +3362,7 @@ fn menu_keyboard(admin: bool) -> InlineKeyboardMarkup {
             ),
         ]);
         rows.push(vec![
-            InlineKeyboardButton::callback(
-                "❌ Scartati".to_string(),
-                "improve:list:discarded:0".to_string(),
-            ),
+            voce(ListScope::Discarded),
             InlineKeyboardButton::callback(
                 "📦 Archivio".to_string(),
                 "improve:archive:list".to_string(),
@@ -3589,48 +3638,6 @@ fn detail_keyboard(
         InlineKeyboardButton::callback("🏠 Menù principale".to_string(), "menu:main".to_string()),
     ]);
     InlineKeyboardMarkup::new(rows)
-}
-
-fn pagination_buttons(scope: ListScope, page: i64, pages: i64) -> Vec<InlineKeyboardButton> {
-    let mut row = Vec::new();
-    if page > 0 {
-        row.push(InlineKeyboardButton::callback(
-            "⬅️ Pagina precedente".to_string(),
-            format!("improve:list:{}:{}", scope.token(), page - 1),
-        ));
-    }
-    row.push(InlineKeyboardButton::callback(
-        format!("{}/{}", page + 1, pages),
-        "improve:noop".to_string(),
-    ));
-    if page + 1 < pages {
-        row.push(InlineKeyboardButton::callback(
-            "Pagina successiva ➡️".to_string(),
-            format!("improve:list:{}:{}", scope.token(), page + 1),
-        ));
-    }
-    row
-}
-
-fn archive_pagination_buttons(page: i64, pages: i64) -> Vec<InlineKeyboardButton> {
-    let mut row = Vec::new();
-    if page > 0 {
-        row.push(InlineKeyboardButton::callback(
-            "⬅️ Pagina precedente".to_string(),
-            format!("improve:archive:page:{}", page - 1),
-        ));
-    }
-    row.push(InlineKeyboardButton::callback(
-        format!("{}/{}", page + 1, pages),
-        "improve:noop".to_string(),
-    ));
-    if page + 1 < pages {
-        row.push(InlineKeyboardButton::callback(
-            "Pagina successiva ➡️".to_string(),
-            format!("improve:archive:page:{}", page + 1),
-        ));
-    }
-    row
 }
 
 fn parse_list_callback(data: &str) -> Option<(ListScope, i64)> {

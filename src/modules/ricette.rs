@@ -30,6 +30,8 @@ use crate::{
 
 type Bot = crate::context_bot::ContextBot;
 
+use crate::modules::liste;
+
 const RECIPE_LIST_PAGE_SIZE: i64 = 5;
 const FOOD_SEARCH_LIMIT: i64 = 8;
 const RECIPE_SEARCH_LIMIT: i64 = 20;
@@ -204,12 +206,16 @@ struct DraftMedia {
 }
 
 #[derive(Debug, Clone, FromRow)]
+/// Una riga della lista delle ricette.
+///
+/// Porzioni, numero di ingredienti e numero di step non ci sono piu': da
+/// quando il testo non ripete le voci (C1) nessuno li mostrava, e costavano
+/// due sotto-query correlate per riga — dieci `COUNT` a ogni apertura di una
+/// pagina da cinque. Si leggono aprendo la ricetta, dove c'e' anche tutto il
+/// resto.
 struct RecipeListRecord {
     id: i64,
     name: String,
-    servings: i64,
-    ingredient_count: i64,
-    step_count: i64,
     owner: bool,
     shared: bool,
 }
@@ -2543,16 +2549,20 @@ async fn show_recipe_list(
         .await
         .unwrap_or_default();
 
-    let mut text = format!(
-        "📋 Ricette · {}\nPagina {}/{}",
-        result_label(total),
-        if pages == 0 { 0 } else { safe_page + 1 },
-        pages
-    );
+    // C10: il nome della schermata coincide con quello del pulsante che ci
+    // porta. C1: il testo non ripete i nomi, che stanno sui pulsanti; ne'
+    // ingredienti, step e porzioni, che stanno nel dettaglio della ricetta.
+    // L'ordinamento e' alfabetico, quindi C6 non chiede di dichiararlo.
+    let mut text = liste::intestazione("📋 Elenco ricette", total, safe_page);
     if rows.is_empty() {
         text.push_str("\n\nNessuna ricetta visibile.");
-    } else {
-        for recipe in &rows {
+    } else if rows.iter().any(|recipe| recipe.owner || recipe.shared) {
+        text.push_str("\n\n👤 tua · 👥 condivisa");
+    }
+
+    let mut keyboard = rows
+        .iter()
+        .map(|recipe| {
             let suffix = if recipe.owner {
                 " 👤"
             } else if recipe.shared {
@@ -2560,29 +2570,29 @@ async fn show_recipe_list(
             } else {
                 ""
             };
-            text.push_str(&format!(
-                "\n\n🍳 {}{}\n🥕 {} ingredienti · 📝 {} step · 👥 {} porzioni",
-                recipe.name, suffix, recipe.ingredient_count, recipe.step_count, recipe.servings
-            ));
-        }
-    }
-
-    let mut keyboard = rows
-        .iter()
-        .map(|recipe| {
             vec![button(
-                format!("🍳 {}", recipe.name),
+                format!("🍳 {}{}", recipe.name, suffix),
                 format!("recipe:detail:{}", recipe.id),
             )]
         })
         .collect::<Vec<_>>();
-    if pages > 1 {
-        keyboard.push(pagination_row("recipe:list", safe_page, pages));
+    if let Some(riga) = liste::riga_paginazione(safe_page, total, "recipe:noop", |pagina| {
+        format!("recipe:list:{pagina}")
+    }) {
+        keyboard.push(riga);
     }
-    keyboard.push(vec![
-        button("➕ Nuova ricetta", "recipe:new"),
-        button("🔎 Cerca", "recipe:search"),
-    ]);
+    // C6: sopra le 20 voci la ricerca viene prima della creazione.
+    keyboard.push(if liste::si_cerca_invece_di_sfogliare(total) {
+        vec![
+            button("🔎 Cerca", "recipe:search"),
+            button("➕ Nuova ricetta", "recipe:new"),
+        ]
+    } else {
+        vec![
+            button("➕ Nuova ricetta", "recipe:new"),
+            button("🔎 Cerca", "recipe:search"),
+        ]
+    });
     keyboard.push(vec![
         button("⬅️ Indietro", "recipe:menu"),
         button("🏠 Menù principale", "menu:main"),
@@ -4548,9 +4558,7 @@ async fn list_visible_recipes(
     let user_id = actor.utente_id.context("Utente non disponibile")?;
     let (predicate, bind_space) = recipe_visibility_predicate("r", &actor);
     let sql = format!(
-        "SELECT r.id, r.nome AS name, r.porzioni_base AS servings, \
-                (SELECT COUNT(*) FROM ricetta_ingredienti ri WHERE ri.ricetta_id = r.id) AS ingredient_count, \
-                (SELECT COUNT(*) FROM ricetta_step rs WHERE rs.ricetta_id = r.id) AS step_count, \
+        "SELECT r.id, r.nome AS name, \
                 CASE WHEN r.proprietario_utente_id = ? THEN 1 ELSE 0 END AS owner, \
                 CASE WHEN r.catalogo_globale = 0 AND r.proprietario_utente_id <> ? THEN 1 ELSE 0 END AS shared \
          FROM ricette r WHERE r.archiviata = 0 AND ({predicate}) \
@@ -4889,9 +4897,7 @@ async fn search_recipes_by_name(
     let user_id = actor.utente_id.context("Utente non disponibile")?;
     let (predicate, bind_space) = recipe_visibility_predicate("r", &actor);
     let sql = format!(
-        "SELECT r.id, r.nome AS name, r.porzioni_base AS servings, \
-                (SELECT COUNT(*) FROM ricetta_ingredienti ri WHERE ri.ricetta_id = r.id) AS ingredient_count, \
-                (SELECT COUNT(*) FROM ricetta_step rs WHERE rs.ricetta_id = r.id) AS step_count, \
+        "SELECT r.id, r.nome AS name, \
                 CASE WHEN r.proprietario_utente_id = ? THEN 1 ELSE 0 END AS owner, \
                 CASE WHEN r.catalogo_globale = 0 AND r.proprietario_utente_id <> ? THEN 1 ELSE 0 END AS shared \
          FROM ricette r \
@@ -6020,24 +6026,6 @@ fn back_home_keyboard(back_callback: &str) -> InlineKeyboardMarkup {
         button("⬅️ Indietro", back_callback),
         button("🏠 Menù principale", "menu:main"),
     ]])
-}
-
-fn pagination_row(prefix: &str, page: i64, pages: i64) -> Vec<InlineKeyboardButton> {
-    let mut row = Vec::new();
-    if page > 0 {
-        row.push(button(
-            "⬅️ Pagina precedente",
-            format!("{prefix}:{}", page - 1),
-        ));
-    }
-    row.push(button(format!("{}/{}", page + 1, pages), "recipe:noop"));
-    if page + 1 < pages {
-        row.push(button(
-            "Pagina successiva ➡️",
-            format!("{prefix}:{}", page + 1),
-        ));
-    }
-    row
 }
 
 fn button(text: impl Into<String>, callback: impl Into<String>) -> InlineKeyboardButton {

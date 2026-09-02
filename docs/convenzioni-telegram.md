@@ -35,6 +35,13 @@ nel pulsante resta solo il titolo. Risultato: **tre pulsanti identici**
 `🍽 Porzione modificata · Giorgia`, e per sapere quale sia quale bisogna
 contarli e confrontarli con il testo sopra.
 
+> **Correzione del 2 settembre.** La prima stesura di questa riga diceva che
+> *Giorgia* fosse l'autore dell'evento. Guardando di nuovo il bot: l'autore era
+> `Alessio Lari` per tutti e cinque gli eventi della pagina, e *Giorgia* è il
+> **profilo su cui la porzione è stata modificata**. Sull'etichetta c'era già;
+> quello che mancava era **quando**. La differenza conta, perché la prima
+> versione di C1 proponeva di aggiungere al pulsante una cosa che c'era.
+
 ### 2. Ogni menù ha una frase che legge i pulsanti ad alta voce
 
 - `📦 Oggetti`: «Scegli cosa vuoi fare. Usa i pulsanti per scegliere cosa fare.»
@@ -147,12 +154,15 @@ testo.
 In pratica, per una lista:
 
 ```text
-🥕 Alimenti · 422                      ← titolo con il totale
-Pagina 1 di 85                          ← posizione
+📋 Elenco alimenti · 422                ← titolo con il totale
+Pagina 1/85                             ← posizione
 
-[ 👤 prova alimento            ]
-[ 🌐 Amido di mais             ]        ← solo i pulsanti, con tutto quello
-[ 🌐 Avena                     ]           che serve a distinguerli
+Prima i tuoi, poi i condivisi, poi il catalogo base.
+👤 tuo · 👥 condiviso                    ← cose che i pulsanti non dicono
+
+[ prova alimento 👤            ]
+[ 🌾 Amido di mais             ]        ← solo i pulsanti, con tutto quello
+[ 🌾 Avena                     ]           che serve a distinguerli
 ```
 
 Il testo non elenca più le voci. Se una voce ha bisogno di data, autore o
@@ -160,8 +170,24 @@ categoria per essere distinta dalle altre, **quella roba va sul pulsante**, non
 in un elenco parallelo:
 
 ```text
-[ 🍽 Porzione · Giorgia · 31/08 19:49 ]
+[ 🍽️ 31/08/26 19:49 · Giorgia ]
 ```
+
+Sull'etichetta di un evento vanno **quando** e **su cosa**. Non ci va l'azione
+a parole: in una lista filtrata per azione è identica su ogni riga, quindi non
+distingue niente e occupa il posto di ciò che distingue. Resta l'icona, e il
+nome per esteso è nel dettaglio insieme all'autore e al luogo. L'anno c'è in
+forma breve: costa tre caratteri e toglie l'ambiguità fra un evento di
+quest'anno e lo stesso giorno di un anno passato.
+
+**Un limite che questa regola non risolve.** Due eventi dello stesso tipo, sulla
+stessa entità, nello stesso minuto restano indistinguibili sull'etichetta: è il
+caso reale di `Pasta test 120% → 100%` e `100% → 120%`, due modifiche opposte
+fatte di seguito. Restano adiacenti e in ordine cronologico, e si distinguono
+aprendole. Mettere il cambiamento sull'etichetta funzionerebbe solo per le
+variazioni numeriche brevi e romperebbe tutti gli altri tipi di evento; i
+secondi sarebbero una precisione che a chi legge non serve. Se all'uso questo
+caso dovesse pesare davvero, si riapre la scelta — non prima.
 
 ### C2. Nessuna frase che descrive i pulsanti
 
@@ -228,7 +254,14 @@ seconda. Il titolo dice sempre quante sono. L'ordinamento va dichiarato quando
 non è alfabetico.
 
 Cinque voci per pagina restano la regola; la paginazione mostra
-`⬅️ Precedente | n/tot | Successiva ➡️` e `n/tot` non è premibile.
+`⬅️ Precedente | n/tot | Successiva ➡️` e `n/tot` non è premibile. Quando c'è
+una pagina sola la riga non compare: una navigazione fra una pagina e se stessa
+è rumore.
+
+La riga non si riscrive a mano: sta in `modules::liste`, insieme
+all'intestazione e alla soglia delle venti voci. Prima era ricopiata in sei
+posti con quattro etichette diverse per lo stesso pulsante, ed è per questo che
+la convenzione non veniva rispettata da nessuno.
 
 ### C7. Il conteggio sta sul pulsante
 
@@ -332,7 +365,10 @@ di applicazione è questo, dal più visibile al meno:
 
 1. **Planner** — è la sezione che si usa ogni giorno ed è quella dove la
    duplicazione pesa di più;
-2. **liste** (alimenti, ricette, storico, miglioramenti) — C1, C6, C7;
+2. ~~**liste** (alimenti, ricette, storico, miglioramenti) — C1, C6, C7~~
+   **fatto il 2 settembre**, tutte e quattro insieme perché C11 non permette di
+   farne due su quattro. Il giro sul bot prima di scrivere codice ha corretto
+   C1 e fatto nascere `modules::liste`;
 3. **menù di sezione** — C2, C3, C10, C11;
 4. **Spazi e Profilo** — C5, la parte concettualmente più difficile;
 5. **menù principale** — C12;

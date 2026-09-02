@@ -74,6 +74,27 @@ Storico globale:
 - prima/dopo e cambio luogo;
 - orario locale in visualizzazione.
 
+**Etichette della lista (C1).** Il messaggio non elenca più gli eventi: porta
+solo il titolo con il totale, la posizione e il filtro attivo. Ogni evento è un
+pulsante `{icona} {gg/mm/aa hh:mm} · {entità}`, per esempio
+`🍽️ 31/08/26 19:49 · Giorgia`.
+
+Sull'etichetta non c'è più l'azione a parole. In una lista filtrata per azione
+è identica su ogni riga, quindi non distingue niente e occupa il posto di ciò
+che distingue: prima il risultato erano tre pulsanti identici
+`🍽 Porzione modificata · Giorgia`. L'azione resta come icona; il nome per
+esteso, l'autore, il modulo e il luogo sono nel dettaglio.
+
+**Limite noto.** Due eventi dello stesso tipo, sulla stessa entità, nello
+stesso minuto restano indistinguibili sull'etichetta — è successo davvero con
+due modifiche opposte della stessa porzione. Restano adiacenti e in ordine
+cronologico, e si separano aprendoli.
+
+**Cosa legge la lista.** Da quando il testo non ripete gli eventi, la query
+della lista chiede cinque colonne invece di tredici: luogo, stanza,
+contenitore, spazio, autore, origine, automatico e tipo entità venivano letti a
+ogni apertura per non essere mostrati. Il dettaglio li legge come prima.
+
 Storico individuale:
 - pulsante `📜 Storico` nella scheda oggetto;
 - mostra soltanto gli eventi della corrente identità storica.

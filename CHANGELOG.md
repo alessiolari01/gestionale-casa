@@ -2,6 +2,102 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_LISTE_CONVENZIONI_20260902 -->
+# 02/09/2026 — Le liste smettono di dire due volte la stessa cosa
+
+Secondo blocco della parte 3 di `docs/convenzioni-telegram.md`: **le liste**,
+tutte e quattro insieme — alimenti, ricette, storico, miglioramenti — perche'
+C11 chiede che le sezioni gemelle si somiglino, e sistemarne due su quattro
+avrebbe lasciato il bot piu' incoerente di prima.
+
+## Cosa si e' visto guardando il bot, e non si vedeva dal codice
+
+Il giro sul bot reale ha cambiato due decisioni.
+
+**C1 sbagliava a dire chi fosse «Giorgia».** La convenzione descriveva i tre
+pulsanti identici `🍽 Porzione modificata · Giorgia` e proponeva come rimedio
+`[ 🍽 Porzione · Giorgia · 31/08 19:49 ]`, trattando *Giorgia* come l'autore.
+Sul bot l'autore era `Alessio Lari` per tutti gli eventi della pagina, e
+*Giorgia* e' il **profilo su cui la porzione e' stata modificata**, cioe'
+`nome_entita_snapshot`, che sull'etichetta c'era gia'. La ricetta scritta in C1
+aggiungeva al pulsante una cosa che c'era e continuava a non aggiungere quella
+che mancava. La convenzione e' stata corretta.
+
+**Data e ora da sole non bastavano.** Due eventi che sembravano doppioni erano
+due modifiche opposte della stessa porzione — `Pasta test 120% → 100%` e
+`100% → 120%` — fatte nello stesso minuto, sullo stesso profilo, dalla stessa
+persona. Applicando C1 alla lettera restavano due pulsanti identici. La scelta
+presa: sull'etichetta vanno **quando** e **su cosa**, il resto sta nel
+dettaglio; due eventi nello stesso minuto restano adiacenti e in ordine, e si
+distinguono aprendoli. E' scritto in C1 come limite noto, invece di essere
+scoperto di nuovo fra sei mesi.
+
+## Un modulo solo per le liste
+
+Nasce `src/modules/liste.rs`, per la stessa ragione per cui esiste un solo
+`calendario.rs`: la riga di paginazione era riscritta a mano in **sei posti**,
+con **quattro etichette diverse** per lo stesso pulsante — `⬅️ Pagina
+precedente`, `⬅️`, `Pagina successiva ➡️`, `➡️` — e due formati di
+intestazione (`· 422 risultati` + `Pagina 1/85` contro `Pagina 1 di 21 · 102
+eventi`). Una convenzione ricopiata a mano in sei posti non e' una convenzione.
+
+Ora la riga e' una sola, `⬅️ Precedente | n/tot | Successiva ➡️`, con `n/tot`
+non premibile, e sparisce del tutto quando c'e' una pagina sola.
+
+## C1 applicata: il testo non ripete piu' i pulsanti
+
+In tutte e quattro le liste il messaggio si riduce a cio' che i pulsanti non
+possono dire — quante voci ci sono, dove siamo, quale filtro e' attivo — e
+tiene solo tre eccezioni, tutte informazioni che sui pulsanti non stanno:
+
+- la **legenda** `👤 tuo · 👥 condiviso`, mostrata solo quando in pagina c'e'
+  almeno un marcatore da spiegare;
+- l'**ordinamento** degli alimenti, che non e' alfabetico (prima i tuoi, poi i
+  condivisi, poi il catalogo base) e che C6 impone di dichiarare. Le ricette
+  sono ordinate alfabeticamente e quindi non dichiarano niente;
+- nella ricerca alimenti, **perche'** un alimento e' fra i risultati quando il
+  suo nome non contiene la parola cercata: cercando «barilla» compare `Amido di
+  mais`, e senza quella riga sembra un errore del bot.
+
+E' sparita «Tocca un evento sotto per vedere il dettaglio» (C2).
+
+## C6 e C7 sui menu'
+
+`🥕 Alimenti` con 422 voci offre ora `🔎 Cerca` come prima azione e
+`📋 Elenco alimenti · 422` come seconda: sfogliare 85 pagine non e' una strada.
+Sotto le 20 voci l'ordine resta quello di prima, perche' con poche voci
+scorrere e' piu' veloce che scrivere.
+
+`💡 Miglioramenti` era l'esempio da cui nasce C7: i conteggi c'erano gia', ma
+in un blocco di testo sopra i pulsanti — «🟡 Da approvare: 0» sopra un pulsante
+`🟡 Da approvare` — insieme a «Usa i pulsanti qui sotto», che C2 vieta. Ora il
+numero e' sull'etichetta e quel blocco non esiste piu'.
+
+## Effetto collaterale: due liste chiedono meno al database
+
+Togliere dal testo cio' che nessuno mostrava piu' ha tolto anche le letture che
+lo producevano, e su un S9 non e' un dettaglio:
+
+- lo **storico** leggeva otto colonne per riga — luogo, stanza, contenitore,
+  spazio, autore, origine, tipo entita' — cinque righe per pagina, a ogni
+  apertura, per non mostrarle;
+- le **ricette** calcolavano due sotto-query correlate per riga (`COUNT` degli
+  ingredienti e degli step): **dieci `COUNT`** a ogni apertura di una pagina da
+  cinque, per una riga di testo che ora sta nel dettaglio.
+
+## Verifica
+
+`fmt`, `clippy --all-targets -- -D warnings` e `test` verdi: **268 test**
+(erano 248). I nuovi coprono la riga di paginazione ai bordi, il contatore non
+premibile, il conteggio sull'etichetta, l'accorciamento della data, e il caso
+che ha generato il lavoro: due eventi dello stesso tipo in momenti diversi non
+producono piu' la stessa etichetta.
+
+Nota sulla toolchain: `div_ceil` sugli interi con segno e' ancora instabile
+sulla versione dell'S9, e la divisione scritta a mano fa scattare
+`manual_div_ceil` sulla Clippy della CI, che e' piu' recente. Il conto si fa
+senza segno, dove `div_ceil` e' stabile e nessuna delle due protesta.
+
 <!-- CHANGELOG_SQLX_RINVIO_20260902 -->
 # 02/09/2026 — sqlx 0.9.0 rinviata, con il perche'
 

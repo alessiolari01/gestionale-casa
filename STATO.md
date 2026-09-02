@@ -57,10 +57,10 @@ Repository: `alessiolari01/gestionale-casa`
 **La PR #9 e' stata mergiata il 1 settembre: `main` contiene tutto lo Step 7**,
 fino al planner 7.3B.
 
-**Ramo aperto: `ux-convenzioni-telegram`**, non ancora mergiato. Contiene il
-lavoro sull'interfaccia del 1-2 settembre. Attenzione: la sincronizzazione
-GitHub del progetto segue `main`, quindi finche' quel ramo resta aperto la
-knowledge base non lo vede.
+**Nessun ramo aperto.** `ux-convenzioni-telegram` e' stato mergiato con la
+PR #10 e non esiste piu', ne' in locale ne' su origin: le versioni precedenti
+di questo file lo davano ancora per aperto, ed e' bastato un `git branch -a`
+per accorgersene. Il lavoro sull'interfaccia del 1-2 settembre e' su `main`.
 
 Il nuovo lavoro riparte da `main`. I due branch dello Step 7 sono storia:
 `step-7-alimentazione-s9` e' quello mergiato, mentre `step-7-alimentazione`
@@ -98,9 +98,25 @@ c'e' una creazione manuale, per non aggiungere concetti all'utente medio.
 il documento di riferimento per ogni schermata: nasce dal giro completo del bot
 fatto il 1 settembre e contiene otto problemi trovati e dodici convenzioni. La
 piu' importante e' C1: **il testo di un messaggio non ripete mai i pulsanti**.
-Applicate finora al planner, al menu' principale e alle righe di navigazione;
-liste, Spazi e Profilo restano da fare, nell'ordine scritto nella parte 3 di
-quel documento.
+Applicate al planner, al menu' principale, alle righe di navigazione e — dal
+2 settembre — alle **quattro liste**: alimenti, ricette, storico,
+miglioramenti. Restano da fare Spazi e Profilo, poi il menu' principale e le
+date, nell'ordine della parte 3 di quel documento.
+
+**Un modulo solo per le liste.** `src/modules/liste.rs` tiene la riga di
+paginazione, l'intestazione con il totale, la soglia delle venti voci oltre la
+quale la ricerca diventa l'azione principale, e il taglio delle etichette.
+Prima la riga di paginazione era riscritta a mano in sei posti con quattro
+etichette diverse per lo stesso pulsante: e' la stessa storia del calendario, e
+la stessa cura.
+
+Guardare le schermate sul bot prima di scrivere ha corretto la convenzione
+stessa: C1 diceva che nello Storico «Giorgia» fosse l'autore dell'evento, e
+invece e' il profilo su cui la porzione e' stata modificata — cioe' una cosa
+che sul pulsante c'era gia'. Quello che mancava era **quando**. La correzione
+e' scritta in C1 insieme al suo limite noto: due eventi dello stesso tipo,
+sulla stessa entita', nello stesso minuto restano indistinguibili
+sull'etichetta e si separano solo aprendoli.
 
 **Un calendario solo.** `src/modules/calendario.rs` tiene le primitive sulle
 date e la griglia del mese. Prima ce n'erano due implementazioni: la congruenza
@@ -126,7 +142,7 @@ invece di arrivare a SQLite e diventare `NULL`.
   `20260901013000_versione_contenuto_ricetta.sql` fosse ancora da applicare:
   non era vero, ed e' bastato leggere `_sqlx_migrations` per accorgersene;
 - pipeline verde: `fmt`, `check --locked`, `clippy --all-targets --locked
-  -- -D warnings`, `test --locked` — **248 test** (226 prima del 1 settembre:
+  -- -D warnings`, `test --locked` — **268 test** (248 prima del 2 settembre:
   e' il numero da confrontare dopo ogni aggiornamento dell'S9);
 - CI su GitHub Actions **verde** dalla run #42, la prima dello Step 7.
 
@@ -224,6 +240,7 @@ nella sezione 3 di questo file e va aggiornato a ogni consegna.
 ```text
 docs/convenzioni-telegram.md        regole di ogni schermata Telegram
 src/modules/calendario.rs           date e griglia del mese, per tutti
+src/modules/liste.rs                paginazione e intestazioni, per tutte le liste
 src/modules/planner_alimentare.rs   dominio + UI Telegram del planner
 src/modules/porzioni.rs             calcolo base/percentuale/override
 src/modules/porzioni_profili.rs     porzione per profilo

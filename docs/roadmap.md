@@ -2,12 +2,11 @@
 
 ## Stato corrente — 02/09/2026
 
-**Tutto lo Step 7 e' su `main`** (PR #9 mergiata). **Ramo aperto:
-`ux-convenzioni-telegram`**, con il lavoro sull'interfaccia del 1-2 settembre,
-non ancora mergiato.
+**Tutto lo Step 7 e' su `main`** (PR #9 mergiata). **Nessun ramo aperto:**
+`ux-convenzioni-telegram` e' stato mergiato con la PR #10.
 
 Chiusi e verificati: 7.0, 7.1, tutta la 7.2 fino a 7.2I.3, e il planner 7.3A e
-7.3B. Pipeline verde con **248 test**; **42 migration, tutte applicate** al
+7.3B. Pipeline verde con **268 test**; **42 migration, tutte applicate** al
 database reale (`applied_migrations=42` nel log di avvio dell'S9).
 
 Chiuse anche: l'aritmetica delle date, che non passa piu' da SQLite (schermata
@@ -15,10 +14,16 @@ settimana da 19 query a 2); l'affidabilita' della build sull'S9; il primo giro
 di correzioni UX, con `docs/convenzioni-telegram.md` come documento di
 riferimento; e l'unificazione dei due calendari in `modules::calendario`.
 
+Chiuso il 2 settembre anche il **blocco liste** delle convenzioni: alimenti,
+ricette, storico e miglioramenti, con `modules::liste` a tenere paginazione e
+intestazioni per tutte.
+
 La prossima funzione e' la **lista della spesa aggregata**, costruita sugli
 snapshot dei pasti non completati, con aggiornamento esplicito e separato da
-quello del planner. Prima pero' restano da applicare le convenzioni a liste,
-Spazi e Profilo: vedi la parte 3 di quel documento.
+quello del planner. Prima pero' restano da applicare le convenzioni a **Spazi e
+Profilo** — la coppia «spazio predefinito» / «vista», la parte
+concettualmente piu' difficile — poi al menu' principale e alle date: vedi la
+parte 3 di quel documento.
 
 CI verde dalla run #51. Aperti non bloccanti: toolchain dell'S9 da aggiornare
 per allinearla a quella del runner, decisione sui pasti liberi, il planner
