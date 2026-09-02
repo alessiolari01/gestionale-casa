@@ -162,11 +162,8 @@ Branch ufficiale stabile:
 main
 ```
 
-Gli step in sviluppo usano branch dedicati, ad esempio l'attuale:
-
-```text
-step-6c-test
-```
+Gli step in sviluppo usano branch dedicati, con un nome che dice di cosa si
+occupano.
 
 Regola operativa:
 

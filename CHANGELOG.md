@@ -1,3 +1,102 @@
+> I percorsi citati nelle voci piu' vecchie si riferiscono alla struttura dei
+> documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
+> la mappa attuale e' nel `README.md`.
+
+<!-- CHANGELOG_DOCUMENTI_20260902 -->
+# 02/09/2026 — I documenti riordinati, e la regola che li tiene allineati
+
+**55 file markdown, 413 KB, e quattro documenti che descrivevano il presente
+dicendo cose diverse.** Tre su quattro mandavano il lettore su
+`step-7-alimentazione`, cioe' sul ramo con il 7.3B **scartato** il 31 agosto.
+
+Il `README.md` — il file che chiunque apra il repository vede per primo — era
+sbagliato quasi in ogni riga: quel ramo, la baseline `34d076c`, 36 migration
+(sono 42) e «prossimo lavoro: Porzioni e override», chiuso da giorni.
+
+## La regola
+
+In testa a `STATO.md`, sezione 0:
+
+> **Nessuna modifica e' finita finche' i documenti non la raccontano.**
+> Il metro: una persona che apre questa cartella senza aver visto nessuna
+> conversazione deve poter capire dove siamo, cosa fa il programma e perche' e'
+> fatto cosi'.
+
+Con la tabella di cosa aggiornare a ogni tipo di modifica e tre divieti, ognuno
+nato da un errore realmente commesso: non dichiarare fatto cio' che non e'
+stato verificato; quello che viene scartato esce dai documenti del presente; un
+fatto sta in un posto solo.
+
+**E un controllo automatico.** `aggiorna-s9.sh` confronta il numero di test
+appena eseguiti con quello dichiarato in `STATO.md` e avvisa se non
+coincidono: e' il fatto piu' facile da lasciare indietro, ed e' anche quello
+che segnala se sul telefono e' arrivato il codice giusto.
+
+## La struttura
+
+Da 55 file a **29**. Un documento per domanda, e la mappa nel `README.md`.
+
+```text
+STATO.md                        l'unico documento del presente
+CHANGELOG.md                    cosa e' cambiato e quando
+docs/architettura.md            perche' e' fatto cosi'
+docs/storico-del-progetto.md    perche' non e' fatto in un altro modo
+docs/convenzioni-telegram.md    come deve comportarsi ogni schermata
+docs/database.md                schema + regola delle migration
+docs/condivisione.md            spazi, ruoli, permessi
+docs/infrastruttura.md          server, script, CI
+docs/moduli/                    cio' che ESISTE
+docs/previsto/                  cio' che e' solo specificato
+```
+
+La distinzione che mancava di piu' non era presente/passato ma **fatto /
+previsto**: acquisti, viaggi, spese, reminder e turni avevano lo stesso aspetto
+dei moduli operativi, e un lettore nuovo credeva che il gestionale facesse
+molto piu' di quello che fa.
+
+Sono spariti: `HANDOFF_COMPLETO.md` (56 KB), `docs/ROADMAP.md`, i dodici file
+`step-7.2x.md`, i due `ricette.md` di cui uno era solo un rimando, e le
+duplicazioni letterali fra `contenitori.md`, `navigazione-luoghi.md` e
+`luoghi.md`. Restano tutti recuperabili con `git log --follow`.
+
+## Cosa e' emerso rileggendo tutto contro il codice
+
+Il riordino ha fatto trovare cose che nessuno cercava, verificate nel sorgente
+e non nei documenti:
+
+- **`item_condivisioni` e' schema morto**: la tabella esiste, ma **zero
+  riferimenti** in `src/`. Lo stesso per `tag`, `item_tag` e `promemoria`.
+  Ora e' scritto in `docs/database.md`: prima di riusarle va verificato che il
+  modello sia ancora quello giusto, invece di darlo per buono perche' la
+  tabella c'e'.
+- **Ricette, planner e spazi non scrivono nello storico**, benche' i documenti
+  dichiarassero come principio che ogni modifica condivisa debba essere
+  attribuibile. Lacuna nota, ora documentata in `docs/moduli/storico.md`.
+- **Porzioni e Planner erano dichiarati da costruire** in tre documenti diversi
+  mentre erano in produzione da giorni.
+- **`docs/condivisione.md` si contraddiceva da solo**: l'intestazione diceva
+  «restano da implementare» e due sezioni piu' sotto dello stesso file
+  descrivevano le stesse funzioni come realizzate.
+- **`schema-core.md` diceva che le Ricette usano `items`**: hanno invece una
+  tabella propria, e `items.tipo` ammette un valore `'ricetta'` mai usato.
+- **Lo Storico dichiarava 6 eventi per pagina**, il codice ne mostra 5.
+- Conteggi dei test fossilizzati a 37, 69 e 153 sparsi in sei documenti.
+
+## Il planner aveva un buco
+
+Non esisteva un documento del modulo piu' usato: era descritto dentro
+`pianificazione-e-spesa.md`, marcato PREVISTO, insieme alla lista della spesa
+che invece non esiste davvero. Ora c'e' `docs/moduli/planner.md`, e la lista
+della spesa resta in `docs/previsto/`.
+
+## Verifica
+
+- **zero rimandi rotti** fra i documenti del presente, controllati uno per uno;
+  i dieci rimasti sono nelle voci storiche del CHANGELOG, che e' un verbale e
+  come tale resta scritto com'era;
+- pipeline verde, 248 test: nessuna modifica al codice tranne il controllo
+  aggiunto allo script.
+
 <!-- CHANGELOG_CALENDARIO_20260902 -->
 # 02/09/2026 — Un calendario solo, e il planner impara a saltare
 
@@ -83,7 +182,7 @@ chiari. Ma guardandola sono uscite tre cose che dal codice non si vedevano.
 # 01/09/2026 — Convenzioni dell'interfaccia, e primo giro di correzioni
 
 Primo giro completo del bot fatto guardandolo davvero, schermata per schermata,
-sull'istanza in esecuzione sull'S9. Il risultato e' `docs/ux/convenzioni-telegram.md`:
+sull'istanza in esecuzione sull'S9. Il risultato e' `docs/convenzioni-telegram.md`:
 cosa e' stato trovato, e dodici convenzioni per non ritrovarlo.
 
 ## La scoperta
@@ -141,7 +240,7 @@ ed e' che quel pulsante esiste solo se porta da qualche altra parte.
 - **I moduli non disponibili non compaiono.** `👕 Vestiti · prossimamente` e
   `🚗 Veicoli · prossimamente` occupavano una riga senza fare niente e
   costringevano il messaggio a spiegare cosa volesse dire «prossimamente».
-  Restano previsti e sono scritti in `docs/step7/roadmap.md`, con i moduli
+  Restano previsti e sono scritti in `docs/roadmap.md`, con i moduli
   segnaposto che gia' esistono.
 - `💡 Miglioramenti` diventa **`📋 Miglioramenti`**: c'erano due lampadine nello
   stesso menu', con nomi quasi uguali e funzioni diverse. `💡 Migliora` resta

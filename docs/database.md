@@ -1,4 +1,42 @@
-# Schema dati core
+# Schema dati e migration
+
+Le due cose stanno insieme perche' nel progetto sono legate da una regola sola:
+**una migration applicata al database reale non si tocca piu'**.
+
+## La regola delle migration
+
+Il riferimento operativo non e' il repository: e' il database che gira
+sull'S9. Riscrivere una migration gia' registrata in `_sqlx_migrations`
+renderebbe codice e dati incoerenti in un modo che nessun controllo
+rileverebbe. Ogni correzione e' quindi una **nuova migration append-only**,
+anche quando corregge un errore di poche ore prima.
+
+Ne discende che alcune colonne restano nello schema senza essere piu' la fonte
+della verita': sono elencate in `docs/storico-del-progetto.md`.
+
+Prima di applicare una migration al database reale — lo fa
+`scripts/aggiorna-s9.sh`, non serve farlo a mano:
+
+1. backup con `sqlite3 .backup`, che e' coerente anche a bot acceso;
+2. controllo che la versione non sia gia' in `_sqlx_migrations`;
+3. prova su una **copia** del database;
+4. `PRAGMA integrity_check` e `PRAGMA foreign_key_check` sulla copia;
+5. solo allora l'avvio, che applica al database vero.
+
+Il conteggio delle migration e quali sono applicate stanno in `STATO.md`.
+L'elenco file per file e' in `migrations/README.md`, accanto ai file stessi.
+
+## Tabelle mai usate
+
+Esistono nello schema ma **nessuna riga di codice le legge o le scrive**:
+`item_condivisioni`, `tag`, `item_tag`, `promemoria`. Sono schema morto, nato
+da progetti poi cambiati. Prima di riusarne una va verificato che il modello
+sia ancora quello giusto, invece di darlo per buono perche' la tabella c'e'.
+
+Attenzione anche a `items.tipo`, che ammette il valore `'ricetta'`: le ricette
+hanno invece una tabella propria e non passano da `items`.
+
+---
 
 Le tabelle descritte qui sono condivise dai moduli basati su `items` (oggetti,
 vestiti, veicoli, ricette). Definite una sola volta, evitano di

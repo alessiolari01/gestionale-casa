@@ -7,7 +7,18 @@ I Profili alimentari sono risorse personali/condivisibili tramite Spazi e non po
 
 # Modello di condivisione
 
-**Stato: IN SVILUPPO.** Utenti, membership, spazio attivo e isolamento dei
+**Operativo.** Utenti, membership, spazio attivo, isolamento dei dati, membri
+e inviti via deep-link sono realizzati (`identity.rs`, `spazi_membri.rs`,
+`access_control.rs`, `resource_permissions.rs`).
+
+Restano **non costruiti**, e le sezioni che li descrivono sono specifiche:
+condivisione diretta risorsa → account fuori dallo spazio, `📄 Crea una mia
+versione`, proposte sui contenuti globali, `🛡️ Modalità utente`. La tabella
+`item_condivisioni` esiste nello schema ma **non e' riferita da nessuna riga di
+codice**: prima di usarla va verificato che il modello sia ancora quello giusto.
+
+<!-- testo storico, conservato per il modello -->
+Utenti, membership, spazio attivo e isolamento dei
 moduli Step 6 sono implementati nel blocco corrente; inviti/gestione membri e
 condivisione/copia completa restano da implementare.
 

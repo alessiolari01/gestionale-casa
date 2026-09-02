@@ -19,7 +19,7 @@ modifica, con nome `<timestamp>_<descrizione>.sql` compatibile con SQLx.
 
 Documentazione:
 
-- `docs/schema-core.md`;
+- `docs/database.md`;
 - `docs/moduli/oggetti.md`;
 - `docs/moduli/luoghi.md`.
 
@@ -73,7 +73,7 @@ unicità `(spazio_id, nome)` senza spostare i dati legacy.
 `20260824143000_alimenti_unita.sql` introduce `unita_misura`, `alimenti` e
 `alimento_alias`. Le conversioni automatiche sono previste soltanto nelle
 famiglie massa (`g`/`kg`) e volume (`ml`/`l`). Il dettaglio architetturale è in
-`docs/step7/step-7.2a-alimenti-unita.md`.
+`docs/moduli/alimenti.md`.
 
 ## Step 7.2B — proprietà e condivisione alimenti
 
