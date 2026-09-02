@@ -1,4 +1,15 @@
-<!-- PLANNER_VERSIONATO_DECISIONE_7_2H -->
+# Lista della spesa — previsto
+
+> **Non ancora costruita.** Il planner dei pasti, descritto insieme a questa in
+> versioni precedenti del documento, e' invece operativo: vedi
+> `docs/moduli/planner.md`.
+>
+> La lista si costruira' sugli snapshot dei pasti non completati, con
+> aggiornamento **esplicito e separato** da quello del planner: aggiornare la
+> lista non deve sovrascrivere cio' che e' gia' stato segnato come comprato.
+
+---
+
 # Decisione consolidata 7.2H — planner versionato
 
 Il futuro Planner deve salvare la versione/snapshot della ricetta effettivamente applicata al pasto. Se la ricetta cambia dopo la pianificazione, `🔄 Aggiorna planner` va mostrato solo quando esiste una differenza e solo per pasti non completati. I pasti completati restano congelati. L'aggiornamento della lista della spesa è un'azione separata e non deve cambiare automaticamente quantità già acquistate.

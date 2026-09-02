@@ -1,7 +1,56 @@
-<!-- STEP7_2H_CHIUSURA_20260829 -->
-# Aggiornamento architetturale autorevole — Step 7.2H chiuso (29/08/2026)
+# Architettura
 
-Il branch `step-7-alimentazione` ha completato il blocco **7.2H.0→7.2H.4F**. Le sezioni storiche più sotto restano valide per la cronologia; in caso di contrasto prevale questo aggiornamento.
+Come è fatto il progetto e **perché** è fatto così. Lo stato corrente sta in
+`STATO.md`; cosa è stato provato e abbandonato in `docs/storico-del-progetto.md`.
+
+Le sezioni più in basso conservano il ragionamento con cui il modello è stato
+costruito, blocco per blocco. Dove citano un branch, una baseline o un
+conteggio, quei riferimenti sono **storici**: non descrivono dove siamo oggi.
+
+## Le decisioni che governano il codice
+
+Undici scelte prese fra lo Step 1 e il 7.3, ognuna con il motivo. Sono la
+ragione per cui il codice non e' fatto in un altro modo, e vanno conosciute
+prima di cambiarlo.
+
+1. **Una migration applicata al database reale e' immutabile.** Il riferimento
+   operativo e' il database dell'S9, non il repository: riscrivere una
+   migration gia' registrata in `_sqlx_migrations` renderebbe codice e dati
+   incoerenti in modo non rilevabile. Ogni correzione e' una nuova migration.
+2. **L'utente interno e' separato dalle identita' esterne.** Telegram e' un
+   provider collegato a un utente, non l'utente: permette piu' provider, e
+   cambiare account senza riscrivere la proprieta' dei dati.
+3. **Un Profilo alimentare e' una persona che mangia, non un account.** Deve
+   poter rappresentare un partner, un bambino o un ospite che il bot non lo
+   useranno mai.
+4. **Condividere non e' copiare.** Condividere significa usare la *stessa*
+   entita' viva; copiare ne crea una indipendente. Vale per ricette e modelli,
+   non per credenziali.
+5. **Proprieta', visibilita' e permesso di modifica sono tre cose distinte.**
+   Vedere una risorsa in uno spazio condiviso non da' il diritto di
+   modificarla; il proprietario resta autorizzato anche se perde la membership.
+6. **Il backend e' fail-closed.** Nascondere un pulsante non e' sicurezza: ogni
+   callback ricontrolla identita', visibilita' e permesso.
+7. **Lo spazio attivo e' un confine di sicurezza, non una preferenza.** Un
+   callback con l'ID di un'entita' di un altro spazio si comporta come se
+   quell'entita' non esistesse, e il cambio di spazio cancella le sessioni.
+8. **Alimento, prodotto commerciale e formato acquistabile sono concetti
+   diversi.** La stessa `Philadelphia · Original` esiste da 175, 200 e 350 g
+   senza essere tre prodotti.
+9. **La ricetta non salva il formato.** Una ricetta chiede 150 g; quale
+   confezione comprare dipende da quantita' aggregata, prezzo e avanzo, cioe'
+   e' una decisione della lista della spesa. Legarli renderebbe le ricette
+   dipendenti dal negozio.
+10. **L'esclusione di un ingrediente non e' una quantita' zero.** Zero e' un
+    numero da sommare, un'esclusione e' un'assenza intenzionale: tenerle
+    distinte permette di non ricomprare cio' che una persona non mangia.
+11. **Lo snapshot del pasto congela le quantita'.** Modificare una ricetta non
+    deve cambiare in silenzio un pasto gia' pianificato: l'aggiornamento e'
+    esplicito e solo sui pasti non ancora consumati.
+
+Una dodicesima, trasversale: **Telegram e' un frontend, non il dominio.** I
+comandi testuali funzionano anche fuori dal menu' e nessun ID tecnico compare
+nell'interfaccia, cosi' una futura app puo' riusare la stessa logica.
 
 ## Modello corrente
 
@@ -44,9 +93,9 @@ Sono append-only; se risultano applicate sul DB reale non devono essere modifica
 
 ## Stato architetturale corrente — Step 7
 
-Gli Step 1→6C sono chiusi e la baseline `main` resta il merge `219caba`.
-Il branch corrente `step-7-alimentazione` ha chiuso il checkpoint documentale
-7.0 con `135dd33` e sta implementando le fondazioni tecniche 7.1.
+Gli Step 1→6C sono chiusi. Lo Step 7 e' interamente su `main` dalla PR #9 del
+1 settembre 2026; il branch `step-7-alimentazione` citato nelle sezioni
+seguenti contiene un 7.3B parallelo **scartato** e non va usato.
 
 Lo Step 7 estende il progetto da gestionale personale a gestionale
 personale/condiviso mediante utenti interni, spazi, membership e audit con
@@ -111,7 +160,7 @@ Riferimenti Telegram canonici: `/luogo_h<ID>` (casa), `/luogo_r<ID>` (stanza), `
 
 Contratto UI: ogni schermata interna rilevante deve offrire ritorno semantico al livello precedente e accesso diretto a `🏠 Menu principale`.
 
-`Nuovo oggetto qui` mantiene casa/stanza/contenitore come relazione strutturata nella creazione dell'oggetto. Dettagli in `docs/moduli/navigazione-luoghi.md`.
+`Nuovo oggetto qui` mantiene casa/stanza/contenitore come relazione strutturata nella creazione dell'oggetto. Dettagli in `docs/moduli/luoghi.md`.
 
 
 ## Infrastruttura di comunicazione operativa
@@ -124,7 +173,7 @@ Galaxy S9 -- Git via SSH ----------> GitHub
 Galaxy S9 -- HTTPS long polling ---> Telegram
 ```
 
-Tailscale evita di dipendere dall'IP LAN e OpenSSH fornisce accesso/trasferimento senza password tramite chiavi dedicate. GitHub resta la fonte ufficiale del codice e non viene sostituito da SCP. La configurazione completa e le regole sui segreti sono documentate in `docs/INFRASTRUTTURA.md`.
+Tailscale evita di dipendere dall'IP LAN e OpenSSH fornisce accesso/trasferimento senza password tramite chiavi dedicate. GitHub resta la fonte ufficiale del codice e non viene sostituito da SCP. La configurazione completa e le regole sui segreti sono documentate in `docs/infrastruttura.md`.
 
 Questo documento descrive come è fatto il progetto e perché è stato fatto
 così. L'obiettivo è che chiunque lo legga — anche senza aver seguito le
@@ -233,7 +282,7 @@ principio architetturale è invece progettare una volta le funzioni trasversali
 e riusarle quando il dominio lo consente. Case e stanze restano entità di
 sistema con tabelle proprie e non sono forzate dentro `items`.
 
-Dettagli dello schema core in `docs/schema-core.md`; luoghi in
+Dettagli dello schema core in `docs/database.md`; luoghi in
 `docs/moduli/luoghi.md`.
 
 
@@ -251,7 +300,7 @@ aggiornamenti tra dispositivi usano preferibilmente `git pull --ff-only`, così
 una divergenza non produce automaticamente merge inattesi.
 
 Gli ZIP restano utili come snapshot o backup, ma non sostituiscono GitHub come
-fonte di verità. Le procedure operative complete sono in `docs/HANDOFF.md`.
+fonte di verità. Le procedure operative complete sono in `STATO.md`.
 
 ### 2.8 SQLite runtime e migration automatiche
 
@@ -290,7 +339,7 @@ SQLite rimane centrale sul backend: non si sincronizza il file DB fra utenti.
 Un utente può appartenere a più spazi. I ruoli iniziali previsti sono
 proprietario, amministratore, membro e sola lettura.
 
-Dettagli in `docs/step7/modello-condivisione.md`.
+Dettagli in `docs/condivisione.md`.
 
 ### 2.10 Condivisione, copia e provenienza
 
@@ -329,7 +378,7 @@ Gli effetti automatici restano collegati all'evento principale tramite il
 modello padre/figlio già esistente e vengono marcati esplicitamente come
 automatici. Gli eventi pre-Step 7 restano senza autore inventato.
 
-Dettagli in `docs/step7/storico-e-audit.md`.
+Dettagli in `docs/moduli/storico.md`.
 
 ### 2.12 Alimentazione come dominio, non semplice file ricette
 
@@ -338,7 +387,7 @@ alimenti, unità, ricette, profili/porzioni, turni/routine, pianificazione,
 lista della spesa, reminder ed export.
 
 Alimento, prodotto acquistabile, scorta e oggetto posseduto restano concetti
-differenti. La specifica è in `docs/moduli/alimentazione/README.md`.
+differenti. La specifica è in `docs/moduli/alimenti.md`.
 
 Dal Step 7.2F.0 anche **prodotto commerciale** e **formato di vendita** sono
 concetti distinti:
@@ -518,8 +567,8 @@ architetturale, ma sono RIMANDATI a dopo lo Step 7. Documenti/garanzie, ricerca
 globale, Veicoli, Vestiti e le altre funzioni storiche restano in roadmap senza
 un numero definitivo finché Step 7 non è stabilizzato.
 
-La sequenza aggiornata è in `docs/ROADMAP.md`; la roadmap interna dello Step 7 è
-in `docs/step7/roadmap.md`.
+La sequenza aggiornata è in `docs/roadmap.md`; la roadmap interna dello Step 7 è
+in `docs/roadmap.md`.
 
 Principio da preservare: foto, documenti, tag, reminder, luoghi, storico,
 condivisione e audit vanno progettati come servizi trasversali quando possibile,

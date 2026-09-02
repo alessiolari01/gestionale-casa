@@ -210,6 +210,24 @@ passo "4/7  Clippy e test"
 esegui cargo clippy --all-targets --locked -- -D warnings || esito_compilazione
 esegui cargo test --locked -- --test-threads=1 || esito_compilazione
 
+# I documenti si aggiornano insieme al codice (regola in STATO.md, sezione 0).
+# Il conteggio dei test e' il fatto piu' facile da lasciare indietro, ed e'
+# anche quello che segnala se sul telefono e' arrivato il codice giusto.
+TEST_ESEGUITI="$(grep -oE 'test result: ok\. [0-9]+ passed' "$LOG" | tail -1 | grep -oE '[0-9]+' | head -1)"
+TEST_DICHIARATI="$(grep -oE '\*\*[0-9]+ test\*\*' "$PROGETTO/STATO.md" 2>/dev/null | head -1 | grep -oE '[0-9]+')"
+if [ -z "$TEST_ESEGUITI" ] || [ -z "$TEST_DICHIARATI" ]; then
+    echo "non riesco a confrontare il numero dei test con STATO.md" | tee -a "$LOG"
+elif [ "$TEST_ESEGUITI" != "$TEST_DICHIARATI" ]; then
+    echo | tee -a "$LOG"
+    echo "ATTENZIONE: i documenti sono rimasti indietro." | tee -a "$LOG"
+    echo "  test eseguiti:   $TEST_ESEGUITI" | tee -a "$LOG"
+    echo "  STATO.md dice:   $TEST_DICHIARATI" | tee -a "$LOG"
+    echo "Aggiorna STATO.md, oppure il codice sul telefono non e' quello che credi." | tee -a "$LOG"
+    echo | tee -a "$LOG"
+else
+    echo "test: $TEST_ESEGUITI, come dichiarato in STATO.md" | tee -a "$LOG"
+fi
+
 # --------------------------------------------------------------------------
 passo "5/7  backup del database e controlli di integrita'"
 # --------------------------------------------------------------------------

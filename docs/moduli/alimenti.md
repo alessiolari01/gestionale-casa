@@ -1,6 +1,6 @@
 # Alimenti e unità
 
-**Stato: OPERATIVO E VERIFICATO.**
+**Operativo.** `src/modules/alimentazione.rs`, `🍽️ Alimentazione → 🥕 Alimenti`.
 
 ## Alimento
 

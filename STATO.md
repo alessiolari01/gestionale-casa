@@ -1,7 +1,54 @@
-# Handoff operativo corrente — 02/09/2026
+# Stato del progetto — 02/09/2026
 
-Questo e' il documento breve da leggere per primo. Dice dove sei davvero, non
-dove eri l'ultima volta che qualcuno ha aggiornato la roadmap.
+**Questo e' l'unico documento che descrive il presente.** Se un fatto sta qui,
+non sta anche altrove: gli altri documenti raccontano com'e' fatto il codice
+(`docs/architettura.md`), come ci siamo arrivati (`docs/storico-del-progetto.md`)
+o cosa non esiste ancora (`docs/previsto/`).
+
+---
+
+## 0. La regola dei documenti
+
+**Nessuna modifica e' finita finche' i documenti non la raccontano.**
+
+Il metro e' questo: *una persona che apre questa cartella senza aver visto
+nessuna conversazione deve poter capire dove siamo, cosa fa il programma e
+perche' e' fatto cosi'.* Se non ci riesce, la modifica non e' completa.
+
+Nello **stesso commit** che cambia il comportamento si aggiornano:
+
+| se cambia | aggiorna |
+|---|---|
+| qualunque cosa | `CHANGELOG.md`: cosa e' cambiato e **perche'** |
+| lo stato presente | questo file: conteggio test, migration, cosa e' fatto, cosa e' aperto |
+| una schermata o il modello di un modulo | il file in `docs/moduli/` |
+| una regola d'interfaccia | `docs/convenzioni-telegram.md` |
+| lo schema dati | `docs/database.md` |
+| cosa viene dopo | `docs/roadmap.md` |
+
+Tre divieti, ognuno nato da un errore realmente commesso:
+
+1. **Non dichiarare fatto cio' che non e' stato verificato.** I documenti hanno
+   affermato che una migration fosse da applicare quando era gia' applicata, e
+   che due moduli fossero da costruire quando erano gia' in produzione. Bastava
+   leggere `_sqlx_migrations` o il menu' del bot.
+2. **Quello che viene scartato esce dai documenti del presente.** Va in
+   `docs/storico-del-progetto.md`, che si legge per capire perche' il codice
+   non e' fatto in un altro modo. Un documento del presente che descrive una
+   funzione abbandonata fa perdere tempo a chi lo legge.
+3. **Un fatto in un posto solo.** Due documenti che affermano lo stesso numero
+   finiscono per affermarne due diversi: e' gia' successo con il conteggio
+   delle migration e dei test.
+
+Due controlli automatici, perche' una regola che nessuno verifica dura poco:
+
+- `scripts/aggiorna-s9.sh` confronta il conteggio dei test dichiarato qui con
+  quello reale e avvisa se non coincidono;
+- `scripts/controlla-documenti.sh`, che gira in CI su ogni push, verifica che
+  nessun documento rimandi a un file inesistente e che non esistano due
+  percorsi che differiscono solo per maiuscole.
+
+---
 
 ## 1. Punto di ripartenza
 
@@ -47,7 +94,7 @@ non e' mai automatico ed e' sempre limitato al pasto scelto.
 La settimana del planner viene creata implicitamente alla prima apertura: non
 c'e' una creazione manuale, per non aggiungere concetti all'utente medio.
 
-**Convenzioni dell'interfaccia Telegram.** `docs/ux/convenzioni-telegram.md` e'
+**Convenzioni dell'interfaccia Telegram.** `docs/convenzioni-telegram.md` e'
 il documento di riferimento per ogni schermata: nasce dal giro completo del bot
 fatto il 1 settembre e contiene otto problemi trovati e dodici convenzioni. La
 piu' importante e' C1: **il testo di un messaggio non ripete mai i pulsanti**.
@@ -175,7 +222,7 @@ nella sezione 3 di questo file e va aggiornato a ogni consegna.
 ## 5. File chiave
 
 ```text
-docs/ux/convenzioni-telegram.md     regole di ogni schermata Telegram
+docs/convenzioni-telegram.md        regole di ogni schermata Telegram
 src/modules/calendario.rs           date e griglia del mese, per tutti
 src/modules/planner_alimentare.rs   dominio + UI Telegram del planner
 src/modules/porzioni.rs             calcolo base/percentuale/override
@@ -231,17 +278,5 @@ scripts/aggiorna-s9.sh              aggiornamento e avvio sul telefono
   corretti, riga di navigazione `⬅️ Indietro | 💡 Migliora | 🏠 Menù principale`
   dove applicabile, e ogni checklist di collaudo indica il percorso completo dal
   `🏠 Menù principale`;
-- non dichiarare fatto cio' che non e' stato realmente verificato.
-
-## 8. Ordine di lettura
-
-1. questo file;
-2. `docs/ux/convenzioni-telegram.md` prima di toccare qualunque schermata;
-3. `CHANGELOG.md`, la voce piu' recente in testa;
-4. `docs/HANDOFF_COMPLETO.md` per le decisioni storiche;
-5. `docs/step7/README.md` e `docs/step7/roadmap.md`;
-6. `ARCHITETTURA.md`;
-7. `docs/step7/modello-condivisione.md` e `docs/moduli/alimentazione/README.md`.
-
-Le sezioni di `HANDOFF_COMPLETO.md` restano intenzionalmente storiche: dove
-contraddicono questo file, prevale questo file.
+- non dichiarare fatto cio' che non e' stato realmente verificato;
+- i documenti si aggiornano nello stesso commit del codice: vedi la sezione 0.

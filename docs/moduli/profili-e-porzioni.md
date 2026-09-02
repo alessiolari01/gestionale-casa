@@ -7,7 +7,10 @@ La parte **Porzioni/override** di questo documento resta invece il prossimo svil
 
 # Profili e porzioni
 
-**Stato: IN IMPLEMENTAZIONE — fondazione database 7.2H.0 aggiunta; UI Telegram ancora da implementare.**
+**Operativo.** Profili in `src/modules/profili_alimentari.rs`, porzioni per
+profilo in `porzioni_profili.rs`, override del singolo ingrediente in
+`porzioni_ingredienti.rs`. Raggiungibili da `🍽️ Alimentazione → 👥 Profili
+alimentari`.
 
 ## Profilo alimentare
 

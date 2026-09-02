@@ -12,7 +12,7 @@ database reale (`applied_migrations=42` nel log di avvio dell'S9).
 
 Chiuse anche: l'aritmetica delle date, che non passa piu' da SQLite (schermata
 settimana da 19 query a 2); l'affidabilita' della build sull'S9; il primo giro
-di correzioni UX, con `docs/ux/convenzioni-telegram.md` come documento di
+di correzioni UX, con `docs/convenzioni-telegram.md` come documento di
 riferimento; e l'unificazione dei due calendari in `modules::calendario`.
 
 La prossima funzione e' la **lista della spesa aggregata**, costruita sugli

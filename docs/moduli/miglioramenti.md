@@ -7,7 +7,7 @@ L'area Miglioramenti espone `📦 Esporta miglioramenti` e `📦 Esporta progett
 
 # Modulo Miglioramenti
 
-**Stato: OPERATIVO E VERIFICATO — chiusura Step 7.2G.1→7.2G.6.**
+**Operativo.** `src/modules/miglioramenti.rs`, `📋 Miglioramenti` dal menù principale.
 
 `💡 Miglioramenti` è il backlog interno del gestionale. Consente di registrare una richiesta direttamente dalla schermata in cui nasce, allegare prove, implementarla, collaudarla e archiviarla senza perdere il contesto.
 
