@@ -1,22 +1,26 @@
 # Roadmap Step 7
 
-## Stato corrente — 01/09/2026 (sera)
+## Stato corrente — 02/09/2026
 
-**Tutto lo Step 7 e' su `main`**: la PR #9 e' stata mergiata. Il lavoro nuovo
-riparte da `main`.
+**Tutto lo Step 7 e' su `main`** (PR #9 mergiata). **Ramo aperto:
+`ux-convenzioni-telegram`**, con il lavoro sull'interfaccia del 1-2 settembre,
+non ancora mergiato.
 
 Chiusi e verificati: 7.0, 7.1, tutta la 7.2 fino a 7.2I.3, e il planner 7.3A e
-7.3B. Pipeline verde con 235 test; 42 migration, di cui l'ultima
-(`20260901013000`) presente ma non ancora applicata al database reale.
+7.3B. Pipeline verde con **248 test**; **42 migration, tutte applicate** al
+database reale (`applied_migrations=42` nel log di avvio dell'S9).
 
-Chiusa anche l'aritmetica delle date: i conti di calendario sono funzioni pure
-Rust e non piu' query a SQLite (schermata settimana da 19 query a 2).
+Chiuse anche: l'aritmetica delle date, che non passa piu' da SQLite (schermata
+settimana da 19 query a 2); l'affidabilita' della build sull'S9; il primo giro
+di correzioni UX, con `docs/ux/convenzioni-telegram.md` come documento di
+riferimento; e l'unificazione dei due calendari in `modules::calendario`.
 
 La prossima funzione e' la **lista della spesa aggregata**, costruita sugli
 snapshot dei pasti non completati, con aggiornamento esplicito e separato da
-quello del planner.
+quello del planner. Prima pero' restano da applicare le convenzioni a liste,
+Spazi e Profilo: vedi la parte 3 di quel documento.
 
-CI verde dalla run #42. Aperti non bloccanti: toolchain dell'S9 da aggiornare
+CI verde dalla run #51. Aperti non bloccanti: toolchain dell'S9 da aggiornare
 per allinearla a quella del runner, decisione sui pasti liberi, il planner
 cercato sette volte per aprire una settimana, PR #6 di Dependabot.
 

@@ -1,4 +1,4 @@
-# Handoff operativo corrente — 01/09/2026 (sera)
+# Handoff operativo corrente — 02/09/2026
 
 Questo e' il documento breve da leggere per primo. Dice dove sei davvero, non
 dove eri l'ultima volta che qualcuno ha aggiornato la roadmap.
@@ -8,8 +8,12 @@ dove eri l'ultima volta che qualcuno ha aggiornato la roadmap.
 Repository: `alessiolari01/gestionale-casa`
 
 **La PR #9 e' stata mergiata il 1 settembre: `main` contiene tutto lo Step 7**,
-fino al planner 7.3B. Il riallineamento di `main`, che era il punto aperto n. 4,
-e' chiuso, e la knowledge base che segue `main` mostra di nuovo lo stato reale.
+fino al planner 7.3B.
+
+**Ramo aperto: `ux-convenzioni-telegram`**, non ancora mergiato. Contiene il
+lavoro sull'interfaccia del 1-2 settembre. Attenzione: la sincronizzazione
+GitHub del progetto segue `main`, quindi finche' quel ramo resta aperto la
+knowledge base non lo vede.
 
 Il nuovo lavoro riparte da `main`. I due branch dello Step 7 sono storia:
 `step-7-alimentazione-s9` e' quello mergiato, mentre `step-7-alimentazione`
@@ -43,6 +47,20 @@ non e' mai automatico ed e' sempre limitato al pasto scelto.
 La settimana del planner viene creata implicitamente alla prima apertura: non
 c'e' una creazione manuale, per non aggiungere concetti all'utente medio.
 
+**Convenzioni dell'interfaccia Telegram.** `docs/ux/convenzioni-telegram.md` e'
+il documento di riferimento per ogni schermata: nasce dal giro completo del bot
+fatto il 1 settembre e contiene otto problemi trovati e dodici convenzioni. La
+piu' importante e' C1: **il testo di un messaggio non ripete mai i pulsanti**.
+Applicate finora al planner, al menu' principale e alle righe di navigazione;
+liste, Spazi e Profilo restano da fare, nell'ordine scritto nella parte 3 di
+quel documento.
+
+**Un calendario solo.** `src/modules/calendario.rs` tiene le primitive sulle
+date e la griglia del mese. Prima ce n'erano due implementazioni: la congruenza
+di Zeller scritta a mano negli inviti e quella basata su `chrono` del planner.
+Il planner ha guadagnato `📅 Vai a una data`, con i giorni che hanno pasti
+marcati da un `•`.
+
 **Aritmetica delle date in Rust.** I conti di calendario non passano piu' da
 SQLite: aprire la schermata settimana costava diciannove query, di cui
 diciassette calcolavano soltanto date. Ora ne resta una,
@@ -61,8 +79,8 @@ invece di arrivare a SQLite e diventare `NULL`.
   `20260901013000_versione_contenuto_ricetta.sql` fosse ancora da applicare:
   non era vero, ed e' bastato leggere `_sqlx_migrations` per accorgersene;
 - pipeline verde: `fmt`, `check --locked`, `clippy --all-targets --locked
-  -- -D warnings`, `test --locked` — **235 test** (erano 226 prima del lavoro
-  sulle date: e' il numero da confrontare dopo ogni aggiornamento dell'S9);
+  -- -D warnings`, `test --locked` — **248 test** (226 prima del 1 settembre:
+  e' il numero da confrontare dopo ogni aggiornamento dell'S9);
 - CI su GitHub Actions **verde** dalla run #42, la prima dello Step 7.
 
 Regola invariata: una migration applicata al database reale e' immutabile. Ogni
@@ -131,10 +149,15 @@ Il vecchio giro zip → scp → unzip → installer python non serve piu'.
 
 ```bash
 cd ~/gestionale-casa
-git pull
-./scripts/aggiorna-s9.sh                    # aggiorna, verifica e avvia
-./scripts/aggiorna-s9.sh --solo-controlli   # si ferma prima dell'avvio
+./scripts/aggiorna-s9.sh                          # aggiorna, verifica e avvia
+./scripts/aggiorna-s9.sh --solo-controlli         # si ferma prima dell'avvio
+./scripts/aggiorna-s9.sh --ramo <nome>            # passa a quel ramo e aggiorna
 ```
+
+**`--ramo` non e' un accessorio.** Senza, lo script aggiorna soltanto il ramo su
+cui l'S9 si trova gia': consegnando il lavoro su un ramo nuovo non arriva
+niente, il collaudo gira verde sul codice di prima e nessun messaggio lo
+segnala. E' successo il 1 settembre.
 
 Lo script rifiuta di partire se sull'S9 ci sono modifiche non committate, imposta
 le variabili che evitano l'esaurimento di memoria in fase di link, esegue
@@ -152,6 +175,8 @@ nella sezione 3 di questo file e va aggiornato a ogni consegna.
 ## 5. File chiave
 
 ```text
+docs/ux/convenzioni-telegram.md     regole di ogni schermata Telegram
+src/modules/calendario.rs           date e griglia del mese, per tutti
 src/modules/planner_alimentare.rs   dominio + UI Telegram del planner
 src/modules/porzioni.rs             calcolo base/percentuale/override
 src/modules/porzioni_profili.rs     porzione per profilo
@@ -211,11 +236,12 @@ scripts/aggiorna-s9.sh              aggiornamento e avvio sul telefono
 ## 8. Ordine di lettura
 
 1. questo file;
-2. `CHANGELOG.md`, la voce piu' recente in testa;
-3. `docs/HANDOFF_COMPLETO.md` per le decisioni storiche;
-4. `docs/step7/README.md` e `docs/step7/roadmap.md`;
-5. `ARCHITETTURA.md`;
-6. `docs/step7/modello-condivisione.md` e `docs/moduli/alimentazione/README.md`.
+2. `docs/ux/convenzioni-telegram.md` prima di toccare qualunque schermata;
+3. `CHANGELOG.md`, la voce piu' recente in testa;
+4. `docs/HANDOFF_COMPLETO.md` per le decisioni storiche;
+5. `docs/step7/README.md` e `docs/step7/roadmap.md`;
+6. `ARCHITETTURA.md`;
+7. `docs/step7/modello-condivisione.md` e `docs/moduli/alimentazione/README.md`.
 
 Le sezioni di `HANDOFF_COMPLETO.md` restano intenzionalmente storiche: dove
 contraddicono questo file, prevale questo file.
