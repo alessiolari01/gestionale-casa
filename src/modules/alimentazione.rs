@@ -223,12 +223,9 @@ pub async fn show_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
 }
 
 async fn show_foods_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
-    bot.send_message(
-        chat_id,
-        "🥕 Alimenti\n\nCrea, consulta, cerca e filtra gli alimenti disponibili.\n\nℹ️ I dati vengono riletti automaticamente ogni volta che apri o modifichi questa sezione.",
-    )
-    .reply_markup(food_menu_keyboard())
-    .await?;
+    bot.send_message(chat_id, "🥕 Alimenti")
+        .reply_markup(food_menu_keyboard())
+        .await?;
     Ok(())
 }
 
@@ -4807,10 +4804,10 @@ fn alimentation_menu_keyboard() -> InlineKeyboardMarkup {
         vec![button("🍳 Ricette", "recipe:menu")],
         vec![button("👥 Profili alimentari", "foodprof:menu")],
         vec![button("📅 Planner alimentare", "planner:menu")],
-        vec![
-            button("⬅️ Indietro", "menu:main"),
-            button("🏠 Menù principale", "menu:main"),
-        ],
+        // Convenzione C3: Alimentazione e' una sezione di primo livello, quindi
+        // `⬅️ Indietro` porterebbe esattamente dove porta `🏠 Menù principale`.
+        // Due pulsanti per la stessa destinazione non aiutano nessuno.
+        vec![button("🏠 Menù principale", "menu:main")],
     ])
 }
 

@@ -1,3 +1,190 @@
+<!-- CHANGELOG_CALENDARIO_20260902 -->
+# 02/09/2026 — Un calendario solo, e il planner impara a saltare
+
+Il calendario delle scadenze degli inviti era la cosa meglio riuscita
+dell'interfaccia: spaziale invece che testuale, un tocco per una data, i limiti
+visibili invece che spiegati. Il modo giusto di riusarlo non era copiarlo.
+
+## Due calendari gregoriani nello stesso progetto
+
+`spazi_membri.rs` conteneva una implementazione a mano delle regole del
+calendario — congruenza di Zeller per il giorno della settimana, anni
+bisestili, giorni del mese — accanto a quella basata su `chrono` introdotta il
+1 settembre nel planner. Due copie delle stesse regole in due moduli sono due
+occasioni di divergere.
+
+Ora c'e' **`src/modules/calendario.rs`**: le primitive sulle date e la griglia
+del mese, in un posto solo. Gli inviti e il planner lo usano entrambi; il
+codice scritto a mano e' stato tolto.
+
+La griglia si configura con: la data di oggi, una funzione che per ogni giorno
+dice se e' selezionabile e se porta un **marcatore**, e un mese minimo
+opzionale. Il marcatore e' la parte che la rende piu' di un selettore di date:
+il calendario puo' mostrare *cosa c'e'* nei giorni.
+
+## `📅 Vai a una data` nel planner
+
+Per raggiungere una settimana di tre mesi avanti servivano dodici pressioni
+della freccia. Ora c'e' la griglia del mese, e i giorni che hanno gia' dei
+pasti portano un `•`:
+
+```text
+|  ⬅️   |Settembre 2026|  ➡️   |
+| Lun | Mar | Mer | Gio | Ven | Sab | Dom |
+|  ·  |[1] •|  2  |  3  | 4 • |  5  |  6  |
+|  7  |  8  |  9  | 10  | 11  |12 • | 13  |
+```
+
+I conteggi del mese arrivano da **una sola query**, non una per giorno.
+
+## Due difetti del calendario originale, corretti
+
+- **Oggi non era segnalato.** In un calendario e' il riferimento principale.
+  Ora e' il numero fra parentesi quadre. Niente emoji: su sette colonne
+  allargherebbe la cella, e `·` era gia' il riempitivo dei giorni fuori dal
+  mese — un simbolo, un significato.
+- **`⬅️ ❌`** per la freccia disattivata faceva sembrare che «indietro» fosse
+  rotto. Una freccia che non porta da nessuna parte si spegne e basta.
+
+## Una trappola, chiusa dentro il modulo
+
+I campi della configurazione sono `&dyn Fn`, che senza `+ Sync` non e' `Send`:
+una schermata che tiene la configurazione a cavallo di un `.await` produce un
+future non-`Send`, e teloxide lo rifiuta con un errore che parla di
+`Injectable` e non nomina mai `Send`. Il `+ Sync` e' nella firma del modulo, con
+il commento che spiega perche', cosi' chi lo usera' dopo non ci ricasca.
+
+## Tre correzioni dopo averlo visto sul telefono
+
+La griglia sta bene anche su schermo stretto: sette colonne leggibili, numeri
+chiari. Ma guardandola sono uscite tre cose che dal codice non si vedevano.
+
+- **Si apriva sul mese sbagliato.** Il pulsante portava il mese dell'inizio
+  settimana, e la settimana 31/08 → 06/09 apriva agosto: il 2 settembre, cioe'
+  oggi, non era nemmeno nella schermata, e il marcatore di oggi si perdeva
+  proprio all'apertura. Ora vale la regola dei numeri di settimana ISO: la
+  settimana appartiene al mese in cui cade il **giovedi'**.
+- **Il mese era scritto due volte**, nel testo del messaggio e
+  nell'intestazione della griglia. E' la convenzione C1, e l'avevo violata io
+  scrivendola. Nel testo resta solo la legenda del `•`, e solo quando c'e'
+  almeno un giorno da spiegare.
+- **`gia'` invece di `già`** nella legenda, contro la regola del progetto sugli
+  accenti italiani corretti.
+
+## Verifica
+
+- pipeline verde: fmt, clippy `-D warnings`, **248 test** (da 236);
+- 11 test nuovi sulla griglia e sul mese della settimana: sette colonne per riga, oggi marcato una volta
+  sola, marcatore accanto al numero, giorno bloccato non premibile, freccia che
+  si spegne al limite, bisestili con le eccezioni secolari;
+- nessuna migration.
+
+<!-- CHANGELOG_UX_TELEGRAM_20260901 -->
+# 01/09/2026 — Convenzioni dell'interfaccia, e primo giro di correzioni
+
+Primo giro completo del bot fatto guardandolo davvero, schermata per schermata,
+sull'istanza in esecuzione sull'S9. Il risultato e' `docs/ux/convenzioni-telegram.md`:
+cosa e' stato trovato, e dodici convenzioni per non ritrovarlo.
+
+## La scoperta
+
+I problemi visti nel planner **non erano del planner**. Sette degli otto sono
+sistemici e si ripetono in ogni sezione. Il piu' diffuso e' che **il testo del
+messaggio ripete i pulsanti sottostanti**: in `Elenco alimenti` cinque nomi nel
+testo e gli stessi cinque nei pulsanti, identici.
+
+Il caso che fa piu' danno e' lo Storico: nel testo ogni evento ha data, ora e
+autore, nel pulsante resta solo il titolo. Risultato: tre pulsanti identici
+`🍽 Porzione modificata · Giorgia`, distinguibili solo contandoli e
+confrontandoli con il testo sopra. **L'informazione che distingue le righe era
+finita nel posto dove non si puo' premere.**
+
+## Planner
+
+- **Vista settimana.** Sparisce l'elenco dei giorni nel testo, che ricompariva
+  identico nei pulsanti. I pulsanti portano conteggio e stato; il testo dice
+  l'unica cosa che i pulsanti non possono dire, cioe' **cosa si mangia oggi**.
+- **Oggi e' segnalato** con `👉`, nella settimana e nel giorno. Era il
+  riferimento piu' utile della schermata e non c'era.
+- **Un giorno vuoto tace** invece di scrivere `0 pasti`: su una settimana quasi
+  libera si vedevano sette righe di niente. Se la settimana e' vuota lo dice una
+  riga sola, con cosa fare.
+- **Date compatte** nei pulsanti (`Lun 31/08`): dentro una settimana l'anno e'
+  lo stesso su tutte e sette le righe e non distingue nulla, mentre lo spazio
+  serviva al marcatore di oggi.
+- **Vista giorno**: i pasti stanno solo sui pulsanti, non piu' anche nel testo.
+- **Concordanze**: il soggetto e' *il pasto*, quindi `✅ Segna come consumato` e
+  `⏭ Segna come saltato`. Erano al femminile.
+- **Un simbolo solo per stato**: il dettaglio diceva `📅 pianificata` mentre le
+  liste dicono `○`. Ora dicono entrambi `○`.
+- `➕ Aggiungi pasto` diventa `➕ Nuovo pasto`: creare si dice in un modo solo.
+
+## Il bug dietro le righe di navigazione
+
+`💡 Migliora` non e' scritto nelle tastiere: lo inserisce `context_bot.rs`,
+cercando nell'ultima riga il pulsante che porta al menu' principale e mettendosi
+davanti a quello. In Alimentazione e Storico **sia `⬅️ Indietro` sia `🏠 Menu'
+principale` puntavano a `menu:main`**, e la ricerca partiva dall'inizio: trovava
+l'Indietro, e Migliora finiva davanti a tutto. Da li' venivano le righe
+`Migliora | Indietro | Menu'`, diverse da ogni altra schermata.
+
+Corretto cercando dal fondo (`rposition`). E poiche' in una sezione di primo
+livello «indietro» e «menu' principale» sono lo stesso posto, l'`⬅️ Indietro`
+ridondante di Alimentazione e Storico e' stato tolto: la regola ora e' scritta,
+ed e' che quel pulsante esiste solo se porta da qualche altra parte.
+
+## Menù principale
+
+- **Ordinato per uso e non per architettura**: prima Alimentazione, Oggetti e
+  Case, poi lo Storico, poi Profilo e Spazi, in fondo gli strumenti. Lo Storico
+  era il primo pulsante del gestionale.
+- **I moduli non disponibili non compaiono.** `👕 Vestiti · prossimamente` e
+  `🚗 Veicoli · prossimamente` occupavano una riga senza fare niente e
+  costringevano il messaggio a spiegare cosa volesse dire «prossimamente».
+  Restano previsti e sono scritti in `docs/step7/roadmap.md`, con i moduli
+  segnaposto che gia' esistono.
+- `💡 Miglioramenti` diventa **`📋 Miglioramenti`**: c'erano due lampadine nello
+  stesso menu', con nomi quasi uguali e funzioni diverse. `💡 Migliora` resta
+  quello che segnala un problema sulla schermata corrente.
+- Via la frase che spiegava «prossimamente», ormai senza oggetto.
+
+## Frasi che leggevano i pulsanti ad alta voce
+
+- `🏷️ Oggetti generici` diceva: «Scegli cosa vuoi fare. Usa i pulsanti per
+  scegliere cosa fare.» La stessa frase due volte nella stessa riga. Ora la
+  schermata si chiama `🏷️ Oggetti`, come il pulsante che ci porta, e non dice
+  altro.
+- `🥕 Alimenti` elencava a parole i quattro pulsanti sottostanti e aggiungeva
+  «i dati vengono riletti automaticamente ogni volta che apri questa sezione»:
+  un dettaglio di implementazione che crea un dubbio che l'utente non aveva.
+
+## `aggiorna-s9.sh --ramo`
+
+Consegnando questo lavoro su un ramo nuovo, sull'S9 non e' arrivato niente: lo
+script aggiorna soltanto il ramo su cui si trova gia'. Il collaudo e' girato
+sul codice di prima, verde, senza che nulla lo segnalasse — la stessa forma
+dell'errore del ramo vuoto di poche ore prima.
+
+```bash
+./scripts/aggiorna-s9.sh --ramo ux-convenzioni-telegram
+```
+
+Dopo il `git checkout` lo script **si riavvia da solo**: bash legge il file man
+mano che lo esegue, e il cambio di ramo puo' averlo appena riscritto;
+proseguire significherebbe eseguire meta' della versione vecchia e meta' di
+quella nuova. Il riavvio riparte dalla versione appena scaricata e tiene lo
+stesso file di log.
+
+## Verifica
+
+- pipeline verde: fmt, clippy `-D warnings`, **236 test**;
+- `--ramo` provato su un repository finto: cambio di ramo, riavvio, file del
+  ramo nuovo presenti, un solo log; piu' gli argomenti sbagliati che si
+  fermano con un messaggio invece di essere ignorati;
+- nessuna migration: nessuna modifica ai dati;
+- il resto — liste lunghe, Spazi e Profilo, conteggi sui pulsanti — e' nella
+  parte 3 del documento delle convenzioni, in ordine di applicazione.
+
 <!-- CHANGELOG_BUILD_S9_20260901 -->
 # 01/09/2026 — Il linker che segfaultava, e perche'
 

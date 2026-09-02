@@ -5,8 +5,14 @@
 # il trasporto e' git, quindi basta che il branch sia stato pushato dal PC.
 #
 # Uso:
-#   ./scripts/aggiorna-s9.sh                 aggiorna, verifica e avvia il bot
+#   ./scripts/aggiorna-s9.sh                    aggiorna, verifica e avvia
 #   ./scripts/aggiorna-s9.sh --solo-controlli   si ferma prima dell'avvio
+#   ./scripts/aggiorna-s9.sh --ramo <nome>      passa a quel ramo e aggiorna
+#
+# `--ramo` esiste perche' senza di esso lo script aggiorna soltanto il ramo su
+# cui si trova gia'. Consegnando il lavoro su un ramo nuovo, sull'S9 non
+# arrivava niente e il collaudo girava sul codice di prima senza che nulla
+# segnalasse l'errore: e' successo il 1 settembre 2026.
 #
 # Ogni esecuzione lascia il log completo dei controlli in data/log/. Serve
 # perche' sullo schermo di Termux l'errore vero di rustc scorre via e resta
@@ -29,10 +35,31 @@ LOG_DA_TENERE=5
 # di dire che manca spazio: meglio avvisare prima.
 MB_MINIMI=1500
 SOLO_CONTROLLI=0
-[ "$1" = "--solo-controlli" ] && SOLO_CONTROLLI=1
+RAMO_RICHIESTO=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --solo-controlli) SOLO_CONTROLLI=1 ;;
+        --ramo)
+            shift
+            RAMO_RICHIESTO="$1"
+            if [ -z "$RAMO_RICHIESTO" ]; then
+                echo "--ramo richiede il nome del ramo."
+                exit 1
+            fi
+            ;;
+        *)
+            echo "Argomento non riconosciuto: $1"
+            echo "Uso: ./scripts/aggiorna-s9.sh [--ramo <nome>] [--solo-controlli]"
+            exit 1
+            ;;
+    esac
+    shift
+done
 
 mkdir -p "$CARTELLA_LOG" || exit 1
-LOG="$CARTELLA_LOG/aggiorna_$(date +%Y%m%d_%H%M%S).log"
+# `AGGIORNA_LOG` viene passata dal riavvio dopo un cambio di ramo, cosi' una
+# sola esecuzione resta in un solo file di log.
+LOG="${AGGIORNA_LOG:-$CARTELLA_LOG/aggiorna_$(date +%Y%m%d_%H%M%S).log}"
 
 passo() {
     echo | tee -a "$LOG"
@@ -123,6 +150,21 @@ if [ -n "$(git status --porcelain)" ]; then
     git status --short
     echo "Committale o mettile da parte con 'git stash' prima di continuare."
     exit 1
+fi
+if [ -n "$RAMO_RICHIESTO" ] && [ "$RAMO_RICHIESTO" != "$RAMO" ]; then
+    echo "passo al ramo: $RAMO_RICHIESTO" | tee -a "$LOG"
+    esegui git fetch origin || exit 1
+    esegui git checkout "$RAMO_RICHIESTO" || exit 1
+    # Bash legge lo script man mano che lo esegue, e il checkout puo' aver
+    # appena riscritto questo file: proseguire significherebbe eseguire meta'
+    # della versione vecchia e meta' di quella nuova. Si riparte dall'inizio
+    # con la versione appena arrivata, tenendo lo stesso file di log.
+    echo "riavvio con la versione dello script appena scaricata" | tee -a "$LOG"
+    export AGGIORNA_LOG="$LOG"
+    if [ "$SOLO_CONTROLLI" -eq 1 ]; then
+        exec "$0" --solo-controlli
+    fi
+    exec "$0"
 fi
 esegui git pull --ff-only || exit 1
 echo "ora a: $(git log --oneline -1)" | tee -a "$LOG"

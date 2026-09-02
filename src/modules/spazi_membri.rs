@@ -18,6 +18,7 @@ use teloxide::{
 };
 
 use crate::identity;
+use crate::modules::calendario;
 
 type Bot = crate::context_bot::ContextBot;
 
@@ -1004,7 +1005,7 @@ async fn show_expiry_calendar(
         requested
     };
     let rows = calendar_rows(year, month, role, invite_id, current);
-    bot.send_message(chat_id, format!("📅 Seleziona la data di scadenza\n\n{} {}\nL'orario predefinito sarà 23:59 e potrai modificarlo anche dopo la creazione.", month_name(month), year))
+    bot.send_message(chat_id, format!("📅 Seleziona la data di scadenza\n\n{} {}\nL'orario predefinito sarà 23:59 e potrai modificarlo anche dopo la creazione.", calendario::month_name(month), year))
         .reply_markup(InlineKeyboardMarkup::new(rows)).await?;
     Ok(())
 }
@@ -1967,82 +1968,50 @@ fn calendar_rows(
     invite_id: Option<i64>,
     current: (i32, u32, u32),
 ) -> Vec<Vec<InlineKeyboardButton>> {
-    let mut rows = Vec::new();
-    let prev = shift_month(year, month, -1);
-    let next = shift_month(year, month, 1);
+    // La griglia del mese e le regole sulle date stanno in `modules::calendario`.
+    // Qui restava una seconda implementazione del calendario gregoriano —
+    // congruenza di Zeller, bisestili, giorni del mese — scritta a mano accanto
+    // a quella basata su `chrono` del planner.
     let nav_prefix = if let Some(id) = invite_id {
         format!("space-members:invite:cal-nav:{id}")
     } else {
         format!("space-members:invite:cal-nav:{}", role_code(role))
     };
-    let prev_callback = if (prev.0, prev.1) < (current.0, current.1) {
-        "space-members:noop".to_string()
-    } else {
-        format!("{nav_prefix}:{}:{:02}", prev.0, prev.1)
-    };
-    rows.push(vec![
-        InlineKeyboardButton::callback(
-            if prev_callback == "space-members:noop" {
-                "⬅️ ❌".to_string()
-            } else {
-                "⬅️".to_string()
-            },
-            prev_callback,
-        ),
-        InlineKeyboardButton::callback(
-            format!("{} {year}", month_name(month)),
-            "space-members:noop".to_string(),
-        ),
-        InlineKeyboardButton::callback(
-            "➡️".to_string(),
-            format!("{nav_prefix}:{}:{:02}", next.0, next.1),
-        ),
-    ]);
-    rows.push(
-        ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"]
-            .into_iter()
-            .map(|label| {
-                InlineKeyboardButton::callback(label.to_string(), "space-members:noop".to_string())
-            })
-            .collect(),
-    );
+    let oggi = format!("{:04}-{:02}-{:02}", current.0, current.1, current.2);
 
-    let first_weekday = weekday_monday_zero(year, month, 1);
-    let days = days_in_month(year, month);
-    let mut day = 1_u32;
-    for week in 0..6 {
-        let mut row = Vec::new();
-        for weekday in 0..7 {
-            let index = week * 7 + weekday;
-            if index < first_weekday || day > days {
-                row.push(InlineKeyboardButton::callback(
-                    "·".to_string(),
-                    "space-members:noop".to_string(),
-                ));
-            } else {
-                let is_past = (year, month, day) < current;
-                let date = format!("{year:04}-{month:02}-{day:02}");
-                let callback = if is_past {
-                    "space-members:noop".to_string()
-                } else if let Some(id) = invite_id {
-                    format!("space-members:invite:set-date:{id}:{date}")
-                } else {
-                    format!("space-members:invite:date:{}:{date}", role_code(role))
-                };
-                let label = if is_past {
-                    format!("{day} ❌")
-                } else {
-                    day.to_string()
-                };
-                row.push(InlineKeyboardButton::callback(label, callback));
-                day += 1;
+    // Un invito puo' scadere solo nel futuro: le date passate restano visibili,
+    // marcate, ma non premibili.
+    let giorno = |data: &str| {
+        if data < oggi.as_str() {
+            calendario::Giorno {
+                stato: calendario::GiornoStato::Bloccato,
+                marcatore: Some("❌"),
             }
+        } else {
+            calendario::Giorno::default()
         }
-        rows.push(row);
-        if day > days {
-            break;
+    };
+    let callback_giorno = |data: &str| {
+        if let Some(id) = invite_id {
+            format!("space-members:invite:set-date:{id}:{data}")
+        } else {
+            format!("space-members:invite:date:{}:{data}", role_code(role))
         }
-    }
+    };
+    let callback_mese = |anno: i32, mese: u32| format!("{nav_prefix}:{anno}:{mese:02}");
+
+    let config = calendario::Calendario {
+        year,
+        month,
+        oggi: &oggi,
+        callback_giorno: &callback_giorno,
+        callback_mese: &callback_mese,
+        callback_inerte: "space-members:noop",
+        giorno: &giorno,
+        mese_minimo: Some((current.0, current.1)),
+    };
+    let mut rows = calendario::righe(&config);
+
     let back_callback = if let Some(id) = invite_id {
         format!("space-members:invite:view:{id}")
     } else {
@@ -2151,7 +2120,7 @@ fn human_local_expiry(value: &str) -> String {
             format!(
                 "{} {} {}, {}",
                 day,
-                month_name(month).to_lowercase(),
+                calendario::month_name(month).to_lowercase(),
                 year,
                 time
             )
@@ -2264,7 +2233,8 @@ fn parse_date(value: &str) -> Option<(i32, u32, u32)> {
     let y = p.next()?.parse().ok()?;
     let m = p.next()?.parse().ok()?;
     let d = p.next()?.parse().ok()?;
-    if p.next().is_some() || !(1..=12).contains(&m) || d < 1 || d > days_in_month(y, m) {
+    if p.next().is_some() || !(1..=12).contains(&m) || d < 1 || d > calendario::days_in_month(y, m)
+    {
         None
     } else {
         Some((y, m, d))
@@ -2272,54 +2242,9 @@ fn parse_date(value: &str) -> Option<(i32, u32, u32)> {
 }
 fn human_date(value: &str) -> String {
     parse_date(value)
-        .map(|(y, m, d)| format!("{} {} {}", d, month_name(m).to_lowercase(), y))
+        .map(|(y, m, d)| format!("{} {} {}", d, calendario::month_name(m).to_lowercase(), y))
         .unwrap_or_else(|| value.to_string())
 }
-fn month_name(month: u32) -> &'static str {
-    match month {
-        1 => "Gennaio",
-        2 => "Febbraio",
-        3 => "Marzo",
-        4 => "Aprile",
-        5 => "Maggio",
-        6 => "Giugno",
-        7 => "Luglio",
-        8 => "Agosto",
-        9 => "Settembre",
-        10 => "Ottobre",
-        11 => "Novembre",
-        12 => "Dicembre",
-        _ => "Mese",
-    }
-}
-fn is_leap(year: i32) -> bool {
-    year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
-}
-fn days_in_month(year: i32, month: u32) -> u32 {
-    match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 if is_leap(year) => 29,
-        2 => 28,
-        _ => 30,
-    }
-}
-fn shift_month(year: i32, month: u32, delta: i32) -> (i32, u32) {
-    let total = year * 12 + month as i32 - 1 + delta;
-    (total.div_euclid(12), (total.rem_euclid(12) + 1) as u32)
-}
-fn weekday_monday_zero(year: i32, month: u32, day: u32) -> usize {
-    let (mut y, mut m) = (year, month as i32);
-    if m < 3 {
-        y -= 1;
-        m += 12;
-    }
-    let k = y % 100;
-    let j = y / 100;
-    let h = (day as i32 + (13 * (m + 1)) / 5 + k + k / 4 + j / 4 + 5 * j).rem_euclid(7);
-    ((h + 5) % 7) as usize
-}
-
 fn parse_invite_role(data: &str, prefix: &str) -> Option<&'static str> {
     role_from_code(data.strip_prefix(prefix)?)
 }
@@ -2764,8 +2689,8 @@ mod tests {
 
     #[test]
     fn calendario_gregoriano_base() {
-        assert_eq!(days_in_month(2028, 2), 29);
-        assert_eq!(weekday_monday_zero(2026, 9, 13), 6);
-        assert_eq!(shift_month(2026, 1, -1), (2025, 12));
+        assert_eq!(calendario::days_in_month(2028, 2), 29);
+        assert_eq!(calendario::weekday_monday_zero(2026, 9, 13), 6);
+        assert_eq!(calendario::shift_month(2026, 1, -1), (2025, 12));
     }
 }

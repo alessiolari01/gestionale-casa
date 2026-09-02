@@ -278,21 +278,27 @@ struct ObjectLocationInput<'a> {
     container_id: Option<i64>,
 }
 
+/// Menù principale, ordinato per uso e non per architettura.
+///
+/// Convenzione C12: prima quello che si apre tutti i giorni, poi la
+/// consultazione, poi le impostazioni, in fondo gli strumenti. I moduli non
+/// ancora disponibili non compaiono: due pulsanti che non fanno niente
+/// occupavano una riga e costringevano il messaggio a spiegare cosa
+/// significasse «prossimamente». Restano scritti in `docs/step7/roadmap.md`.
+///
+/// Convenzione C4: la lampadina è una sola. `💡 Migliora` segnala un problema
+/// sulla schermata corrente; la lista dei miglioramenti è `📋 Miglioramenti`.
 pub fn main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup {
     let mut rows = vec![
+        vec![button("🍽️ Alimentazione", "food:menu")],
+        vec![button("🏷️ Oggetti", "oggetti:menu")],
+        vec![button("🏠 Case, stanze e contenitori", "loc:menu")],
         vec![button("📜 Storico", "history:global:0")],
         vec![
             button("👤 Profilo", "identity:profile"),
             button("👥 Spazi", "identity:spaces"),
         ],
-        vec![button("🏷️ Oggetti", "oggetti:menu")],
-        vec![button("🏠 Case, stanze e contenitori", "loc:menu")],
-        vec![
-            button("👕 Vestiti · prossimamente", "menu:soon"),
-            button("🚗 Veicoli · prossimamente", "menu:soon"),
-        ],
-        vec![button("🍽️ Alimentazione", "food:menu")],
-        vec![button("💡 Miglioramenti", "improve:menu")],
+        vec![button("📋 Miglioramenti", "improve:menu")],
     ];
     if is_admin {
         rows.push(vec![button("🛠️ Amministrazione", "admin:menu")]);
@@ -301,12 +307,9 @@ pub fn main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup {
 }
 
 pub async fn show_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
-    bot.send_message(
-        chat_id,
-        "🏷️ Oggetti generici\n\nScegli cosa vuoi fare. Usa i pulsanti per scegliere cosa fare.",
-    )
-    .reply_markup(objects_menu_keyboard())
-    .await?;
+    bot.send_message(chat_id, "🏷️ Oggetti")
+        .reply_markup(objects_menu_keyboard())
+        .await?;
     Ok(())
 }
 

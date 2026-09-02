@@ -1145,10 +1145,9 @@ fn global_history_keyboard(
         ));
     }
     rows.push(filter_row);
-    rows.push(vec![
-        button("⬅️ Indietro", "menu:main"),
-        button("🏠 Menù principale", "menu:main"),
-    ]);
+    // Convenzione C3: lo Storico e' una sezione di primo livello, quindi
+    // `⬅️ Indietro` porterebbe dove porta gia' `🏠 Menù principale`.
+    rows.push(vec![button("🏠 Menù principale", "menu:main")]);
     InlineKeyboardMarkup::new(rows)
 }
 
