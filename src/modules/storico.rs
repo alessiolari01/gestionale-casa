@@ -1125,22 +1125,9 @@ fn global_history_keyboard(
         )]);
     }
 
-    let pages = total_pages(total);
-    if pages > 1 {
-        let mut nav = Vec::new();
-        if page > 0 {
-            nav.push(button(
-                "⬅️",
-                &format!("h:g:{}:{token}", base62_encode(page - 1)),
-            ));
-        }
-        nav.push(button(&format!("{} / {}", page + 1, pages), "history:noop"));
-        if page + 1 < pages {
-            nav.push(button(
-                "➡️",
-                &format!("h:g:{}:{token}", base62_encode(page + 1)),
-            ));
-        }
+    if let Some(nav) = liste::riga_paginazione_da_totale(page, total, "history:noop", |pagina| {
+        format!("h:g:{}:{token}", base62_encode(pagina))
+    }) {
         rows.push(nav);
     }
 
@@ -1229,23 +1216,12 @@ fn dynamic_filter_keyboard(
         )]);
     }
 
-    let pages =
-        ((total + HISTORY_FILTER_PICKER_PAGE_SIZE - 1) / HISTORY_FILTER_PICKER_PAGE_SIZE).max(1);
-    if pages > 1 {
-        let mut nav = Vec::new();
-        if page > 0 {
-            nav.push(button(
-                "⬅️",
-                &format!("h:p:{kind_code}:{}:{token}", base62_encode(page - 1)),
-            ));
-        }
-        nav.push(button(&format!("{} / {}", page + 1, pages), "history:noop"));
-        if page + 1 < pages {
-            nav.push(button(
-                "➡️",
-                &format!("h:p:{kind_code}:{}:{token}", base62_encode(page + 1)),
-            ));
-        }
+    let pages = (total as u64)
+        .max(1)
+        .div_ceil(HISTORY_FILTER_PICKER_PAGE_SIZE as u64) as i64;
+    if let Some(nav) = liste::riga_paginazione(page, pages, "history:noop", |pagina| {
+        format!("h:p:{kind_code}:{}:{token}", base62_encode(pagina))
+    }) {
         rows.push(nav);
     }
 
@@ -2024,10 +2000,12 @@ fn history_list_keyboard(
         rows.push(vec![button(&event_button_label(event), &callback)]);
     }
 
-    if let Some(nav) = liste::riga_paginazione(page, total, "history:noop", |pagina| match scope {
-        HistoryScope::Global => format!("history:global:{pagina}"),
-        HistoryScope::Item(item_id) => format!("history:item:{item_id}:{pagina}"),
-    }) {
+    if let Some(nav) =
+        liste::riga_paginazione_da_totale(page, total, "history:noop", |pagina| match scope {
+            HistoryScope::Global => format!("history:global:{pagina}"),
+            HistoryScope::Item(item_id) => format!("history:item:{item_id}:{pagina}"),
+        })
+    {
         rows.push(nav);
     }
 

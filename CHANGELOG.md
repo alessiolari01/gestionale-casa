@@ -2,6 +2,61 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_LISTE_PAGINAZIONE_COMPLETATA_20260902 -->
+# 02/09/2026 — La paginazione unica non era unica
+
+Aprendo lo `📜 Storico` sul bot, la riga di paginazione era ancora quella
+vecchia: `1 / 21` e due frecce nude, invece di
+`⬅️ Precedente | 1/21 | Successiva ➡️`. Le etichette degli eventi erano quelle
+nuove, l'intestazione pure — solo la riga sotto era rimasta indietro.
+
+**Nello storico ci sono due tastiere, e ne avevo convertita una sola.**
+`history_list_keyboard` serve lo storico di un singolo oggetto;
+`global_history_keyboard` serve lo `📜 Storico` del menu' principale, cioe'
+proprio quello che si apre per primo. Il conteggio «sei posti» scritto nella
+voce di ieri era sbagliato: nei quattro moduli delle liste le righe scritte a
+mano erano **nove**, e ne erano rimaste indietro quattro.
+
+## Perche' erano rimaste indietro
+
+Non per distrazione: **la primitiva non ci entrava.** `riga_paginazione`
+prendeva *il totale delle voci* e dava per scontate cinque voci per pagina, ma
+tre di quei quattro punti non contano in voci da cinque:
+
+- il selettore dei filtri dello storico ne mostra **sette** per pagina;
+- la descrizione lunga di un miglioramento e' spezzata **a caratteri**, non a
+  voci;
+- la lista delle categorie in «cerca per ingredienti» conosce solo il numero di
+  pagine.
+
+Chi non poteva usarla si e' tenuto la propria riga, ed e' esattamente il modo in
+cui una convenzione torna a divergere — cioe' il problema che il modulo doveva
+chiudere. Una primitiva che non entra dove serve non unifica niente.
+
+Ora `riga_paginazione` prende **il numero di pagine**, che e' l'unita' che tutti
+i chiamanti conoscono, e `riga_paginazione_da_totale` resta per chi ha il
+totale. Tutte e nove le righe dei quattro moduli passano di li'.
+
+## Cosa resta fuori, dichiarato
+
+Sei righe scritte a mano vivono ancora in moduli che **non** sono in questo
+blocco: `spazi_membri`, `porzioni_profili`, `porzioni_ingredienti`,
+`profili_alimentari` (due) e `planner_alimentare`. Passeranno con i blocchi
+Spazi/Profilo e con il planner. Le frecce di `calendario.rs` non c'entrano: li'
+una freccia che non porta da nessuna parte si spegne (C13), non e' una riga di
+paginazione.
+
+## Verificato sul bot, non dedotto
+
+Questa volta l'esempio della ricerca e' stato controllato sul bot vero:
+cercando `philadelphia` compare `Formaggio spalmabile` con la riga
+`→ prodotto Philadelphia · Original`. E cercando `zucchine`, che i due risultati
+li trova per nome, la riga non compare — che e' il comportamento giusto.
+Controllato anche il contrario dell'esempio inventato di ieri: `Amido di mais`
+non ha nessun prodotto associato.
+
+**270 test** (erano 269).
+
 <!-- CHANGELOG_LISTE_RICERCA_CORREZIONE_20260902 -->
 # 02/09/2026 — Un esempio inventato, e il buco che nascondeva
 
@@ -79,6 +134,8 @@ scoperto di nuovo fra sei mesi.
 
 Nasce `src/modules/liste.rs`, per la stessa ragione per cui esiste un solo
 `calendario.rs`: la riga di paginazione era riscritta a mano in **sei posti**,
+(il conteggio e' sbagliato: erano nove nei soli quattro moduli, e quattro sono
+rimaste indietro fino alla voce successiva)
 con **quattro etichette diverse** per lo stesso pulsante — `⬅️ Pagina
 precedente`, `⬅️`, `Pagina successiva ➡️`, `➡️` — e due formati di
 intestazione (`· 422 risultati` + `Pagina 1/85` contro `Pagina 1 di 21 · 102

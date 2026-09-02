@@ -90,6 +90,14 @@ stesso minuto restano indistinguibili sull'etichetta — è successo davvero con
 due modifiche opposte della stessa porzione. Restano adiacenti e in ordine
 cronologico, e si separano aprendoli.
 
+**Due tastiere, non una.** `global_history_keyboard` serve lo `📜 Storico` del
+menu principale, `history_list_keyboard` quello di un singolo oggetto. Sono
+separate perché i callback dello storico globale portano i filtri codificati in
+base62 (`h:g:`) per restare nel limite Telegram di 64 byte. Chi cambia l'aspetto
+della lista deve toccarle **tutte e due**: il 2 settembre ne è stata convertita
+una sola e sul bot lo storico globale è rimasto con la vecchia riga di
+paginazione, mentre le etichette erano già quelle nuove.
+
 **Cosa legge la lista.** Da quando il testo non ripete gli eventi, la query
 della lista chiede cinque colonne invece di tredici: luogo, stanza,
 contenitore, spazio, autore, origine, automatico e tipo entità venivano letti a

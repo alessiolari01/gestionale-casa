@@ -2576,9 +2576,11 @@ async fn show_recipe_list(
             )]
         })
         .collect::<Vec<_>>();
-    if let Some(riga) = liste::riga_paginazione(safe_page, total, "recipe:noop", |pagina| {
-        format!("recipe:list:{pagina}")
-    }) {
+    if let Some(riga) =
+        liste::riga_paginazione_da_totale(safe_page, total, "recipe:noop", |pagina| {
+            format!("recipe:list:{pagina}")
+        })
+    {
         keyboard.push(riga);
     }
     // C6: sopra le 20 voci la ricerca viene prima della creazione.
@@ -3084,21 +3086,9 @@ async fn show_recipe_food_categories(
             )]
         })
         .collect::<Vec<_>>();
-    if pages > 1 {
-        let mut nav = Vec::new();
-        if page > 0 {
-            nav.push(button(
-                "⬅️ Pagina precedente",
-                format!("recipe:find:categories:{}", page - 1),
-            ));
-        }
-        nav.push(button(format!("{}/{}", page + 1, pages), "recipe:noop"));
-        if page + 1 < pages {
-            nav.push(button(
-                "Pagina successiva ➡️",
-                format!("recipe:find:categories:{}", page + 1),
-            ));
-        }
+    if let Some(nav) = liste::riga_paginazione(page, pages, "recipe:noop", |pagina| {
+        format!("recipe:find:categories:{pagina}")
+    }) {
         rows.push(nav);
     }
     if current_filter.is_some() {

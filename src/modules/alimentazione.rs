@@ -5356,9 +5356,11 @@ fn push_pagination_row(
     total: usize,
     callback_prefix: &str,
 ) {
-    if let Some(riga) = liste::riga_paginazione(page, total as i64, "food:noop", |pagina| {
-        format!("{callback_prefix}:{pagina}")
-    }) {
+    if let Some(riga) =
+        liste::riga_paginazione_da_totale(page, total as i64, "food:noop", |pagina| {
+            format!("{callback_prefix}:{pagina}")
+        })
+    {
         rows.push(riga);
     }
 }

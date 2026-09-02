@@ -259,9 +259,17 @@ una pagina sola la riga non compare: una navigazione fra una pagina e se stessa
 è rumore.
 
 La riga non si riscrive a mano: sta in `modules::liste`, insieme
-all'intestazione e alla soglia delle venti voci. Prima era ricopiata in sei
-posti con quattro etichette diverse per lo stesso pulsante, ed è per questo che
-la convenzione non veniva rispettata da nessuno.
+all'intestazione e alla soglia delle venti voci. Prima era ricopiata in nove
+posti nei soli moduli delle liste, con quattro etichette diverse per lo stesso
+pulsante, ed è per questo che la convenzione non veniva rispettata da nessuno.
+
+La primitiva prende **il numero di pagine**, non il totale delle voci. È una
+lezione pagata: la prima versione prendeva il totale e dava per scontate cinque
+voci per pagina, così i punti che contano diversamente — il selettore dei filtri
+dello storico ne mostra sette, una descrizione lunga è spezzata a caratteri —
+non potevano usarla e si sono tenuti la loro riga. **Una primitiva che non entra
+dove serve non unifica niente**, e il difetto si è visto solo aprendo il bot:
+lo Storico mostrava ancora `1 / 21` con le frecce nude.
 
 ### C7. Il conteggio sta sul pulsante
 

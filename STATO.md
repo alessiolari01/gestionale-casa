@@ -105,10 +105,22 @@ date, nell'ordine della parte 3 di quel documento.
 
 **Un modulo solo per le liste.** `src/modules/liste.rs` tiene la riga di
 paginazione, l'intestazione con il totale, la soglia delle venti voci oltre la
-quale la ricerca diventa l'azione principale, e il taglio delle etichette.
-Prima la riga di paginazione era riscritta a mano in sei posti con quattro
-etichette diverse per lo stesso pulsante: e' la stessa storia del calendario, e
-la stessa cura.
+quale la ricerca diventa l'azione principale, e il taglio delle etichette. E'
+la stessa storia del calendario, e la stessa cura.
+
+La riga prende **il numero di pagine**, non il totale delle voci: la prima
+versione prendeva il totale e dava per scontate cinque voci per pagina, e i
+chiamanti che contano diversamente — il selettore dei filtri dello storico ne
+mostra sette, la descrizione lunga di un miglioramento e' spezzata a caratteri —
+non potevano usarla e si erano tenuti la loro riga scritta a mano. Se ne e'
+accorto il collaudo sul bot, non il codice: lo `📜 Storico` mostrava ancora
+`1 / 21` con le frecce nude. `riga_paginazione_da_totale` resta per chi ha il
+totale.
+
+**Restano sei righe di paginazione scritte a mano** fuori da questo blocco, in
+`spazi_membri`, `porzioni_profili`, `porzioni_ingredienti`,
+`profili_alimentari` (due) e `planner_alimentare`: passeranno con i blocchi
+Spazi/Profilo e con il planner.
 
 Guardare le schermate sul bot prima di scrivere ha corretto la convenzione
 stessa: C1 diceva che nello Storico «Giorgia» fosse l'autore dell'evento, e
@@ -142,7 +154,7 @@ invece di arrivare a SQLite e diventare `NULL`.
   `20260901013000_versione_contenuto_ricetta.sql` fosse ancora da applicare:
   non era vero, ed e' bastato leggere `_sqlx_migrations` per accorgersene;
 - pipeline verde: `fmt`, `check --locked`, `clippy --all-targets --locked
-  -- -D warnings`, `test --locked` — **269 test** (248 prima del 2 settembre:
+  -- -D warnings`, `test --locked` — **270 test** (248 prima del 2 settembre:
   e' il numero da confrontare dopo ogni aggiornamento dell'S9);
 - CI su GitHub Actions **verde** dalla run #42, la prima dello Step 7.
 

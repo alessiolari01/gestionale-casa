@@ -2102,7 +2102,7 @@ async fn show_list(
             format!("improve:view:{}:{}:{}", item.id, scope.token(), page),
         )]);
     }
-    if let Some(riga) = liste::riga_paginazione(page, total, "improve:noop", |pagina| {
+    if let Some(riga) = liste::riga_paginazione_da_totale(page, total, "improve:noop", |pagina| {
         format!("improve:list:{}:{}", scope.token(), pagina)
     }) {
         buttons.push(riga);
@@ -2188,7 +2188,7 @@ async fn show_archive(
         ));
     }
     let mut keyboard = Vec::new();
-    if let Some(riga) = liste::riga_paginazione(page, total, "improve:noop", |pagina| {
+    if let Some(riga) = liste::riga_paginazione_da_totale(page, total, "improve:noop", |pagina| {
         format!("improve:archive:page:{pagina}")
     }) {
         keyboard.push(riga);
@@ -2865,24 +2865,9 @@ async fn show_full_description(
     let pages = split_text_pages(&item.descrizione, DESCRIPTION_PAGE_CHARS);
     let page = requested_page.clamp(0, pages.len().saturating_sub(1) as i64);
     let mut rows = Vec::new();
-    if pages.len() > 1 {
-        let mut nav = Vec::new();
-        if page > 0 {
-            nav.push(InlineKeyboardButton::callback(
-                "⬅️ Pagina precedente".to_string(),
-                format!("improve:description:full:{improvement_id}:{}", page - 1),
-            ));
-        }
-        nav.push(InlineKeyboardButton::callback(
-            format!("{}/{}", page + 1, pages.len()),
-            "improve:noop".to_string(),
-        ));
-        if (page as usize) + 1 < pages.len() {
-            nav.push(InlineKeyboardButton::callback(
-                "Pagina successiva ➡️".to_string(),
-                format!("improve:description:full:{improvement_id}:{}", page + 1),
-            ));
-        }
+    if let Some(nav) = liste::riga_paginazione(page, pages.len() as i64, "improve:noop", |pagina| {
+        format!("improve:description:full:{improvement_id}:{pagina}")
+    }) {
         rows.push(nav);
     }
     rows.push(vec![

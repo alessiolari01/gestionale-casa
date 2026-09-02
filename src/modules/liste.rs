@@ -68,15 +68,22 @@ pub fn intestazione(titolo: &str, totale: i64, pagina: i64) -> String {
 /// Restituisce `None` quando c'e' una pagina sola: una riga di navigazione fra
 /// una pagina e se stessa e' rumore.
 ///
+/// Prende **il numero di pagine**, non il totale delle voci, ed e' una scelta
+/// pagata: la prima versione prendeva solo il totale e dava per scontate cinque
+/// voci per pagina, cosi' i chiamanti che contano in pagine — il selettore dei
+/// filtri dello storico ne mostra sette, la descrizione lunga di un
+/// miglioramento e' spezzata a caratteri — non potevano usarla e sono rimasti
+/// con la loro riga scritta a mano. Una primitiva che non entra dove serve non
+/// unifica niente.
+///
 /// `callback_pagina` costruisce il callback della pagina richiesta, perche'
 /// ogni modulo ha il suo formato; `callback_inerte` e' il no-op del modulo.
 pub fn riga_paginazione(
     pagina: i64,
-    totale: i64,
+    pagine: i64,
     callback_inerte: &str,
     callback_pagina: impl Fn(i64) -> String,
 ) -> Option<Vec<InlineKeyboardButton>> {
-    let pagine = totale_pagine(totale);
     if pagine <= 1 {
         return None;
     }
@@ -99,6 +106,22 @@ pub fn riga_paginazione(
         ));
     }
     Some(riga)
+}
+
+/// Come `riga_paginazione`, per chi conosce il totale delle voci invece del
+/// numero di pagine, con le cinque voci per pagina della regola.
+pub fn riga_paginazione_da_totale(
+    pagina: i64,
+    totale: i64,
+    callback_inerte: &str,
+    callback_pagina: impl Fn(i64) -> String,
+) -> Option<Vec<InlineKeyboardButton>> {
+    riga_paginazione(
+        pagina,
+        totale_pagine(totale),
+        callback_inerte,
+        callback_pagina,
+    )
 }
 
 /// Etichetta di un pulsante che porta a una lista, con il conteggio (C7).
@@ -163,25 +186,25 @@ mod tests {
 
     #[test]
     fn una_pagina_sola_non_ha_riga_di_navigazione() {
-        let riga = riga_paginazione(0, 4, "x:noop", |p| format!("x:{p}"));
+        let riga = riga_paginazione_da_totale(0, 4, "x:noop", |p| format!("x:{p}"));
         assert!(riga.is_none());
     }
 
     #[test]
     fn prima_pagina_non_offre_precedente() {
-        let riga = riga_paginazione(0, 422, "x:noop", |p| format!("x:{p}"));
+        let riga = riga_paginazione_da_totale(0, 422, "x:noop", |p| format!("x:{p}"));
         assert_eq!(etichette(&riga), vec!["1/85", "Successiva ➡️"]);
     }
 
     #[test]
     fn ultima_pagina_non_offre_successiva() {
-        let riga = riga_paginazione(84, 422, "x:noop", |p| format!("x:{p}"));
+        let riga = riga_paginazione_da_totale(84, 422, "x:noop", |p| format!("x:{p}"));
         assert_eq!(etichette(&riga), vec!["⬅️ Precedente", "85/85"]);
     }
 
     #[test]
     fn pagina_intermedia_ha_entrambe_le_frecce() {
-        let riga = riga_paginazione(1, 422, "x:noop", |p| format!("x:{p}"));
+        let riga = riga_paginazione_da_totale(1, 422, "x:noop", |p| format!("x:{p}"));
         assert_eq!(
             etichette(&riga),
             vec!["⬅️ Precedente", "2/85", "Successiva ➡️"]
@@ -191,7 +214,8 @@ mod tests {
     #[test]
     fn il_contatore_non_e_premibile() {
         let riga =
-            riga_paginazione(1, 422, "food:noop", |p| format!("food:list:page:{p}")).unwrap();
+            riga_paginazione_da_totale(1, 422, "food:noop", |p| format!("food:list:page:{p}"))
+                .unwrap();
         let callback = |b: &InlineKeyboardButton| match &b.kind {
             teloxide::types::InlineKeyboardButtonKind::CallbackData(data) => data.clone(),
             _ => String::new(),
@@ -199,6 +223,17 @@ mod tests {
         assert_eq!(callback(&riga[1]), "food:noop");
         assert_eq!(callback(&riga[0]), "food:list:page:0");
         assert_eq!(callback(&riga[2]), "food:list:page:2");
+    }
+
+    #[test]
+    fn la_riga_accetta_anche_un_numero_di_pagine_diverso_da_cinque_per_pagina() {
+        // Il selettore dei filtri dello storico mostra sette voci per pagina:
+        // se la riga sapesse contare solo a cinque, resterebbe fuori.
+        let riga = riga_paginazione(1, 3, "history:noop", |p| format!("h:p:{p}"));
+        assert_eq!(
+            etichette(&riga),
+            vec!["⬅️ Precedente", "2/3", "Successiva ➡️"]
+        );
     }
 
     #[test]
