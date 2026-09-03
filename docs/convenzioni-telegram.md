@@ -385,3 +385,42 @@ di applicazione è questo, dal più visibile al meno:
 Ogni blocco chiude con il collaudo su Telegram sull'S9, e questo documento si
 aggiorna quando una convenzione si rivela sbagliata all'uso — non quando è
 scomoda da rispettare.
+
+**Il collaudo si fa due volte: prima di scrivere e dopo aver consegnato.** Nel
+blocco liste il giro fatto prima ha corretto C1 (vedi il riquadro nella parte 1)
+e quello fatto dopo ha trovato un difetto che i test non vedevano: lo Storico
+mostrava ancora la vecchia riga di paginazione, perché delle sue due tastiere
+ne era stata convertita una sola.
+
+---
+
+## Parte 4 — Visto sul bot, non ancora sistemato
+
+Difetti osservati durante i collaudi, ognuno con il blocco della parte 3 a cui
+appartiene. Stanno qui e non in un messaggio perché *chi apre questa cartella
+deve poter sapere cosa manca* senza aver visto nessuna conversazione.
+
+### Blocco 3 — menù di sezione
+
+- **`🔎 Cerca alimento` descrive solo metà di quello che fa.** Il testo dice
+  «Scrivi il nome o un alias da cercare», ma la ricerca guarda anche marca e
+  nome dei prodotti commerciali collegati: è la strada per cui cercando
+  `philadelphia` compare `Formaggio spalmabile`. Chi legge non può indovinarlo.
+- **La riga di navigazione della ricerca è spezzata su due righe:**
+  `⬅️ Indietro | ❌ Annulla | 🏠 Menù principale` e sotto `💡 Migliora`. C3 per
+  un passo di procedura vuole `❌ Annulla | 💡 Migliora | 🏠 Menù principale`,
+  e qui `⬅️ Indietro` e `❌ Annulla` portano allo stesso posto.
+
+### Blocco 6 — date
+
+- **C9 non è applicata allo Storico**, che è la schermata con più date di tutto
+  il gestionale: il giorno corrente non è segnalato da nessuna parte. Serve il
+  `👉` all'inizio dell'etichetta degli eventi di oggi, o `· oggi` nel titolo.
+
+### Da decidere, non un difetto
+
+- Nei risultati di ricerca **con un solo risultato**, la riga «Perché sono nei
+  risultati» nomina l'alimento che è già sul pulsante sotto. Con cinque
+  risultati il nome serve a capire di quale si parla; con uno è ridondante.
+  Va deciso se toglierlo nel caso singolo o accettare la ripetizione in cambio
+  di una regola sola.

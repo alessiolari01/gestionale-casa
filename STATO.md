@@ -57,12 +57,24 @@ Repository: `alessiolari01/gestionale-casa`
 **La PR #9 e' stata mergiata il 1 settembre: `main` contiene tutto lo Step 7**,
 fino al planner 7.3B.
 
-**Nessun ramo aperto.** `ux-convenzioni-telegram` e' stato mergiato con la
-PR #10 e non esiste piu', ne' in locale ne' su origin: le versioni precedenti
-di questo file lo davano ancora per aperto, ed e' bastato un `git branch -a`
-per accorgersene. Il lavoro sull'interfaccia del 1-2 settembre e' su `main`.
+`ux-convenzioni-telegram` e' stato mergiato con la PR #10 e non esiste piu':
+il lavoro sull'interfaccia del 1 settembre e' su `main`.
 
-Il nuovo lavoro riparte da `main`. I due branch dello Step 7 sono storia:
+**Il blocco liste** (2 settembre, tre commit) e' arrivato con il ramo
+`ux-liste`. Questo file ha gia' sbagliato due volte a dichiarare quali rami
+fossero aperti, quindi la risposta non si legge qui ma si chiede a git:
+
+```powershell
+git branch -a
+git log --oneline main..origin/ux-liste
+```
+
+Se il secondo comando non stampa niente, il merge e' avvenuto e `main`
+contiene tutto. Se stampa dei commit, quel ramo e' ancora aperto e il lavoro
+nuovo parte da li', non da `main` — e finche' resta aperto la
+sincronizzazione GitHub del progetto, che segue `main`, non lo vede.
+
+I due branch dello Step 7 sono storia:
 `step-7-alimentazione-s9` e' quello mergiato, mentre `step-7-alimentazione`
 contiene un 7.3B parallelo scartato il 31 agosto e **non va usato**. Il motivo
 e' spiegato nel `CHANGELOG.md`, alla voce "Due implementazioni parallele".

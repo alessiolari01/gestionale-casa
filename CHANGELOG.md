@@ -2,6 +2,37 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_LISTE_CHIUSURA_20260902 -->
+# 02/09/2026 — Cosa resta da fare, scritto dove si trova
+
+Chiusura del blocco liste. Nessun cambiamento al codice: due buchi nei
+documenti, tutti e due della stessa specie.
+
+**`STATO.md` dichiarava «nessun ramo aperto» mentre `ux-liste` era aperto.**
+E' la seconda volta che questo file sbaglia a dire quali rami esistono: la
+prima dava `ux-convenzioni-telegram` per aperto quando era gia' mergiato.
+Un fatto che cambia a ogni ramo non puo' stare scritto in un documento che si
+aggiorna a mano, quindi adesso non c'e' piu' la risposta ma i due comandi che
+la danno — `git branch -a` e `git log --oneline main..origin/<ramo>` — con
+scritto cosa vuol dire ciascun esito. Un documento che dice «chiedilo a git»
+non puo' invecchiare.
+
+**I difetti visti durante i collaudi vivevano solo nella conversazione.** Tre
+cose osservate sul bot e non ancora sistemate — il prompt della ricerca che
+descrive meta' di quello che fa, la riga di navigazione della ricerca spezzata
+su due righe, e C9 mai applicata allo Storico che e' la schermata con piu' date
+di tutte — piu' una scelta rimasta aperta sulla riga di spiegazione quando il
+risultato e' uno solo. Ora sono la **parte 4** di
+`docs/convenzioni-telegram.md`, ognuna con il blocco della parte 3 a cui
+appartiene. La regola del progetto e' che chi apre la cartella deve capire dove
+siamo: vale anche per cio' che manca, non solo per cio' che c'e'.
+
+Aggiunto anche, nella parte 3, che il collaudo si fa **due volte**: prima di
+scrivere e dopo aver consegnato. Nel blocco liste il primo giro ha corretto C1
+e il secondo ha trovato un difetto che i test non vedevano.
+
+CI verde su tutti e tre i commit del ramo. Nessun test nuovo: **270**.
+
 <!-- CHANGELOG_LISTE_PAGINAZIONE_COMPLETATA_20260902 -->
 # 02/09/2026 — La paginazione unica non era unica
 
