@@ -4,6 +4,22 @@ Questo documento descrive **come comunicano tra loro PC, Galaxy S9, GitHub e
 Telegram** e quale ruolo ha ogni componente. Non contiene chiavi private,
 token o password.
 
+## 0. PC fisso vs portatile — dove gira l'agente oggi
+
+`docs/previsto/automazione-ciclo-sviluppo.md` distingue un **PC fisso** (dove
+girerebbe la sessione che scrive/committa/collauda) da un **portatile** (solo
+controllo remoto, non parla con l'S9). Quel PC fisso **non esiste ancora**.
+
+**Verificato il 3 settembre 2026**: la sessione Claude Code che scrive questo
+codice gira sul portatile stesso, `galaxybookalessio` — lo stesso dispositivo
+di cui parla la sezione 2 qui sotto, con Tailscale e la chiave SSH verso l'S9
+già configurate e funzionanti (`ssh s9` risponde). Per ora il portatile fa da
+host dell'automazione. Il giorno in cui arriva un PC fisso vero, la migrazione
+è a basso costo: clonare il repository, installare Rust/GCC e Tailscale,
+generare **una chiave SSH dedicata e nuova** per quel PC (non copiare quella
+del portatile) e autorizzarla sull'S9 — nessuna modifica strutturale al
+progetto.
+
 ## 1. Topologia attuale
 
 ```text

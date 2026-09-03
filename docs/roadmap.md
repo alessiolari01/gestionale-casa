@@ -85,9 +85,16 @@ Rimangono già specificati Acquisti, Viaggi, Spese, documenti/garanzie, manutenz
 
 ## Ultima evoluzione infrastrutturale futura
 
-`🧪 Zona test` + aggiornamenti quasi zero-downtime (#9).
+`🧪 Zona test` + aggiornamenti quasi zero-downtime (#9). **In corso dal
+3 settembre 2026** sul ramo `automazione-ciclo-sviluppo`, per gradi. Specifica
+completa in `docs/previsto/automazione-ciclo-sviluppo.md` (ciclo dev → deploy)
+e `docs/previsto/invio-miglioramenti-a-claude.md` (canale di invio dal bot).
 
-Non è prioritaria adesso. Quando verrà implementata dovrà consentire all'admin di testare una candidata separata mentre tutti gli altri restano sulla stabile, con database/snapshot di test, pipeline automatica, `✅ Conferma versione`, `🚀 Installa e riavvia`, backup e rollback. Un solo processo deve ricevere gli update Telegram per lo stesso token.
+Consentirà all'admin di testare una candidata separata mentre tutti gli altri
+restano sulla stabile, con database/snapshot di test, pipeline automatica,
+conferma funzionale esplicita, deploy a downtime minimo e rollback. Un solo
+processo riceve gli update Telegram per lo stesso token — nessun nodo di
+standby o failover automatico, esplicitamente rimandato a un momento futuro.
 
 <!-- STEP7_2H0_PROFILI_FONDAZIONI -->
 ## Decisioni aggiunte prima di 7.2H

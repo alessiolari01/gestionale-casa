@@ -2,6 +2,61 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_AUTOMAZIONE_SPEC_20260903 -->
+# 03/09/2026 — Specifica dell'automazione del ciclo dev → deploy, e una topologia da correggere
+
+Nessun codice: solo documenti, apertura del ramo `automazione-ciclo-sviluppo`
+e le prime verifiche prima di scrivere qualunque cosa.
+
+Aggiunti `docs/previsto/automazione-ciclo-sviluppo.md` (il ciclo completo:
+richiesta → scrittura → collaudo locale → push → collaudo S9 via SSH →
+verifica reale della CI → deploy a downtime minimo in modalità riservata →
+conferma funzionale → merge) e `docs/previsto/invio-miglioramenti-a-claude.md`
+(il canale `📤 Invia a Claude` sui miglioramenti `da_fare`, complementare alla
+richiesta in chat). Esplicitamente fuori scope, per ora: nodi di standby,
+failover automatico fra macchine.
+
+## Una cosa da correggere prima di iniziare
+
+`docs/infrastruttura.md` descriveva un **PC fisso** distinto dal portatile,
+dove dovrebbe girare l'agente — non esiste ancora. Verificato: questa sessione
+gira **sul portatile stesso** (`galaxybookalessio`), che ha già Tailscale e
+SSH verso l'S9 funzionanti (`ssh s9` risponde). Per ora il portatile fa da
+host; la migrazione a un PC fisso futuro resta a basso costo (repository via
+git, Rust/GCC da reinstallare, una chiave SSH **nuova e dedicata** per quel
+PC, non quella del portatile).
+
+Anche `ContextState` in `src/context_bot.rs`, citato nella specifica come il
+posto dove vive lo stato "in attesa di input testuale", non lo è: tiene lo
+storico di `💡 Migliora`. Lo stato vero vive in nove mappe indipendenti in
+`main.rs` (`identity_sessions`, `food_sessions`, `profile_sessions`,
+`recipe_sessions`, `improvement_sessions`, `container_sessions`,
+`location_sessions`, `photo_sessions`, `sessions`).
+
+## Decisioni prese, prima di scrivere codice
+
+Quattro punti "Aperto" nei due documenti, con opzioni proposte e non decise
+da soli:
+
+- il messaggio pinnato (countdown, poi checklist) è pilotato dall'**agente**
+  via API Telegram diretta, non dal bot sull'S9 — deve continuare ad
+  aggiornarsi anche mentre il processo S9 è fermo per lo swap;
+- tipo/orario della manutenzione: schermata
+  `🛠️ Amministrazione → 🚀 Distribuzione`, default + scelta puntuale a ogni
+  deploy;
+- coda "in attesa di input testuale": si interrogano le nove mappe cosi'
+  come sono, nessun refactoring preliminare, timeout massimo prima di
+  procedere comunque;
+- invii duplicati di `📤 Invia a Claude`: un flag `in_coda_claude` +
+  timestamp sulla riga `miglioramenti`, non una tabella coda separata.
+
+**Confermato, non è più un punto aperto**: `cargo test` non tocca mai il
+database reale — ricerca su tutto `src/`, ogni `.connect(...)` nei test usa
+`sqlite::memory:`, zero eccezioni. Il DB reale si raggiunge solo a runtime
+via `DATABASE_URL`.
+
+Nessun test nuovo, nessun cambiamento al totale: **270**.
+
 <!-- CHANGELOG_LISTE_CI_ROSSA_20260902 -->
 # 02/09/2026 — Un `format!` inutile, e quattro run rosse per accorgersene
 

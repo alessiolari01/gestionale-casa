@@ -158,6 +158,30 @@ grafo tramite `teloxide-core`. Effetto collaterale utile: la validazione delle
 date e' diventata semantica, quindi `2026-02-30` viene rifiutata all'ingresso
 invece di arrivare a SQLite e diventare `NULL`.
 
+## 2bis. Automazione del ciclo di sviluppo — in corso
+
+Dal 3 settembre 2026, per gradi: specifica in
+`docs/previsto/automazione-ciclo-sviluppo.md` e
+`docs/previsto/invio-miglioramenti-a-claude.md`. Per sapere se c'è lavoro
+aperto su questo si chiede a git, come in sezione 1 — non lo si dichiara qui.
+
+Corretta durante la lettura dei due documenti: `docs/infrastruttura.md`
+parlava di un "PC fisso" distinto dal portatile, non ancora esistente. La
+sessione che scrive questo codice gira sul portatile stesso
+(`galaxybookalessio`), che ha già Tailscale e SSH verso l'S9 funzionanti — fa
+da host dell'automazione per ora (dettagli in `docs/infrastruttura.md`,
+sezione 0).
+
+Decisioni prese il 3 settembre, dettagliate negli stessi due documenti: il
+messaggio pinnato di countdown/checklist è pilotato dall'agente via API
+Telegram diretta (non dal bot sull'S9); tipo/orario della manutenzione si
+configurano da una schermata admin con default + scelta puntuale; la coda
+"in attesa di input testuale" si controlla interrogando le nove mappe di
+sessione esistenti in `main.rs`, senza unificarle prima; gli invii duplicati
+di `📤 Invia a Claude` si evitano con un flag sulla riga `miglioramenti`, non
+una tabella coda separata. Confermato che `cargo test` non tocca mai il
+database reale (ogni test usa `sqlite::memory:`).
+
 ## 3. Stato tecnico verificato
 
 - **42 migration** nel repository, **tutte applicate** al database reale
