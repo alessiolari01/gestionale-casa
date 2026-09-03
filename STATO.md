@@ -278,12 +278,24 @@ scripts/aggiorna-s9.sh              aggiornamento e avvio sul telefono
 
 ## 6. Punti aperti
 
-1. **Toolchain dell'S9 piu' vecchia di quella della CI.** La Clippy del
-   telefono non emette lint che il runner invece applica: e' cosi' che
-   `drain_collect` e' rimasto invisibile finche' la CI non ha iniziato a girare
-   sui branch. Un controllo locale che passa non e' una prova se la toolchain
-   non e' la stessa; quando i due esiti divergono, ha ragione la CI. Da
-   aggiornare con `rustup update` su Termux.
+1. **Tre toolchain diverse, e solo una conta.** Il runner della CI usa la
+   **1.98**; l'ambiente dell'assistente e' fermo alla **1.95** e non puo'
+   aggiornarsi (`static.rust-lang.org` e' chiuso in uscita); l'S9 e' piu'
+   vecchio di entrambi. La Clippy delle versioni piu' basse non emette lint che
+   il runner invece applica: e' cosi' che `drain_collect` e' rimasto invisibile,
+   ed e' successo di nuovo il 2 settembre con `useless_format`, che ha fatto
+   fallire **quattro run di seguito** mentre la Clippy 1.95 diceva verde.
+
+   **Un `clippy` locale che passa non e' un lasciapassare, e' solo l'assenza di
+   una brutta notizia.** L'unico esito che conta e' quello della CI, e va
+   **guardato sulla pagina della run**: il 2 settembre e' stato riassunto da uno
+   strumento che ha letto verde dove era rosso, e su quella base era gia' stato
+   consigliato il merge. Prima di mergiare si apre Actions e si legge l'icona.
+
+   Da aggiornare con `rustup update` su Termux. Attenzione: **un
+   `rust-toolchain.toml` non e' la soluzione ovvia** — su Termux `cargo` arriva
+   da `pkg` e non da rustup, quindi il file verrebbe ignorato li' e potrebbe
+   invece costringere altri ambienti a scaricare una versione che non hanno.
 2. **Pasti liberi** non rappresentabili: `ricetta_nome_snapshot` e' NOT NULL.
    Decisione rimandata ora che esiste l'esito "saltato".
 3. **`cargo clean` ogni tanto sull'S9.** `target/` cresce fino a qualche GB e

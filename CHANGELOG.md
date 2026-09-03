@@ -2,6 +2,62 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_LISTE_CI_ROSSA_20260902 -->
+# 02/09/2026 — Un `format!` inutile, e quattro run rosse per accorgersene
+
+Il ramo `ux-liste` aveva la CI **rossa da subito**, su tutte e quattro le run.
+Compilava, i 270 test passavano, il formato era a posto e il controllo dei
+documenti era verde: falliva soltanto **Clippy**, con un errore solo.
+
+```text
+error: useless use of `format!`
+  --> src/modules/miglioramenti.rs:2176:26
+   |   let mut lines = vec![format!(
+   |       "{}",
+   |       liste::intestazione("📦 Archivio miglioramenti", total, page)
+   |   )];
+```
+
+Un `format!("{}", x)` attorno a una funzione che restituisce gia' una `String`,
+scritto per non cambiare la forma `vec![format!(...)]` che c'era prima. Il
+rimedio non e' il `.to_string()` suggerito da Clippy ma togliere il `format!`:
+
+```rust
+let mut lines = vec![liste::intestazione("📦 Archivio miglioramenti", total, page)];
+```
+
+## Perche' non se n'era accorto nessuno prima del runner
+
+`useless_format` non e' un lint nuovo, ma **e' stato esteso** fra le versioni.
+Il runner ha la **1.98**, l'ambiente in cui il codice viene scritto e provato ha
+la **1.95** e non puo' aggiornarsi. Tre versioni di distanza bastano.
+
+E' la seconda volta che questo scarto morde, dopo `drain_collect`. Il punto
+aperto 1 di `STATO.md` lo diceva gia' — *un controllo locale che passa non e'
+una prova se la toolchain non e' la stessa* — ma restava una nota generica: ora
+porta i numeri veri delle tre toolchain e la conseguenza operativa.
+
+## L'errore piu' grave non e' stato il lint
+
+Il lint e' un refuso. L'errore vero e' che lo stato della CI e' stato
+**riassunto invece che guardato**: uno strumento ha letto «verde» dove la pagina
+diceva rosso, e su quella base era gia' stato consigliato di mergiare in `main`.
+Un merge fatto su quel consiglio avrebbe portato la CI rossa sul ramo
+principale.
+
+Da qui in avanti, prima di ogni merge si apre la pagina della run e si legge
+l'icona. E' scritto nel punto aperto 1.
+
+## Nota su `rust-toolchain.toml`
+
+Sembra la soluzione ovvia e **non lo e'**: sull'S9 `cargo` arriva da `pkg` di
+Termux e non da rustup, quindi il file verrebbe semplicemente ignorato proprio
+sulla macchina piu' fragile, mentre potrebbe costringere altri ambienti a
+scaricare una versione che non riescono a prendere. La strada resta
+`rustup update` sull'S9, con la CI come unico giudice.
+
+Nessun test nuovo: **270**.
+
 <!-- CHANGELOG_LISTE_CHIUSURA_20260902 -->
 # 02/09/2026 — Cosa resta da fare, scritto dove si trova
 

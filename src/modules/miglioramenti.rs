@@ -2173,9 +2173,10 @@ async fn show_archive(
             .await?;
         return Ok(());
     }
-    let mut lines = vec![format!(
-        "{}",
-        liste::intestazione("📦 Archivio miglioramenti", total, page)
+    let mut lines = vec![liste::intestazione(
+        "📦 Archivio miglioramenti",
+        total,
+        page,
     )];
     for item in rows {
         lines.push(String::new());
