@@ -207,6 +207,16 @@ visto collaudando a mano il blocco Spazi/Profilo. Corretto usando sempre
 anche da solo se `python3` è lo stub Windows che non esegue nulla, e ripiega
 su `python` — la stessa soluzione già in `verifica-ci.sh`.
 
+**Terzo pezzo pronto**: `scripts/collauda-remoto.sh`, punto 4 del ciclo —
+lancia `aggiorna-s9.sh --ramo <nome> --solo-controlli` sull'S9 via SSH invece
+di chiederlo a chi lo faceva a mano da Termux. Usa sempre `--solo-controlli`:
+verifica compilazione/Clippy/test/migration, non avvia mai il bot. Provato
+per davvero su questo ramo: S9 passato da `ux-spazi-profilo` ad
+`automazione-ciclo-sviluppo`, 270 test (uguale a quanto dichiarato qui),
+backup creato, nessuna migration pendente, fermato prima dell'avvio come
+richiesto. L'S9 resta sul ramo appena collaudato — comportamento voluto,
+lo stesso di quando lo lancia una persona.
+
 ## 3. Stato tecnico verificato
 
 - **42 migration** nel repository, **tutte applicate** al database reale
@@ -325,6 +335,7 @@ src/main.rs                         routing, sessioni, input inattesi
 scripts/aggiorna-s9.sh              aggiornamento e avvio sul telefono
 scripts/verifica-ci.sh              stato reale della run CI via API, non un riassunto
 scripts/pipeline-locale.sh          fmt/check/test/clippy in locale, commit/push solo se verde
+scripts/collauda-remoto.sh          lancia aggiorna-s9.sh --solo-controlli sull'S9 via SSH
 ```
 
 ## 6. Punti aperti

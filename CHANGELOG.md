@@ -2,6 +2,32 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_COLLAUDO_REMOTO_20260904 -->
+# 04/09/2026 — Il collaudo sull'S9 lanciato dall'agente, non più a mano da Termux
+
+`scripts/collauda-remoto.sh`: punto 4 del ciclo. Si collega via SSH e lancia
+`aggiorna-s9.sh --ramo <nome> --solo-controlli` — sempre `--solo-controlli`,
+perché questo passo verifica che il codice sia sano (compilazione, Clippy,
+test, migration di prova) e non deve mai avviare il bot: quello è il passo 6
+(swap), non questo. Controlla anche che il ramo richiesto sia stato pushato
+su GitHub prima di collaudarlo — l'S9 vede solo quello, non l'albero locale
+del PC (STATO.md, sezione 4).
+
+**Provato per davvero contro l'S9 vero**, non un caso finto: l'S9 era su
+`ux-spazi-profilo`, lo script lo ha portato su `automazione-ciclo-sviluppo`,
+compilato, passati 270 test (confermato uguale a quanto dichiarato in
+`STATO.md` — lo confronto lo fa già `aggiorna-s9.sh` da solo), creato un
+backup del database reale, verificata l'integrità, controllato che non ci
+fossero migration pendenti, fermato prima dell'avvio. Il bot non è mai
+partito.
+
+L'S9 resta sul ramo appena collaudato invece di tornare a quello precedente:
+comportamento voluto, lo stesso di quando lo lancia una persona — il passo 6
+del ciclo (deploy vero) parte da questo stesso stato.
+
+Nessun test Rust coinvolto in questo commit (non è codice Rust). Totale
+invariato: 270.
+
 <!-- CHANGELOG_PIPELINE_LOCALE_20260904 -->
 # 04/09/2026 — La pipeline locale, e un bug di `controlla-documenti.sh` che c'era da settimane
 
