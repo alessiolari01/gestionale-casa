@@ -2,6 +2,42 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_COUNTDOWN_PINNATO_20260904 -->
+# 04/09/2026 — Il countdown pinnato, e due bug di rete trovati provandolo per davvero
+
+Sotto-step 1/5 del punto 6 del ciclo (deploy): `scripts/telegram-api.sh`
+(`tg_leggi_credenziali`, `tg_invia_e_fissa`, `tg_modifica`, `tg_sblocca`) e
+`scripts/prova-countdown.sh` per collaudarlo isolato, senza nessun deploy
+vero attaccato. Deciso il 3 settembre: pilotato dall'agente via API diretta,
+non dal bot sull'S9, perché deve continuare ad aggiornarsi anche quando il
+processo S9 è fermo per lo swap.
+
+Provato sulla chat reale dell'amministratore principale, non su un caso
+finto. Prima versione: tick ogni 15s, confermato che il meccanismo di
+pin/edit funziona ma il countdown "non si vedeva scendere". Corretto a un
+tick al secondo — modificare non spamma la chat come inviare farebbe.
+
+## Due problemi di rete, trovati provando
+
+`curl --data-urlencode` su questa macchina (curl 8.21/mingw-w64) **corrompe
+i caratteri non-ASCII**: una vocale accentata diventa `U+FFFD` prima ancora
+di essere codificata, e Telegram rifiuta con "strings must be encoded in
+UTF-8". Isolato con `https://httpbin.org/get` prima di incolpare Telegram.
+Aggirato codificando il testo con Python (`urllib.parse.quote`, stesso
+rilevamento `python3`/`python` già usato in `verifica-ci.sh` e
+`controlla-documenti.sh`) e passandolo già pronto a curl con `--data`
+semplice, che non lo ritocca più.
+
+Un test da 30 tick ha incontrato **tre fallimenti di connessione
+transitori** (`Recv failure: Connection was reset`) — non un limite di
+frequenza di Telegram, la rete. `curl --retry 4 --retry-all-errors
+--retry-delay 2` li assorbe da solo, e dal 7.66 rispetta anche l'header
+`Retry-After` di un eventuale 429 senza doverlo leggere a mano: più semplice
+di un retry scritto a mano, e il countdown è arrivato in fondo lo stesso
+(un piccolo scatto visibile una sola volta, confermato irrilevante).
+
+Nessun test Rust coinvolto. Totale invariato: 270.
+
 <!-- CHANGELOG_COLLAUDO_REMOTO_20260904 -->
 # 04/09/2026 — Il collaudo sull'S9 lanciato dall'agente, non più a mano da Termux
 

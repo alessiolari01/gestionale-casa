@@ -217,6 +217,31 @@ backup creato, nessuna migration pendente, fermato prima dell'avvio come
 richiesto. L'S9 resta sul ramo appena collaudato — comportamento voluto,
 lo stesso di quando lo lancia una persona.
 
+**Punto 6 del ciclo (deploy), sotto-step 1/5 fatto**: la meccanica del
+messaggio pinnato via API diretta, isolata da qualunque deploy vero.
+`scripts/telegram-api.sh` (`tg_leggi_credenziali`, `tg_invia_e_fissa`,
+`tg_modifica`, `tg_sblocca`) e `scripts/prova-countdown.sh` per collaudarla.
+Confermato da Alessio sulla chat reale: tick al secondo, stesso messaggio
+modificato senza mai duplicarlo, contatore visibile che scende a zero.
+
+Due problemi trovati collaudando per davvero, non a tavolino:
+
+- `curl --data-urlencode` su questa macchina (curl 8.21/mingw-w64) corrompe
+  i caratteri non-ASCII (una vocale accentata diventa `U+FFFD` prima di
+  essere codificata) e Telegram rifiuta la richiesta. Aggirato codificando
+  il testo con Python (`urllib.parse.quote`) e passandolo già pronto con
+  `--data` semplice;
+- un tick al secondo per 30 modifiche ha incontrato tre `Recv failure:
+  Connection was reset` transitori. `curl --retry 4 --retry-all-errors
+  --retry-delay 2` li assorbe da solo (e rispetta anche l'header
+  `Retry-After` di un eventuale 429 di Telegram, senza doverlo leggere a
+  mano): il countdown è arrivato in fondo lo stesso, con un piccolo scatto
+  visibile una sola volta.
+
+Restano 4 sotto-step: gestione del processo sull'S9 (`nohup`+`disown`+file
+PID, deciso il 4 settembre), la schermata admin `🚀 Distribuzione`, la coda
+"in attesa di input testuale", e lo swap vero con rollback.
+
 ## 3. Stato tecnico verificato
 
 - **42 migration** nel repository, **tutte applicate** al database reale
@@ -336,6 +361,8 @@ scripts/aggiorna-s9.sh              aggiornamento e avvio sul telefono
 scripts/verifica-ci.sh              stato reale della run CI via API, non un riassunto
 scripts/pipeline-locale.sh          fmt/check/test/clippy in locale, commit/push solo se verde
 scripts/collauda-remoto.sh          lancia aggiorna-s9.sh --solo-controlli sull'S9 via SSH
+scripts/telegram-api.sh             pin/edit su Telegram via API diretta, per il countdown/checklist
+scripts/prova-countdown.sh          collaudo isolato del countdown pinnato, nessun deploy vero
 ```
 
 ## 6. Punti aperti
