@@ -2,6 +2,38 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_PIPELINE_LOCALE_20260904 -->
+# 04/09/2026 — La pipeline locale, e un bug di `controlla-documenti.sh` che c'era da settimane
+
+`scripts/pipeline-locale.sh`: punto 2 del ciclo in
+`docs/previsto/automazione-ciclo-sviluppo.md`. Stessa sequenza di
+`.github/workflows/ci.yml`, stesso ordine (documenti → fmt → check → test →
+clippy), in locale. `--commit FILE_MESSAGGIO FILE... [--push]` aggiunge,
+committa e pusha **solo se tutti i controlli passano** — la regola "niente
+commit o push se la pipeline fallisce" (STATO.md, sezione 7) diventa
+meccanica invece che da ricordarsi ogni volta.
+
+Provato in entrambi i sensi: pipeline vera, verde, 270 test; e pipeline fatta
+fallire apposta (un file con formattazione sbagliata) — fermata su "Formato",
+nessun commit creato, verificato con `git status` subito dopo.
+
+## Un bug reale, non di oggi, trovato scrivendo lo script sopra
+
+`scripts/controlla-documenti.sh` usava `os.path.normpath`. Su Windows quello
+e' `ntpath`, che normalizza i separatori con `\`: un percorso valido come
+`docs/architettura.md` restituito da `git ls-files` (sempre con `/`) smette
+di essere uguale a se stesso dopo la normalizzazione, e **ogni** rimando del
+progetto risultava "rotto" — compresi quelli mai toccati. Non si era mai
+notato perche' lo script gira in CI su Linux, dove `os.path` **e'**
+`posixpath` e il bug non esiste; in locale, su Windows, veniva semplicemente
+scavalcato leggendo il diff a mano. Corretto usando sempre `posixpath`
+esplicitamente, indipendentemente dal sistema operativo (Termux, CI, o
+Windows in locale) — cosi' come lo script rileva anche da solo se `python3`
+sul `PATH` e' lo stub Microsoft Store che non esegue nulla, e ripiega su
+`python` (stessa soluzione gia' scritta in `verifica-ci.sh`).
+
+Nessun test Rust coinvolto: nessun cambiamento al totale, **270**.
+
 <!-- CHANGELOG_VERIFICA_CI_20260904 -->
 # 04/09/2026 — Il primo pezzo dell'automazione: leggere la CI, non riassumerla
 

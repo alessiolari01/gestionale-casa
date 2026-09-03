@@ -189,6 +189,24 @@ letto correttamente sia mentre era `in_progress` sia dopo, `completed` /
 `success`. `--attendi` ripete il controllo fino a un timeout invece di uscire
 subito con "ancora in corso".
 
+**Secondo pezzo pronto**: `scripts/pipeline-locale.sh`, la stessa sequenza di
+`ci.yml` (documenti, fmt, check, test, clippy) in locale, punto 2 del ciclo.
+Con `--commit FILE_MESSAGGIO FILE...` aggiunge, committa e — con `--push` —
+pusha solo se tutti i controlli sono verdi: "niente commit o push se la
+pipeline fallisce" era già una regola operativa (sezione 7), ora è meccanica
+invece che da ricordarsi. Provato sia a far passare una pipeline vera (270
+test) sia a farla fallire di proposito (un file non formattato): nel secondo
+caso nessun commit è stato creato, verificato con `git status`.
+
+Nel provarlo si è trovato e sistemato un bug reale in
+`scripts/controlla-documenti.sh`, non nuovo di oggi: usava `os.path`, che su
+Windows normalizza con `\` invece di `/`, e faceva risultare "rotto" ogni
+singolo rimando del progetto — anche quelli mai toccati, come si era già
+visto collaudando a mano il blocco Spazi/Profilo. Corretto usando sempre
+`posixpath`, indipendentemente dal sistema operativo. Lo script ora rileva
+anche da solo se `python3` è lo stub Windows che non esegue nulla, e ripiega
+su `python` — la stessa soluzione già in `verifica-ci.sh`.
+
 ## 3. Stato tecnico verificato
 
 - **42 migration** nel repository, **tutte applicate** al database reale
@@ -306,6 +324,7 @@ src/context_bot.rs                  schermata singola e `💡 Migliora`
 src/main.rs                         routing, sessioni, input inattesi
 scripts/aggiorna-s9.sh              aggiornamento e avvio sul telefono
 scripts/verifica-ci.sh              stato reale della run CI via API, non un riassunto
+scripts/pipeline-locale.sh          fmt/check/test/clippy in locale, commit/push solo se verde
 ```
 
 ## 6. Punti aperti
