@@ -19,10 +19,11 @@ use teloxide::{
 
 use crate::identity;
 use crate::modules::calendario;
+use crate::modules::liste;
 
 type Bot = crate::context_bot::ContextBot;
 
-const PAGE_SIZE: i64 = 5;
+const PAGE_SIZE: i64 = liste::VOCI_PER_PAGINA as i64;
 const UNLIMITED_USES: i64 = 2_147_483_647;
 const INVITE_PREFIX: &str = "spazio_";
 
@@ -677,7 +678,7 @@ async fn show_members(
         .fetch_one(pool)
         .await
         .unwrap_or(0);
-    let pages = page_count(total);
+    let pages = liste::totale_pagine(total);
     let page = requested_page.max(0).min(pages.saturating_sub(1));
     let members = sqlx::query_as::<_, MemberRow>(
         "SELECT u.id AS user_id, u.nome_visualizzato AS nome, ms.ruolo, \
@@ -704,8 +705,10 @@ async fn show_members(
             )]
         })
         .collect::<Vec<_>>();
-    if total > 0 {
-        rows.push(pagination_row(page, pages, "space-members:list:"));
+    if let Some(row) = liste::riga_paginazione(page, pages, "space-members:noop", |p| {
+        format!("space-members:list:{p}")
+    }) {
+        rows.push(row);
     }
     if can_manage {
         rows.push(vec![InlineKeyboardButton::callback(
@@ -1134,7 +1137,7 @@ async fn show_active_invites(
         .await?;
         return Ok(());
     }
-    let pages = page_count(total);
+    let pages = liste::totale_pagine(total);
     let page = requested_page.max(0).min(pages - 1);
     let invites =
         sqlx::query_as::<_, InviteRow>(&invite_select_sql("i.spazio_id = ?", "LIMIT ? OFFSET ?"))
@@ -1157,7 +1160,11 @@ async fn show_active_invites(
             )]
         })
         .collect::<Vec<_>>();
-    rows.push(pagination_row(page, pages, "space-members:invite:list:"));
+    if let Some(row) = liste::riga_paginazione(page, pages, "space-members:noop", |p| {
+        format!("space-members:invite:list:{p}")
+    }) {
+        rows.push(row);
+    }
     rows.push(vec![InlineKeyboardButton::callback(
         "➕ Nuovo invito".to_string(),
         "space-members:invite:new".to_string(),
@@ -2021,27 +2028,6 @@ fn calendar_rows(
     rows
 }
 
-fn pagination_row(page: i64, pages: i64, prefix: &str) -> Vec<InlineKeyboardButton> {
-    let mut row = Vec::new();
-    if page > 0 {
-        row.push(InlineKeyboardButton::callback(
-            "⬅️ Pagina precedente".to_string(),
-            format!("{prefix}{}", page - 1),
-        ));
-    }
-    row.push(InlineKeyboardButton::callback(
-        format!("{}/{}", page + 1, pages),
-        "space-members:noop".to_string(),
-    ));
-    if page + 1 < pages {
-        row.push(InlineKeyboardButton::callback(
-            "Pagina successiva ➡️".to_string(),
-            format!("{prefix}{}", page + 1),
-        ));
-    }
-    row
-}
-
 fn open_space_keyboard(spazio_id: i64) -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![vec![
         InlineKeyboardButton::callback(
@@ -2189,9 +2175,6 @@ fn role_from_code(code: &str) -> Option<&'static str> {
         "r" => Some("lettura"),
         _ => None,
     }
-}
-fn page_count(total: i64) -> i64 {
-    ((total + PAGE_SIZE - 1) / PAGE_SIZE).max(1)
 }
 fn parse_page(data: &str, prefix: &str) -> Option<i64> {
     data.strip_prefix(prefix)?

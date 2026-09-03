@@ -12,12 +12,15 @@ use teloxide::{
 
 use crate::{
     identity,
-    modules::storico::{self, NewFieldChange, NewHistoryEvent},
+    modules::{
+        liste,
+        storico::{self, NewFieldChange, NewHistoryEvent},
+    },
 };
 
 type Bot = crate::context_bot::ContextBot;
 
-const PAGE_SIZE: i64 = 5;
+const PAGE_SIZE: i64 = liste::VOCI_PER_PAGINA as i64;
 
 #[derive(Debug, Clone, FromRow)]
 struct IngredientRow {
@@ -305,7 +308,7 @@ async fn show_list_with_notice(
 
     match load_page(pool, profile_id, recipe_id, requested_page).await {
         Ok((items, total, page)) => {
-            let pages = page_count(total);
+            let pages = liste::totale_pagine(total);
             let text = format!(
                 "{}🥕 Ingredienti personalizzati\n\n👤 Profilo: {}\n🍳 Ricetta: {}\n\nScegli un ingrediente.\n\nTotale: {total}\nPagina {}/{}",
                 notice
@@ -486,7 +489,7 @@ async fn load_page(
             .await
             .context("Impossibile contare gli ingredienti")?;
 
-    let pages = page_count(total);
+    let pages = liste::totale_pagine(total);
     let page = requested_page.max(0).min(pages.saturating_sub(1));
     let rows = sqlx::query_as::<_, IngredientRow>(
         "SELECT ri.id, a.nome AS name, ri.quantita AS recipe_quantity, \
@@ -908,22 +911,10 @@ fn list_keyboard(
         })
         .collect::<Vec<_>>();
 
-    if pages > 1 {
-        let mut pagination = Vec::new();
-        if page > 0 {
-            pagination.push(button(
-                "⬅️ Pagina precedente",
-                list_callback(profile_id, recipe_id, page - 1),
-            ));
-        }
-        pagination.push(button(format!("{}/{}", page + 1, pages), "foodprof:noop"));
-        if page + 1 < pages {
-            pagination.push(button(
-                "Pagina successiva ➡️",
-                list_callback(profile_id, recipe_id, page + 1),
-            ));
-        }
-        rows.push(pagination);
+    if let Some(row) = liste::riga_paginazione(page, pages, "foodprof:noop", |p| {
+        list_callback(profile_id, recipe_id, p)
+    }) {
+        rows.push(row);
     }
 
     rows.push(vec![
@@ -1070,10 +1061,6 @@ fn format_quantity(value: f64) -> String {
     }
 }
 
-fn page_count(total: i64) -> i64 {
-    ((total + PAGE_SIZE - 1) / PAGE_SIZE).max(1)
-}
-
 fn current_user_id() -> Result<i64> {
     identity::current_actor()
         .utente_id
@@ -1138,13 +1125,6 @@ mod tests {
             history_override_value("Pasta test", "Pasta", "g", Some(("escluso", None))),
             "Pasta test · Pasta: escluso"
         );
-    }
-
-    #[test]
-    fn pagina_ingredienti_massimo_cinque() {
-        assert_eq!(page_count(0), 1);
-        assert_eq!(page_count(5), 1);
-        assert_eq!(page_count(6), 2);
     }
 
     #[test]

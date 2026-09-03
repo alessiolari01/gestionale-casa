@@ -1,4 +1,4 @@
-# Stato del progetto — 02/09/2026
+# Stato del progetto — 03/09/2026
 
 **Questo e' l'unico documento che descrive il presente.** Se un fatto sta qui,
 non sta anche altrove: gli altri documenti raccontano com'e' fatto il codice
@@ -110,10 +110,12 @@ c'e' una creazione manuale, per non aggiungere concetti all'utente medio.
 il documento di riferimento per ogni schermata: nasce dal giro completo del bot
 fatto il 1 settembre e contiene otto problemi trovati e dodici convenzioni. La
 piu' importante e' C1: **il testo di un messaggio non ripete mai i pulsanti**.
-Applicate al planner, al menu' principale, alle righe di navigazione e — dal
-2 settembre — alle **quattro liste**: alimenti, ricette, storico,
-miglioramenti. Restano da fare Spazi e Profilo, poi il menu' principale e le
-date, nell'ordine della parte 3 di quel documento.
+Applicate al planner, al menu' principale, alle righe di navigazione, alle
+**quattro liste** (2 settembre: alimenti, ricette, storico, miglioramenti) e —
+dal 3 settembre — a **Spazi e Profilo** (C5): la coppia spazio predefinito /
+vista si spiega ora in una riga sola su entrambe le schermate, invece di due
+etichette separate che nessuna schermata legava fra loro. Restano da fare il
+menu' principale e le date, nell'ordine della parte 3 di quel documento.
 
 **Un modulo solo per le liste.** `src/modules/liste.rs` tiene la riga di
 paginazione, l'intestazione con il totale, la soglia delle venti voci oltre la
@@ -129,10 +131,14 @@ accorto il collaudo sul bot, non il codice: lo `📜 Storico` mostrava ancora
 `1 / 21` con le frecce nude. `riga_paginazione_da_totale` resta per chi ha il
 totale.
 
-**Restano sei righe di paginazione scritte a mano** fuori da questo blocco, in
-`spazi_membri`, `porzioni_profili`, `porzioni_ingredienti`,
-`profili_alimentari` (due) e `planner_alimentare`: passeranno con i blocchi
-Spazi/Profilo e con il planner.
+**Restava una riga di paginazione scritta a mano** fuori da `planner_alimentare`:
+le cinque in `spazi_membri`, `porzioni_profili`, `porzioni_ingredienti` e
+`profili_alimentari` (due) sono passate a `modules::liste` il 3 settembre,
+insieme al blocco Spazi/Profilo. Due di quelle cinque avevano lo stesso difetto
+gia' visto nello Storico il 2 settembre — la riga appariva anche con una sola
+pagina, perche' il controllo era `if totale > 0` invece che sul numero di
+pagine — e `riga_paginazione` lo evita per costruzione. Resta solo
+`planner_alimentare`, che passera' con il blocco planner.
 
 Guardare le schermate sul bot prima di scrivere ha corretto la convenzione
 stessa: C1 diceva che nello Storico «Giorgia» fosse l'autore dell'evento, e
@@ -263,6 +269,7 @@ nella sezione 3 di questo file e va aggiornato a ogni consegna.
 
 ```text
 docs/convenzioni-telegram.md        regole di ogni schermata Telegram
+src/identity.rs                     👤 Profilo e 👥 Spazi: testo, spazio predefinito, vista
 src/modules/calendario.rs           date e griglia del mese, per tutti
 src/modules/liste.rs                paginazione e intestazioni, per tutte le liste
 src/modules/planner_alimentare.rs   dominio + UI Telegram del planner

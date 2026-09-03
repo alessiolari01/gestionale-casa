@@ -378,7 +378,17 @@ di applicazione è questo, dal più visibile al meno:
    farne due su quattro. Il giro sul bot prima di scrivere codice ha corretto
    C1 e fatto nascere `modules::liste`;
 3. **menù di sezione** — C2, C3, C10, C11;
-4. **Spazi e Profilo** — C5, la parte concettualmente più difficile;
+4. ~~**Spazi e Profilo** — C5, la parte concettualmente più difficile~~
+   **fatto il 3 settembre.** Il giro sul bot prima di scrivere ha confermato
+   il codice letto, quindi la convenzione non ha avuto bisogno di correzioni.
+   `👥 Spazi` e `👤 Profilo` non elencano più separatamente spazio predefinito
+   e vista: una riga sola, "Le cose nuove finiscono in *Spazio*. Adesso stai
+   vedendo *vista*.", vale su entrambe le schermate. Sistemati anche, sulle
+   stesse due schermate: la lista degli spazi ripetuta in testo e pulsanti
+   (C1) spostando tipo e ruolo sul pulsante; le due frasi «Usa i pulsanti
+   per…» / «Usa il pulsante 👥 Spazi per…» (C2, e problema 7 — quel pulsante
+   su quella schermata non esiste); ruolo sistema e ruolo nello spazio,
+   scritti come frase invece che come coppia campo/valore (C5);
 5. **menù principale** — C12;
 6. **date** — C13, ovunque se ne inserisca una a mano.
 

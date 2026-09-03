@@ -19,13 +19,16 @@ use teloxide::{
 
 use crate::{
     identity,
-    modules::storico::{self, NewFieldChange, NewHistoryEvent},
+    modules::{
+        liste,
+        storico::{self, NewFieldChange, NewHistoryEvent},
+    },
 };
 
 type Bot = crate::context_bot::ContextBot;
 
-const PROFILE_PAGE_SIZE: i64 = 5;
-const SPACE_PAGE_SIZE: i64 = 5;
+const PROFILE_PAGE_SIZE: i64 = liste::VOCI_PER_PAGINA as i64;
+const SPACE_PAGE_SIZE: i64 = liste::VOCI_PER_PAGINA as i64;
 const PROFILE_NAME_MAX_CHARS: usize = 80;
 
 #[derive(Clone, Default)]
@@ -529,7 +532,7 @@ async fn show_profile_list(
 ) -> ResponseResult<()> {
     match list_visible_profiles(pool, requested_page).await {
         Ok(profile_page) => {
-            let pages = page_count(profile_page.total);
+            let pages = liste::totale_pagine(profile_page.total);
             let text = if profile_page.total == 0 {
                 "👥 Profili alimentari\n\nNessun profilo disponibile.\n\nCrea il tuo profilo oppure una persona senza account.".to_string()
             } else {
@@ -649,7 +652,7 @@ async fn show_space_manager(
 
     match list_manageable_spaces(pool, profile_id, requested_page).await {
         Ok(space_page) => {
-            let pages = space_page_count(space_page.total);
+            let pages = liste::totale_pagine(space_page.total);
             let text = if space_page.total == 0 {
                 format!(
                     "🏠 Visibilità · {}\n\nNon hai spazi modificabili disponibili.\nIl profilo rimane privato.",
@@ -1156,7 +1159,7 @@ async fn list_visible_profiles(pool: &SqlitePool, requested_page: i64) -> Result
     .await
     .context("Impossibile contare i profili alimentari")?;
 
-    let pages = page_count(total);
+    let pages = liste::totale_pagine(total);
     let page = requested_page.max(0).min(pages.saturating_sub(1));
     let offset = page * PROFILE_PAGE_SIZE;
 
@@ -1265,7 +1268,7 @@ async fn list_manageable_spaces(
     .await
     .context("Impossibile contare gli spazi condivisi")?;
 
-    let pages = space_page_count(total);
+    let pages = liste::totale_pagine(total);
     let page = requested_page.max(0).min(pages.saturating_sub(1));
     let offset = page * SPACE_PAGE_SIZE;
     let items = sqlx::query_as::<_, ManageableSpaceRecord>(
@@ -1354,14 +1357,6 @@ fn parse_profile_space_callback(data: &str, prefix: &str) -> Option<(i64, i64, i
     (parts.next().is_none()).then_some((profile_id, space_id, page))
 }
 
-fn page_count(total: i64) -> i64 {
-    ((total + PROFILE_PAGE_SIZE - 1) / PROFILE_PAGE_SIZE).max(1)
-}
-
-fn space_page_count(total: i64) -> i64 {
-    ((total + SPACE_PAGE_SIZE - 1) / SPACE_PAGE_SIZE).max(1)
-}
-
 fn button(text: impl Into<String>, data: impl Into<String>) -> InlineKeyboardButton {
     InlineKeyboardButton::callback(text.into(), data.into())
 }
@@ -1427,25 +1422,10 @@ fn profile_list_keyboard(page: &ProfilePage, pages: i64) -> InlineKeyboardMarkup
         })
         .collect::<Vec<_>>();
 
-    if page.total > 0 {
-        let mut pagination = Vec::new();
-        if page.page > 0 {
-            pagination.push(button(
-                "⬅️ Pagina precedente",
-                format!("foodprof:list:page:{}", page.page - 1),
-            ));
-        }
-        pagination.push(button(
-            format!("{}/{}", page.page + 1, pages),
-            "foodprof:noop",
-        ));
-        if page.page + 1 < pages {
-            pagination.push(button(
-                "Pagina successiva ➡️",
-                format!("foodprof:list:page:{}", page.page + 1),
-            ));
-        }
-        rows.push(pagination);
+    if let Some(row) = liste::riga_paginazione(page.page, pages, "foodprof:noop", |p| {
+        format!("foodprof:list:page:{p}")
+    }) {
+        rows.push(row);
     }
 
     rows.push(vec![button("➕ Nuovo profilo", "foodprof:new")]);
@@ -1506,25 +1486,10 @@ fn space_manager_keyboard(
         })
         .collect::<Vec<_>>();
 
-    if page.total > 0 {
-        let mut pagination = Vec::new();
-        if page.page > 0 {
-            pagination.push(button(
-                "⬅️ Pagina precedente",
-                format!("foodprof:spaces:{profile_id}:{}", page.page - 1),
-            ));
-        }
-        pagination.push(button(
-            format!("{}/{}", page.page + 1, pages),
-            "foodprof:noop",
-        ));
-        if page.page + 1 < pages {
-            pagination.push(button(
-                "Pagina successiva ➡️",
-                format!("foodprof:spaces:{profile_id}:{}", page.page + 1),
-            ));
-        }
-        rows.push(pagination);
+    if let Some(row) = liste::riga_paginazione(page.page, pages, "foodprof:noop", |p| {
+        format!("foodprof:spaces:{profile_id}:{p}")
+    }) {
+        rows.push(row);
     }
 
     if page.selected_total > 0 {
@@ -1632,15 +1597,6 @@ mod tests {
     #[test]
     fn nome_profilo_normalizza_spazi() {
         assert_eq!(clean_name("  Mario   Rossi  ").unwrap(), "Mario Rossi");
-    }
-
-    #[test]
-    fn paginazione_profili_usa_cinque_elementi() {
-        assert_eq!(page_count(0), 1);
-        assert_eq!(page_count(5), 1);
-        assert_eq!(page_count(6), 2);
-        assert_eq!(page_count(11), 3);
-        assert_eq!(space_page_count(6), 2);
     }
 
     #[test]

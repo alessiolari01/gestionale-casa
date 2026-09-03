@@ -567,7 +567,7 @@ async fn handle_authorized_message(
                 IdentityConversationState::AwaitingRenameSpaceName => {
                     identity::rename_active_space(&pool, &actor, text)
                         .await
-                        .map(|name| format!("✅ Spazio predefinito rinominato: {name}"))
+                        .map(|name| format!("✅ Spazio rinominato: {name}"))
                 }
             };
             match result {
@@ -753,7 +753,7 @@ async fn handle_authorized_message(
                 identity_sessions.set(chat_id, IdentityConversationState::AwaitingRenameSpaceName);
                 bot.send_message(
                     msg.chat.id,
-                    format!("✏️ Rinomina spazio\n\nSpazio predefinito attuale: {}\nScrivi il nuovo nome oppure premi ❌ Annulla.", actor.spazio_nome_snapshot),
+                    format!("✏️ Rinomina spazio\n\nNome attuale: {}\nScrivi il nuovo nome oppure premi ❌ Annulla.", actor.spazio_nome_snapshot),
                 )
                     .reply_markup(space_flow_keyboard())
                     .await?;
@@ -1394,14 +1394,19 @@ async fn send_spaces(
 
     match identity::list_user_spaces(pool, user_id).await {
         Ok(spaces) => {
-            let summary = identity::spaces_summary(pool, actor)
-                .await
-                .unwrap_or_else(|_| "👥 Spazi".to_string());
+            let summary = identity::spaces_summary(actor);
             let mut rows = Vec::new();
             for space in spaces {
                 let marker = if space.attivo != 0 { "⭐" } else { "○" };
+                // C1: tipo e ruolo distinguono uno spazio dall'altro e il
+                // testo sopra non li ripete piu', quindi stanno sul pulsante.
                 rows.push(vec![InlineKeyboardButton::callback(
-                    format!("{marker} {}", space.nome),
+                    format!(
+                        "{marker} {} · {} · {}",
+                        space.nome,
+                        identity::space_type_label(&space.tipo),
+                        identity::role_label(&space.ruolo)
+                    ),
                     format!("identity:space:{}", space.id),
                 )]);
             }

@@ -925,38 +925,23 @@ pub(crate) async fn ensure_can_write_sqlx(pool: &SqlitePool) -> Result<(), sqlx:
     }
 }
 
-pub(crate) async fn spaces_summary(pool: &SqlitePool, actor: &AuditActor) -> Result<String> {
-    let user_id = actor
-        .utente_id
-        .context("Spazi non disponibili per un attore di sistema")?;
-    let spaces = list_user_spaces(pool, user_id).await?;
-    let mut lines = vec![
-        "👥 Spazi".to_string(),
-        String::new(),
-        "Lo spazio predefinito determina dove vengono creati normalmente i nuovi dati.".to_string(),
-        String::new(),
-    ];
-    for space in spaces {
-        let marker = if space.attivo != 0 { "●" } else { "○" };
-        lines.push(format!(
-            "{marker} {} · {} · {}",
-            space.nome,
-            space_type_label(&space.tipo),
-            role_label(&space.ruolo)
-        ));
+/// C5: spazio predefinito e vista vanno spiegati insieme, con le conseguenze
+/// pratiche, in una riga sola — non in due etichette separate che nessuna
+/// schermata lega mai fra loro.
+pub(crate) fn spaces_summary(actor: &AuditActor) -> String {
+    format!(
+        "👥 Spazi\n\nLe cose nuove finiscono in {}. Adesso stai vedendo {}.",
+        actor.spazio_nome_snapshot,
+        view_phrase(actor.view_all),
+    )
+}
+
+fn view_phrase(view_all: bool) -> &'static str {
+    if view_all {
+        "tutti i tuoi spazi"
+    } else {
+        "solo lo spazio predefinito"
     }
-    lines.push(String::new());
-    lines.push(format!(
-        "Vista: {}",
-        if actor.view_all {
-            "🌐 Tutti i miei spazi"
-        } else {
-            "🎯 Solo spazio predefinito"
-        }
-    ));
-    lines.push(String::new());
-    lines.push("Usa i pulsanti per creare, rinominare o cambiare spazio.".to_string());
-    Ok(lines.join("\n"))
 }
 
 pub(crate) fn space_type_label(value: &str) -> &str {
@@ -998,26 +983,47 @@ pub(crate) async fn profile_summary(pool: &SqlitePool, actor: &AuditActor) -> Re
             .await
             .context("Impossibile contare gli spazi disponibili")?;
 
-    let system_role = if is_system_admin(pool, actor).await? {
-        "\nRuolo sistema: Amministratore"
+    let system_admin_line = if is_system_admin(pool, actor).await? {
+        "\nSei anche amministratore del sistema."
     } else {
         ""
     };
 
+    let spaces_line = if space_count > 1 {
+        format!("Hai accesso a {space_count} spazi.")
+    } else {
+        "Hai accesso a un solo spazio.".to_string()
+    };
+
+    // C5: "spazio predefinito" e "vista" non stanno mai da soli — la stessa
+    // frase di `spaces_summary` spiega insieme dove finiscono le cose nuove e
+    // cosa si sta vedendo, cosi' le due schermate non la raccontano in due modi.
     Ok(format!(
-        "👤 Profilo\n\nNome: {}\nTelegram: {}\nSpazio predefinito: {}\nVista: {}\nRuolo nello spazio: {}{}\nMembro dal: {}\nSpazi disponibili: {}\n\nUsa il pulsante 👥 Spazi per cambiare spazio predefinito o modalità di visualizzazione.",
+        "👤 Profilo\n\n{}\nTelegram: {}\n\n{}{}\n\nLe cose nuove finiscono in {}. Adesso stai vedendo {}.\n\n{}",
         actor.nome_snapshot,
         telegram,
+        role_sentence(&role, &actor.spazio_nome_snapshot, &member_since),
+        system_admin_line,
         actor.spazio_nome_snapshot,
-        if actor.view_all { "Tutti i miei spazi" } else { "Solo spazio predefinito" },
-        role_label(&role),
-        system_role,
-        member_since,
-        space_count,
+        view_phrase(actor.view_all),
+        spaces_line,
     ))
 }
 
-fn role_label(role: &str) -> &str {
+fn role_sentence(role: &str, spazio: &str, membro_dal: &str) -> String {
+    let ruolo = match role {
+        "proprietario" => "proprietario",
+        "amministratore" => "amministratore",
+        "membro" => "membro",
+        "lettura" => {
+            return format!("Hai accesso in sola lettura a {spazio}. Membro dal {membro_dal}.")
+        }
+        _ => role,
+    };
+    format!("Sei {ruolo} di {spazio}. Membro dal {membro_dal}.")
+}
+
+pub(crate) fn role_label(role: &str) -> &str {
     match role {
         "proprietario" => "Proprietario",
         "amministratore" => "Amministratore",
@@ -1280,6 +1286,83 @@ mod tests {
         .await
         .expect("preferenza riparata");
         assert_eq!(active, LEGACY_SPACE_ID);
+    }
+
+    #[test]
+    fn spaces_summary_lega_spazio_predefinito_e_vista_in_una_frase_c5() {
+        let mut actor = AuditActor::system();
+        actor.spazio_nome_snapshot = "Casa".to_string();
+
+        actor.view_all = true;
+        assert_eq!(
+            spaces_summary(&actor),
+            "👥 Spazi\n\nLe cose nuove finiscono in Casa. Adesso stai vedendo tutti i tuoi spazi."
+        );
+
+        actor.view_all = false;
+        assert_eq!(
+            spaces_summary(&actor),
+            "👥 Spazi\n\nLe cose nuove finiscono in Casa. Adesso stai vedendo solo lo spazio predefinito."
+        );
+    }
+
+    #[tokio::test]
+    async fn profile_summary_spiega_spazio_predefinito_e_vista_insieme_c5() {
+        let pool = test_pool().await;
+        let actor = resolve_telegram_profile(
+            &pool,
+            &telegram_profile(1001, "Alessio", Some("alessio_test")),
+        )
+        .await
+        .expect("actor");
+
+        let summary = profile_summary(&pool, &actor).await.expect("profilo");
+
+        assert!(summary.contains(
+            "Le cose nuove finiscono in Spazio principale. Adesso stai vedendo solo lo spazio predefinito."
+        ));
+        assert!(summary.contains("Sei proprietario di Spazio principale. Membro dal "));
+        assert!(summary.contains("Sei anche amministratore del sistema."));
+        assert!(summary.contains("Hai accesso a un solo spazio."));
+        // Problema 7: descriveva un pulsante "👥 Spazi" che su questa
+        // schermata non esiste.
+        assert!(!summary.contains("Usa il pulsante"));
+
+        set_view_all(&pool, &actor, true)
+            .await
+            .expect("vista tutti");
+        let all = resolve_telegram_profile(
+            &pool,
+            &telegram_profile(1001, "Alessio", Some("alessio_test")),
+        )
+        .await
+        .expect("actor vista tutti");
+        let summary_tutti = profile_summary(&pool, &all)
+            .await
+            .expect("profilo vista tutti");
+        assert!(summary_tutti.contains(
+            "Le cose nuove finiscono in Spazio principale. Adesso stai vedendo tutti i tuoi spazi."
+        ));
+    }
+
+    #[test]
+    fn role_sentence_copre_tutti_i_ruoli_senza_lasciarne_indietro() {
+        assert_eq!(
+            role_sentence("proprietario", "Casa", "01/09/2026"),
+            "Sei proprietario di Casa. Membro dal 01/09/2026."
+        );
+        assert_eq!(
+            role_sentence("amministratore", "Casa", "01/09/2026"),
+            "Sei amministratore di Casa. Membro dal 01/09/2026."
+        );
+        assert_eq!(
+            role_sentence("membro", "Casa", "01/09/2026"),
+            "Sei membro di Casa. Membro dal 01/09/2026."
+        );
+        assert_eq!(
+            role_sentence("lettura", "Casa", "01/09/2026"),
+            "Hai accesso in sola lettura a Casa. Membro dal 01/09/2026."
+        );
     }
 
     #[tokio::test]

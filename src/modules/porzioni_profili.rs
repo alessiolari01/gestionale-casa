@@ -9,12 +9,15 @@ use teloxide::{
 
 use crate::{
     identity,
-    modules::storico::{self, NewFieldChange, NewHistoryEvent},
+    modules::{
+        liste,
+        storico::{self, NewFieldChange, NewHistoryEvent},
+    },
 };
 
 type Bot = crate::context_bot::ContextBot;
 
-const RECIPE_PAGE_SIZE: i64 = 5;
+const RECIPE_PAGE_SIZE: i64 = liste::VOCI_PER_PAGINA as i64;
 const PRESET_PERCENTAGES: [i64; 4] = [80, 100, 120, 150];
 
 #[derive(Debug, Clone, FromRow)]
@@ -198,7 +201,7 @@ async fn show_recipe_list(
 
     match list_visible_recipes(pool, profile_id, requested_page).await {
         Ok(page) => {
-            let pages = page_count(page.total);
+            let pages = liste::totale_pagine(page.total);
             let text = if page.total == 0 {
                 format!(
                     "🍽️ Porzioni e preferenze · {profile_name}\n\nNessuna ricetta disponibile nel contesto corrente."
@@ -529,7 +532,7 @@ async fn list_visible_recipes(
         .await
         .context("Impossibile contare le ricette per il profilo")?;
 
-    let pages = page_count(total);
+    let pages = liste::totale_pagine(total);
     let page = requested_page.max(0).min(pages.saturating_sub(1));
     let offset = page * RECIPE_PAGE_SIZE;
 
@@ -943,25 +946,10 @@ fn recipe_list_keyboard(
         })
         .collect::<Vec<_>>();
 
-    if page.total > 0 {
-        let mut pagination = Vec::new();
-        if page.page > 0 {
-            pagination.push(button(
-                "⬅️ Pagina precedente",
-                format!("foodprof:portion:list:{profile_id}:{}", page.page - 1),
-            ));
-        }
-        pagination.push(button(
-            format!("{}/{}", page.page + 1, pages),
-            "foodprof:noop",
-        ));
-        if page.page + 1 < pages {
-            pagination.push(button(
-                "Pagina successiva ➡️",
-                format!("foodprof:portion:list:{profile_id}:{}", page.page + 1),
-            ));
-        }
-        rows.push(pagination);
+    if let Some(row) = liste::riga_paginazione(page.page, pages, "foodprof:noop", |p| {
+        format!("foodprof:portion:list:{profile_id}:{p}")
+    }) {
+        rows.push(row);
     }
 
     rows.push(vec![
@@ -1092,10 +1080,6 @@ fn factor_to_percentage(factor: f64) -> i64 {
     (factor * 100.0).round() as i64
 }
 
-fn page_count(total: i64) -> i64 {
-    ((total + RECIPE_PAGE_SIZE - 1) / RECIPE_PAGE_SIZE).max(1)
-}
-
 fn parse_positive_i64(value: &str) -> Option<i64> {
     value.parse::<i64>().ok().filter(|value| *value > 0)
 }
@@ -1139,14 +1123,6 @@ mod tests {
         assert_eq!(factor_to_percentage(1.0), 100);
         assert_eq!(factor_to_percentage(1.2), 120);
         assert_eq!(factor_to_percentage(1.5), 150);
-    }
-
-    #[test]
-    fn paginazione_ricette_usa_cinque_elementi() {
-        assert_eq!(page_count(0), 1);
-        assert_eq!(page_count(5), 1);
-        assert_eq!(page_count(6), 2);
-        assert_eq!(page_count(11), 3);
     }
 
     #[test]

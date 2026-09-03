@@ -2,6 +2,73 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_SPAZI_PROFILO_20260903 -->
+# 03/09/2026 — Spazio predefinito e vista, spiegati insieme per la prima volta
+
+Blocco 4 di `docs/convenzioni-telegram.md`: C5 applicata a `👤 Profilo` e
+`👥 Spazi` (`src/identity.rs`), la parte segnalata come concettualmente piu'
+difficile del gestionale.
+
+## Il problema che C5 doveva risolvere
+
+Spazio predefinito e vista sono due impostazioni indipendenti — una decide
+dove finiscono le cose nuove, l'altra cosa si vede — con nomi che si
+somigliano, e nessuna delle due schermate le spiegava insieme. `👤 Profilo`
+elencava `Spazio predefinito: X` e `Vista: Y` come due righe separate;
+`👥 Spazi` ripeteva lo stesso paio con parole leggermente diverse
+(`Solo spazio predefinito` contro `Solo predefinito` sul pulsante). Ora una
+riga sola, identica su entrambe le schermate:
+
+```text
+Le cose nuove finiscono in Casa. Adesso stai vedendo tutti i tuoi spazi.
+```
+
+## Il giro sul bot prima di scrivere
+
+Diversamente dal blocco liste, questa volta il giro sul bot non ha corretto la
+convenzione: gli screenshot di `👤 Profilo`, `👥 Spazi` e `✏️ Rinomina spazio`
+mandati da Alessio corrispondevano esattamente al codice letto in
+`identity.rs` e `main.rs`. Vale comunque la pena registrarlo, perche' la
+regola non e' "guarda solo se pensi che serva" — e' guardare sempre, e qui il
+guardare ha confermato invece di correggere.
+
+## Cosa altro e' cambiato sulle stesse due schermate
+
+- **C1** — `👥 Spazi` ripeteva in testo la lista degli spazi che era gia' sui
+  pulsanti (marcatore, nome). Tipo e ruolo, che sui pulsanti non c'erano,
+  ci sono andati; il testo non elenca piu' gli spazi uno per uno.
+- **C2 e problema 7** — sparite «Usa i pulsanti per creare, rinominare o
+  cambiare spazio» e «Usa il pulsante 👥 Spazi per cambiare spazio predefinito
+  o modalita' di visualizzazione»: la seconda descriveva un pulsante che su
+  quella schermata non esiste (si torna a Spazi con `⬅️ Indietro`, gia' in
+  tastiera).
+- **C5** — «Ruolo nello spazio» e «Ruolo sistema» erano coppia campo/valore
+  senza contesto; ora sono frasi («Sei proprietario di Casa.», «Sei anche
+  amministratore del sistema.»).
+- Il flusso `✏️ Rinomina spazio` diceva «Spazio predefinito attuale» (stesso
+  problema di C5, in scala minore): ora «Nome attuale». Il messaggio di
+  successo aveva due forme diverse per la stessa azione a seconda del
+  percorso (comando testuale contro pulsante): unificate su «✅ Spazio
+  rinominato».
+
+## Le cinque righe di paginazione a mano che restavano nel blocco
+
+`spazi_membri`, `porzioni_profili`, `porzioni_ingredienti` e
+`profili_alimentari` (due) sono passate a `modules::liste::riga_paginazione`.
+Due di queste — la lista membri in `spazi_membri` e la lista profili in
+`profili_alimentari` — avevano lo stesso difetto gia' visto nello Storico
+il 2 settembre: la riga di navigazione compariva anche con una sola pagina,
+perche' il controllo era `if totale > 0` invece che sul numero di pagine.
+`riga_paginazione` lo evita per costruzione (`pagine <= 1` non produce riga),
+quindi la conversione non e' stata solo un rifacimento — ha tolto un difetto
+reale mai segnalato perche' invisibile con poche voci in lista. Resta solo
+`planner_alimentare`, per il blocco planner.
+
+Tre test diretti su `page_count` (duplicati fra tre moduli, stessa copertura
+di `liste::totale_pagine_arrotonda_per_eccesso`) sono stati tolti; tre nuovi
+test in `identity.rs` verificano la frase C5 su entrambe le schermate e tutte
+e quattro le forme di `role_sentence`. Nessun cambiamento al totale: **270**.
+
 <!-- CHANGELOG_LISTE_CI_ROSSA_20260902 -->
 # 02/09/2026 — Un `format!` inutile, e quattro run rosse per accorgersene
 
