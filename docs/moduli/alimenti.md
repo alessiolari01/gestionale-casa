@@ -22,6 +22,38 @@ Il catalogo base è globale; gli utenti possono possedere alimenti personali e r
 
 La categoria viene scelta durante la creazione; `Altro` rimane un fallback di schema, non un passaggio obbligatorio del wizard.
 
+## Elenco, ricerca e filtri sul bot
+
+Le tre liste del modulo — elenco, risultati di ricerca, risultati del filtro —
+seguono C1, C6 e C7 di `docs/convenzioni-telegram.md`. Il messaggio **non
+elenca gli alimenti**: stanno sui pulsanti. Nel testo restano solo le cose che
+un pulsante non può dire:
+
+- l'**ordinamento**, che non è alfabetico — prima i propri alimenti, poi i
+  condivisi, poi il catalogo base — e che quindi C6 impone di dichiarare;
+- la **legenda** `👤 tuo · 👥 condiviso`, mostrata solo quando in pagina c'è
+  almeno un marcatore da spiegare. Il catalogo base non ne porta;
+- nella ricerca, **perché** un alimento è fra i risultati quando il suo nome
+  non contiene la parola cercata, e per quale delle due strade: un **alias** o
+  un **prodotto commerciale** collegato. Senza quella riga il risultato sembra
+  un errore del bot.
+
+  ```text
+  Perché sono nei risultati:
+  Formaggio spalmabile → prodotto Philadelphia · Original
+  Formaggio spalmabile → anche «Crema spalmabile»
+  ```
+
+  Le strade sono quelle di `list_foods_with_offset`: nome, alias, e
+  `marca + nome commerciale` dei prodotti attivi. Il caso è coperto dal test
+  `la_ricerca_spiega_perche_un_alimento_e_nei_risultati`, che verifica anche
+  che un alimento trovato **per nome** non produca nessuna riga.
+
+Con 422 alimenti l'elenco è lungo 85 pagine, quindi nel menu `🥕 Alimenti` la
+prima azione è `🔎 Cerca` e la seconda `📋 Elenco alimenti · 422`, con il
+conteggio sull'etichetta (C7). Sotto le 20 voci l'ordine si inverte: con poche
+voci scorrere è più veloce che scrivere.
+
 ## Alias e ricerca
 
 Gli alias normalizzati evitano duplicati e supportano ricerca umana. La ricerca Alimenti considera anche marca/nome dei prodotti commerciali collegati: cercare `Philadelphia` può restituire l'alimento generico collegato, non una riga prodotto separata nella lista alimenti.

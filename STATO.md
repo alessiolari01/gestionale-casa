@@ -57,12 +57,24 @@ Repository: `alessiolari01/gestionale-casa`
 **La PR #9 e' stata mergiata il 1 settembre: `main` contiene tutto lo Step 7**,
 fino al planner 7.3B.
 
-**Ramo aperto: `ux-convenzioni-telegram`**, non ancora mergiato. Contiene il
-lavoro sull'interfaccia del 1-2 settembre. Attenzione: la sincronizzazione
-GitHub del progetto segue `main`, quindi finche' quel ramo resta aperto la
-knowledge base non lo vede.
+`ux-convenzioni-telegram` e' stato mergiato con la PR #10 e non esiste piu':
+il lavoro sull'interfaccia del 1 settembre e' su `main`.
 
-Il nuovo lavoro riparte da `main`. I due branch dello Step 7 sono storia:
+**Il blocco liste** (2 settembre, tre commit) e' arrivato con il ramo
+`ux-liste`. Questo file ha gia' sbagliato due volte a dichiarare quali rami
+fossero aperti, quindi la risposta non si legge qui ma si chiede a git:
+
+```powershell
+git branch -a
+git log --oneline main..origin/ux-liste
+```
+
+Se il secondo comando non stampa niente, il merge e' avvenuto e `main`
+contiene tutto. Se stampa dei commit, quel ramo e' ancora aperto e il lavoro
+nuovo parte da li', non da `main` — e finche' resta aperto la
+sincronizzazione GitHub del progetto, che segue `main`, non lo vede.
+
+I due branch dello Step 7 sono storia:
 `step-7-alimentazione-s9` e' quello mergiato, mentre `step-7-alimentazione`
 contiene un 7.3B parallelo scartato il 31 agosto e **non va usato**. Il motivo
 e' spiegato nel `CHANGELOG.md`, alla voce "Due implementazioni parallele".
@@ -98,9 +110,37 @@ c'e' una creazione manuale, per non aggiungere concetti all'utente medio.
 il documento di riferimento per ogni schermata: nasce dal giro completo del bot
 fatto il 1 settembre e contiene otto problemi trovati e dodici convenzioni. La
 piu' importante e' C1: **il testo di un messaggio non ripete mai i pulsanti**.
-Applicate finora al planner, al menu' principale e alle righe di navigazione;
-liste, Spazi e Profilo restano da fare, nell'ordine scritto nella parte 3 di
-quel documento.
+Applicate al planner, al menu' principale, alle righe di navigazione e — dal
+2 settembre — alle **quattro liste**: alimenti, ricette, storico,
+miglioramenti. Restano da fare Spazi e Profilo, poi il menu' principale e le
+date, nell'ordine della parte 3 di quel documento.
+
+**Un modulo solo per le liste.** `src/modules/liste.rs` tiene la riga di
+paginazione, l'intestazione con il totale, la soglia delle venti voci oltre la
+quale la ricerca diventa l'azione principale, e il taglio delle etichette. E'
+la stessa storia del calendario, e la stessa cura.
+
+La riga prende **il numero di pagine**, non il totale delle voci: la prima
+versione prendeva il totale e dava per scontate cinque voci per pagina, e i
+chiamanti che contano diversamente — il selettore dei filtri dello storico ne
+mostra sette, la descrizione lunga di un miglioramento e' spezzata a caratteri —
+non potevano usarla e si erano tenuti la loro riga scritta a mano. Se ne e'
+accorto il collaudo sul bot, non il codice: lo `📜 Storico` mostrava ancora
+`1 / 21` con le frecce nude. `riga_paginazione_da_totale` resta per chi ha il
+totale.
+
+**Restano sei righe di paginazione scritte a mano** fuori da questo blocco, in
+`spazi_membri`, `porzioni_profili`, `porzioni_ingredienti`,
+`profili_alimentari` (due) e `planner_alimentare`: passeranno con i blocchi
+Spazi/Profilo e con il planner.
+
+Guardare le schermate sul bot prima di scrivere ha corretto la convenzione
+stessa: C1 diceva che nello Storico «Giorgia» fosse l'autore dell'evento, e
+invece e' il profilo su cui la porzione e' stata modificata — cioe' una cosa
+che sul pulsante c'era gia'. Quello che mancava era **quando**. La correzione
+e' scritta in C1 insieme al suo limite noto: due eventi dello stesso tipo,
+sulla stessa entita', nello stesso minuto restano indistinguibili
+sull'etichetta e si separano solo aprendoli.
 
 **Un calendario solo.** `src/modules/calendario.rs` tiene le primitive sulle
 date e la griglia del mese. Prima ce n'erano due implementazioni: la congruenza
@@ -126,7 +166,7 @@ invece di arrivare a SQLite e diventare `NULL`.
   `20260901013000_versione_contenuto_ricetta.sql` fosse ancora da applicare:
   non era vero, ed e' bastato leggere `_sqlx_migrations` per accorgersene;
 - pipeline verde: `fmt`, `check --locked`, `clippy --all-targets --locked
-  -- -D warnings`, `test --locked` — **248 test** (226 prima del 1 settembre:
+  -- -D warnings`, `test --locked` — **270 test** (248 prima del 2 settembre:
   e' il numero da confrontare dopo ogni aggiornamento dell'S9);
 - CI su GitHub Actions **verde** dalla run #42, la prima dello Step 7.
 
@@ -224,6 +264,7 @@ nella sezione 3 di questo file e va aggiornato a ogni consegna.
 ```text
 docs/convenzioni-telegram.md        regole di ogni schermata Telegram
 src/modules/calendario.rs           date e griglia del mese, per tutti
+src/modules/liste.rs                paginazione e intestazioni, per tutte le liste
 src/modules/planner_alimentare.rs   dominio + UI Telegram del planner
 src/modules/porzioni.rs             calcolo base/percentuale/override
 src/modules/porzioni_profili.rs     porzione per profilo
@@ -237,12 +278,24 @@ scripts/aggiorna-s9.sh              aggiornamento e avvio sul telefono
 
 ## 6. Punti aperti
 
-1. **Toolchain dell'S9 piu' vecchia di quella della CI.** La Clippy del
-   telefono non emette lint che il runner invece applica: e' cosi' che
-   `drain_collect` e' rimasto invisibile finche' la CI non ha iniziato a girare
-   sui branch. Un controllo locale che passa non e' una prova se la toolchain
-   non e' la stessa; quando i due esiti divergono, ha ragione la CI. Da
-   aggiornare con `rustup update` su Termux.
+1. **Tre toolchain diverse, e solo una conta.** Il runner della CI usa la
+   **1.98**; l'ambiente dell'assistente e' fermo alla **1.95** e non puo'
+   aggiornarsi (`static.rust-lang.org` e' chiuso in uscita); l'S9 e' piu'
+   vecchio di entrambi. La Clippy delle versioni piu' basse non emette lint che
+   il runner invece applica: e' cosi' che `drain_collect` e' rimasto invisibile,
+   ed e' successo di nuovo il 2 settembre con `useless_format`, che ha fatto
+   fallire **quattro run di seguito** mentre la Clippy 1.95 diceva verde.
+
+   **Un `clippy` locale che passa non e' un lasciapassare, e' solo l'assenza di
+   una brutta notizia.** L'unico esito che conta e' quello della CI, e va
+   **guardato sulla pagina della run**: il 2 settembre e' stato riassunto da uno
+   strumento che ha letto verde dove era rosso, e su quella base era gia' stato
+   consigliato il merge. Prima di mergiare si apre Actions e si legge l'icona.
+
+   Da aggiornare con `rustup update` su Termux. Attenzione: **un
+   `rust-toolchain.toml` non e' la soluzione ovvia** — su Termux `cargo` arriva
+   da `pkg` e non da rustup, quindi il file verrebbe ignorato li' e potrebbe
+   invece costringere altri ambienti a scaricare una versione che non hanno.
 2. **Pasti liberi** non rappresentabili: `ricetta_nome_snapshot` e' NOT NULL.
    Decisione rimandata ora che esiste l'esito "saltato".
 3. **`cargo clean` ogni tanto sull'S9.** `target/` cresce fino a qualche GB e

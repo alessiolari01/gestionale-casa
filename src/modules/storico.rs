@@ -343,24 +343,24 @@ pub(crate) async fn record_location_change(
 
 type Bot = crate::context_bot::ContextBot;
 
+use crate::modules::liste;
+
 const HISTORY_PAGE_SIZE: i64 = 5;
 
+/// Una riga della lista dello storico.
+///
+/// Da quando il testo non ripete piu' gli eventi (C1) la lista ha bisogno solo
+/// di cio' che finisce sull'etichetta del pulsante. Luogo, autore, origine e
+/// tipo di entita' si leggono aprendo l'evento, e non vengono piu' nemmeno
+/// chiesti al database: erano otto colonne per riga, cinque righe per pagina,
+/// lette a ogni apertura dello storico per non essere mostrate.
 #[derive(Debug, Clone, FromRow)]
 struct HistoryListRow {
     id: i64,
-    tipo_entita: String,
     when_local: String,
     operazione: String,
     componente: String,
     nome_entita_snapshot: String,
-    abitazione_nome_snapshot: Option<String>,
-    stanza_nome_snapshot: Option<String>,
-    contenitore_percorso_snapshot: Option<String>,
-    spazio_nome_snapshot: Option<String>,
-    luogo_spazio_nome_snapshot: Option<String>,
-    attore_nome_snapshot: Option<String>,
-    origine_azione: String,
-    automatico: i64,
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -537,16 +537,27 @@ async fn show_global_history_filtered(
                 events
             };
 
-            let summary = history_filters_summary(pool, filters).await;
-            let title = if filters.is_default() {
-                "📜 Storico globale".to_string()
+            // Il filtro sta sotto l'intestazione, non dentro il titolo: il
+            // titolo deve restare una riga sola perche' il conteggio (C1) gli
+            // va accanto.
+            let filtro = if filters.is_default() {
+                None
             } else {
-                format!("📜 Storico globale\n🔎 {summary}")
+                Some(history_filters_summary(pool, filters).await)
             };
 
-            bot.send_message(chat_id, format_history_list(&title, &events, page, total))
-                .reply_markup(global_history_keyboard(&events, page, total, filters))
-                .await?;
+            bot.send_message(
+                chat_id,
+                format_history_list(
+                    "📜 Storico globale",
+                    filtro.as_deref(),
+                    &events,
+                    page,
+                    total,
+                ),
+            )
+            .reply_markup(global_history_keyboard(&events, page, total, filters))
+            .await?;
         }
         Err(error) => {
             tracing::error!(?error, ?filters, "Errore lettura storico globale filtrato");
@@ -799,13 +810,9 @@ async fn load_filtered_global_history_page(
     let total: i64 = count.build_query_scalar().fetch_one(pool).await?;
 
     let mut list = QueryBuilder::<Sqlite>::new(
-        "SELECT e.id, se.tipo_entita, \
+        "SELECT e.id, \
                 strftime('%d/%m/%Y %H:%M', e.avvenuto_il, 'localtime') AS when_local, \
-                e.operazione, e.componente, e.nome_entita_snapshot, \
-                e.abitazione_nome_snapshot, e.stanza_nome_snapshot, \
-                e.contenitore_percorso_snapshot, e.spazio_nome_snapshot, \
-                e.luogo_spazio_nome_snapshot, e.attore_nome_snapshot, \
-                e.origine_azione, e.automatico \
+                e.operazione, e.componente, e.nome_entita_snapshot \
          FROM storico_eventi e \
          JOIN storico_entita se ON se.id = e.entita_storico_id \
          WHERE ",
@@ -1118,22 +1125,9 @@ fn global_history_keyboard(
         )]);
     }
 
-    let pages = total_pages(total);
-    if pages > 1 {
-        let mut nav = Vec::new();
-        if page > 0 {
-            nav.push(button(
-                "⬅️",
-                &format!("h:g:{}:{token}", base62_encode(page - 1)),
-            ));
-        }
-        nav.push(button(&format!("{} / {}", page + 1, pages), "history:noop"));
-        if page + 1 < pages {
-            nav.push(button(
-                "➡️",
-                &format!("h:g:{}:{token}", base62_encode(page + 1)),
-            ));
-        }
+    if let Some(nav) = liste::riga_paginazione_da_totale(page, total, "history:noop", |pagina| {
+        format!("h:g:{}:{token}", base62_encode(pagina))
+    }) {
         rows.push(nav);
     }
 
@@ -1222,23 +1216,12 @@ fn dynamic_filter_keyboard(
         )]);
     }
 
-    let pages =
-        ((total + HISTORY_FILTER_PICKER_PAGE_SIZE - 1) / HISTORY_FILTER_PICKER_PAGE_SIZE).max(1);
-    if pages > 1 {
-        let mut nav = Vec::new();
-        if page > 0 {
-            nav.push(button(
-                "⬅️",
-                &format!("h:p:{kind_code}:{}:{token}", base62_encode(page - 1)),
-            ));
-        }
-        nav.push(button(&format!("{} / {}", page + 1, pages), "history:noop"));
-        if page + 1 < pages {
-            nav.push(button(
-                "➡️",
-                &format!("h:p:{kind_code}:{}:{token}", base62_encode(page + 1)),
-            ));
-        }
+    let pages = (total as u64)
+        .max(1)
+        .div_ceil(HISTORY_FILTER_PICKER_PAGE_SIZE as u64) as i64;
+    if let Some(nav) = liste::riga_paginazione(page, pages, "history:noop", |pagina| {
+        format!("h:p:{kind_code}:{}:{token}", base62_encode(pagina))
+    }) {
         rows.push(nav);
     }
 
@@ -1621,7 +1604,8 @@ pub async fn show_item_history(
             bot.send_message(
                 chat_id,
                 format_history_list(
-                    &format!("📜 Storico\n🏷️ {}", entity.1),
+                    "📜 Storico",
+                    Some(&format!("🏷️ {}", entity.1)),
                     &events,
                     page,
                     total,
@@ -1778,13 +1762,9 @@ async fn load_entity_history_page(
     .await?;
 
     let events = sqlx::query_as::<_, HistoryListRow>(
-        "SELECT e.id, se.tipo_entita, \
+        "SELECT e.id, \
                 strftime('%d/%m/%Y %H:%M', e.avvenuto_il, 'localtime') AS when_local, \
-                e.operazione, e.componente, e.nome_entita_snapshot, \
-                e.abitazione_nome_snapshot, e.stanza_nome_snapshot, \
-                e.contenitore_percorso_snapshot, e.spazio_nome_snapshot, \
-                e.luogo_spazio_nome_snapshot, e.attore_nome_snapshot, \
-                e.origine_azione, e.automatico \
+                e.operazione, e.componente, e.nome_entita_snapshot \
          FROM storico_eventi e JOIN storico_entita se ON se.id = e.entita_storico_id \
          WHERE e.entita_storico_id = ? AND e.spazio_id = ? AND se.spazio_id = e.spazio_id \
          ORDER BY e.avvenuto_il DESC, e.id DESC LIMIT ? OFFSET ?",
@@ -1857,44 +1837,33 @@ async fn load_event_detail(
     Ok(Some((event, changes, location)))
 }
 
-fn format_history_list(title: &str, events: &[HistoryListRow], page: i64, total: i64) -> String {
-    let pages = total_pages(total);
-    let mut message = format!(
-        "{title}\n\nPagina {} di {} · {} eventi",
-        page + 1,
-        pages,
-        total
-    );
+/// Testo di una lista di eventi (C1).
+///
+/// Non elenca piu' gli eventi: stanno tutti sui pulsanti sotto, con data e
+/// ora. Qui resta solo cio' che i pulsanti non possono dire — quanti sono,
+/// dove siamo nella lista, e quale filtro e' attivo — piu' la riga che spiega
+/// una lista vuota (C8).
+///
+/// E' sparita anche «Tocca un evento sotto per vedere il dettaglio»: C2 vieta
+/// le frasi che descrivono i pulsanti.
+fn format_history_list(
+    titolo: &str,
+    filtro: Option<&str>,
+    events: &[HistoryListRow],
+    page: i64,
+    total: i64,
+) -> String {
+    let mut message = liste::intestazione(titolo, total, page);
+
+    if let Some(filtro) = filtro {
+        message.push_str("\n🔎 ");
+        message.push_str(filtro);
+    }
 
     if events.is_empty() {
         message.push_str("\n\nNessun evento registrato.");
-        return message;
     }
 
-    for event in events {
-        message.push_str("\n\n");
-        message.push_str(&format!(
-            "{}\n{} {} · {} {}",
-            event.when_local,
-            event_action_icon(&event.componente, &event.operazione),
-            event_action_label(&event.componente, &event.operazione),
-            entity_icon(&event.tipo_entita),
-            event.nome_entita_snapshot,
-        ));
-        message.push('\n');
-        message.push_str(&format_history_actor_line(
-            event.attore_nome_snapshot.as_deref(),
-            &event.origine_azione,
-            event.automatico != 0,
-        ));
-
-        if let Some(location) = event_context(event) {
-            message.push_str("\n📍 ");
-            message.push_str(&location);
-        }
-    }
-
-    message.push_str("\n\nTocca un evento sotto per vedere il dettaglio.");
     message
 }
 
@@ -2031,24 +2000,12 @@ fn history_list_keyboard(
         rows.push(vec![button(&event_button_label(event), &callback)]);
     }
 
-    let pages = total_pages(total);
-    if pages > 1 {
-        let mut nav = Vec::new();
-        if page > 0 {
-            let callback = match scope {
-                HistoryScope::Global => format!("history:global:{}", page - 1),
-                HistoryScope::Item(item_id) => format!("history:item:{item_id}:{}", page - 1),
-            };
-            nav.push(button("⬅️", &callback));
-        }
-        nav.push(button(&format!("{} / {}", page + 1, pages), "history:noop"));
-        if page + 1 < pages {
-            let callback = match scope {
-                HistoryScope::Global => format!("history:global:{}", page + 1),
-                HistoryScope::Item(item_id) => format!("history:item:{item_id}:{}", page + 1),
-            };
-            nav.push(button("➡️", &callback));
-        }
+    if let Some(nav) =
+        liste::riga_paginazione_da_totale(page, total, "history:noop", |pagina| match scope {
+            HistoryScope::Global => format!("history:global:{pagina}"),
+            HistoryScope::Item(item_id) => format!("history:item:{item_id}:{pagina}"),
+        })
+    {
         rows.push(nav);
     }
 
@@ -2127,13 +2084,48 @@ fn parse_nonnegative(value: &str) -> Option<i64> {
     (value >= 0).then_some(value)
 }
 
+/// Etichetta di un evento nella lista (C1).
+///
+/// Prima l'etichetta era `{icona} {azione} · {entita'}` e il testo del
+/// messaggio teneva per se' data, ora e autore. Il risultato erano cinque
+/// pulsanti di cui tre identici — `🍽️ Porzione modificata · Giorgia` — e per
+/// capire quale fosse quale bisognava contarli e confrontarli con l'elenco
+/// scritto sopra.
+///
+/// Ora l'etichetta porta **quando**, che e' la cosa che cambia da un evento
+/// all'altro, e non porta piu' l'azione a parole, che in una lista filtrata
+/// per azione e' identica su ogni riga e quindi non distingue niente: resta
+/// l'icona, e il nome per esteso e' nel dettaglio insieme all'autore e al
+/// luogo.
+///
+/// L'anno c'e' in forma breve. Costa tre caratteri e toglie l'ambiguita' fra
+/// un evento di quest'anno e lo stesso giorno di un anno passato, che in uno
+/// storico che si allunga capita davvero.
 fn event_button_label(event: &HistoryListRow) -> String {
     format!(
         "{} {} · {}",
         event_action_icon(&event.componente, &event.operazione),
-        event_action_label(&event.componente, &event.operazione),
-        truncate_chars(&event.nome_entita_snapshot, 22)
+        quando_breve(&event.when_local),
+        liste::tronca(&event.nome_entita_snapshot, 18)
     )
+}
+
+/// `31/08/2026 19:49` diventa `31/08/26 19:49`.
+///
+/// Se il formato non e' quello atteso il valore torna intatto: un'etichetta
+/// leggermente lunga e' meglio di una data inventata.
+fn quando_breve(when_local: &str) -> String {
+    let Some((data, ora)) = when_local.split_once(' ') else {
+        return when_local.to_string();
+    };
+    let parti: Vec<&str> = data.split('/').collect();
+    let [giorno, mese, anno] = parti.as_slice() else {
+        return when_local.to_string();
+    };
+    if anno.len() < 2 {
+        return when_local.to_string();
+    }
+    format!("{giorno}/{mese}/{} {ora}", &anno[anno.len() - 2..])
 }
 
 fn truncate_chars(value: &str, max: usize) -> String {
@@ -2144,24 +2136,6 @@ fn truncate_chars(value: &str, max: usize) -> String {
     } else {
         prefix
     }
-}
-
-fn event_context(event: &HistoryListRow) -> Option<String> {
-    event.abitazione_nome_snapshot.as_deref().map(|home| {
-        let show_space = crate::identity::current_view_all()
-            || event
-                .luogo_spazio_nome_snapshot
-                .as_deref()
-                .zip(event.spazio_nome_snapshot.as_deref())
-                .is_some_and(|(location_space, owner_space)| location_space != owner_space);
-        format_location_with_space(
-            Some(home),
-            event.stanza_nome_snapshot.as_deref(),
-            event.contenitore_percorso_snapshot.as_deref(),
-            event.luogo_spazio_nome_snapshot.as_deref(),
-            show_space,
-        )
-    })
 }
 
 fn detail_context(event: &HistoryEventDetail) -> Option<String> {
@@ -2389,7 +2363,7 @@ fn format_money_cents(cents: i64) -> String {
 }
 
 fn total_pages(total: i64) -> i64 {
-    ((total + HISTORY_PAGE_SIZE - 1) / HISTORY_PAGE_SIZE).max(1)
+    liste::totale_pagine(total)
 }
 
 #[cfg(test)]
@@ -2521,6 +2495,71 @@ mod tests {
             "Casa principale / Garage / Armadio / Ripiano 2 / Scatola"
         );
         assert_eq!(entity_icon("contenitore"), "📦");
+    }
+
+    #[test]
+    fn quando_breve_accorcia_l_anno() {
+        assert_eq!(quando_breve("31/08/2026 19:49"), "31/08/26 19:49");
+        assert_eq!(quando_breve("01/09/2026 15:20"), "01/09/26 15:20");
+    }
+
+    #[test]
+    fn quando_breve_lascia_stare_cio_che_non_riconosce() {
+        // Meglio un'etichetta lunga di una data inventata.
+        assert_eq!(quando_breve("mai"), "mai");
+        assert_eq!(quando_breve("2026-08-31 19:49"), "2026-08-31 19:49");
+        assert_eq!(quando_breve("31/08 19:49"), "31/08 19:49");
+    }
+
+    fn riga_di_prova(when_local: &str, entita: &str) -> HistoryListRow {
+        HistoryListRow {
+            id: 1,
+            when_local: when_local.to_string(),
+            operazione: "modifica".to_string(),
+            componente: "porzione_profilo".to_string(),
+            nome_entita_snapshot: entita.to_string(),
+        }
+    }
+
+    #[test]
+    fn l_etichetta_di_un_evento_porta_quando_e_su_cosa() {
+        let riga = riga_di_prova("31/08/2026 19:49", "Giorgia");
+        assert_eq!(event_button_label(&riga), "🍽️ 31/08/26 19:49 · Giorgia");
+    }
+
+    #[test]
+    fn due_eventi_dello_stesso_tipo_in_momenti_diversi_non_si_confondono() {
+        // Il difetto trovato sul bot il 2 settembre: tre pulsanti identici
+        // `🍽️ Porzione modificata · Giorgia`, perche' l'unica cosa scritta
+        // sull'etichetta era quella che non cambiava mai.
+        let prima = event_button_label(&riga_di_prova("31/08/2026 10:51", "Giorgia"));
+        let dopo = event_button_label(&riga_di_prova("31/08/2026 19:49", "Giorgia"));
+        assert_ne!(prima, dopo);
+    }
+
+    #[test]
+    fn il_testo_della_lista_non_ripete_gli_eventi() {
+        let eventi = vec![
+            riga_di_prova("31/08/2026 19:49", "Giorgia"),
+            riga_di_prova("31/08/2026 10:51", "Alessio test"),
+        ];
+        let testo = format_history_list("📜 Storico globale", None, &eventi, 0, 102);
+
+        assert_eq!(testo, "📜 Storico globale · 102\nPagina 1/21");
+        // C1: niente nomi, date o autori nel testo — stanno sui pulsanti.
+        assert!(!testo.contains("Giorgia"));
+        assert!(!testo.contains("19:49"));
+        // C2: niente frasi che descrivono i pulsanti.
+        assert!(!testo.contains("Tocca"));
+    }
+
+    #[test]
+    fn il_filtro_attivo_sta_sotto_l_intestazione() {
+        let testo = format_history_list("📜 Storico globale", Some("Alimentazione"), &[], 0, 0);
+        assert_eq!(
+            testo,
+            "📜 Storico globale · 0\nPagina 1/1\n🔎 Alimentazione\n\nNessun evento registrato."
+        );
     }
 
     #[test]

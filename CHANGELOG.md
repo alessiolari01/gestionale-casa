@@ -2,6 +2,291 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_LISTE_CI_ROSSA_20260902 -->
+# 02/09/2026 — Un `format!` inutile, e quattro run rosse per accorgersene
+
+Il ramo `ux-liste` aveva la CI **rossa da subito**, su tutte e quattro le run.
+Compilava, i 270 test passavano, il formato era a posto e il controllo dei
+documenti era verde: falliva soltanto **Clippy**, con un errore solo.
+
+```text
+error: useless use of `format!`
+  --> src/modules/miglioramenti.rs:2176:26
+   |   let mut lines = vec![format!(
+   |       "{}",
+   |       liste::intestazione("📦 Archivio miglioramenti", total, page)
+   |   )];
+```
+
+Un `format!("{}", x)` attorno a una funzione che restituisce gia' una `String`,
+scritto per non cambiare la forma `vec![format!(...)]` che c'era prima. Il
+rimedio non e' il `.to_string()` suggerito da Clippy ma togliere il `format!`:
+
+```rust
+let mut lines = vec![liste::intestazione("📦 Archivio miglioramenti", total, page)];
+```
+
+## Perche' non se n'era accorto nessuno prima del runner
+
+`useless_format` non e' un lint nuovo, ma **e' stato esteso** fra le versioni.
+Il runner ha la **1.98**, l'ambiente in cui il codice viene scritto e provato ha
+la **1.95** e non puo' aggiornarsi. Tre versioni di distanza bastano.
+
+E' la seconda volta che questo scarto morde, dopo `drain_collect`. Il punto
+aperto 1 di `STATO.md` lo diceva gia' — *un controllo locale che passa non e'
+una prova se la toolchain non e' la stessa* — ma restava una nota generica: ora
+porta i numeri veri delle tre toolchain e la conseguenza operativa.
+
+## L'errore piu' grave non e' stato il lint
+
+Il lint e' un refuso. L'errore vero e' che lo stato della CI e' stato
+**riassunto invece che guardato**: uno strumento ha letto «verde» dove la pagina
+diceva rosso, e su quella base era gia' stato consigliato di mergiare in `main`.
+Un merge fatto su quel consiglio avrebbe portato la CI rossa sul ramo
+principale.
+
+Da qui in avanti, prima di ogni merge si apre la pagina della run e si legge
+l'icona. E' scritto nel punto aperto 1.
+
+## Nota su `rust-toolchain.toml`
+
+Sembra la soluzione ovvia e **non lo e'**: sull'S9 `cargo` arriva da `pkg` di
+Termux e non da rustup, quindi il file verrebbe semplicemente ignorato proprio
+sulla macchina piu' fragile, mentre potrebbe costringere altri ambienti a
+scaricare una versione che non riescono a prendere. La strada resta
+`rustup update` sull'S9, con la CI come unico giudice.
+
+Nessun test nuovo: **270**.
+
+<!-- CHANGELOG_LISTE_CHIUSURA_20260902 -->
+# 02/09/2026 — Cosa resta da fare, scritto dove si trova
+
+Chiusura del blocco liste. Nessun cambiamento al codice: due buchi nei
+documenti, tutti e due della stessa specie.
+
+**`STATO.md` dichiarava «nessun ramo aperto» mentre `ux-liste` era aperto.**
+E' la seconda volta che questo file sbaglia a dire quali rami esistono: la
+prima dava `ux-convenzioni-telegram` per aperto quando era gia' mergiato.
+Un fatto che cambia a ogni ramo non puo' stare scritto in un documento che si
+aggiorna a mano, quindi adesso non c'e' piu' la risposta ma i due comandi che
+la danno — `git branch -a` e `git log --oneline main..origin/<ramo>` — con
+scritto cosa vuol dire ciascun esito. Un documento che dice «chiedilo a git»
+non puo' invecchiare.
+
+**I difetti visti durante i collaudi vivevano solo nella conversazione.** Tre
+cose osservate sul bot e non ancora sistemate — il prompt della ricerca che
+descrive meta' di quello che fa, la riga di navigazione della ricerca spezzata
+su due righe, e C9 mai applicata allo Storico che e' la schermata con piu' date
+di tutte — piu' una scelta rimasta aperta sulla riga di spiegazione quando il
+risultato e' uno solo. Ora sono la **parte 4** di
+`docs/convenzioni-telegram.md`, ognuna con il blocco della parte 3 a cui
+appartiene. La regola del progetto e' che chi apre la cartella deve capire dove
+siamo: vale anche per cio' che manca, non solo per cio' che c'e'.
+
+Aggiunto anche, nella parte 3, che il collaudo si fa **due volte**: prima di
+scrivere e dopo aver consegnato. Nel blocco liste il primo giro ha corretto C1
+e il secondo ha trovato un difetto che i test non vedevano.
+
+CI verde su tutti e tre i commit del ramo. Nessun test nuovo: **270**.
+
+<!-- CHANGELOG_LISTE_PAGINAZIONE_COMPLETATA_20260902 -->
+# 02/09/2026 — La paginazione unica non era unica
+
+Aprendo lo `📜 Storico` sul bot, la riga di paginazione era ancora quella
+vecchia: `1 / 21` e due frecce nude, invece di
+`⬅️ Precedente | 1/21 | Successiva ➡️`. Le etichette degli eventi erano quelle
+nuove, l'intestazione pure — solo la riga sotto era rimasta indietro.
+
+**Nello storico ci sono due tastiere, e ne avevo convertita una sola.**
+`history_list_keyboard` serve lo storico di un singolo oggetto;
+`global_history_keyboard` serve lo `📜 Storico` del menu' principale, cioe'
+proprio quello che si apre per primo. Il conteggio «sei posti» scritto nella
+voce di ieri era sbagliato: nei quattro moduli delle liste le righe scritte a
+mano erano **nove**, e ne erano rimaste indietro quattro.
+
+## Perche' erano rimaste indietro
+
+Non per distrazione: **la primitiva non ci entrava.** `riga_paginazione`
+prendeva *il totale delle voci* e dava per scontate cinque voci per pagina, ma
+tre di quei quattro punti non contano in voci da cinque:
+
+- il selettore dei filtri dello storico ne mostra **sette** per pagina;
+- la descrizione lunga di un miglioramento e' spezzata **a caratteri**, non a
+  voci;
+- la lista delle categorie in «cerca per ingredienti» conosce solo il numero di
+  pagine.
+
+Chi non poteva usarla si e' tenuto la propria riga, ed e' esattamente il modo in
+cui una convenzione torna a divergere — cioe' il problema che il modulo doveva
+chiudere. Una primitiva che non entra dove serve non unifica niente.
+
+Ora `riga_paginazione` prende **il numero di pagine**, che e' l'unita' che tutti
+i chiamanti conoscono, e `riga_paginazione_da_totale` resta per chi ha il
+totale. Tutte e nove le righe dei quattro moduli passano di li'.
+
+## Cosa resta fuori, dichiarato
+
+Sei righe scritte a mano vivono ancora in moduli che **non** sono in questo
+blocco: `spazi_membri`, `porzioni_profili`, `porzioni_ingredienti`,
+`profili_alimentari` (due) e `planner_alimentare`. Passeranno con i blocchi
+Spazi/Profilo e con il planner. Le frecce di `calendario.rs` non c'entrano: li'
+una freccia che non porta da nessuna parte si spegne (C13), non e' una riga di
+paginazione.
+
+## Verificato sul bot, non dedotto
+
+Questa volta l'esempio della ricerca e' stato controllato sul bot vero:
+cercando `philadelphia` compare `Formaggio spalmabile` con la riga
+`→ prodotto Philadelphia · Original`. E cercando `zucchine`, che i due risultati
+li trova per nome, la riga non compare — che e' il comportamento giusto.
+Controllato anche il contrario dell'esempio inventato di ieri: `Amido di mais`
+non ha nessun prodotto associato.
+
+**270 test** (erano 269).
+
+<!-- CHANGELOG_LISTE_RICERCA_CORREZIONE_20260902 -->
+# 02/09/2026 — Un esempio inventato, e il buco che nascondeva
+
+Nella voce precedente e nel commento della funzione stava scritto che «cercando
+*barilla* compare `Amido di mais`». **Non era vero: l'esempio era inventato.**
+Non e' stato osservato su nessuna schermata ne' su nessun dato, e sul database
+reale quella ricerca non restituisce quell'alimento. E' il divieto n.1 della
+sezione 0 di questo progetto — non dichiarare fatto cio' che non e' stato
+verificato — e va segnato perche' un esempio falso in un documento e' peggio di
+un esempio mancante: chi lo legge lo prende per una verifica gia' fatta.
+
+Al suo posto c'e' **Philadelphia su `Formaggio spalmabile`**, che non e'
+inventato: e' l'esempio gia' presente in `docs/moduli/alimenti.md` ed e'
+esercitato dal test `ricerca_alimenti_trova_anche_marca_e_nome_commerciale`.
+
+## Il difetto che l'esempio finto copriva
+
+Cercando l'esempio vero e' saltato fuori che la funzione era **incompleta**.
+`list_foods_with_offset` fa comparire un alimento per tre strade — il nome, gli
+**alias**, e marca piu' nome dei prodotti commerciali collegati — mentre la
+riga di spiegazione ne copriva una sola, quella dei prodotti. Un alimento
+trovato per alias restava inspiegato esattamente come prima del lavoro sulle
+liste: il difetto che C1 doveva chiudere era chiuso a meta'.
+
+Ora la riga copre tutte e due le strade e dice quale delle due e' stata:
+
+```text
+Perché sono nei risultati:
+Formaggio spalmabile → prodotto Philadelphia · Original
+Formaggio spalmabile → anche «Crema spalmabile»
+```
+
+Il nuovo test `la_ricerca_spiega_perche_un_alimento_e_nei_risultati` verifica
+tutti e tre i casi su un database vero: trovato per prodotto, trovato per
+alias, e trovato per nome — quest'ultimo non deve produrre nessuna riga, perche'
+non c'e' niente da spiegare.
+
+Corretto anche `Perche'` in `Perché` nel testo mostrato su Telegram: la
+sezione 7 di `STATO.md` chiede accenti italiani corretti, e l'apostrofo va bene
+nei commenti del codice, non in quello che legge una persona.
+
+**269 test** (erano 268).
+
+<!-- CHANGELOG_LISTE_CONVENZIONI_20260902 -->
+# 02/09/2026 — Le liste smettono di dire due volte la stessa cosa
+
+Secondo blocco della parte 3 di `docs/convenzioni-telegram.md`: **le liste**,
+tutte e quattro insieme — alimenti, ricette, storico, miglioramenti — perche'
+C11 chiede che le sezioni gemelle si somiglino, e sistemarne due su quattro
+avrebbe lasciato il bot piu' incoerente di prima.
+
+## Cosa si e' visto guardando il bot, e non si vedeva dal codice
+
+Il giro sul bot reale ha cambiato due decisioni.
+
+**C1 sbagliava a dire chi fosse «Giorgia».** La convenzione descriveva i tre
+pulsanti identici `🍽 Porzione modificata · Giorgia` e proponeva come rimedio
+`[ 🍽 Porzione · Giorgia · 31/08 19:49 ]`, trattando *Giorgia* come l'autore.
+Sul bot l'autore era `Alessio Lari` per tutti gli eventi della pagina, e
+*Giorgia* e' il **profilo su cui la porzione e' stata modificata**, cioe'
+`nome_entita_snapshot`, che sull'etichetta c'era gia'. La ricetta scritta in C1
+aggiungeva al pulsante una cosa che c'era e continuava a non aggiungere quella
+che mancava. La convenzione e' stata corretta.
+
+**Data e ora da sole non bastavano.** Due eventi che sembravano doppioni erano
+due modifiche opposte della stessa porzione — `Pasta test 120% → 100%` e
+`100% → 120%` — fatte nello stesso minuto, sullo stesso profilo, dalla stessa
+persona. Applicando C1 alla lettera restavano due pulsanti identici. La scelta
+presa: sull'etichetta vanno **quando** e **su cosa**, il resto sta nel
+dettaglio; due eventi nello stesso minuto restano adiacenti e in ordine, e si
+distinguono aprendoli. E' scritto in C1 come limite noto, invece di essere
+scoperto di nuovo fra sei mesi.
+
+## Un modulo solo per le liste
+
+Nasce `src/modules/liste.rs`, per la stessa ragione per cui esiste un solo
+`calendario.rs`: la riga di paginazione era riscritta a mano in **sei posti**,
+(il conteggio e' sbagliato: erano nove nei soli quattro moduli, e quattro sono
+rimaste indietro fino alla voce successiva)
+con **quattro etichette diverse** per lo stesso pulsante — `⬅️ Pagina
+precedente`, `⬅️`, `Pagina successiva ➡️`, `➡️` — e due formati di
+intestazione (`· 422 risultati` + `Pagina 1/85` contro `Pagina 1 di 21 · 102
+eventi`). Una convenzione ricopiata a mano in sei posti non e' una convenzione.
+
+Ora la riga e' una sola, `⬅️ Precedente | n/tot | Successiva ➡️`, con `n/tot`
+non premibile, e sparisce del tutto quando c'e' una pagina sola.
+
+## C1 applicata: il testo non ripete piu' i pulsanti
+
+In tutte e quattro le liste il messaggio si riduce a cio' che i pulsanti non
+possono dire — quante voci ci sono, dove siamo, quale filtro e' attivo — e
+tiene solo tre eccezioni, tutte informazioni che sui pulsanti non stanno:
+
+- la **legenda** `👤 tuo · 👥 condiviso`, mostrata solo quando in pagina c'e'
+  almeno un marcatore da spiegare;
+- l'**ordinamento** degli alimenti, che non e' alfabetico (prima i tuoi, poi i
+  condivisi, poi il catalogo base) e che C6 impone di dichiarare. Le ricette
+  sono ordinate alfabeticamente e quindi non dichiarano niente;
+- nella ricerca alimenti, **perche'** un alimento e' fra i risultati quando il
+  suo nome non contiene la parola cercata — e' finito li' per un alias o per un
+  prodotto commerciale collegato, e senza quella riga sembra un errore del bot.
+  (La prima stesura di questa voce portava qui un esempio inventato e una
+  funzione incompleta: vedi la voce successiva, del 2 settembre.)
+
+E' sparita «Tocca un evento sotto per vedere il dettaglio» (C2).
+
+## C6 e C7 sui menu'
+
+`🥕 Alimenti` con 422 voci offre ora `🔎 Cerca` come prima azione e
+`📋 Elenco alimenti · 422` come seconda: sfogliare 85 pagine non e' una strada.
+Sotto le 20 voci l'ordine resta quello di prima, perche' con poche voci
+scorrere e' piu' veloce che scrivere.
+
+`💡 Miglioramenti` era l'esempio da cui nasce C7: i conteggi c'erano gia', ma
+in un blocco di testo sopra i pulsanti — «🟡 Da approvare: 0» sopra un pulsante
+`🟡 Da approvare` — insieme a «Usa i pulsanti qui sotto», che C2 vieta. Ora il
+numero e' sull'etichetta e quel blocco non esiste piu'.
+
+## Effetto collaterale: due liste chiedono meno al database
+
+Togliere dal testo cio' che nessuno mostrava piu' ha tolto anche le letture che
+lo producevano, e su un S9 non e' un dettaglio:
+
+- lo **storico** leggeva otto colonne per riga — luogo, stanza, contenitore,
+  spazio, autore, origine, tipo entita' — cinque righe per pagina, a ogni
+  apertura, per non mostrarle;
+- le **ricette** calcolavano due sotto-query correlate per riga (`COUNT` degli
+  ingredienti e degli step): **dieci `COUNT`** a ogni apertura di una pagina da
+  cinque, per una riga di testo che ora sta nel dettaglio.
+
+## Verifica
+
+`fmt`, `clippy --all-targets -- -D warnings` e `test` verdi: **268 test**
+(erano 248). I nuovi coprono la riga di paginazione ai bordi, il contatore non
+premibile, il conteggio sull'etichetta, l'accorciamento della data, e il caso
+che ha generato il lavoro: due eventi dello stesso tipo in momenti diversi non
+producono piu' la stessa etichetta.
+
+Nota sulla toolchain: `div_ceil` sugli interi con segno e' ancora instabile
+sulla versione dell'S9, e la divisione scritta a mano fa scattare
+`manual_div_ceil` sulla Clippy della CI, che e' piu' recente. Il conto si fa
+senza segno, dove `div_ceil` e' stabile e nessuna delle due protesta.
+
 <!-- CHANGELOG_SQLX_RINVIO_20260902 -->
 # 02/09/2026 — sqlx 0.9.0 rinviata, con il perche'
 

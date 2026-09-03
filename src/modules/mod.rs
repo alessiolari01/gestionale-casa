@@ -15,6 +15,7 @@ pub mod calendario;
 #[allow(dead_code)]
 pub mod contenitori;
 pub mod foto;
+pub mod liste;
 pub mod luoghi;
 pub mod miglioramenti;
 pub mod oggetti;

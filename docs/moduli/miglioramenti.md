@@ -72,6 +72,17 @@ La stessa semantica è disponibile per le richieste di accesso.
 ## Paginazione e navigazione
 
 - massimo 5 elementi per pagina;
+- riga di paginazione comune (`modules::liste`):
+  `⬅️ Precedente | n/tot | Successiva ➡️`, assente con una pagina sola;
+- il testo della lista non elenca i miglioramenti (C1): l'etichetta porta
+  stato, testo del suggerimento, il segno `🆕` di non letto e l'icona
+  dell'esito del collaudo. Autore e allegati sono nel dettaglio;
+- il menu porta il conteggio sull'etichetta (C7): `🟡 Da approvare · 0` invece
+  di una riga di testo sopra il pulsante. Era l'esempio da cui la convenzione è
+  nata, e con quel blocco è sparita anche la frase «Usa i pulsanti qui sotto»,
+  che C2 vieta;
+- l'archivio resta un elenco testuale: lì non ci sono pulsanti per riga, quindi
+  non c'è duplicazione da togliere. Ne condivide intestazione e paginazione;
 - dettaglio → Indietro conserva lista e pagina;
 - annullare modifica testo conserva il contesto;
 - cambio stato torna alla lista appropriata;

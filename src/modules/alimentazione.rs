@@ -24,6 +24,8 @@ use crate::identity;
 
 type Bot = crate::context_bot::ContextBot;
 
+use crate::modules::liste;
+
 const FOOD_PAGE_SIZE: usize = 5;
 const FOOD_PAGE_FETCH: i64 = FOOD_PAGE_SIZE as i64 + 1;
 const FOOD_NAME_MAX_CHARS: usize = 120;
@@ -222,9 +224,13 @@ pub async fn show_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     Ok(())
 }
 
-async fn show_foods_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
+async fn show_foods_menu(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> ResponseResult<()> {
+    // C7: il conteggio sta sul pulsante, non in una riga di testo sopra. Se
+    // il conteggio non si riesce a leggere si mostra comunque il menu' senza
+    // numeri: una sezione raggiungibile vale piu' di un numero esatto.
+    let total = count_foods(pool, None, None).await.ok().map(|t| t as i64);
     bot.send_message(chat_id, "🥕 Alimenti")
-        .reply_markup(food_menu_keyboard())
+        .reply_markup(food_menu_keyboard_con_conteggio(total))
         .await?;
     Ok(())
 }
@@ -247,7 +253,7 @@ pub async fn handle_message(
             }
             "/alimenti" => {
                 sessions.clear_chat(chat_id);
-                show_foods_menu(bot, msg.chat.id).await?;
+                show_foods_menu(bot, msg.chat.id, pool).await?;
                 return Ok(true);
             }
             "/alimento_nuovo" => {
@@ -765,7 +771,7 @@ pub async fn handle_callback(
         }
         "food:foods" => {
             sessions.clear_chat(chat_id.0);
-            show_foods_menu(bot, chat_id).await?;
+            show_foods_menu(bot, chat_id, pool).await?;
             Ok(true)
         }
         "food:new" => {
@@ -1429,7 +1435,7 @@ pub async fn handle_callback(
         }
         "food:back" => {
             sessions.clear_chat(chat_id.0);
-            show_foods_menu(bot, chat_id).await?;
+            show_foods_menu(bot, chat_id, pool).await?;
             Ok(true)
         }
         "food:new:back:name" => {
@@ -2889,16 +2895,13 @@ async fn send_food_list(
     let page = clamp_page(page, total);
     match list_foods_with_offset(pool, None, None, FOOD_PAGE_FETCH, page_offset(page)).await {
         Ok(rows) => {
-            let (foods, has_next) = split_food_page(rows);
-            let title = "📋 Alimenti";
+            let (foods, _has_next) = split_food_page(rows);
+            // C10: il nome della schermata coincide con quello del pulsante
+            // che ci porta, cioe' `📋 Elenco alimenti`.
+            let title = "📋 Elenco alimenti";
             let current_user = actor.utente_id;
-            let mut text = format!(
-                "{title} · {}\nPagina {}/{}\n\n",
-                result_count_label(total),
-                page + 1,
-                total_pages(total)
-            );
-            append_food_lines(&mut text, &foods, current_user);
+            let mut text = liste::intestazione(title, total as i64, page);
+            text.push_str(&note_elenco_alimenti(&foods, current_user));
             tracing::info!(
                 chat_id = chat_id.0,
                 user_id = ?actor.utente_id,
@@ -2908,13 +2911,7 @@ async fn send_food_list(
                 "Alimentazione: invio elenco"
             );
             bot.send_message(chat_id, text)
-                .reply_markup(food_results_keyboard(
-                    &foods,
-                    page,
-                    has_next,
-                    total,
-                    current_user,
-                ))
+                .reply_markup(food_results_keyboard(&foods, page, total, current_user))
                 .await?;
             tracing::info!(
                 chat_id = chat_id.0,
@@ -2979,20 +2976,18 @@ async fn send_search_results(
     .await
     {
         Ok(rows) => {
-            let (foods, has_next) = split_food_page(rows);
+            let (foods, _has_next) = split_food_page(rows);
             let current_user = identity::current_actor().utente_id;
-            let mut text = format!(
-                "🔎 Risultati per: \"{raw_query}\" · {}\nPagina {}/{}\n\n",
-                result_count_label(total),
-                page + 1,
-                total_pages(total)
+            let mut text = liste::intestazione(
+                &format!("🔎 Risultati per: \"{raw_query}\""),
+                total as i64,
+                page,
             );
             append_search_food_lines(pool, &mut text, &foods, current_user, &normalized).await;
             bot.send_message(chat_id, text)
                 .reply_markup(food_search_results_keyboard(
                     &foods,
                     page,
-                    has_next,
                     total,
                     current_user,
                 ))
@@ -3083,7 +3078,7 @@ async fn send_filtered_food_list(
         .join(" + ");
 
     match list_foods_multi_categories_page(pool, category_ids, page).await {
-        Ok((foods, has_next, total, page)) => {
+        Ok((foods, _has_next, total, page)) => {
             if foods.is_empty() {
                 bot.send_message(
                     chat_id,
@@ -3095,18 +3090,12 @@ async fn send_filtered_food_list(
             }
 
             let current_user = identity::current_actor().utente_id;
-            let mut text = format!(
-                "{labels} · {}\nPagina {}/{}\n\n",
-                result_count_label(total),
-                page + 1,
-                total_pages(total)
-            );
-            append_food_lines(&mut text, &foods, current_user);
+            let mut text = liste::intestazione(&labels, total as i64, page);
+            text.push_str(&note_elenco_alimenti(&foods, current_user));
             bot.send_message(chat_id, text)
                 .reply_markup(food_filtered_results_keyboard(
                     &foods,
                     page,
-                    has_next,
                     total,
                     current_user,
                 ))
@@ -4812,32 +4801,58 @@ fn alimentation_menu_keyboard() -> InlineKeyboardMarkup {
 }
 
 fn food_menu_keyboard() -> InlineKeyboardMarkup {
-    InlineKeyboardMarkup::new(vec![
-        vec![button("➕ Nuovo alimento", "food:new")],
-        vec![
-            button("📋 Elenco alimenti", "food:list"),
-            button("🔎 Cerca", "food:search"),
-        ],
-        vec![button("🏷 Filtra", "food:filter")],
-        vec![
-            button("⬅️ Indietro", "food:menu"),
-            button("🏠 Menù principale", "menu:main"),
-        ],
-    ])
+    food_menu_keyboard_con_conteggio(None)
+}
+
+/// Menu' della sezione Alimenti, nell'ordine canonico di C11.
+///
+/// C6: sopra le 20 voci sfogliare non e' una strada praticabile — con 422
+/// alimenti l'elenco e' lungo 85 pagine — quindi `🔎 Cerca` diventa la prima
+/// azione e l'elenco la seconda. Sotto la soglia l'elenco resta primo, perche'
+/// con poche voci scorrere e' piu' veloce che scrivere.
+///
+/// C7: il conteggio sta sull'etichetta dell'elenco, cosi' si sa quanto e'
+/// grande la lista prima di aprirla.
+fn food_menu_keyboard_con_conteggio(total: Option<i64>) -> InlineKeyboardMarkup {
+    let elenco = match total {
+        Some(total) => button(
+            liste::etichetta_con_conteggio("📋 Elenco alimenti", total),
+            "food:list",
+        ),
+        None => button("📋 Elenco alimenti", "food:list"),
+    };
+    let cerca = button("🔎 Cerca", "food:search");
+
+    let mut rows = Vec::new();
+    if total.is_some_and(liste::si_cerca_invece_di_sfogliare) {
+        rows.push(vec![cerca]);
+        rows.push(vec![elenco]);
+    } else {
+        rows.push(vec![elenco]);
+        rows.push(vec![cerca]);
+    }
+    rows.push(vec![button("➕ Nuovo alimento", "food:new")]);
+    rows.push(vec![button("🏷 Filtra", "food:filter")]);
+    rows.push(vec![
+        button("⬅️ Indietro", "food:menu"),
+        button("🏠 Menù principale", "menu:main"),
+    ]);
+    InlineKeyboardMarkup::new(rows)
 }
 
 fn food_results_keyboard(
     foods: &[FoodRecord],
     page: i64,
-    has_next: bool,
     total: usize,
     current_user: Option<i64>,
 ) -> InlineKeyboardMarkup {
     let mut rows = food_item_rows(foods, current_user);
-    push_pagination_row(&mut rows, page, has_next, total, "food:list:page");
+    push_pagination_row(&mut rows, page, total, "food:list:page");
+    // C6: sopra le 20 voci la ricerca e' la strada principale, quindi viene
+    // prima della creazione.
     rows.push(vec![
-        button("➕ Nuovo alimento", "food:new"),
         button("🔎 Cerca", "food:search:list"),
+        button("➕ Nuovo alimento", "food:new"),
     ]);
     rows.push(vec![button("🏷 Filtra", "food:filter")]);
     rows.push(vec![
@@ -4850,12 +4865,11 @@ fn food_results_keyboard(
 fn food_search_results_keyboard(
     foods: &[FoodRecord],
     page: i64,
-    has_next: bool,
     total: usize,
     current_user: Option<i64>,
 ) -> InlineKeyboardMarkup {
     let mut rows = food_item_rows(foods, current_user);
-    push_pagination_row(&mut rows, page, has_next, total, "food:search:page");
+    push_pagination_row(&mut rows, page, total, "food:search:page");
     rows.push(vec![
         button("🔎 Nuova ricerca", "food:search:list"),
         button("🏷 Filtra", "food:filter"),
@@ -4953,15 +4967,16 @@ fn category_filter_keyboard(
 fn food_filtered_results_keyboard(
     foods: &[FoodRecord],
     page: i64,
-    has_next: bool,
     total: usize,
     current_user: Option<i64>,
 ) -> InlineKeyboardMarkup {
     let mut rows = food_item_rows(foods, current_user);
-    push_pagination_row(&mut rows, page, has_next, total, "food:filter:page");
+    push_pagination_row(&mut rows, page, total, "food:filter:page");
+    // C6: sopra le 20 voci la ricerca e' la strada principale, quindi viene
+    // prima della creazione.
     rows.push(vec![
-        button("➕ Nuovo alimento", "food:new"),
         button("🔎 Cerca", "food:search:list"),
+        button("➕ Nuovo alimento", "food:new"),
     ]);
     rows.push(vec![button("🏷 Cambia filtro", "food:filter")]);
     rows.push(vec![
@@ -5230,20 +5245,38 @@ fn food_origin_rank(food: &FoodRecord) -> i64 {
     }
 }
 
-fn append_food_lines(text: &mut String, foods: &[FoodRecord], current_user: Option<i64>) {
-    let mut has_non_base = false;
-    for food in foods {
-        if food_origin_marker(food, current_user).is_some() {
-            has_non_base = true;
-        }
-        text.push_str(&food_summary_line(food, current_user));
-        text.push('\n');
+/// Cio' che il testo di un elenco di alimenti puo' dire e i pulsanti no (C1).
+///
+/// Sono due cose e nessuna delle due sta su un pulsante: **con che criterio e'
+/// ordinata la lista**, che C6 impone di dichiarare quando non e' alfabetico,
+/// e **cosa vogliono dire i marcatori** che compaiono sulle etichette. La
+/// legenda si mostra solo quando in pagina c'e' almeno un marcatore da
+/// spiegare: il catalogo base non ne porta.
+fn note_elenco_alimenti(foods: &[FoodRecord], current_user: Option<i64>) -> String {
+    let mut note = String::from("\n\nPrima i tuoi, poi i condivisi, poi il catalogo base.");
+    if foods
+        .iter()
+        .any(|food| food_origin_marker(food, current_user).is_some())
+    {
+        note.push_str("\n👤 tuo · 👥 condiviso");
     }
-    if has_non_base {
-        text.push_str("\n👤 tuo · 👥 condiviso");
-    }
+    note
 }
 
+/// Nella ricerca il testo non elenca piu' i risultati — stanno sui pulsanti —
+/// ma tiene l'unica cosa che i pulsanti non possono dire (C1): **perche'** un
+/// alimento e' finito fra i risultati quando il suo nome non contiene la
+/// parola cercata.
+///
+/// La ricerca guarda tre cose (`list_foods_with_offset`): il nome, gli alias e
+/// marca piu' nome dei prodotti commerciali collegati. Quando a farlo comparire
+/// non e' stato il nome, senza una riga di spiegazione il risultato sembra un
+/// errore del bot. Gli alimenti trovati per nome non producono nessuna riga:
+/// per loro non c'e' niente da spiegare.
+///
+/// Le due strade sono trattate insieme perche' il difetto e' lo stesso: la
+/// prima versione di questa funzione copriva solo i prodotti, e un alimento
+/// trovato per alias restava inspiegato esattamente come prima.
 async fn append_search_food_lines(
     pool: &SqlitePool,
     text: &mut String,
@@ -5251,17 +5284,32 @@ async fn append_search_food_lines(
     current_user: Option<i64>,
     normalized_query: &str,
 ) {
-    let mut has_non_base = false;
+    let mut spiegazioni = Vec::new();
     for food in foods {
-        if food_origin_marker(food, current_user).is_some() {
-            has_non_base = true;
+        if normalize_name(&food.name).contains(normalized_query) {
+            continue;
         }
-        text.push_str(&food_summary_line(food, current_user));
-        text.push('\n');
+        let etichetta = food_summary_line(food, current_user);
+
+        match matching_aliases_for_food(pool, food.id, normalized_query).await {
+            Ok(aliases) => {
+                for alias in aliases {
+                    spiegazioni.push(format!("{etichetta} → anche «{alias}»"));
+                }
+            }
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    food_id = food.id,
+                    "Errore alias corrispondenti ricerca"
+                );
+            }
+        }
+
         match matching_products_for_food(pool, food.id, normalized_query).await {
             Ok(products) => {
                 for (brand, product_name) in products {
-                    text.push_str(&format!("   🛒 {brand} · {product_name}\n"));
+                    spiegazioni.push(format!("{etichetta} → prodotto {brand} · {product_name}"));
                 }
             }
             Err(error) => {
@@ -5273,8 +5321,17 @@ async fn append_search_food_lines(
             }
         }
     }
-    if has_non_base {
-        text.push_str("\n👤 tuo · 👥 condiviso");
+
+    if !spiegazioni.is_empty() {
+        text.push_str("\n\nPerché sono nei risultati:\n");
+        text.push_str(&spiegazioni.join("\n"));
+    }
+
+    if foods
+        .iter()
+        .any(|food| food_origin_marker(food, current_user).is_some())
+    {
+        text.push_str("\n\n👤 tuo · 👥 condiviso");
     }
 }
 
@@ -5296,34 +5353,20 @@ fn food_item_rows(
 fn push_pagination_row(
     rows: &mut Vec<Vec<InlineKeyboardButton>>,
     page: i64,
-    has_next: bool,
     total: usize,
     callback_prefix: &str,
 ) {
-    let pages = total_pages(total);
-    if pages <= 1 {
-        return;
+    if let Some(riga) =
+        liste::riga_paginazione_da_totale(page, total as i64, "food:noop", |pagina| {
+            format!("{callback_prefix}:{pagina}")
+        })
+    {
+        rows.push(riga);
     }
-
-    let mut pagination = Vec::new();
-    if page > 0 {
-        pagination.push(button(
-            "⬅️ Pagina precedente",
-            format!("{callback_prefix}:{}", page - 1),
-        ));
-    }
-    pagination.push(button(format!("{}/{}", page + 1, pages), "food:noop"));
-    if has_next {
-        pagination.push(button(
-            "Pagina successiva ➡️",
-            format!("{callback_prefix}:{}", page + 1),
-        ));
-    }
-    rows.push(pagination);
 }
 
 fn page_offset(page: i64) -> i64 {
-    page.max(0).saturating_mul(FOOD_PAGE_SIZE as i64)
+    liste::scarto(page)
 }
 
 fn split_food_page(mut rows: Vec<FoodRecord>) -> (Vec<FoodRecord>, bool) {
@@ -5337,17 +5380,8 @@ fn parse_nonnegative_page(raw: &str) -> Option<i64> {
     (page >= 0).then_some(page)
 }
 
-fn total_pages(total: usize) -> usize {
-    if total == 0 {
-        1
-    } else {
-        total.div_ceil(FOOD_PAGE_SIZE)
-    }
-}
-
 fn clamp_page(page: i64, total: usize) -> i64 {
-    let last = total_pages(total).saturating_sub(1) as i64;
-    page.max(0).min(last)
+    liste::pagina_valida(page, total as i64)
 }
 
 fn result_count_label(total: usize) -> String {
@@ -5425,6 +5459,33 @@ async fn send_food_products(
         .reply_markup(food_products_keyboard(food_id, &products, can_edit))
         .await?;
     Ok(())
+}
+
+/// Gli alias di un alimento che contengono la parola cercata.
+///
+/// Serve alla riga che spiega perche' un alimento e' fra i risultati: la
+/// ricerca guarda il nome, **gli alias** e i prodotti commerciali collegati, e
+/// senza questa query il caso dell'alias restava senza spiegazione.
+async fn matching_aliases_for_food(
+    pool: &SqlitePool,
+    food_id: i64,
+    normalized_query: &str,
+) -> Result<Vec<String>> {
+    if normalized_query.is_empty() {
+        return Ok(Vec::new());
+    }
+    sqlx::query_scalar::<_, String>(
+        "SELECT alias \
+         FROM alimento_alias \
+         WHERE alimento_id = ? AND instr(alias_normalizzato, ?) > 0 \
+         ORDER BY alias COLLATE NOCASE, id \
+         LIMIT 3",
+    )
+    .bind(food_id)
+    .bind(normalized_query)
+    .fetch_all(pool)
+    .await
+    .context("Impossibile leggere gli alias corrispondenti alla ricerca")
 }
 
 async fn matching_products_for_food(
@@ -7834,6 +7895,77 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn la_ricerca_spiega_perche_un_alimento_e_nei_risultati() {
+        // La ricerca guarda nome, alias e marca/nome dei prodotti collegati.
+        // Quando a far comparire un alimento non e' il suo nome, il risultato
+        // sembra un errore del bot: questa e' la riga che lo spiega (C1).
+        let pool = test_pool().await;
+        let admin_id = create_user(&pool, "Admin spiegazione ricerca").await;
+        add_membership(&pool, 1, admin_id, "proprietario").await;
+        sqlx::query("UPDATE utenti SET ruolo_sistema = 'admin' WHERE id = ?")
+            .bind(admin_id)
+            .execute(&pool)
+            .await
+            .expect("promozione admin");
+        let food_id: i64 = sqlx::query_scalar(
+            "SELECT id FROM alimenti WHERE catalogo_globale = 1 AND nome_normalizzato = 'formaggio spalmabile'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("formaggio spalmabile");
+        let unit_id: i64 = sqlx::query_scalar("SELECT id FROM unita_misura WHERE simbolo = 'g'")
+            .fetch_one(&pool)
+            .await
+            .expect("grammi");
+
+        let actor = actor(admin_id, 1, true, "Admin spiegazione ricerca");
+        identity::with_actor(actor, async {
+            create_product_association(&pool, food_id, "Philadelphia", "Original", 200.0, unit_id)
+                .await
+                .expect("prodotto");
+            sqlx::query(
+                "INSERT INTO alimento_alias (alimento_id, alias, alias_normalizzato) VALUES (?, ?, ?)",
+            )
+            .bind(food_id)
+            .bind("Crema spalmabile")
+            .bind(normalize_name("Crema spalmabile"))
+            .execute(&pool)
+            .await
+            .expect("alias");
+
+            // Trovato per il prodotto commerciale.
+            let foods = list_foods(&pool, Some("philadelphia"), None, 20)
+                .await
+                .expect("ricerca marca");
+            let mut testo = String::new();
+            append_search_food_lines(&pool, &mut testo, &foods, Some(admin_id), "philadelphia")
+                .await;
+            assert!(testo.contains("Perché sono nei risultati:"), "{testo}");
+            assert!(
+                testo.contains("prodotto Philadelphia · Original"),
+                "{testo}"
+            );
+
+            // Trovato per un alias: prima questa strada restava inspiegata.
+            let foods = list_foods(&pool, Some("crema"), None, 20)
+                .await
+                .expect("ricerca alias");
+            let mut testo = String::new();
+            append_search_food_lines(&pool, &mut testo, &foods, Some(admin_id), "crema").await;
+            assert!(testo.contains("anche «Crema spalmabile»"), "{testo}");
+
+            // Trovato per il proprio nome: non c'e' niente da spiegare.
+            let foods = list_foods(&pool, Some("formaggio"), None, 20)
+                .await
+                .expect("ricerca nome");
+            let mut testo = String::new();
+            append_search_food_lines(&pool, &mut testo, &foods, Some(admin_id), "formaggio").await;
+            assert!(!testo.contains("Perché sono nei risultati:"), "{testo}");
+        })
+        .await;
+    }
+
+    #[tokio::test]
     async fn ricerca_alimenti_trova_anche_marca_e_nome_commerciale() {
         let pool = test_pool().await;
         let admin_id = create_user(&pool, "Admin ricerca prodotti").await;
@@ -7938,11 +8070,42 @@ mod tests {
         .await;
     }
 
+    fn etichette_tastiera(markup: &InlineKeyboardMarkup) -> Vec<Vec<String>> {
+        markup
+            .inline_keyboard
+            .iter()
+            .map(|riga| riga.iter().map(|b| b.text.clone()).collect())
+            .collect()
+    }
+
+    #[test]
+    fn sopra_le_venti_voci_la_ricerca_viene_prima_dell_elenco() {
+        // C6: con 422 alimenti l'elenco e' lungo 85 pagine, e sfogliarlo non
+        // e' una strada. Il conteggio sta sul pulsante (C7).
+        let righe = etichette_tastiera(&food_menu_keyboard_con_conteggio(Some(422)));
+        assert_eq!(righe[0], vec!["🔎 Cerca"]);
+        assert_eq!(righe[1], vec!["📋 Elenco alimenti · 422"]);
+    }
+
+    #[test]
+    fn sotto_la_soglia_l_elenco_resta_la_prima_azione() {
+        let righe = etichette_tastiera(&food_menu_keyboard_con_conteggio(Some(7)));
+        assert_eq!(righe[0], vec!["📋 Elenco alimenti · 7"]);
+        assert_eq!(righe[1], vec!["🔎 Cerca"]);
+    }
+
+    #[test]
+    fn senza_conteggio_il_menu_resta_usabile() {
+        // Se il conteggio non si legge, la sezione deve restare raggiungibile.
+        let righe = etichette_tastiera(&food_menu_keyboard_con_conteggio(None));
+        assert_eq!(righe[0], vec!["📋 Elenco alimenti"]);
+    }
+
     #[test]
     fn intestazione_paginata_calcola_totale_e_pagine() {
         assert_eq!(result_count_label(1), "1 risultato");
         assert_eq!(result_count_label(37), "37 risultati");
-        assert_eq!(total_pages(37), 8);
+        assert_eq!(liste::totale_pagine(37), 8);
         assert_eq!(clamp_page(1, 37), 1);
         assert_eq!(clamp_page(99, 37), 7);
     }

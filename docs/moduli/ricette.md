@@ -198,7 +198,15 @@ Menu Ricette:
 ```
 
 Gli elenchi usano 5 ricette per pagina e il pulsante centrale pagina/totale è
-informativo.
+informativo. La riga di paginazione è quella comune di `modules::liste`:
+`⬅️ Precedente | n/tot | Successiva ➡️`, assente quando c'è una pagina sola.
+
+Il testo non elenca le ricette (C1): stanno sui pulsanti, con il marcatore
+`👤`/`👥` sull'etichetta. Porzioni, numero di ingredienti e numero di step si
+leggono aprendo la ricetta — prima erano nel messaggio e costavano due
+sotto-query correlate per riga, dieci `COUNT` a ogni pagina, per un testo che
+nessuno doveva più leggere. L'ordinamento è alfabetico, quindi non va
+dichiarato.
 
 La ricerca per nome usa `nome_normalizzato` e rispetta la visibilità corrente.
 
