@@ -217,6 +217,28 @@ Nessuna tastiera scrive `💡 Migliora` da sé: lo inserisce `context_bot.rs`
 prima dell'**ultimo** pulsante `menu:main` della riga. Chi scrive una tastiera
 deve solo mettere il pulsante del menù per ultimo.
 
+**`⬅️ Indietro` e `❌ Annulla` non sono la stessa cosa quando la procedura ha
+più di un passo.** `⬅️ Indietro` torna al passo precedente della stessa
+procedura, senza abbandonarla; `❌ Annulla` la chiude e basta. In una
+procedura a **un solo passo** (scrivi un nome, conferma un valore) i due
+coincidono: non c'è un passo precedente diverso dall'uscita, quindi
+`❌ Annulla` prende il posto di `⬅️ Indietro` nella riga di navigazione, come
+in tabella. In una procedura a **più passi**, dove servono entrambi,
+`❌ Annulla` va su una riga propria sopra quella di navigazione:
+
+```text
+[ ❌ Annulla ]
+⬅️ Indietro | 💡 Migliora | 🏠 Menù principale
+```
+
+**Un pulsante "per uscire" che non chiude davvero la conversazione guidata è
+un difetto, non una scorciatoia.** Il flusso `✏️ Rinomina spazio` mostrava
+`👤 Profilo` e `👥 Spazi` al posto di `❌ Annulla` — pulsanti che portavano
+altrove ma non azzeravano lo stato "sto aspettando un nome": chi li premeva e
+poi scriveva un messaggio qualunque rischiava di vederlo interpretato come il
+nuovo nome dello spazio. Ogni pulsante che chiude o cambia una procedura
+guidata deve ripulire lo stato della sessione, non solo cambiare schermata.
+
 ### C4. Un simbolo, un significato
 
 | simbolo | significato | dove |

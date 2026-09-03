@@ -1076,9 +1076,15 @@ async fn handle_authorized_callback(
             food_sessions.clear_chat(chat_id.0);
             improvement_sessions.clear_chat(chat_id.0);
             recipe_sessions.clear_chat(chat_id.0);
+            identity_sessions.clear_chat(chat_id.0);
             send_main_menu(&bot, chat_id, &pool, &actor).await?;
         }
+        "identity:cancel" => {
+            identity_sessions.clear_chat(chat_id.0);
+            send_spaces(&bot, chat_id, &pool, &actor).await?;
+        }
         "identity:profile" => {
+            identity_sessions.clear_chat(chat_id.0);
             send_profile(&bot, chat_id, &pool, &actor).await?;
         }
         "identity:spaces" => {
@@ -1086,6 +1092,7 @@ async fn handle_authorized_callback(
             location_sessions.clear_chat(chat_id.0);
             container_sessions.clear_chat(chat_id.0);
             photo_sessions.clear_chat(chat_id.0);
+            identity_sessions.clear_chat(chat_id.0);
             send_spaces(&bot, chat_id, &pool, &actor).await?;
         }
         "identity:space:new" => {
@@ -2235,21 +2242,16 @@ fn profile_keyboard() -> InlineKeyboardMarkup {
     ]])
 }
 
+/// Un passo di procedura a una sola fase (C3): `❌ Annulla` prende il posto
+/// di `⬅️ Indietro` ed esce dall'intera procedura, invece di lasciare
+/// `👤 Profilo` / `👥 Spazi` — pulsanti che non chiudevano la conversazione
+/// guidata e permettevano di lasciarla a meta', pronta a interpretare come
+/// nuovo nome qualunque messaggio scritto dopo.
 fn space_flow_keyboard() -> InlineKeyboardMarkup {
-    InlineKeyboardMarkup::new(vec![
-        vec![InlineKeyboardButton::callback(
-            "👤 Profilo".to_string(),
-            "identity:profile".to_string(),
-        )],
-        vec![InlineKeyboardButton::callback(
-            "👥 Spazi".to_string(),
-            "identity:spaces".to_string(),
-        )],
-        vec![InlineKeyboardButton::callback(
-            "🏠 Menù principale".to_string(),
-            "menu:main".to_string(),
-        )],
-    ])
+    InlineKeyboardMarkup::new(vec![vec![
+        InlineKeyboardButton::callback("❌ Annulla".to_string(), "identity:cancel".to_string()),
+        InlineKeyboardButton::callback("🏠 Menù principale".to_string(), "menu:main".to_string()),
+    ]])
 }
 
 fn command_args(text: &str) -> &str {

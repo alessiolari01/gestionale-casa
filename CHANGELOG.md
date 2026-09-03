@@ -2,6 +2,39 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_SPAZI_ANNULLA_20260903 -->
+# 03/09/2026 — Un pulsante "per uscire" che non usciva
+
+Trovato da Alessio al primo collaudo del blocco Spazi/Profilo: `✏️ Rinomina
+spazio` mostrava `👤 Profilo` e `👥 Spazi` al posto di un `❌ Annulla` che
+funzionasse. Non erano decorativi — portavano davvero a quelle schermate — ma
+**non ripulivano lo stato "sto aspettando un nome"**: chi li premeva restava
+dentro `IdentityConversationState::AwaitingRenameSpaceName` (o
+`AwaitingNewSpaceName`), e il primo messaggio scritto dopo, qualunque fosse,
+veniva interpretato come il nuovo nome dello spazio.
+
+Il testo diceva gia' "Scrivi il nuovo nome oppure premi ❌ Annulla" da prima
+di questo blocco: quel pulsante non e' mai esistito, l'unica via d'uscita reale
+era il comando testuale `/annulla`, invisibile a chi non lo conosce.
+
+`space_flow_keyboard()` ora e' una riga sola, `❌ Annulla | 💡 Migliora |
+🏠 Menù principale`, dove `❌ Annulla` (`identity:cancel`) ripulisce lo stato
+ed esce alla schermata Spazi — lo stesso comportamento di `/annulla`, ora
+anche a pulsante. Per lo stesso motivo ripuliscono `identity_sessions` anche
+`menu:main`, `identity:profile` e `identity:spaces`, che prima non lo
+facevano.
+
+**Regola generale, aggiunta a C3** di `docs/convenzioni-telegram.md`:
+`⬅️ Indietro` e `❌ Annulla` sono la stessa cosa solo in una procedura a un
+passo solo (e allora `❌ Annulla` prende il posto di `⬅️ Indietro` nella riga
+di navigazione, gia' cosi' in tabella). In una procedura a piu' passi vanno
+tenuti separati: `⬅️ Indietro` torna al passo precedente, `❌ Annulla` chiude
+tutto e va su una riga propria sopra la navigazione. E soprattutto: un
+pulsante che chiude o cambia una procedura guidata deve ripulire lo stato
+della sessione, non solo cambiare schermata.
+
+Nessun test nuovo, nessun cambiamento al totale: **270**.
+
 <!-- CHANGELOG_SPAZI_PROFILO_20260903 -->
 # 03/09/2026 — Spazio predefinito e vista, spiegati insieme per la prima volta
 
