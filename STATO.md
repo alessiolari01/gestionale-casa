@@ -182,6 +182,13 @@ di `📤 Invia a Claude` si evitano con un flag sulla riga `miglioramenti`, non
 una tabella coda separata. Confermato che `cargo test` non tocca mai il
 database reale (ogni test usa `sqlite::memory:`).
 
+**Primo pezzo pronto**: `scripts/verifica-ci.sh`, legge lo stato reale
+dell'ultima run CI di un ramo dall'API di GitHub (nessun token necessario, il
+repository è pubblico). Provato su una run vera, `#70` su questo stesso ramo:
+letto correttamente sia mentre era `in_progress` sia dopo, `completed` /
+`success`. `--attendi` ripete il controllo fino a un timeout invece di uscire
+subito con "ancora in corso".
+
 ## 3. Stato tecnico verificato
 
 - **42 migration** nel repository, **tutte applicate** al database reale
@@ -298,6 +305,7 @@ src/modules/spazi_membri.rs         membri, inviti, ruoli
 src/context_bot.rs                  schermata singola e `💡 Migliora`
 src/main.rs                         routing, sessioni, input inattesi
 scripts/aggiorna-s9.sh              aggiornamento e avvio sul telefono
+scripts/verifica-ci.sh              stato reale della run CI via API, non un riassunto
 ```
 
 ## 6. Punti aperti

@@ -2,6 +2,36 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_VERIFICA_CI_20260904 -->
+# 04/09/2026 — Il primo pezzo dell'automazione: leggere la CI, non riassumerla
+
+`scripts/verifica-ci.sh`, primo passo verificabile del ciclo descritto in
+`docs/previsto/automazione-ciclo-sviluppo.md` (punto 5): legge l'ultima run
+CI di un ramo direttamente dall'API di GitHub Actions. Nessuna scrittura,
+nessun token — il repository è pubblico.
+
+Provato su una run vera e non su un caso finto: `#70`, la run generata dal
+commit precedente su questo stesso ramo. Letta correttamente sia mentre era
+`in_progress` (osservato prima che finisse) sia dopo, `completed`/`success`.
+Provati anche un ramo inesistente (nessuna run trovata, uscita 1) e
+`--attendi` su una run già conclusa (esce subito, non aspetta il timeout).
+
+**Un bug trovato scrivendolo, non dopo**: la prima versione passava la
+risposta JSON dell'API sullo stdin dello stesso comando invocato come
+`python - <<EOF` — cioè lo stdin già usato per lo script Python stesso.
+Arrivava sempre vuota (`Expecting value: line 1 column 1`). Corretto
+scrivendo lo script Python in un file temporaneo e passando la risposta
+dell'API come secondo file, non su uno stdin conteso.
+
+**Una trappola di Windows, la stessa già scritta in `claude/stato-reale-progetto.md`**:
+`python3` esiste sul `PATH` di questa macchina ma è lo stub del Microsoft
+Store, che esce con un errore invece di eseguire — `command -v python3` lo
+trova comunque, perché esiste come file. Lo script ora verifica anche che
+l'interprete risponda a `--version` prima di fidarsi, e ripiega su `python`.
+
+Nessun test Rust coinvolto (non è codice Rust): nessun cambiamento al
+totale, resta **270**.
+
 <!-- CHANGELOG_AUTOMAZIONE_SPEC_20260903 -->
 # 03/09/2026 — Specifica dell'automazione del ciclo dev → deploy, e una topologia da correggere
 
