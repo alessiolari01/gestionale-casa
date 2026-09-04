@@ -164,6 +164,25 @@ singolo.
    manutenzione per gli utenti normali finché non c'è una nuova versione
    pronta, e si riparte dal punto 2 con le correzioni.
 
+   **Punti 7-8-9 scritti (sotto-step 5c, 4 settembre 2026), collaudo
+   sull'S9 da fare**: pilotati dal bot stesso — non dall'agente via API
+   diretta come il countdown, perché qui il bot nuovo è già acceso e in
+   ascolto (deciso insieme ad Alessio). Il contenuto (riepilogo + passi da
+   provare) arriva da un file scritto dall'agente prima dello swap
+   (`data/run/riepilogo_deploy.txt`: testo libero, poi una riga
+   `---CHECKLIST---`, poi una voce per riga) — stesso canale a file già
+   usato per `RISERVATO` e per lo stato delle sessioni. All'avvio, con
+   `RISERVATO=1` e il file leggibile, il bot manda da solo il messaggio
+   all'amministratore principale: checklist a bottoni `☐`/`✅` che si
+   spuntano via edit, bottoni `✅ Confermo, funziona` / `❌ Non funziona`
+   che compaiono solo a checklist completa (verificato anche lato server,
+   mai fidandosi del solo stato client). Alla conferma: disattiva la
+   modalità riservata e notifica tutte le chat attive, stessa funzione
+   condivisa col bottone di sblocco del sotto-step 5a. In entrambi i casi
+   scrive `data/run/esito_collaudo.txt` ("confermato"/"rifiutato") per
+   l'agente orchestratore — non ancora collegato al merge su `main` né al
+   rollback: arriva con il sotto-step 5d.
+
 Qualunque fallimento in un passaggio (connessione SSH persa, build o
 collaudo in errore) genera una notifica Telegram immediata con l'errore
 specifico e lo stato in cui è stato lasciato l'S9 — mai un fallimento

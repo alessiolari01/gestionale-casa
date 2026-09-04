@@ -2,6 +2,46 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_COLLAUDO_GUIDATO_20260904 -->
+# 04/09/2026 — Riepilogo, checklist e conferma pilotati dal bot (sotto-step 5c, scritto)
+
+Terzo pezzo del sotto-step 5/5 (lo swap vero): i punti 7-8-9 della
+specifica (riepilogo di cosa e' stato implementato, checklist di collaudo
+guidato, conferma/rifiuto finale dell'amministratore principale).
+
+Deciso insieme ad Alessio prima di scrivere codice: a differenza del
+countdown (agente orchestratore, API diretta, perche' deve continuare ad
+aggiornarsi anche col vecchio processo fermo), qui e' il bot nuovo stesso
+a pilotare tutto — e' gia' acceso e in ascolto su Telegram appena lo swap
+e' completo, non serve altro.
+
+Il contenuto (riepilogo + passi da provare) arriva da un file scritto
+dall'agente prima dello swap (`data/run/riepilogo_deploy.txt`: testo
+libero, poi una riga `---CHECKLIST---`, poi una voce per riga) — stesso
+canale a file gia' usato per `RISERVATO` e per lo stato delle sessioni,
+non un parametro nuovo per ogni pezzo. All'avvio, con `RISERVATO=1` e il
+file leggibile, il bot manda da solo il messaggio all'amministratore
+principale (`identity::list_primary_admin_chat_ids`): checklist a bottoni
+`☐`/`✅` che si spuntano via edit dello stesso messaggio, mai un messaggio
+nuovo. I bottoni `✅ Confermo, funziona` / `❌ Non funziona` compaiono solo
+a checklist completa — e il server li rifiuta comunque se qualcuno li
+premesse prima, senza fidarsi del solo stato lato client.
+
+Alla conferma: disattiva la modalita' riservata e notifica tutte le chat
+attive, con `esci_da_modalita_riservata` — la stessa funzione gia' usata
+dal bottone di sblocco del sotto-step 5a, condivisa invece di duplicata.
+Al rifiuto: resta in modalita' riservata, come da specifica. In entrambi i
+casi scrive `data/run/esito_collaudo.txt` ("confermato"/"rifiutato"), che
+l'agente orchestratore (sotto-step 5d) leggera' per decidere se procedere
+al merge su `main` o innescare il rollback del sotto-step 5b — non ancora
+collegato a nessuno dei due.
+
+289 test (280 prima), 9 nuovi in `src/modules/collaudo.rs`: interpretazione
+del file (separatore mancante, checklist vuota, righe vuote ignorate),
+`tutto_fatto`/`alterna` (incluso un indice inesistente), la tastiera che
+mostra conferma/rifiuto solo a checklist completa, il troncamento delle
+etichette lunghe. Collaudo reale sull'S9 nel prossimo commit.
+
 <!-- CHANGELOG_ROLLBACK_BINARIO_COLLAUDO_20260904 -->
 # 04/09/2026 — Sotto-step 5b collaudato per davvero: rollback in ~2 secondi
 

@@ -395,6 +395,36 @@ modalità normale, come deciso). `ferma-bot.sh` ha fermato il processo
 ripristinato con lo spegnimento pulito consueto, senza saperne nulla del
 rollback: stesso schema di PID di sempre.
 
+**Sotto-step 5c, meccanica scritta — collaudo sull'S9 da fare**: riepilogo,
+checklist e conferma/rifiuto pilotati dal bot stesso, deciso il 4
+settembre. Il contenuto (cosa è stato implementato + passi da provare)
+arriva da un file scritto dall'agente prima dello swap
+(`data/run/riepilogo_deploy.txt`, formato: testo libero, poi una riga
+`---CHECKLIST---`, poi una voce per riga) — stesso canale a file già usato
+per `RISERVATO` e per lo stato delle sessioni, non un parametro nuovo per
+ogni pezzo. All'avvio, se `RISERVATO=1` e il file è leggibile, il bot manda
+da solo il messaggio all'amministratore principale
+(`identity::list_primary_admin_chat_ids`): riepilogo, checklist con
+bottoni `☐`/`✅` che si spuntano via edit (mai un messaggio nuovo), e i
+bottoni `✅ Confermo, funziona` / `❌ Non funziona` che compaiono solo a
+checklist completa — verificato anche lato server, non solo nascondendo i
+bottoni, perché uno stato lato client non è mai una garanzia.
+
+Alla conferma: disattiva la modalità riservata e notifica tutte le chat
+attive — stessa funzione (`esci_da_modalita_riservata`) già usata dal
+bottone di sblocco del sotto-step 5a, condivisa invece di duplicata. Al
+rifiuto: resta in modalità riservata, come da specifica. In entrambi i
+casi scrive `data/run/esito_collaudo.txt` ("confermato" o "rifiutato"),
+che l'agente orchestratore (sotto-step 5d) leggerà per decidere se
+procedere al merge o innescare il rollback del sotto-step 5b — non ancora
+collegato a nessuno dei due.
+
+289 test (280 prima), 9 nuovi in `src/modules/collaudo.rs`: interpretazione
+del file (separatore mancante, checklist vuota, righe vuote ignorate),
+`tutto_fatto`/`alterna` (incluso un indice inesistente), la tastiera che
+mostra conferma/rifiuto solo a checklist completa, il troncamento delle
+etichette lunghe.
+
 **Trovato per davvero verificando la CI di questo stesso push**: subito
 dopo `git push`, `scripts/verifica-ci.sh` ha riportato "OK CI verde"
 leggendo pero' la run del **commit precedente** (`7c730932`, gia'
@@ -438,10 +468,10 @@ questo blocco di automazione.
   stata applicata sull'S9 al momento di scrivere questo: lo sara' al
   prossimo `aggiorna-s9.sh`;
 - pipeline verde: `fmt`, `check --locked`, `clippy --all-targets --locked
-  -- -D warnings`, `test --locked` — **280 test** (279 prima del sotto-step
-  5a, 270 prima del sotto-step 3/5 della distribuzione, 248 prima del
-  2 settembre: e' il numero da confrontare dopo ogni aggiornamento
-  dell'S9);
+  -- -D warnings`, `test --locked` — **289 test** (280 prima del sotto-step
+  5c, 279 prima del sotto-step 5a, 270 prima del sotto-step 3/5 della
+  distribuzione, 248 prima del 2 settembre: e' il numero da confrontare
+  dopo ogni aggiornamento dell'S9);
 - CI su GitHub Actions **verde** dalla run #42, la prima dello Step 7.
 
 Regola invariata: una migration applicata al database reale e' immutabile. Ogni

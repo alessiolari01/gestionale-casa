@@ -29,7 +29,7 @@ use teloxide::{
     dispatching::ShutdownToken,
     dptree,
     prelude::*,
-    types::{InlineKeyboardButton, InlineKeyboardMarkup, User},
+    types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, User},
 };
 
 type Bot = context_bot::ContextBot;
@@ -168,6 +168,37 @@ impl ShutdownController {
     }
 }
 
+/// Sotto-step 5c del punto 6 del ciclo di automazione: lo stato del
+/// collaudo guidato dopo uno swap (riepilogo, checklist, message_id da
+/// modificare). Un solo collaudo alla volta ha senso — un solo
+/// amministratore principale, un solo deploy in corso — quindi `Option`
+/// invece di una mappa per chat come le dieci sessioni testuali.
+#[derive(Clone, Default)]
+struct CollaudoStore {
+    stato: Arc<Mutex<Option<modules::collaudo::StatoCollaudo>>>,
+}
+
+impl CollaudoStore {
+    fn imposta(&self, stato: modules::collaudo::StatoCollaudo) {
+        *self.stato.lock().unwrap_or_else(|p| p.into_inner()) = Some(stato);
+    }
+
+    /// Applica `f` allo stato attivo, se c'è. `None` se non c'è nessun
+    /// collaudo in corso (bottone di un messaggio vecchio, o modalità
+    /// normale).
+    fn con_stato<T>(
+        &self,
+        f: impl FnOnce(&mut modules::collaudo::StatoCollaudo) -> T,
+    ) -> Option<T> {
+        let mut guard = self.stato.lock().unwrap_or_else(|p| p.into_inner());
+        guard.as_mut().map(f)
+    }
+
+    fn concludi(&self) {
+        *self.stato.lock().unwrap_or_else(|p| p.into_inner()) = None;
+    }
+}
+
 /// Sotto-step 5a del punto 6 del ciclo di automazione: solo l'amministratore
 /// principale può usare il bot mentre è attiva, gli altri vedono un avviso
 /// di manutenzione. Un `AtomicBool` condiviso, non una variabile letta una
@@ -212,6 +243,7 @@ struct HandlerDependencies {
     distribuzione_sessions: DistribuzioneSessionStore,
     shutdown_controller: ShutdownController,
     modalita_riservata: ModalitaRiservata,
+    collaudo_store: CollaudoStore,
 }
 
 /// Vera solo quando la modalità riservata è attiva e chi scrive non è
@@ -489,6 +521,7 @@ async fn async_main() -> anyhow::Result<()> {
         tracing::info!("Avvio in modalità riservata (RISERVATO=1)");
     }
     let modalita_riservata = ModalitaRiservata::new(riservato_da_avvio);
+    let collaudo_store = CollaudoStore::default();
     let handler_dependencies = Arc::new(HandlerDependencies {
         config: config.clone(),
         pool: pool.clone(),
@@ -504,7 +537,62 @@ async fn async_main() -> anyhow::Result<()> {
         distribuzione_sessions,
         shutdown_controller: shutdown_controller.clone(),
         modalita_riservata,
+        collaudo_store: collaudo_store.clone(),
     });
+
+    // Sotto-step 5c del punto 6 del ciclo di automazione: solo a un avvio
+    // riservato con un riepilogo pronto ha senso mandare il messaggio di
+    // collaudo -- un avvio normale non ha nulla da far provare.
+    if riservato_da_avvio {
+        if let Some(riepilogo) =
+            modules::collaudo::leggi_riepilogo(modules::collaudo::FILE_RIEPILOGO).await
+        {
+            match identity::list_primary_admin_chat_ids(&pool).await {
+                Ok(chat_ids) => {
+                    for id in chat_ids {
+                        let chat_id = ChatId(id);
+                        let stato = modules::collaudo::StatoCollaudo::nuovo(
+                            chat_id,
+                            MessageId(0),
+                            riepilogo.clone(),
+                        );
+                        match bot
+                            .send_message_without_improve(chat_id, stato.testo_messaggio())
+                            .reply_markup(stato.tastiera())
+                            .await
+                        {
+                            Ok(messaggio) => {
+                                let stato = modules::collaudo::StatoCollaudo::nuovo(
+                                    chat_id,
+                                    messaggio.id,
+                                    riepilogo.clone(),
+                                );
+                                collaudo_store.imposta(stato);
+                            }
+                            Err(error) => {
+                                tracing::error!(
+                                    chat_id = id,
+                                    ?error,
+                                    "Impossibile inviare il messaggio di collaudo"
+                                );
+                            }
+                        }
+                    }
+                }
+                Err(error) => {
+                    tracing::error!(
+                        ?error,
+                        "Impossibile leggere la chat dell'amministratore principale per il collaudo"
+                    );
+                }
+            }
+        } else {
+            tracing::warn!(
+                "Avvio riservato senza un riepilogo leggibile in {}",
+                modules::collaudo::FILE_RIEPILOGO
+            );
+        }
+    }
 
     // Sotto-step 4/5 del punto 6 del ciclo di automazione: il controllo
     // pre-swap ("qualche chat sta scrivendo?") lo fa l'agente orchestratore
@@ -1161,6 +1249,7 @@ async fn handle_callback(
     let distribuzione_sessions = deps.distribuzione_sessions.clone();
     let shutdown_controller = deps.shutdown_controller.clone();
     let modalita_riservata = deps.modalita_riservata.clone();
+    let collaudo_store = deps.collaudo_store.clone();
     bot.answer_callback_query(q.id.clone()).await?;
 
     let Some(message) = q.regular_message() else {
@@ -1252,6 +1341,7 @@ async fn handle_callback(
             distribuzione_sessions,
             shutdown_controller,
             modalita_riservata,
+            collaudo_store,
             actor,
             data,
         )),
@@ -1276,6 +1366,7 @@ async fn handle_authorized_callback(
     distribuzione_sessions: DistribuzioneSessionStore,
     shutdown_controller: ShutdownController,
     modalita_riservata: ModalitaRiservata,
+    collaudo_store: CollaudoStore,
     actor: identity::AuditActor,
     data: String,
 ) -> ResponseResult<()> {
@@ -1602,25 +1693,77 @@ async fn handle_authorized_callback(
         }
         "admin:riservato:sblocca" => {
             if ensure_primary_admin_access(&bot, chat_id, &pool, &actor).await? {
-                if modalita_riservata.is_attiva() {
-                    modalita_riservata.disattiva();
-                    let chat_ids = identity::list_active_chat_ids(&pool)
+                esci_da_modalita_riservata(&bot, &pool, &modalita_riservata).await;
+                send_admin_menu(&bot, chat_id, &pool, &actor, &modalita_riservata).await?;
+            }
+        }
+        "collaudo:conferma" | "collaudo:rifiuta" => {
+            if ensure_primary_admin_access(&bot, chat_id, &pool, &actor).await? {
+                let pronto = collaudo_store
+                    .con_stato(|stato| stato.tutto_fatto())
+                    .unwrap_or(false);
+                if !pronto {
+                    // Bottone premuto prima di spuntare tutta la checklist
+                    // (o messaggio di un collaudo già concluso): la
+                    // tastiera non dovrebbe nemmeno mostrarli, ma non ci si
+                    // fida del solo stato lato client.
+                    return respond(());
+                }
+                let confermato = data == "collaudo:conferma";
+                let esito = if confermato {
+                    "confermato"
+                } else {
+                    "rifiutato"
+                };
+                if let Err(error) = modules::collaudo::scrivi_esito(esito).await {
+                    tracing::error!(?error, "Impossibile scrivere l'esito del collaudo");
+                }
+                if confermato {
+                    esci_da_modalita_riservata(&bot, &pool, &modalita_riservata).await;
+                }
+                let testo = if confermato {
+                    modules::collaudo::testo_confermato()
+                } else {
+                    modules::collaudo::testo_rifiutato()
+                };
+                if let Some((chat_id_messaggio, message_id)) =
+                    collaudo_store.con_stato(|stato| (stato.chat_id, stato.message_id))
+                {
+                    if let Err(error) = bot
+                        .edit_message_text(chat_id_messaggio, message_id, testo)
                         .await
-                        .unwrap_or_default();
-                    for id in chat_ids {
-                        if let Err(error) = bot
-                            .send_message_without_improve(ChatId(id), "✅ Di nuovo online.")
-                            .await
-                        {
-                            tracing::warn!(
-                                chat_id = id,
-                                ?error,
-                                "Impossibile notificare la fine della modalità riservata"
-                            );
-                        }
+                    {
+                        tracing::error!(?error, "Impossibile aggiornare il messaggio di collaudo");
                     }
                 }
-                send_admin_menu(&bot, chat_id, &pool, &actor, &modalita_riservata).await?;
+                collaudo_store.concludi();
+            }
+        }
+        _ if data.starts_with("collaudo:toggle:") => {
+            if ensure_primary_admin_access(&bot, chat_id, &pool, &actor).await? {
+                let indice = data
+                    .strip_prefix("collaudo:toggle:")
+                    .and_then(|value| value.parse::<usize>().ok());
+                let aggiornato = indice.and_then(|indice| {
+                    collaudo_store.con_stato(|stato| {
+                        stato.alterna(indice);
+                        (
+                            stato.chat_id,
+                            stato.message_id,
+                            stato.testo_messaggio(),
+                            stato.tastiera(),
+                        )
+                    })
+                });
+                if let Some((chat_id_messaggio, message_id, testo, tastiera)) = aggiornato {
+                    if let Err(error) = bot
+                        .edit_message_text(chat_id_messaggio, message_id, testo)
+                        .reply_markup(tastiera)
+                        .await
+                    {
+                        tracing::error!(?error, "Impossibile aggiornare la checklist di collaudo");
+                    }
+                }
             }
         }
         "admin:distribuzione" => {
@@ -2462,6 +2605,36 @@ async fn ensure_primary_admin_access(
             bot.send_message(chat_id, "⚠️ Comando non disponibile.")
                 .await?;
             Ok(false)
+        }
+    }
+}
+
+/// Disattiva la modalità riservata (se attiva) e notifica tutte le chat di
+/// utenti attivi. Condivisa dal bottone `admin:riservato:sblocca`
+/// (sotto-step 5a) e dalla conferma del collaudo guidato (sotto-step 5c):
+/// stesso comportamento, due modi di arrivarci.
+async fn esci_da_modalita_riservata(
+    bot: &Bot,
+    pool: &SqlitePool,
+    modalita_riservata: &ModalitaRiservata,
+) {
+    if !modalita_riservata.is_attiva() {
+        return;
+    }
+    modalita_riservata.disattiva();
+    let chat_ids = identity::list_active_chat_ids(pool)
+        .await
+        .unwrap_or_default();
+    for id in chat_ids {
+        if let Err(error) = bot
+            .send_message_without_improve(ChatId(id), "✅ Di nuovo online.")
+            .await
+        {
+            tracing::warn!(
+                chat_id = id,
+                ?error,
+                "Impossibile notificare la fine della modalità riservata"
+            );
         }
     }
 }
