@@ -184,6 +184,15 @@ impl ImprovementSessionStore {
         self.with_sessions(|sessions| sessions.contains_key(&chat_id))
     }
 
+    /// Chat con una sessione attiva in questa mappa. Usata dal controllo
+    /// pre-swap (sotto-step 4/5 del punto 6 del ciclo di automazione) per
+    /// sapere se rimandare lo spegnimento del bot, non da un singolo
+    /// handler — quelli usano `has_active` su un chat_id preciso.
+    #[allow(dead_code)]
+    pub fn active_chat_ids(&self) -> Vec<i64> {
+        self.with_sessions(|sessions| sessions.keys().copied().collect())
+    }
+
     fn get(&self, chat_id: i64) -> Option<ImprovementConversationState> {
         self.with_sessions(|sessions| sessions.get(&chat_id).cloned())
     }

@@ -2,6 +2,39 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_SESSIONI_ATTIVE_20260904 -->
+# 04/09/2026 — Il bot sa dire se qualcuno sta scrivendo, su richiesta (meccanica scritta, collaudo sull'S9 in corso)
+
+Sotto-step 4/5 del punto 6 del ciclo (deploy): il controllo pre-swap che
+rimanda lo stop del bot finche' qualche chat ha una sessione "in attesa di
+input testuale" attiva, deciso il 3 settembre. Le dieci mappe che tengono
+quello stato (nove piu' `distribuzione_sessions` del sotto-step 3) vivono
+solo nella memoria del processo Rust sull'S9: un controllo esterno via SSH
+non puo' leggerle, serve un canale che il bot esponga.
+
+Decisione presa insieme ad Alessio prima di scrivere codice: un segnale
+Unix su richiesta invece di una scrittura periodica. Il bot ascolta
+`SIGUSR1` (nuovo, non tocca il `SIGINT` gia' collaudato nel sotto-step 2 per
+lo spegnimento pulito) e alla ricezione scrive `data/run/sessioni.txt` con
+il numero di chat con una sessione attiva. Il nuovo
+`scripts/controlla-sessioni-attive.sh` manda il segnale via SSH, legge il
+file, e ripete con un intervallo fino a "0 sessioni attive" o a un timeout
+massimo, oltre il quale procede comunque com'e' scritto nella specifica.
+
+`SIGUSR1` non esiste su Windows: il canale (`avvia_ascolto_segnale_stato_sessioni`
+e le funzioni che chiama) e' dietro `#[cfg(unix)]`, un'alternativa vuota lo
+sostituisce sulle altre piattaforme, cosi' `fmt`/`check`/`test`/`clippy`
+restano verdi in locale su questa macchina esattamente come prima — l'unico
+posto dove il canale serve davvero e' l'S9.
+
+Aggiunto `active_chat_ids()` a ciascuna delle dieci mappe di sessione (le
+otto nei moduli piu' le due in `main.rs`): stesso schema di `has_active`
+gia' presente in quattro di loro, ma senza un chat_id specifico — serve solo
+al controllo pre-swap, non ai singoli handler.
+
+Non ancora collegato a `ferma-bot.sh`: la sequenza reale (aspetta, poi
+ferma, poi swap) arriva con il sotto-step 5.
+
 <!-- CHANGELOG_VERIFICA_CI_SHA_20260904 -->
 # 04/09/2026 — verifica-ci.sh poteva riportare "verde" leggendo il commit sbagliato
 

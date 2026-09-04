@@ -78,7 +78,19 @@ singolo.
      `recipe_sessions`, `improvement_sessions`, `container_sessions`,
      `location_sessions`, `photo_sessions`, `sessions`), ognuna con il proprio
      `has_active(chat_id)`. Il controllo pre-swap le interroga tutte, senza
-     unificarle prima — vedi la decisione in `STATO.md`;
+     unificarle prima — vedi la decisione in `STATO.md`. **Meccanica scritta
+     (sotto-step 4/5, 4 settembre 2026), collaudo sull'S9 in corso**: le
+     mappe (dieci, con
+     `distribuzione_sessions` del sotto-step 3) vivono solo nella memoria
+     del processo Rust sull'S9, quindi il controllo esterno via SSH non
+     puo' leggerle direttamente. Deciso insieme ad Alessio: il bot ascolta
+     `SIGUSR1` (non tocca il `SIGINT` gia' usato per lo spegnimento) e alla
+     ricezione scrive `data/run/sessioni.txt` con il numero di chat con una
+     sessione attiva — un segnale su richiesta, non una scrittura
+     periodica. `scripts/controlla-sessioni-attive.sh` manda il segnale via
+     SSH e ripete la lettura fino a "0 sessioni attive" o al timeout
+     massimo. Non ancora collegato a `ferma-bot.sh`: la sequenza reale
+     arriva con il sotto-step 5;
    - ferma il vecchio processo, avvia il nuovo binario;
    - se il nuovo processo non si avvia o va in errore subito dopo lo swap:
      rollback automatico e immediato al binario precedente, con notifica

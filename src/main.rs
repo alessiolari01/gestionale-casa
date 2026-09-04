@@ -73,6 +73,19 @@ impl IdentitySessionStore {
             .unwrap_or_else(|p| p.into_inner())
             .remove(&chat_id);
     }
+
+    /// Chat con una sessione attiva in questa mappa. Usata dal controllo
+    /// pre-swap (sotto-step 4/5 del punto 6 del ciclo di automazione) per
+    /// sapere se rimandare lo spegnimento del bot.
+    #[allow(dead_code)]
+    fn active_chat_ids(&self) -> Vec<i64> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .keys()
+            .copied()
+            .collect()
+    }
 }
 
 /// Attesa di un valore digitato per la schermata admin 🚀 Distribuzione
@@ -117,6 +130,19 @@ impl DistribuzioneSessionStore {
             .unwrap_or_else(|p| p.into_inner())
             .remove(&chat_id);
     }
+
+    /// Chat con una sessione attiva in questa mappa. Usata dal controllo
+    /// pre-swap (sotto-step 4/5 del punto 6 del ciclo di automazione) per
+    /// sapere se rimandare lo spegnimento del bot.
+    #[allow(dead_code)]
+    fn active_chat_ids(&self) -> Vec<i64> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .keys()
+            .copied()
+            .collect()
+    }
 }
 
 #[derive(Clone, Default)]
@@ -158,6 +184,96 @@ struct HandlerDependencies {
     distribuzione_sessions: DistribuzioneSessionStore,
     shutdown_controller: ShutdownController,
 }
+
+/// Percorso del file di stato letto dall'agente orchestratore, relativo
+/// alla cartella da cui gira il processo (`~/gestionale-casa` sull'S9,
+/// stessa convenzione di `data/run/bot.pid` in `avvia-bot.sh`). Usato solo
+/// dal canale SIGUSR1, che esiste solo su unix — vedi
+/// `avvia_ascolto_segnale_stato_sessioni`.
+#[cfg(unix)]
+const FILE_STATO_SESSIONI: &str = "data/run/sessioni.txt";
+
+/// Chat con una sessione "in attesa di input testuale" attiva, in una
+/// qualunque delle dieci mappe indipendenti — deciso il 3 settembre 2026 di
+/// interrogarle così come sono, senza unificarle prima. Un set invece di
+/// una somma: una chat non dovrebbe mai comparire in due mappe assieme, ma
+/// se succedesse contarla due volte darebbe un numero fuorviante.
+#[cfg(unix)]
+fn chat_con_sessione_attiva(deps: &HandlerDependencies) -> std::collections::BTreeSet<i64> {
+    let mut chat_ids = std::collections::BTreeSet::new();
+    chat_ids.extend(deps.sessions.active_chat_ids());
+    chat_ids.extend(deps.location_sessions.active_chat_ids());
+    chat_ids.extend(deps.container_sessions.active_chat_ids());
+    chat_ids.extend(deps.photo_sessions.active_chat_ids());
+    chat_ids.extend(deps.food_sessions.active_chat_ids());
+    chat_ids.extend(deps.profile_sessions.active_chat_ids());
+    chat_ids.extend(deps.improvement_sessions.active_chat_ids());
+    chat_ids.extend(deps.recipe_sessions.active_chat_ids());
+    chat_ids.extend(deps.identity_sessions.active_chat_ids());
+    chat_ids.extend(deps.distribuzione_sessions.active_chat_ids());
+    chat_ids
+}
+
+/// Scrive il numero di chat con una sessione attiva in
+/// `FILE_STATO_SESSIONI`, seguito dall'istante (secondi epoch) in cui è
+/// stato scritto — utile a chi legge il file per accorgersi di un valore
+/// vecchio. Il contenuto basta a `scripts/controlla-sessioni-attive.sh`
+/// per decidere se rimandare lo stop del bot.
+#[cfg(unix)]
+async fn scrivi_stato_sessioni(deps: &HandlerDependencies) {
+    let numero = chat_con_sessione_attiva(deps).len();
+    let adesso = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|durata| durata.as_secs())
+        .unwrap_or(0);
+    let contenuto = format!("{numero}\n{adesso}\n");
+
+    if let Some(cartella) = std::path::Path::new(FILE_STATO_SESSIONI).parent() {
+        if let Err(error) = tokio::fs::create_dir_all(cartella).await {
+            tracing::error!(
+                ?error,
+                "Impossibile creare la cartella del file di stato sessioni"
+            );
+            return;
+        }
+    }
+    if let Err(error) = tokio::fs::write(FILE_STATO_SESSIONI, contenuto).await {
+        tracing::error!(?error, "Impossibile scrivere il file di stato sessioni");
+    } else {
+        tracing::info!(numero, "Stato sessioni scritto su richiesta (SIGUSR1)");
+    }
+}
+
+/// Ascolta SIGUSR1 e, a ogni segnale, riscrive `FILE_STATO_SESSIONI` con lo
+/// stato corrente. Un segnale su richiesta invece di una scrittura
+/// periodica (deciso insieme ad Alessio il 4 settembre 2026): lo scrive
+/// solo quando all'agente orchestratore serve davvero saperlo, prima di
+/// fermare il bot per uno swap (sotto-step 4/5 del punto 6 del ciclo).
+///
+/// Non tocca SIGINT: `ferma-bot.sh` continua a usarlo per lo spegnimento
+/// pulito già collaudato nel sotto-step 2/5, questo è un canale a parte.
+#[cfg(unix)]
+fn avvia_ascolto_segnale_stato_sessioni(deps: Arc<HandlerDependencies>) {
+    tokio::spawn(async move {
+        let mut segnale =
+            match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::user_defined1()) {
+                Ok(segnale) => segnale,
+                Err(error) => {
+                    tracing::error!(?error, "Impossibile registrare il gestore di SIGUSR1");
+                    return;
+                }
+            };
+        while segnale.recv().await.is_some() {
+            scrivi_stato_sessioni(&deps).await;
+        }
+    });
+}
+
+/// SIGUSR1 non esiste su Windows: questo canale serve solo sull'S9, dove il
+/// processo gira davvero. Sviluppare e collaudare in locale su Windows (fmt/
+/// check/test/clippy) resta possibile senza di lui.
+#[cfg(not(unix))]
+fn avvia_ascolto_segnale_stato_sessioni(_deps: Arc<HandlerDependencies>) {}
 
 static UNEXPECTED_INPUT_COUNTS: OnceLock<Mutex<HashMap<i64, u8>>> = OnceLock::new();
 
@@ -336,6 +452,14 @@ async fn async_main() -> anyhow::Result<()> {
         distribuzione_sessions,
         shutdown_controller: shutdown_controller.clone(),
     });
+
+    // Sotto-step 4/5 del punto 6 del ciclo di automazione: il controllo
+    // pre-swap ("qualche chat sta scrivendo?") lo fa l'agente orchestratore
+    // via SSH, non il bot da solo -- ma le mappe di sessione vivono solo
+    // nella memoria di questo processo, quindi serve un canale che le
+    // esponga su richiesta. Vedi `avvia_ascolto_segnale_stato_sessioni`.
+    avvia_ascolto_segnale_stato_sessioni(handler_dependencies.clone());
+
     let handler = dptree::entry()
         .branch(Update::filter_message().endpoint(handle_message))
         .branch(Update::filter_callback_query().endpoint(handle_callback));

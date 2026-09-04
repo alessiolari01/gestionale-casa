@@ -48,6 +48,14 @@ impl PhotoSessionStore {
         });
     }
 
+    /// Chat con una sessione attiva in questa mappa. Usata dal controllo
+    /// pre-swap (sotto-step 4/5 del punto 6 del ciclo di automazione) per
+    /// sapere se rimandare lo spegnimento del bot.
+    #[allow(dead_code)]
+    pub fn active_chat_ids(&self) -> Vec<i64> {
+        self.with_sessions(|sessions| sessions.keys().copied().collect())
+    }
+
     fn get(&self, chat_id: i64) -> Option<i64> {
         self.with_sessions(|sessions| sessions.get(&chat_id).copied())
     }

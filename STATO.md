@@ -293,8 +293,27 @@ dai retry di `_tg_curl`, countdown arrivato a 0 con i salti nel numero
 mostrato dovuti proprio ai due intoppi — comportamento atteso e confermato
 da Alessio dopo la spiegazione. Messaggio di prova ripulito a fine collaudo.
 
-Restano 2 sotto-step: la coda "in attesa di input testuale", e lo swap vero
-con rollback.
+**Sotto-step 4/5, meccanica scritta — collaudo sull'S9 in corso, non ancora
+confermato**: il controllo pre-swap "qualche chat sta scrivendo?"
+(le dieci mappe di sessione — nove più `distribuzione_sessions` del
+sotto-step 3 — interrogate così come sono, senza unificarle, deciso il
+3 settembre). Decisione di schema presa insieme ad Alessio prima di
+scrivere codice: le mappe vivono solo nella memoria del processo Rust
+sull'S9, quindi un controllo esterno via SSH non può leggerle
+direttamente — serve un canale che il bot esponga su richiesta. Scelto un
+segnale on-demand invece di una scrittura periodica: il bot ascolta
+`SIGUSR1` (nuovo, non tocca il `SIGINT` già collaudato nel sotto-step 2) e,
+alla ricezione, scrive `data/run/sessioni.txt` con il numero di chat che
+hanno una sessione attiva in una qualunque delle dieci mappe. Il nuovo
+script `scripts/controlla-sessioni-attive.sh` (lanciato dal PC, come
+`collauda-remoto.sh`) manda il segnale via SSH, legge il file, e ripete con
+un intervallo fino a "0 sessioni attive" o a un tempo massimo — oltre il
+quale procede comunque, come deciso nella specifica. Non tocca ancora
+`ferma-bot.sh`: il collegamento dei due nella sequenza reale di stop arriva
+con il sotto-step 5.
+
+Restano il collaudo reale di questo sotto-step sull'S9 e il sotto-step 5
+(lo swap vero con rollback).
 
 **Trovato per davvero verificando la CI di questo stesso push**: subito
 dopo `git push`, `scripts/verifica-ci.sh` ha riportato "OK CI verde"
