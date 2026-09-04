@@ -75,6 +75,50 @@ impl IdentitySessionStore {
     }
 }
 
+/// Attesa di un valore digitato per la schermata admin 🚀 Distribuzione
+/// (sotto-step 3/5 del punto 6 del ciclo di automazione): input ibrido,
+/// bottoni con valori preimpostati oppure testo libero. Stesso schema di
+/// `IdentitySessionStore`, una mappa indipendente in più — deciso il
+/// 3 settembre 2026 di non unificare le mappe di sessione esistenti.
+#[derive(Clone, Default)]
+struct DistribuzioneSessionStore {
+    inner: Arc<Mutex<HashMap<i64, DistribuzioneConversationState>>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum DistribuzioneConversationState {
+    AwaitingMinuti,
+    AwaitingOrario,
+}
+
+impl DistribuzioneSessionStore {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn get(&self, chat_id: i64) -> Option<DistribuzioneConversationState> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(&chat_id)
+            .copied()
+    }
+
+    fn set(&self, chat_id: i64, state: DistribuzioneConversationState) {
+        self.inner
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(chat_id, state);
+    }
+
+    fn clear_chat(&self, chat_id: i64) {
+        self.inner
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&chat_id);
+    }
+}
+
 #[derive(Clone, Default)]
 struct ShutdownController {
     token: Arc<Mutex<Option<ShutdownToken>>>,
@@ -111,6 +155,7 @@ struct HandlerDependencies {
     improvement_sessions: ImprovementSessionStore,
     recipe_sessions: RecipeSessionStore,
     identity_sessions: IdentitySessionStore,
+    distribuzione_sessions: DistribuzioneSessionStore,
     shutdown_controller: ShutdownController,
 }
 
@@ -274,6 +319,7 @@ async fn async_main() -> anyhow::Result<()> {
     let improvement_sessions = ImprovementSessionStore::new();
     let recipe_sessions = RecipeSessionStore::new();
     let identity_sessions = IdentitySessionStore::new();
+    let distribuzione_sessions = DistribuzioneSessionStore::new();
     let shutdown_controller = ShutdownController::default();
     let handler_dependencies = Arc::new(HandlerDependencies {
         config: config.clone(),
@@ -287,6 +333,7 @@ async fn async_main() -> anyhow::Result<()> {
         improvement_sessions,
         recipe_sessions,
         identity_sessions,
+        distribuzione_sessions,
         shutdown_controller: shutdown_controller.clone(),
     });
     let handler = dptree::entry()
@@ -348,6 +395,7 @@ async fn handle_message(
     let improvement_sessions = deps.improvement_sessions.clone();
     let recipe_sessions = deps.recipe_sessions.clone();
     let identity_sessions = deps.identity_sessions.clone();
+    let distribuzione_sessions = deps.distribuzione_sessions.clone();
     let chat_id = msg.chat.id.0;
     bot.cleanup_transient_media(msg.chat.id).await;
     bot.record_text(chat_id, msg.text().or_else(|| msg.caption()));
@@ -414,6 +462,7 @@ async fn handle_message(
             improvement_sessions,
             recipe_sessions,
             identity_sessions,
+            distribuzione_sessions,
             actor,
         )),
     )
@@ -442,6 +491,7 @@ async fn handle_authorized_message(
     improvement_sessions: ImprovementSessionStore,
     recipe_sessions: RecipeSessionStore,
     identity_sessions: IdentitySessionStore,
+    distribuzione_sessions: DistribuzioneSessionStore,
     actor: identity::AuditActor,
 ) -> ResponseResult<()> {
     let chat_id = msg.chat.id.0;
@@ -457,6 +507,7 @@ async fn handle_authorized_message(
         improvement_sessions.clear_chat(chat_id);
         recipe_sessions.clear_chat(chat_id);
         identity_sessions.clear_chat(chat_id);
+        distribuzione_sessions.clear_chat(chat_id);
         return respond(());
     }
 
@@ -472,6 +523,7 @@ async fn handle_authorized_message(
         food_sessions.clear_chat(chat_id);
         recipe_sessions.clear_chat(chat_id);
         identity_sessions.clear_chat(chat_id);
+        distribuzione_sessions.clear_chat(chat_id);
         return respond(());
     }
 
@@ -495,6 +547,7 @@ async fn handle_authorized_message(
         food_sessions.clear_chat(chat_id);
         improvement_sessions.clear_chat(chat_id);
         identity_sessions.clear_chat(chat_id);
+        distribuzione_sessions.clear_chat(chat_id);
         return respond(());
     }
 
@@ -542,12 +595,20 @@ async fn handle_authorized_message(
             && command != Some("/annulla")
         {
             identity_sessions.clear_chat(chat_id);
+            distribuzione_sessions.clear_chat(chat_id);
         }
     }
 
     if command == Some("/annulla") && identity_sessions.get(chat_id).is_some() {
         identity_sessions.clear_chat(chat_id);
+        distribuzione_sessions.clear_chat(chat_id);
         send_spaces(&bot, msg.chat.id, &pool, &actor).await?;
+        return respond(());
+    }
+
+    if command == Some("/annulla") && distribuzione_sessions.get(chat_id).is_some() {
+        distribuzione_sessions.clear_chat(chat_id);
+        send_admin_distribuzione(&bot, msg.chat.id, &pool, &actor).await?;
         return respond(());
     }
 
@@ -573,6 +634,7 @@ async fn handle_authorized_message(
             match result {
                 Ok(message) => {
                     identity_sessions.clear_chat(chat_id);
+                    distribuzione_sessions.clear_chat(chat_id);
                     bot.send_message(msg.chat.id, message)
                         .reply_markup(profile_keyboard())
                         .await?;
@@ -591,6 +653,68 @@ async fn handle_authorized_message(
         }
     }
 
+    if command.is_none() {
+        if let Some(state) = distribuzione_sessions.get(chat_id) {
+            match state {
+                DistribuzioneConversationState::AwaitingMinuti => {
+                    match modules::distribuzione::valida_minuti(text) {
+                        Ok(minuti) => {
+                            distribuzione_sessions.clear_chat(chat_id);
+                            if let Err(error) =
+                                modules::distribuzione::imposta_countdown(&pool, minuti).await
+                            {
+                                tracing::error!(?error, "Errore impostazione countdown default");
+                                bot.send_message(
+                                    msg.chat.id,
+                                    "⚠️ Non sono riuscito a salvare il default.",
+                                )
+                                .reply_markup(
+                                    modules::distribuzione::schermata_principale_keyboard(),
+                                )
+                                .await?;
+                            } else {
+                                send_admin_distribuzione(&bot, msg.chat.id, &pool, &actor).await?;
+                            }
+                        }
+                        Err(messaggio) => {
+                            bot.send_message(msg.chat.id, format!("⚠️ {messaggio}"))
+                                .reply_markup(modules::distribuzione::scelta_minuti_keyboard())
+                                .await?;
+                        }
+                    }
+                }
+                DistribuzioneConversationState::AwaitingOrario => {
+                    match modules::distribuzione::valida_orario(text) {
+                        Ok(orario) => {
+                            distribuzione_sessions.clear_chat(chat_id);
+                            if let Err(error) =
+                                modules::distribuzione::imposta_programmato(&pool, &orario).await
+                            {
+                                tracing::error!(?error, "Errore impostazione orario default");
+                                bot.send_message(
+                                    msg.chat.id,
+                                    "⚠️ Non sono riuscito a salvare il default.",
+                                )
+                                .reply_markup(
+                                    modules::distribuzione::schermata_principale_keyboard(),
+                                )
+                                .await?;
+                            } else {
+                                send_admin_distribuzione(&bot, msg.chat.id, &pool, &actor).await?;
+                            }
+                        }
+                        Err(messaggio) => {
+                            bot.send_message(msg.chat.id, format!("⚠️ {messaggio}"))
+                                .reply_markup(modules::distribuzione::scelta_orario_keyboard())
+                                .await?;
+                        }
+                    }
+                }
+            }
+            return respond(());
+        }
+    }
+
     if modules::planner_alimentare::handle_message(&bot, &msg, &pool, text).await? {
         sessions.clear_chat(chat_id);
         location_sessions.clear_chat(chat_id);
@@ -600,6 +724,7 @@ async fn handle_authorized_message(
         improvement_sessions.clear_chat(chat_id);
         recipe_sessions.clear_chat(chat_id);
         identity_sessions.clear_chat(chat_id);
+        distribuzione_sessions.clear_chat(chat_id);
         return respond(());
     }
 
@@ -614,6 +739,7 @@ async fn handle_authorized_message(
         improvement_sessions.clear_chat(chat_id);
         recipe_sessions.clear_chat(chat_id);
         identity_sessions.clear_chat(chat_id);
+        distribuzione_sessions.clear_chat(chat_id);
         return respond(());
     }
     // Box intenzionale: Alimentazione ha un future molto grande; tenerlo
@@ -633,6 +759,7 @@ async fn handle_authorized_message(
         photo_sessions.clear_chat(chat_id);
         recipe_sessions.clear_chat(chat_id);
         identity_sessions.clear_chat(chat_id);
+        distribuzione_sessions.clear_chat(chat_id);
         return respond(());
     }
 
@@ -841,6 +968,7 @@ async fn handle_callback(
     let improvement_sessions = deps.improvement_sessions.clone();
     let recipe_sessions = deps.recipe_sessions.clone();
     let identity_sessions = deps.identity_sessions.clone();
+    let distribuzione_sessions = deps.distribuzione_sessions.clone();
     let shutdown_controller = deps.shutdown_controller.clone();
     bot.answer_callback_query(q.id.clone()).await?;
 
@@ -920,6 +1048,7 @@ async fn handle_callback(
             improvement_sessions,
             recipe_sessions,
             identity_sessions,
+            distribuzione_sessions,
             shutdown_controller,
             actor,
             data,
@@ -942,6 +1071,7 @@ async fn handle_authorized_callback(
     improvement_sessions: ImprovementSessionStore,
     recipe_sessions: RecipeSessionStore,
     identity_sessions: IdentitySessionStore,
+    distribuzione_sessions: DistribuzioneSessionStore,
     shutdown_controller: ShutdownController,
     actor: identity::AuditActor,
     data: String,
@@ -966,6 +1096,7 @@ async fn handle_authorized_callback(
         food_sessions.clear_chat(chat_id.0);
         recipe_sessions.clear_chat(chat_id.0);
         identity_sessions.clear_chat(chat_id.0);
+        distribuzione_sessions.clear_chat(chat_id.0);
         return respond(());
     }
 
@@ -980,6 +1111,7 @@ async fn handle_authorized_callback(
         profile_sessions.clear_chat(chat_id.0);
         recipe_sessions.clear_chat(chat_id.0);
         identity_sessions.clear_chat(chat_id.0);
+        distribuzione_sessions.clear_chat(chat_id.0);
         return respond(());
     }
 
@@ -1002,6 +1134,7 @@ async fn handle_authorized_callback(
         improvement_sessions.clear_chat(chat_id.0);
         recipe_sessions.clear_chat(chat_id.0);
         identity_sessions.clear_chat(chat_id.0);
+        distribuzione_sessions.clear_chat(chat_id.0);
         return respond(());
     }
     if data.starts_with("recipe:") || (data == "menu:main" && recipe_sessions.has_active(chat_id.0))
@@ -1022,6 +1155,7 @@ async fn handle_authorized_callback(
             food_sessions.clear_chat(chat_id.0);
             improvement_sessions.clear_chat(chat_id.0);
             identity_sessions.clear_chat(chat_id.0);
+            distribuzione_sessions.clear_chat(chat_id.0);
             return respond(());
         }
     } else {
@@ -1046,6 +1180,7 @@ async fn handle_authorized_callback(
             photo_sessions.clear_chat(chat_id.0);
             recipe_sessions.clear_chat(chat_id.0);
             identity_sessions.clear_chat(chat_id.0);
+            distribuzione_sessions.clear_chat(chat_id.0);
             return respond(());
         }
     } else {
@@ -1064,6 +1199,7 @@ async fn handle_authorized_callback(
         improvement_sessions.clear_chat(chat_id.0);
         recipe_sessions.clear_chat(chat_id.0);
         identity_sessions.clear_chat(chat_id.0);
+        distribuzione_sessions.clear_chat(chat_id.0);
         return respond(());
     }
 
@@ -1260,6 +1396,133 @@ async fn handle_authorized_callback(
         }
         "admin:status" | "system:status" => {
             send_status(&bot, chat_id, &pool, &actor).await?;
+        }
+        "admin:distribuzione" => {
+            if ensure_primary_admin_access(&bot, chat_id, &pool, &actor).await? {
+                distribuzione_sessions.clear_chat(chat_id.0);
+                send_admin_distribuzione(&bot, chat_id, &pool, &actor).await?;
+            }
+        }
+        "admin:distribuzione:cambia" => {
+            if ensure_primary_admin_access(&bot, chat_id, &pool, &actor).await? {
+                distribuzione_sessions.clear_chat(chat_id.0);
+                bot.send_message(chat_id, modules::distribuzione::testo_scelta_tipo())
+                    .reply_markup(modules::distribuzione::scelta_tipo_keyboard())
+                    .await?;
+            }
+        }
+        "admin:distribuzione:tipo:subito" => {
+            if ensure_primary_admin_access(&bot, chat_id, &pool, &actor).await? {
+                distribuzione_sessions.clear_chat(chat_id.0);
+                match modules::distribuzione::imposta_subito(&pool).await {
+                    Ok(()) => send_admin_distribuzione(&bot, chat_id, &pool, &actor).await?,
+                    Err(error) => {
+                        tracing::error!(?error, "Errore impostazione default Subito");
+                        bot.send_message(chat_id, "⚠️ Non sono riuscito a salvare il default.")
+                            .reply_markup(modules::distribuzione::schermata_principale_keyboard())
+                            .await?;
+                    }
+                }
+            }
+        }
+        "admin:distribuzione:tipo:countdown" => {
+            if ensure_primary_admin_access(&bot, chat_id, &pool, &actor).await? {
+                distribuzione_sessions
+                    .set(chat_id.0, DistribuzioneConversationState::AwaitingMinuti);
+                bot.send_message(chat_id, modules::distribuzione::testo_scelta_minuti())
+                    .reply_markup(modules::distribuzione::scelta_minuti_keyboard())
+                    .await?;
+            }
+        }
+        "admin:distribuzione:tipo:programmato" => {
+            if ensure_primary_admin_access(&bot, chat_id, &pool, &actor).await? {
+                distribuzione_sessions
+                    .set(chat_id.0, DistribuzioneConversationState::AwaitingOrario);
+                bot.send_message(chat_id, modules::distribuzione::testo_scelta_orario())
+                    .reply_markup(modules::distribuzione::scelta_orario_keyboard())
+                    .await?;
+            }
+        }
+        "admin:distribuzione:minuti:altro" => {
+            if ensure_primary_admin_access(&bot, chat_id, &pool, &actor).await? {
+                distribuzione_sessions
+                    .set(chat_id.0, DistribuzioneConversationState::AwaitingMinuti);
+                bot.send_message(
+                    chat_id,
+                    "✏️ Scrivi i minuti del countdown (un numero tra 1 e 180).",
+                )
+                .await?;
+            }
+        }
+        "admin:distribuzione:orario:altro" => {
+            if ensure_primary_admin_access(&bot, chat_id, &pool, &actor).await? {
+                distribuzione_sessions
+                    .set(chat_id.0, DistribuzioneConversationState::AwaitingOrario);
+                bot.send_message(chat_id, "✏️ Scrivi l'orario nel formato HH:MM, es. 03:00.")
+                    .await?;
+            }
+        }
+        _ if data.starts_with("admin:distribuzione:minuti:") => {
+            if ensure_primary_admin_access(&bot, chat_id, &pool, &actor).await? {
+                let minuti = data
+                    .strip_prefix("admin:distribuzione:minuti:")
+                    .and_then(|value| value.parse::<i64>().ok());
+                match minuti {
+                    Some(minuti) => {
+                        distribuzione_sessions.clear_chat(chat_id.0);
+                        match modules::distribuzione::imposta_countdown(&pool, minuti).await {
+                            Ok(()) => {
+                                send_admin_distribuzione(&bot, chat_id, &pool, &actor).await?
+                            }
+                            Err(error) => {
+                                tracing::error!(?error, "Errore impostazione countdown default");
+                                bot.send_message(
+                                    chat_id,
+                                    "⚠️ Non sono riuscito a salvare il default.",
+                                )
+                                .reply_markup(
+                                    modules::distribuzione::schermata_principale_keyboard(),
+                                )
+                                .await?;
+                            }
+                        }
+                    }
+                    None => {
+                        bot.send_message(chat_id, "⚠️ Valore non valido.").await?;
+                    }
+                }
+            }
+        }
+        _ if data.starts_with("admin:distribuzione:orario:") => {
+            if ensure_primary_admin_access(&bot, chat_id, &pool, &actor).await? {
+                let orario = data
+                    .strip_prefix("admin:distribuzione:orario:")
+                    .and_then(modules::distribuzione::orario_da_callback);
+                match orario {
+                    Some(orario) => {
+                        distribuzione_sessions.clear_chat(chat_id.0);
+                        match modules::distribuzione::imposta_programmato(&pool, &orario).await {
+                            Ok(()) => {
+                                send_admin_distribuzione(&bot, chat_id, &pool, &actor).await?
+                            }
+                            Err(error) => {
+                                tracing::error!(?error, "Errore impostazione orario default");
+                                bot.send_message(
+                                    chat_id,
+                                    "⚠️ Non sono riuscito a salvare il default.",
+                                )
+                                .reply_markup(
+                                    modules::distribuzione::schermata_principale_keyboard(),
+                                )
+                                .await?;
+                            }
+                        }
+                    }
+                    None => {
+                        bot.send_message(chat_id, "⚠️ Valore non valido.").await?;
+                    }
+                }
+            }
         }
         _ if data.starts_with("history:") || data.starts_with("h:") => {
             sessions.clear_chat(chat_id.0);
@@ -1594,6 +1857,52 @@ async fn send_admin_overview(
             bot.send_message(
                 chat_id,
                 "⚠️ Non riesco a leggere la panoramica del gestionale.",
+            )
+            .reply_markup(admin_back_keyboard())
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+async fn send_admin_distribuzione(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    actor: &identity::AuditActor,
+) -> ResponseResult<()> {
+    if !ensure_primary_admin_access(bot, chat_id, pool, actor).await? {
+        return Ok(());
+    }
+
+    match modules::distribuzione::leggi(pool).await {
+        Ok(impostazioni) => {
+            let tempo_rimanente = match impostazioni.tipo_default {
+                modules::distribuzione::TipoManutenzione::Programmato => {
+                    match &impostazioni.orario_programmato_default {
+                        Some(orario) => modules::distribuzione::tempo_rimanente(pool, orario)
+                            .await
+                            .unwrap_or_default(),
+                        None => None,
+                    }
+                }
+                _ => None,
+            };
+            bot.send_message(
+                chat_id,
+                modules::distribuzione::testo_schermata_principale(
+                    &impostazioni,
+                    tempo_rimanente.as_deref(),
+                ),
+            )
+            .reply_markup(modules::distribuzione::schermata_principale_keyboard())
+            .await?;
+        }
+        Err(error) => {
+            tracing::error!(?error, "Errore lettura impostazioni di distribuzione");
+            bot.send_message(
+                chat_id,
+                "⚠️ Non riesco a leggere le impostazioni di distribuzione.",
             )
             .reply_markup(admin_back_keyboard())
             .await?;
@@ -2187,6 +2496,10 @@ fn admin_menu_keyboard(primary: bool, pending_access: i64) -> InlineKeyboardMark
         rows.push(vec![InlineKeyboardButton::callback(
             format!("📨 Richieste di accesso ({pending_access})"),
             "admin:access".to_string(),
+        )]);
+        rows.push(vec![InlineKeyboardButton::callback(
+            "🚀 Distribuzione".to_string(),
+            "admin:distribuzione".to_string(),
         )]);
         rows.push(vec![InlineKeyboardButton::callback(
             "⏻ Spegni gestionale".to_string(),

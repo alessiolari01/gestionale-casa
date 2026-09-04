@@ -74,7 +74,16 @@ passo() {
     fi
 }
 
-passo "Coerenza dei documenti" ./scripts/controlla-documenti.sh
+# La coerenza dei documenti si controlla sull'albero tracciato da git
+# (`git ls-files` dentro controlla-documenti.sh), non sulla copia di lavoro.
+# In modalita' --commit un documento puo' rimandare a un file nuovo che
+# ancora non e' tracciato: va quindi controllata *dopo* il `git add`, non
+# prima, altrimenti un commit legittimo (file nuovo + doc che lo cita)
+# fallirebbe sempre. Fuori da --commit non c'e' nessun add da aspettare,
+# quindi si controlla subito come gli altri passi.
+if [ "$MODALITA_COMMIT" != "1" ]; then
+    passo "Coerenza dei documenti" ./scripts/controlla-documenti.sh
+fi
 passo "Formato" cargo fmt --all -- --check
 passo "Check" cargo check --locked
 passo "Test" cargo test --locked
@@ -90,6 +99,12 @@ git add -- "${FILES[@]}" || {
     echo "git add fallito." >&2
     exit 1
 }
+
+if ! ./scripts/controlla-documenti.sh; then
+    echo "FERMO: 'Coerenza dei documenti' ha fallito dopo git add. Nessun commit, nessun push." >&2
+    git reset -- "${FILES[@]}" >/dev/null 2>&1
+    exit 1
+fi
 
 git commit -F "$FILE_MESSAGGIO" || {
     echo "git commit fallito (o niente da committare)." >&2

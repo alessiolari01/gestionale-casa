@@ -261,8 +261,40 @@ a `.enable_ctrlc_handler()`, che ascolta SIGINT — e spegnimento pulito
 confermato dal log (`^C received`, `Gestionale Casa offline`) e dal
 messaggio che il bot manda da solo agli amministratori.
 
-Restano 3 sotto-step: la schermata admin `🚀 Distribuzione`, la coda "in
-attesa di input testuale", e lo swap vero con rollback.
+**Sotto-step 3/5 fatto**: la schermata admin `🛠️ Amministrazione → 🚀
+Distribuzione`, per configurare il default di tipo/orario della
+manutenzione proposto a ogni deploy (Subito / Countdown standard / Programma
+orario). Schema deciso insieme ad Alessio prima di scrivere codice: tabella
+dedicata a riga singola `impostazioni_distribuzione`
+(`migrations/20260904150000_impostazioni_distribuzione.sql`), con CHECK che
+tengono coerenti tipo e parametro, più le colonne `scelta_puntuale_*` — già
+nello schema, senza UI ancora — che il sotto-step 5 userà per la scelta
+puntuale del singolo deploy. L'input dei valori (minuti del countdown,
+orario della manutenzione programmata) è ibrido su richiesta di Alessio:
+bottoni con valori preimpostati (3/5/10/15 minuti; 02:00/03:00/04:00/05:00)
+più testo libero validato, gestito da una decima mappa di sessione
+indipendente in `main.rs` (`distribuzione_sessions`), sullo stesso schema di
+`identity_sessions` — coerente con la decisione del 3 settembre di non
+unificare le mappe esistenti. Il modulo `src/modules/distribuzione.rs`
+contiene la logica pura (validazione minuti/orario, calcolo del tempo
+rimanente fino a un orario programmato) coperta da unit test, sullo stesso
+schema di `porzioni.rs` e `calendario.rs`.
+
+Nel farlo, rispondendo a una domanda di Alessio sul comportamento del
+countdown già collaudato (sotto-step 1) sotto un intoppo di rete, si è
+trovato un bug reale in `scripts/prova-countdown.sh`: il tempo rimanente
+veniva decrementato di 1 a ogni giro del loop invece di essere calcolato da
+una scadenza fissa, quindi un tick più lento di un secondo (un retry di
+rete) faceva restare il numero mostrato indietro rispetto al tempo vero,
+senza mai recuperare. Corretto calcolando il rimanente da
+`scadenza - ora_attuale` a ogni giro. Ricollaudato per davvero sulla chat
+reale (10s): due `Recv failure: Connection was reset` transitori assorbiti
+dai retry di `_tg_curl`, countdown arrivato a 0 con i salti nel numero
+mostrato dovuti proprio ai due intoppi — comportamento atteso e confermato
+da Alessio dopo la spiegazione. Messaggio di prova ripulito a fine collaudo.
+
+Restano 2 sotto-step: la coda "in attesa di input testuale", e lo swap vero
+con rollback.
 
 **Trovato collaudando, fuori dall'ambito di questo blocco**: il messaggio
 "ℹ️ Non sto aspettando un input in questo momento" (`main.rs`,
@@ -279,14 +311,18 @@ questo blocco di automazione.
 
 ## 3. Stato tecnico verificato
 
-- **42 migration** nel repository, **tutte applicate** al database reale
-  dell'S9. Confermato dall'avvio del 1 settembre sera:
+- **43 migration** nel repository. Le prime 42 sono **applicate** al database
+  reale dell'S9, confermato dall'avvio del 1 settembre sera:
   `applied_migrations=42`. Le versioni precedenti di questo file dicevano che
   `20260901013000_versione_contenuto_ricetta.sql` fosse ancora da applicare:
-  non era vero, ed e' bastato leggere `_sqlx_migrations` per accorgersene;
+  non era vero, ed e' bastato leggere `_sqlx_migrations` per accorgersene.
+  La 43esima, `20260904150000_impostazioni_distribuzione.sql`, non e' ancora
+  stata applicata sull'S9 al momento di scrivere questo: lo sara' al
+  prossimo `aggiorna-s9.sh`;
 - pipeline verde: `fmt`, `check --locked`, `clippy --all-targets --locked
-  -- -D warnings`, `test --locked` — **270 test** (248 prima del 2 settembre:
-  e' il numero da confrontare dopo ogni aggiornamento dell'S9);
+  -- -D warnings`, `test --locked` — **279 test** (270 prima del sotto-step
+  3/5 della distribuzione, 248 prima del 2 settembre: e' il numero da
+  confrontare dopo ogni aggiornamento dell'S9);
 - CI su GitHub Actions **verde** dalla run #42, la prima dello Step 7.
 
 Regola invariata: una migration applicata al database reale e' immutabile. Ogni

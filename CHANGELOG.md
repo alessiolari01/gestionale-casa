@@ -2,6 +2,68 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_DISTRIBUZIONE_ADMIN_20260904 -->
+# 04/09/2026 — Schermata admin 🚀 Distribuzione: il default della manutenzione
+
+Sotto-step 3/5 del punto 6 del ciclo (deploy): la schermata
+`🛠️ Amministrazione → 🚀 Distribuzione`, per configurare il default di
+tipo/orario della manutenzione proposto a ogni deploy automatico (Subito /
+Countdown standard / Programma orario), decisa il 3 settembre.
+
+Schema dati concordato con Alessio prima di scrivere codice (due domande
+puntuali, non deciso da solo): tabella a riga singola
+`impostazioni_distribuzione` (`migrations/20260904150000_impostazioni_distribuzione.sql`),
+con `CHECK` che tengono coerenti tipo e parametro (un `subito` non porta ne'
+minuti ne' orario, un `countdown` richiede i minuti, un `programmato`
+richiede l'orario). Le colonne `scelta_puntuale_*` esistono gia' nello
+schema per la scelta puntuale del singolo deploy, ma non hanno ancora una
+UI: arriva con il sotto-step 5, quando esiste un deploy vero che la offre —
+costruirla ora sarebbe stata un'interazione senza niente da innescare.
+
+L'inserimento dei valori (minuti del countdown, orario della manutenzione
+programmata) e' ibrido su richiesta esplicita di Alessio: bottoni con
+valori preimpostati (3/5/10/15 minuti; 02:00/03:00/04:00/05:00) piu' testo
+libero validato (`valida_minuti`, `valida_orario` in
+`src/modules/distribuzione.rs`, pure e testate). Per il testo libero serve
+sapere quando un chat sta aspettando un valore: una decima mappa di
+sessione indipendente in `main.rs` (`distribuzione_sessions`), sullo stesso
+schema di `identity_sessions` — coerente con la decisione del 3 settembre
+di non unificare le nove mappe esistenti prima del sotto-step 4. Ogni punto
+del codice che azzera le altre nove per cambiare contesto azzera anche
+questa.
+
+Per il default "Programma orario" la schermata mostra anche il tempo
+rimanente fino a quell'orario (es. "alle 03:00, tra 2h 30m"), letto
+dall'ora locale di SQLite — stessa scelta gia' presa per il calendario,
+perche' e' l'unico posto che conosce davvero il fuso orario del telefono.
+
+Nel rispondere a una domanda di Alessio sul comportamento del countdown
+gia' collaudato (sotto-step 1) durante un intoppo di rete, si e' trovato un
+bug reale in `scripts/prova-countdown.sh`: il tempo mostrato veniva
+decrementato di 1 a ogni giro del loop, non calcolato da una scadenza
+fissa, quindi un tick piu' lento di un secondo (un retry di rete) faceva
+restare il numero indietro rispetto al tempo vero senza mai recuperare.
+Corretto calcolando il rimanente da `scadenza - ora_attuale` a ogni giro.
+Ricollaudato per davvero sulla chat reale (10s): due `Recv failure:
+Connection was reset` transitori assorbiti dai retry, countdown arrivato a
+0 con i salti nel numero dovuti proprio ai due intoppi — comportamento
+atteso, confermato da Alessio dopo la spiegazione. Messaggio di prova
+ripulito a fine collaudo.
+
+279 test (270 prima), 9 nuovi su `src/modules/distribuzione.rs`: validazione
+minuti/orario e calcolo del tempo rimanente, incluso l'attraversamento della
+mezzanotte.
+
+Trovato usando `pipeline-locale.sh --commit` per la prima volta con un file
+nuovo citato da un documento nello stesso commit: `controlla-documenti.sh`
+verifica i rimandi sull'albero **tracciato da git** (`git ls-files`), ma la
+pipeline lo eseguiva **prima** del `git add` — un commit legittimo che
+aggiunge insieme un file e il documento che lo cita avrebbe sempre fallito.
+Corretto spostando quel controllo dopo `git add` (solo in modalita'
+`--commit`; fuori da quella modalita' resta dove'era, non c'e' nessun add
+da aspettare), con `git reset` dei file se fallisce, cosi' niente resta
+staged da un tentativo fallito.
+
 <!-- CHANGELOG_NIENTE_PIN_20260904 -->
 # 04/09/2026 — Tolto il pin: lascia una notifica fantasma che non si ripulisce
 

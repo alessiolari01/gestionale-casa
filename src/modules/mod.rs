@@ -14,6 +14,7 @@ pub mod alimentazione;
 pub mod calendario;
 #[allow(dead_code)]
 pub mod contenitori;
+pub mod distribuzione;
 pub mod foto;
 pub mod liste;
 pub mod luoghi;

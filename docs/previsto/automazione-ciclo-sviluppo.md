@@ -95,7 +95,17 @@ singolo.
      `🛠️ Amministrazione → 🚀 Distribuzione`, con un default configurabile
      (es. sempre countdown di 5 minuti) e una scelta puntuale a ogni deploy —
      Subito / Countdown standard / Programma orario — offerta quando il
-     countdown parte.
+     countdown parte. **Il default e' costruito (sotto-step 3/5, 4 settembre
+     2026)**: tabella a riga singola `impostazioni_distribuzione`
+     (`migrations/20260904150000_impostazioni_distribuzione.sql`), con CHECK
+     di coerenza tipo/parametro e le colonne `scelta_puntuale_*` gia'
+     presenti ma senza UI — arriveranno con il sotto-step 5, quando esiste
+     un deploy reale che le offre. **Deciso il 4 settembre 2026**: l'input
+     dei valori (minuti del countdown, orario della manutenzione
+     programmata) e' ibrido — bottoni con valori preimpostati piu' testo
+     libero validato — gestito da una nuova mappa di sessione indipendente
+     in `main.rs` (`distribuzione_sessions`), sullo stesso schema delle
+     altre nove.
 7. Notifica Telegram con il riepilogo di cosa è stato implementato e i passi
    concreti da provare — l'amministratore principale ha già accesso alla
    versione nuova in modalità riservata, gli altri utenti no.

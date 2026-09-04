@@ -9,6 +9,15 @@
 # spamma la chat come inviare farebbe). tg_modifica gestisce da sola il
 # limite di frequenza di Telegram se lo incontra.
 #
+# Il tempo rimanente si ricava da una scadenza fissa (ora + durata, in
+# secondi epoch), non da un contatore decrementato a ogni giro (deciso il
+# 4 settembre 2026, trovato rileggendo il codice: un tick che dura più di
+# un secondo — un retry di rete, il processo sospeso — faceva restare
+# indietro il numero mostrato rispetto al tempo vero, senza mai
+# recuperare). Ricalcolando da `scadenza - ora_attuale` a ogni giro, un
+# ritardo si vede come un salto nel numero mostrato invece che come una
+# deriva silenziosa.
+#
 # Niente pin (deciso il 4 settembre 2026, dopo il secondo collaudo):
 # fissare e poi eliminare il messaggio lascia in chat una notifica di
 # sistema fantasma ("Gestionale_Bot pinned Deleted message") che non
@@ -45,10 +54,12 @@ if [ -z "$ID" ]; then
 fi
 echo "Messaggio inviato: id=$ID"
 
+SCADENZA=$(($(date +%s) + DURATA))
 RESTANO="$DURATA"
 while [ "$RESTANO" -gt 0 ]; do
     sleep 1
-    RESTANO=$((RESTANO - 1))
+    RESTANO=$((SCADENZA - $(date +%s)))
+    [ "$RESTANO" -lt 0 ] && RESTANO=0
     tg_modifica "$ID" "$(testo_tick "$RESTANO")" || exit 1
 done
 
