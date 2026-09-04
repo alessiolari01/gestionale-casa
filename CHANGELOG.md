@@ -2,6 +2,34 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_MENU_DOPO_CONFERMA_20260904 -->
+# 04/09/2026 — Dopo la conferma, un bottone per tornare subito operativi
+
+Collaudata per davvero sull'S9 la correzione precedente
+(`send_message_untracked`): la checklist e' rimasta "Collaudo confermato",
+la notifica "Di nuovo online" separata, senza il bottone Migliora.
+
+Alessio ha chiesto un miglioramento a caldo, dopo aver visto il
+comportamento corretto: poter riprendere a usare il gestionale subito
+dopo la conferma, senza dover scrivere un comando a mano. Aggiunto un
+bottone `🏠 Menu principale` (callback `menu:main`, lo stesso di ogni
+altra schermata) alla notifica "Di nuovo online".
+
+Perche' quel bottone sia davvero cliccabile, pero', la notifica dev'essere
+di nuovo *tracciata* da `ContextBot` (`send_message_without_improve`, non
+`send_message_untracked`): `claim_callback` accetta un click solo su una
+schermata registrata come "attiva" per quella chat, e un messaggio
+untracked non lo e' mai. Per restare sicuri senza reintrodurre il bug
+delle due voci precedenti, riordinato il gestore di `collaudo:conferma`:
+l'edit del messaggio di collaudo in "confermato" avviene *prima* della
+notifica broadcast, non dopo -- cosi' la notifica tracciata (che cancella
+la schermata attiva precedente, come ogni altra schermata del progetto)
+cancella il messaggio "confermato" gia' mostrato, non la checklist ancora
+da completare.
+
+Nessun test nuovo. Totale invariato: 289. Ricollaudo sull'S9 nel prossimo
+commit.
+
 <!-- CHANGELOG_SEND_MESSAGE_UNTRACKED_20260904 -->
 # 04/09/2026 — Il primo tentativo di correzione non bypassava davvero ContextBot
 

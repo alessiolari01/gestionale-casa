@@ -457,7 +457,24 @@ segno che il messaggio era ancora tracciato. Corretto usando
 `send_message_untracked`, un metodo che esiste già in `context_bot.rs`
 apposta per le notifiche che non devono toccare nessuno stato di
 "schermata attiva": usa il bot grezzo per davvero, senza passare dal
-wrapper. Ricollaudo sull'S9 in corso.
+wrapper.
+
+Con questo secondo fix il collaudo della conferma è passato per davvero
+(checklist rimasta come "Collaudo confermato", notifica separata "Di
+nuovo online" senza bottone Migliora). Chiesto da Alessio a quel punto:
+poter riprendere a usare il gestionale subito dopo la conferma, senza
+scrivere un comando a mano. Aggiunto un bottone `🏠 Menù principale`
+(callback `menu:main`, lo stesso di sempre — risolve l'attore vero al
+momento del click, non ricostruito qui) alla notifica di broadcast. Perché
+quel bottone sia cliccabile, la notifica dev'essere di nuovo *tracciata*
+(`send_message_without_improve`, non più `send_message_untracked`):
+`claim_callback` accetta un click solo su una schermata registrata come
+attiva. Per restare sicuri, riordinato: l'edit del messaggio di collaudo
+in "confermato" avviene *prima* della notifica broadcast, non dopo — così
+la notifica tracciata cancella il messaggio "confermato" già mostrato
+(la stessa transizione "vecchia schermata sparisce, nuova arriva" di
+sempre), non la checklist ancora da completare. Ricollaudo sull'S9 in
+corso.
 
 289 test (280 prima), 9 nuovi in `src/modules/collaudo.rs`: interpretazione
 del file (separatore mancante, checklist vuota, righe vuote ignorate),

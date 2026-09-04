@@ -1718,14 +1718,21 @@ async fn handle_authorized_callback(
                 if let Err(error) = modules::collaudo::scrivi_esito(esito).await {
                     tracing::error!(?error, "Impossibile scrivere l'esito del collaudo");
                 }
-                if confermato {
-                    esci_da_modalita_riservata(&bot, &pool, &modalita_riservata).await;
-                }
                 let testo = if confermato {
                     modules::collaudo::testo_confermato()
                 } else {
                     modules::collaudo::testo_rifiutato()
                 };
+                // L'edit del messaggio di collaudo viene PRIMA della
+                // notifica broadcast, non dopo: quest'ultima manda un
+                // messaggio nuovo alla stessa chat e, come ogni altra
+                // schermata del progetto, cancella quella attiva
+                // precedente. Se arrivasse prima, cancellerebbe la
+                // checklist ancora da modificare (trovato per davvero
+                // collaudando sull'S9); in quest'ordine, invece, cancella
+                // il messaggio "confermato" appena mostrato — la stessa
+                // transizione "vecchia schermata sparisce, nuova arriva"
+                // di sempre, non un caso speciale.
                 if let Some((chat_id_messaggio, message_id)) =
                     collaudo_store.con_stato(|stato| (stato.chat_id, stato.message_id))
                 {
@@ -1735,6 +1742,9 @@ async fn handle_authorized_callback(
                     {
                         tracing::error!(?error, "Impossibile aggiornare il messaggio di collaudo");
                     }
+                }
+                if confermato {
+                    esci_da_modalita_riservata(&bot, &pool, &modalita_riservata).await;
                 }
                 collaudo_store.concludi();
             }
@@ -2625,23 +2635,27 @@ async fn esci_da_modalita_riservata(
     let chat_ids = identity::list_active_chat_ids(pool)
         .await
         .unwrap_or_default();
+    // `send_message_without_improve` (tracciata: diventa la schermata attiva
+    // e cancella quella precedente), non `send_message_untracked`: qui serve
+    // che il bottone `menu:main` sia poi cliccabile, e `claim_callback`
+    // accetta solo click su una schermata registrata come attiva. È sicuro
+    // farlo qui perché chi chiama questa funzione ha già modificato in place
+    // (mai cancellato) l'eventuale schermata precedente che voleva
+    // conservare, prima di arrivare a questo punto — vedi `collaudo:conferma`.
+    // Un bottone verso `menu:main`, non un menù pre-costruito qui: quel
+    // callback passa dal dispatch normale, che risolve l'attore vero al
+    // momento del click (ruolo admin incluso) invece di doverlo ricostruire
+    // per ogni chat attiva senza un update Telegram reale sottomano. Chiesto
+    // da Alessio dopo il primo collaudo: poter riprendere a usare il
+    // gestionale subito, senza scrivere un comando a mano.
+    let torna_al_menu = InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
+        "🏠 Menù principale".to_string(),
+        "menu:main".to_string(),
+    )]]);
     for id in chat_ids {
-        // `send_message_untracked`, non `send_message`/`send_message_without_improve`:
-        // quelle passano dalla gestione di "una sola schermata UI attiva per
-        // chat" di `ContextBot`, che cancellerebbe l'ultima schermata di
-        // quella chat -- per l'amministratore principale, proprio il
-        // messaggio di collaudo appena modificato in "confermato". Trovato
-        // per davvero collaudando sull'S9, per ben due volte: prima con
-        // `send_message_without_improve` (stesso problema), poi con un
-        // errato `(*bot).send_message(...)` che in realtà richiama comunque
-        // il metodo di `ContextBot` (il deref di un `&ContextBot` produce
-        // `ContextBot`, non richiama il suo `Deref` verso il bot grezzo) —
-        // si vedeva infatti comparire anche il bottone "💡 Migliora`.
-        // `send_message_untracked` esiste apposta per notifiche come
-        // questa: usa il bot grezzo di teloxide, senza toccare nessuno
-        // stato di `ContextBot`.
         if let Err(error) = bot
-            .send_message_untracked(ChatId(id), "✅ Di nuovo online.")
+            .send_message_without_improve(ChatId(id), "✅ Di nuovo online.")
+            .reply_markup(torna_al_menu.clone())
             .await
         {
             tracing::warn!(
