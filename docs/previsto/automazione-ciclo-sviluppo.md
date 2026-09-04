@@ -164,8 +164,8 @@ singolo.
    manutenzione per gli utenti normali finché non c'è una nuova versione
    pronta, e si riparte dal punto 2 con le correzioni.
 
-   **Punti 7-8-9 scritti (sotto-step 5c, 4 settembre 2026), collaudo
-   sull'S9 da fare**: pilotati dal bot stesso — non dall'agente via API
+   **Punti 7-8-9 costruiti e collaudati per davvero sull'S9 (sotto-step
+   5c, 4 settembre 2026)**: pilotati dal bot stesso — non dall'agente via API
    diretta come il countdown, perché qui il bot nuovo è già acceso e in
    ascolto (deciso insieme ad Alessio). Il contenuto (riepilogo + passi da
    provare) arriva da un file scritto dall'agente prima dello swap
@@ -181,7 +181,11 @@ singolo.
    condivisa col bottone di sblocco del sotto-step 5a. In entrambi i casi
    scrive `data/run/esito_collaudo.txt` ("confermato"/"rifiutato") per
    l'agente orchestratore — non ancora collegato al merge su `main` né al
-   rollback: arriva con il sotto-step 5d.
+   rollback: arriva con il sotto-step 5d. Collaudo reale, end-to-end:
+   checklist spuntata, "Collaudo confermato" mostrato, notifica "Di nuovo
+   online" con un bottone `🏠 Menù principale` che porta a un menù
+   davvero operativo (aggiunto su richiesta di Alessio dopo il primo
+   collaudo riuscito, per non dover scrivere un comando a mano).
 
 Qualunque fallimento in un passaggio (connessione SSH persa, build o
 collaudo in errore) genera una notifica Telegram immediata con l'errore

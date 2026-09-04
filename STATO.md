@@ -395,7 +395,7 @@ modalità normale, come deciso). `ferma-bot.sh` ha fermato il processo
 ripristinato con lo spegnimento pulito consueto, senza saperne nulla del
 rollback: stesso schema di PID di sempre.
 
-**Sotto-step 5c, meccanica scritta — collaudo sull'S9 da fare**: riepilogo,
+**Sotto-step 5c fatto**: riepilogo,
 checklist e conferma/rifiuto pilotati dal bot stesso, deciso il 4
 settembre. Il contenuto (cosa è stato implementato + passi da provare)
 arriva da un file scritto dall'agente prima dello swap
@@ -473,8 +473,16 @@ attiva. Per restare sicuri, riordinato: l'edit del messaggio di collaudo
 in "confermato" avviene *prima* della notifica broadcast, non dopo — così
 la notifica tracciata cancella il messaggio "confermato" già mostrato
 (la stessa transizione "vecchia schermata sparisce, nuova arriva" di
-sempre), non la checklist ancora da completare. Ricollaudo sull'S9 in
-corso.
+sempre), non la checklist ancora da completare.
+
+**Collaudo finale, end-to-end, confermato da Alessio sulla chat reale**:
+checklist spuntata voce per voce, bottoni di conferma comparsi solo a
+completamento, "✅ Confermo, funziona" premuto → messaggio diventato
+"Collaudo confermato", notifica separata "✅ Di nuovo online." con il
+bottone `🏠 Menù principale`, premuto quel bottone → menù principale vero
+e operativo, non un vicolo cieco. Bot fermato con `ferma-bot.sh` a fine
+collaudo; file di prova (`riepilogo_deploy.txt`, `esito_collaudo.txt`)
+ripuliti da `data/run/` sull'S9.
 
 289 test (280 prima), 9 nuovi in `src/modules/collaudo.rs`: interpretazione
 del file (separatore mancante, checklist vuota, righe vuote ignorate),
@@ -489,6 +497,13 @@ normali (`100644`), non eseguibili (`100755`) come `avvia-bot.sh` e
 `ferma-bot.sh` — Windows non ha il bit di esecuzione, quindi git li aveva
 aggiunti senza. Corretto in git (`git update-index --chmod=+x`), non sul
 filesystem, così ogni futuro checkout sull'S9 li trova già giusti.
+
+Con 5a, 5b e 5c fatti, resta il sotto-step 5d: l'orchestrazione che lega
+insieme i controlli e i pezzi già costruiti (aspetta le sessioni, salva il
+binario, ferma, aggiorna, avvia riservato con il riepilogo pronto,
+controlla la salute del nuovo processo, chiama il rollback se serve) in
+un'unica sequenza — oggi ogni pezzo è stato collaudato lanciandolo a mano,
+uno alla volta.
 
 **Trovato per davvero verificando la CI di questo stesso push**: subito
 dopo `git push`, `scripts/verifica-ci.sh` ha riportato "OK CI verde"

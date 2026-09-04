@@ -2,6 +2,27 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_SOTTOSTEP_5C_COMPLETO_20260904 -->
+# 04/09/2026 — Sotto-step 5c completo: collaudo end-to-end confermato
+
+Ultimo giro sull'S9, dopo tre correzioni trovate collaudando per davvero:
+checklist di prova spuntata voce per voce, bottoni di conferma comparsi
+solo a completamento, "✅ Confermo, funziona" premuto → messaggio diventato
+"✅ Collaudo confermato", notifica separata "✅ Di nuovo online." con il
+bottone `🏠 Menù principale`, premuto quel bottone → menu principale vero
+e operativo. Confermato da Alessio sulla chat reale.
+
+Bot fermato con `ferma-bot.sh` a fine collaudo. File di prova
+(`riepilogo_deploy.txt`, `esito_collaudo.txt`) ripuliti da `data/run/`
+sull'S9.
+
+Con 5a, 5b e 5c fatti, resta solo il sotto-step 5d: l'orchestrazione che
+lega insieme i pezzi già costruiti e collaudati singolarmente (controllo
+sessioni, salvataggio del binario, stop/avvio, riepilogo/checklist, esito)
+in un'unica sequenza automatica.
+
+Nessun codice nuovo (solo verifica e pulizia). Totale invariato: 289.
+
 <!-- CHANGELOG_MENU_DOPO_CONFERMA_20260904 -->
 # 04/09/2026 — Dopo la conferma, un bottone per tornare subito operativi
 
