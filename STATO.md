@@ -369,7 +369,7 @@ di questa sezione. Resta coperto solo dall'unit test
 (`deve_bloccare_per_manutenzione`, quattro casi), non da un collaudo su un
 utente vero non amministratore.
 
-**Sotto-step 5b, scritto — collaudo sull'S9 da fare**: rollback del
+**Sotto-step 5b fatto**: rollback del
 binario senza ricompilazione. Deciso insieme ad Alessio: una copia del
 binario compilato, non due cartelle di lavoro separate (blue/green) —
 più semplice e meno spazio, su un telefono conta. `scripts/salva-binario.sh`
@@ -385,6 +385,15 @@ rollback senza saperne nulla. Timeout di avvio molto più corto
 (30s contro i 180s di `avvia-bot.sh`): non c'è nessuna build da aspettare,
 se il binario già compilato non parte in pochi secondi il problema è
 un altro.
+
+Collaudato per davvero sull'S9: `salva-binario.sh` ha copiato il binario
+(50M); avviato il bot normale (`avvia-bot.sh`); `rollback-binario.sh` ha
+fermato quel processo e fatto ripartire il binario salvato in **~2
+secondi** (`time` alla mano), log senza nessuna riga "Compiling" —
+conferma che non c'è stata ricompilazione — e senza `RISERVATO` (torna in
+modalità normale, come deciso). `ferma-bot.sh` ha fermato il processo
+ripristinato con lo spegnimento pulito consueto, senza saperne nulla del
+rollback: stesso schema di PID di sempre.
 
 **Trovato per davvero verificando la CI di questo stesso push**: subito
 dopo `git push`, `scripts/verifica-ci.sh` ha riportato "OK CI verde"

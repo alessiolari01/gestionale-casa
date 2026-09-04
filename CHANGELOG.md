@@ -2,6 +2,24 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_ROLLBACK_BINARIO_COLLAUDO_20260904 -->
+# 04/09/2026 — Sotto-step 5b collaudato per davvero: rollback in ~2 secondi
+
+Il rollback del binario descritto nella voce precedente e' stato
+collaudato sul bot vero, sull'S9 vero. `salva-binario.sh` ha copiato il
+binario (50M). Avviato il bot normale con `avvia-bot.sh`, poi lanciato
+`rollback-binario.sh`: ha fermato quel processo e fatto ripartire il
+binario salvato in **~2 secondi** (misurato con `time`), log senza nessuna
+riga "Compiling" — conferma diretta che non c'e' stata ricompilazione — e
+senza `RISERVATO` nel log, cioe' tornato in modalita' normale come
+deciso (era gia' la versione in produzione, non ha bisogno di ripartire
+riservata). `ferma-bot.sh` ha poi fermato il processo ripristinato con lo
+spegnimento pulito consueto, senza saperne nulla del rollback avvenuto
+prima.
+
+Nessun codice Rust coinvolto (verifica di due script bash). Totale
+invariato: 280.
+
 <!-- CHANGELOG_ROLLBACK_BINARIO_20260904 -->
 # 04/09/2026 — Rollback del binario senza ricompilazione (sotto-step 5b, scritto)
 

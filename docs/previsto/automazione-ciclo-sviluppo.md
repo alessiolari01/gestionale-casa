@@ -95,11 +95,11 @@ singolo.
    - se il nuovo processo non si avvia o va in errore subito dopo lo swap:
      rollback automatico e immediato al binario precedente, con notifica
      Telegram dell'errore preciso — l'S9 non deve mai restare giù in
-     silenzio. **Scritto (sotto-step 5b, 4 settembre 2026), collaudo
-     sull'S9 da fare**: una copia del binario compilato, non due cartelle
-     di lavoro separate (deciso insieme ad Alessio — più semplice, meno
-     spazio su un telefono). `scripts/salva-binario.sh` copia
-     `target/debug/gestionale-casa` in `data/run/binario_precedente`
+     silenzio. **Costruito e collaudato per davvero sull'S9 (sotto-step
+     5b, 4 settembre 2026)**: una copia del binario compilato, non due
+     cartelle di lavoro separate (deciso insieme ad Alessio — più
+     semplice, meno spazio su un telefono). `scripts/salva-binario.sh`
+     copia `target/debug/gestionale-casa` in `data/run/binario_precedente`
      *prima* di aggiornare il codice e ricompilare.
      `scripts/rollback-binario.sh` ferma quello che sta girando (necessario:
      Telegram rifiuta un secondo long-polling con lo stesso token) ed
@@ -108,7 +108,9 @@ singolo.
      una build che potrebbe essere quella appena rivelatasi rotta. Stesso
      schema di processo di `avvia-bot.sh` (nohup+disown, PID file), così
      `ferma-bot.sh` continua a funzionare dopo un rollback senza saperne
-     nulla;
+     nulla. Collaudo reale: rollback completato in ~2 secondi, log senza
+     nessuna riga "Compiling" (conferma che non c'è stata ricompilazione),
+     `ferma-bot.sh` ha fermato il processo ripristinato senza problemi;
    - il codice nuovo riparte in **modalità riservata**: solo l'amministratore
      principale può usarlo davvero (ruoli/permessi già esistenti in
      `access_control.rs`). Gli utenti normali vedono lo stato di
