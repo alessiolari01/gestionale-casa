@@ -12,6 +12,11 @@
 #
 # Uso (sull'S9, o da remoto con: ssh s9 'cd ~/gestionale-casa && ./scripts/avvia-bot.sh'):
 #   ./scripts/avvia-bot.sh
+#   ./scripts/avvia-bot.sh --riservato   # sotto-step 5a: solo l'amministratore
+#                                        # principale puo' usare il bot, gli
+#                                        # altri vedono un avviso di manutenzione,
+#                                        # finche' non si sblocca da un bottone
+#                                        # in chat (nessun riavvio necessario)
 
 set -uo pipefail
 
@@ -20,6 +25,11 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 CARTELLA_RUN="$PWD/data/run"
 PIDFILE="$CARTELLA_RUN/bot.pid"
 LOGFILE="$CARTELLA_RUN/bot.out"
+
+RISERVATO=0
+if [ "${1:-}" = "--riservato" ]; then
+    RISERVATO=1
+fi
 
 mkdir -p "$CARTELLA_RUN" || exit 1
 
@@ -38,8 +48,13 @@ fi
 export CARGO_BUILD_JOBS=1
 export CARGO_INCREMENTAL=0
 
-echo "Avvio in background (nohup, log in $LOGFILE)..."
-nohup cargo run --locked > "$LOGFILE" 2>&1 &
+if [ "$RISERVATO" = "1" ]; then
+    echo "Avvio in background, modalita' riservata (nohup, log in $LOGFILE)..."
+    RISERVATO=1 nohup cargo run --locked > "$LOGFILE" 2>&1 &
+else
+    echo "Avvio in background (nohup, log in $LOGFILE)..."
+    nohup cargo run --locked > "$LOGFILE" 2>&1 &
+fi
 PID=$!
 disown
 

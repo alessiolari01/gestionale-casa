@@ -2,6 +2,52 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_MODALITA_RISERVATA_20260904 -->
+# 04/09/2026 — Modalità riservata (sotto-step 5a, meccanica scritta, collaudo sull'S9 in corso)
+
+Primo pezzo del sotto-step 5/5 (lo swap vero), il più delicato del ciclo di
+automazione: spezzato in quattro sotto-pezzi concordati con Alessio prima
+di scrivere codice (5a modalità riservata, 5b rollback del binario, 5c
+riepilogo/checklist/conferma pilotati dal bot stesso, 5d l'orchestrazione).
+
+Decisioni prese insieme ad Alessio:
+
+- **il flag vive in memoria**, non su file né come variabile letta una
+  volta sola: `ModalitaRiservata` è un `AtomicBool` condiviso, stesso
+  schema di `ShutdownController`. Deve poter tornare disattivo premendo un
+  bottone in chat senza riavviare il processo — è proprio quel momento
+  (la conferma dell'amministratore) a farlo tornare online per tutti;
+- **chi pilota il riepilogo/checklist finale (punti 7-9 della specifica)
+  è il bot nuovo stesso**, non l'agente orchestratore via API diretta come
+  il countdown: a differenza del countdown (che deve aggiornarsi anche col
+  vecchio processo fermo), qui il bot nuovo è già acceso e in ascolto su
+  Telegram, quindi può gestire i suoi stessi bottoni come ogni altra
+  schermata — arriva col sotto-step 5c.
+
+`scripts/avvia-bot.sh --riservato` imposta `RISERVATO=1` solo per quel
+lancio; un avvio normale (uso quotidiano su Termux, o senza il flag) resta
+aperto a tutti come oggi. Il bot legge la variabile una volta all'avvio e
+la tiene nel flag condiviso. Il gate (`deve_bloccare_per_manutenzione`,
+pura e unit-testata) si applica sia ai messaggi sia ai callback, appena
+risolta l'identità di chi scrive — prima di toccare qualunque handler dei
+moduli. Il bottone `✅ Sblocca, torna online per tutti`, visibile solo
+all'amministratore principale nel menù `🛠️ Amministrazione` quando la
+modalità è attiva, disattiva il flag e manda "✅ Di nuovo online." a tutte
+le chat di utenti attivi (`identity::list_active_chat_ids`, nuova — non
+solo agli amministratori, a differenza della notifica di spegnimento).
+
+**Limite noto, non un problema di questa modifica**: verificare per davvero
+che un utente *non* amministratore veda l'avviso di manutenzione richiede
+un secondo account Telegram, che il progetto non ha ancora — stessa lacuna
+già segnata al punto 6 di `STATO.md`. La logica di blocco resta comunque
+coperta da un unit test con i quattro casi possibili
+(`manutenzione_blocca_solo_chi_non_e_amministratore_principale`). Il
+collaudo reale sull'S9 verificherà quello che si può verificare oggi:
+l'amministratore principale continua a usare il bot normalmente con la
+modalità attiva, e il bottone la disattiva senza riavviare nulla.
+
+280 test (279 prima), 1 nuovo.
+
 <!-- CHANGELOG_SESSIONI_ATTIVE_COLLAUDO_20260904 -->
 # 04/09/2026 — Sotto-step 4/5 collaudato per davvero: bot libero, sessione aperta, bot liberato
 

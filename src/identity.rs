@@ -586,6 +586,23 @@ pub(crate) async fn list_system_admin_chat_ids(pool: &SqlitePool) -> Result<Vec<
     .context("Impossibile leggere le chat degli amministratori")
 }
 
+/// Tutte le chat di utenti attivi, admin o no. Usata per "✅ Di nuovo
+/// online" quando la modalità riservata si disattiva (sotto-step 5a del
+/// punto 6 del ciclo di automazione): quel messaggio è per tutti, non solo
+/// per gli amministratori.
+pub(crate) async fn list_active_chat_ids(pool: &SqlitePool) -> Result<Vec<i64>> {
+    sqlx::query_scalar(
+        "SELECT DISTINCT at.chat_id \
+         FROM account_telegram at \
+         JOIN utenti u ON u.id = at.utente_id \
+         WHERE u.stato = 'attivo' \
+         ORDER BY at.chat_id",
+    )
+    .fetch_all(pool)
+    .await
+    .context("Impossibile leggere le chat degli utenti attivi")
+}
+
 pub(crate) async fn list_system_users(pool: &SqlitePool) -> Result<Vec<SystemUserSummary>> {
     sqlx::query_as::<_, SystemUserSummary>(
         "SELECT u.nome_visualizzato AS nome, \

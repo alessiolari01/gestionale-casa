@@ -331,7 +331,34 @@ già sostituito, quindi restava letterale. Corretto usando un percorso
 relativo (`data/run`), visto che il comando remoto fa già `cd
 ~/gestionale-casa` prima di usarlo.
 
-Resta 1 sotto-step: lo swap vero con rollback.
+Resta 1 sotto-step, il più delicato, spezzato a sua volta in quattro pezzi
+concordati con Alessio prima di scrivere codice: 5a modalità riservata,
+5b rollback del binario senza ricompilazione, 5c riepilogo/checklist/
+conferma pilotati dal bot stesso (non dall'agente via API diretta, a
+differenza del countdown: qui il bot nuovo è già acceso e in ascolto,
+non serve altro), 5d l'orchestrazione che li lega.
+
+**Sotto-step 5a, meccanica scritta — collaudo sull'S9 in corso, non ancora
+confermato**: la modalità riservata (solo l'amministratore principale può
+usare il bot, gli altri vedono "🚧 Manutenzione in corso"). Deciso insieme
+ad Alessio: un flag in memoria (`ModalitaRiservata`, un `AtomicBool`
+condiviso come `ShutdownController`), non un file o una variabile letta
+una volta sola — deve poter tornare disattivo premendo un bottone in chat,
+senza riavviare il processo. `scripts/avvia-bot.sh --riservato` imposta
+`RISERVATO=1` solo per quel lancio; un avvio normale (Termux quotidiano,
+o senza il flag) resta aperto a tutti come oggi. Il bottone
+`✅ Sblocca, torna online per tutti`, visibile solo all'amministratore
+principale quando la modalità è attiva, disattiva il flag e manda
+"✅ Di nuovo online." a tutte le chat di utenti attivi
+(`identity::list_active_chat_ids`, nuova).
+
+Verificabile solo in parte per ora: il gate vero e proprio (bloccare chi
+*non* è amministratore principale) richiederebbe un secondo account
+Telegram per il collaudo reale — la stessa lacuna già segnata al punto 6
+di questa sezione. La logica è comunque coperta da un unit test
+(`deve_bloccare_per_manutenzione`, quattro casi); resta da verificare per
+davvero, sull'S9, che l'amministratore principale continui a usare il bot
+normalmente con la modalità attiva e che il bottone la disattivi.
 
 **Trovato per davvero verificando la CI di questo stesso push**: subito
 dopo `git push`, `scripts/verifica-ci.sh` ha riportato "OK CI verde"
@@ -376,9 +403,10 @@ questo blocco di automazione.
   stata applicata sull'S9 al momento di scrivere questo: lo sara' al
   prossimo `aggiorna-s9.sh`;
 - pipeline verde: `fmt`, `check --locked`, `clippy --all-targets --locked
-  -- -D warnings`, `test --locked` — **279 test** (270 prima del sotto-step
-  3/5 della distribuzione, 248 prima del 2 settembre: e' il numero da
-  confrontare dopo ogni aggiornamento dell'S9);
+  -- -D warnings`, `test --locked` — **280 test** (279 prima del sotto-step
+  5a, 270 prima del sotto-step 3/5 della distribuzione, 248 prima del
+  2 settembre: e' il numero da confrontare dopo ogni aggiornamento
+  dell'S9);
 - CI su GitHub Actions **verde** dalla run #42, la prima dello Step 7.
 
 Regola invariata: una migration applicata al database reale e' immutabile. Ogni

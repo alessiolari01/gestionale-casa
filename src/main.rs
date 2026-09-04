@@ -168,6 +168,34 @@ impl ShutdownController {
     }
 }
 
+/// Sotto-step 5a del punto 6 del ciclo di automazione: solo l'amministratore
+/// principale può usare il bot mentre è attiva, gli altri vedono un avviso
+/// di manutenzione. Un `AtomicBool` condiviso, non una variabile letta una
+/// volta sola all'avvio: deve poter tornare `false` premendo un bottone in
+/// chat, senza riavviare il processo — deciso insieme ad Alessio il
+/// 4 settembre 2026.
+#[derive(Clone, Default)]
+struct ModalitaRiservata {
+    attiva: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl ModalitaRiservata {
+    fn new(attiva: bool) -> Self {
+        Self {
+            attiva: Arc::new(std::sync::atomic::AtomicBool::new(attiva)),
+        }
+    }
+
+    fn is_attiva(&self) -> bool {
+        self.attiva.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    fn disattiva(&self) {
+        self.attiva
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 #[derive(Clone)]
 struct HandlerDependencies {
     config: Arc<Config>,
@@ -183,6 +211,19 @@ struct HandlerDependencies {
     identity_sessions: IdentitySessionStore,
     distribuzione_sessions: DistribuzioneSessionStore,
     shutdown_controller: ShutdownController,
+    modalita_riservata: ModalitaRiservata,
+}
+
+/// Vera solo quando la modalità riservata è attiva e chi scrive non è
+/// l'amministratore principale — pura e testabile senza Telegram né
+/// database, stessa scelta di `calcola_tempo_rimanente` in
+/// `modules::distribuzione`.
+fn deve_bloccare_per_manutenzione(riservato: bool, primario: bool) -> bool {
+    riservato && !primario
+}
+
+fn testo_manutenzione() -> &'static str {
+    "🚧 Manutenzione in corso\n\nStiamo aggiornando il gestionale. Riprova tra poco."
 }
 
 /// Percorso del file di stato letto dall'agente orchestratore, relativo
@@ -437,6 +478,17 @@ async fn async_main() -> anyhow::Result<()> {
     let identity_sessions = IdentitySessionStore::new();
     let distribuzione_sessions = DistribuzioneSessionStore::new();
     let shutdown_controller = ShutdownController::default();
+    // Sotto-step 5a del punto 6 del ciclo di automazione: solo lo swap
+    // vero (scripts/avvia-bot.sh) imposta RISERVATO=1 per il binario
+    // nuovo. Un avvio normale (`cargo run` a mano, o senza la variabile)
+    // resta aperto a tutti come oggi -- deciso insieme ad Alessio.
+    let riservato_da_avvio = std::env::var("RISERVATO")
+        .map(|valore| valore == "1")
+        .unwrap_or(false);
+    if riservato_da_avvio {
+        tracing::info!("Avvio in modalità riservata (RISERVATO=1)");
+    }
+    let modalita_riservata = ModalitaRiservata::new(riservato_da_avvio);
     let handler_dependencies = Arc::new(HandlerDependencies {
         config: config.clone(),
         pool: pool.clone(),
@@ -451,6 +503,7 @@ async fn async_main() -> anyhow::Result<()> {
         identity_sessions,
         distribuzione_sessions,
         shutdown_controller: shutdown_controller.clone(),
+        modalita_riservata,
     });
 
     // Sotto-step 4/5 del punto 6 del ciclo di automazione: il controllo
@@ -520,6 +573,7 @@ async fn handle_message(
     let recipe_sessions = deps.recipe_sessions.clone();
     let identity_sessions = deps.identity_sessions.clone();
     let distribuzione_sessions = deps.distribuzione_sessions.clone();
+    let modalita_riservata = deps.modalita_riservata.clone();
     let chat_id = msg.chat.id.0;
     bot.cleanup_transient_media(msg.chat.id).await;
     bot.record_text(chat_id, msg.text().or_else(|| msg.caption()));
@@ -571,6 +625,16 @@ async fn handle_message(
         }
     };
 
+    if modalita_riservata.is_attiva() {
+        let primario = identity::is_primary_admin(&pool, &actor)
+            .await
+            .unwrap_or(false);
+        if deve_bloccare_per_manutenzione(true, primario) {
+            bot.send_message(msg.chat.id, testo_manutenzione()).await?;
+            return respond(());
+        }
+    }
+
     let result = identity::with_actor(
         actor.clone(),
         Box::pin(handle_authorized_message(
@@ -587,6 +651,7 @@ async fn handle_message(
             recipe_sessions,
             identity_sessions,
             distribuzione_sessions,
+            modalita_riservata,
             actor,
         )),
     )
@@ -616,6 +681,7 @@ async fn handle_authorized_message(
     recipe_sessions: RecipeSessionStore,
     identity_sessions: IdentitySessionStore,
     distribuzione_sessions: DistribuzioneSessionStore,
+    modalita_riservata: ModalitaRiservata,
     actor: identity::AuditActor,
 ) -> ResponseResult<()> {
     let chat_id = msg.chat.id.0;
@@ -1052,7 +1118,7 @@ async fn handle_authorized_message(
             }
         },
         Some("/admin") => {
-            send_admin_menu(&bot, msg.chat.id, &pool, &actor).await?;
+            send_admin_menu(&bot, msg.chat.id, &pool, &actor, &modalita_riservata).await?;
         }
         Some("/status") => {
             send_status(&bot, msg.chat.id, &pool, &actor).await?;
@@ -1094,6 +1160,7 @@ async fn handle_callback(
     let identity_sessions = deps.identity_sessions.clone();
     let distribuzione_sessions = deps.distribuzione_sessions.clone();
     let shutdown_controller = deps.shutdown_controller.clone();
+    let modalita_riservata = deps.modalita_riservata.clone();
     bot.answer_callback_query(q.id.clone()).await?;
 
     let Some(message) = q.regular_message() else {
@@ -1141,6 +1208,16 @@ async fn handle_callback(
         }
     };
 
+    if modalita_riservata.is_attiva() {
+        let primario = identity::is_primary_admin(&pool, &actor)
+            .await
+            .unwrap_or(false);
+        if deve_bloccare_per_manutenzione(true, primario) {
+            bot.send_message(chat_id, testo_manutenzione()).await?;
+            return respond(());
+        }
+    }
+
     if !bot.claim_callback(chat_id.0, message.id, &data) {
         let is_admin = identity::is_system_admin(&pool, &actor)
             .await
@@ -1174,6 +1251,7 @@ async fn handle_callback(
             identity_sessions,
             distribuzione_sessions,
             shutdown_controller,
+            modalita_riservata,
             actor,
             data,
         )),
@@ -1197,6 +1275,7 @@ async fn handle_authorized_callback(
     identity_sessions: IdentitySessionStore,
     distribuzione_sessions: DistribuzioneSessionStore,
     shutdown_controller: ShutdownController,
+    modalita_riservata: ModalitaRiservata,
     actor: identity::AuditActor,
     data: String,
 ) -> ResponseResult<()> {
@@ -1447,7 +1526,7 @@ async fn handle_authorized_callback(
             }
         }
         "admin:menu" => {
-            send_admin_menu(&bot, chat_id, &pool, &actor).await?;
+            send_admin_menu(&bot, chat_id, &pool, &actor, &modalita_riservata).await?;
         }
         "admin:overview" => {
             send_admin_overview(&bot, chat_id, &pool, &actor).await?;
@@ -1520,6 +1599,29 @@ async fn handle_authorized_callback(
         }
         "admin:status" | "system:status" => {
             send_status(&bot, chat_id, &pool, &actor).await?;
+        }
+        "admin:riservato:sblocca" => {
+            if ensure_primary_admin_access(&bot, chat_id, &pool, &actor).await? {
+                if modalita_riservata.is_attiva() {
+                    modalita_riservata.disattiva();
+                    let chat_ids = identity::list_active_chat_ids(&pool)
+                        .await
+                        .unwrap_or_default();
+                    for id in chat_ids {
+                        if let Err(error) = bot
+                            .send_message_without_improve(ChatId(id), "✅ Di nuovo online.")
+                            .await
+                        {
+                            tracing::warn!(
+                                chat_id = id,
+                                ?error,
+                                "Impossibile notificare la fine della modalità riservata"
+                            );
+                        }
+                    }
+                }
+                send_admin_menu(&bot, chat_id, &pool, &actor, &modalita_riservata).await?;
+            }
         }
         "admin:distribuzione" => {
             if ensure_primary_admin_access(&bot, chat_id, &pool, &actor).await? {
@@ -1881,6 +1983,7 @@ async fn send_admin_menu(
     chat_id: ChatId,
     pool: &SqlitePool,
     actor: &identity::AuditActor,
+    modalita_riservata: &ModalitaRiservata,
 ) -> ResponseResult<()> {
     if !ensure_admin_access(bot, chat_id, pool, actor).await? {
         return Ok(());
@@ -1897,7 +2000,11 @@ async fn send_admin_menu(
         chat_id,
         "🛠️ Amministrazione\n\nArea riservata per monitorare il gestionale. I ruoli di sistema sono separati dai permessi negli spazi e sulle singole risorse.",
     )
-    .reply_markup(admin_menu_keyboard(primary, pending))
+    .reply_markup(admin_menu_keyboard(
+        primary,
+        pending,
+        modalita_riservata.is_attiva(),
+    ))
     .await?;
     Ok(())
 }
@@ -2599,7 +2706,11 @@ fn access_request_status_label(value: &str) -> &'static str {
     }
 }
 
-fn admin_menu_keyboard(primary: bool, pending_access: i64) -> InlineKeyboardMarkup {
+fn admin_menu_keyboard(
+    primary: bool,
+    pending_access: i64,
+    modalita_riservata_attiva: bool,
+) -> InlineKeyboardMarkup {
     let mut rows = vec![
         vec![
             InlineKeyboardButton::callback(
@@ -2617,6 +2728,12 @@ fn admin_menu_keyboard(primary: bool, pending_access: i64) -> InlineKeyboardMark
         )],
     ];
     if primary {
+        if modalita_riservata_attiva {
+            rows.push(vec![InlineKeyboardButton::callback(
+                "✅ Sblocca, torna online per tutti".to_string(),
+                "admin:riservato:sblocca".to_string(),
+            )]);
+        }
         rows.push(vec![InlineKeyboardButton::callback(
             format!("📨 Richieste di accesso ({pending_access})"),
             "admin:access".to_string(),
@@ -2699,8 +2816,19 @@ fn first_command(text: &str) -> Option<&str> {
 
 #[cfg(test)]
 mod runtime_tests {
-    use super::{unexpected_input_notice, TELEGRAM_REQUEST_TIMEOUT, TOKIO_THREAD_STACK_SIZE};
+    use super::{
+        deve_bloccare_per_manutenzione, unexpected_input_notice, TELEGRAM_REQUEST_TIMEOUT,
+        TOKIO_THREAD_STACK_SIZE,
+    };
     use std::time::Duration;
+
+    #[test]
+    fn manutenzione_blocca_solo_chi_non_e_amministratore_principale() {
+        assert!(deve_bloccare_per_manutenzione(true, false));
+        assert!(!deve_bloccare_per_manutenzione(true, true));
+        assert!(!deve_bloccare_per_manutenzione(false, false));
+        assert!(!deve_bloccare_per_manutenzione(false, true));
+    }
 
     #[test]
     fn timeout_http_telegram_supporta_upload_lunghi() {
