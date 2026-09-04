@@ -218,13 +218,16 @@ richiesto. L'S9 resta sul ramo appena collaudato — comportamento voluto,
 lo stesso di quando lo lancia una persona.
 
 **Punto 6 del ciclo (deploy), sotto-step 1/5 fatto**: la meccanica del
-messaggio pinnato via API diretta, isolata da qualunque deploy vero.
-`scripts/telegram-api.sh` (`tg_leggi_credenziali`, `tg_invia_e_fissa`,
-`tg_modifica`, `tg_sblocca`) e `scripts/prova-countdown.sh` per collaudarla.
-Confermato da Alessio sulla chat reale: tick al secondo, stesso messaggio
-modificato senza mai duplicarlo, contatore visibile che scende a zero.
+messaggio di countdown via API diretta, isolata da qualunque deploy vero.
+`scripts/telegram-api.sh` (`tg_leggi_credenziali`, `tg_invia`, `tg_modifica`,
+`tg_elimina`) e `scripts/prova-countdown.sh` per collaudarla. Confermato da
+Alessio sulla chat reale, su chat vuota: tick al secondo, stesso messaggio
+modificato senza mai duplicarlo, contatore visibile che scende a zero. Il
+messaggio arriva **solo alla chat dell'amministratore principale** — la
+funzione cerca proprio quel chat_id nel database, nessun altro utente lo
+vede mai.
 
-Due problemi trovati collaudando per davvero, non a tavolino:
+Tre problemi trovati collaudando per davvero, non a tavolino:
 
 - `curl --data-urlencode` su questa macchina (curl 8.21/mingw-w64) corrompe
   i caratteri non-ASCII (una vocale accentata diventa `U+FFFD` prima di
@@ -236,7 +239,16 @@ Due problemi trovati collaudando per davvero, non a tavolino:
   --retry-delay 2` li assorbe da solo (e rispetta anche l'header
   `Retry-After` di un eventuale 429 di Telegram, senza doverlo leggere a
   mano): il countdown è arrivato in fondo lo stesso, con un piccolo scatto
-  visibile una sola volta.
+  visibile una sola volta;
+- **il pin è stato tolto**: la prima versione fissava (pin) il messaggio.
+  Dopo averlo eliminato a fine collaudo restava in chat una notifica di
+  sistema fantasma («Gestionale_Bot pinned Deleted message»), non
+  ripulibile via API (i service message di pin/unpin non restituiscono un
+  `message_id` utilizzabile). Trovato da Alessio guardando la chat vera, non
+  a tavolino. Tolto il pin del tutto: un messaggio normale, sempre
+  aggiornato sullo stesso id, basta — non serve fissarlo per tenerlo
+  "fermo", ci pensa già il fatto che è l'unico messaggio a cambiare.
+  Riprovato su chat vuota: nessuna notifica fantasma.
 
 **Sotto-step 2/5 fatto**: `scripts/avvia-bot.sh` e `scripts/ferma-bot.sh`,
 gestione del processo sull'S9 con `nohup`+`disown`+file PID (deciso il
@@ -248,10 +260,6 @@ online confermato dal log (`Gestionale Casa online`), spegnimento con
 a `.enable_ctrlc_handler()`, che ascolta SIGINT — e spegnimento pulito
 confermato dal log (`^C received`, `Gestionale Casa offline`) e dal
 messaggio che il bot manda da solo agli amministratori.
-
-Aggiunto anche `tg_elimina` a `telegram-api.sh`, per ripulire i messaggi di
-prova dalla chat reale dopo un collaudo — non fa parte del ciclo di deploy,
-serve solo a non lasciare la chat sporca di test.
 
 Restano 3 sotto-step: la schermata admin `🚀 Distribuzione`, la coda "in
 attesa di input testuale", e lo swap vero con rollback.

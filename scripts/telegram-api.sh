@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Primitive per pilotare Telegram via API diretta dall'agente, non dal bot
 # sull'S9. Decisione del 3 settembre 2026 (docs/previsto/
-# automazione-ciclo-sviluppo.md, punto 6): il messaggio pinnato di
-# countdown/checklist deve continuare ad aggiornarsi anche quando il
-# processo S9 e' fermo per lo swap, quindi non puo' dipendere dal bot in
-# esecuzione in quel momento.
+# automazione-ciclo-sviluppo.md, punto 6): il messaggio di countdown/
+# checklist deve continuare ad aggiornarsi anche quando il processo S9 e'
+# fermo per lo swap, quindi non puo' dipendere dal bot in esecuzione in
+# quel momento.
 #
 # Il repository e' pubblico: token e chat_id non devono MAI comparire come
 # letterali in un file committato. Si leggono via SSH dal .env e dal
@@ -15,9 +15,9 @@
 # Uso, da un altro script:
 #   source scripts/telegram-api.sh
 #   tg_leggi_credenziali          # imposta TG_TOKEN e TG_CHAT_ID
-#   id=$(tg_invia_e_fissa "testo")
+#   id=$(tg_invia "testo")
 #   tg_modifica "$id" "nuovo testo"
-#   tg_sblocca "$id"
+#   tg_elimina "$id"
 
 set -uo pipefail
 
@@ -74,8 +74,17 @@ tg_leggi_credenziali() {
     export TG_TOKEN TG_CHAT_ID
 }
 
-# Invia un messaggio e lo fissa (pin), silenziosamente. Stampa il message_id.
-tg_invia_e_fissa() {
+# Invia un messaggio. Stampa il message_id.
+#
+# Deciso il 4 settembre 2026, dopo il primo collaudo: niente pin. Fissare
+# (pinChatMessage) e poi eliminare il messaggio lascia in chat una notifica
+# di sistema fantasma ("Gestionale_Bot pinned Deleted message") che non
+# sparisce da sola e non si può ripulire via API (i service message di
+# pin/unpin non hanno un message_id restituito da queste chiamate). Un
+# messaggio normale, aggiornato sempre sullo stesso id, basta: resta
+# comunque l'unico messaggio che cambia, l'ordine cronologico della chat
+# non ha bisogno di essere forzato.
+tg_invia() {
     local testo risposta message_id
     testo="$(tg_urlencode "$1")"
     risposta="$(_tg_curl "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
@@ -86,10 +95,6 @@ tg_invia_e_fissa() {
         echo "Invio fallito: $risposta" >&2
         return 1
     fi
-    _tg_curl "https://api.telegram.org/bot${TG_TOKEN}/pinChatMessage" \
-        --data "chat_id=${TG_CHAT_ID}" \
-        --data "message_id=${message_id}" \
-        --data "disable_notification=true" >/dev/null
     echo "$message_id"
 }
 
@@ -112,13 +117,6 @@ tg_modifica() {
     fi
     echo "Modifica fallita: $risposta" >&2
     return 1
-}
-
-tg_sblocca() {
-    local message_id="$1"
-    _tg_curl "https://api.telegram.org/bot${TG_TOKEN}/unpinChatMessage" \
-        --data "chat_id=${TG_CHAT_ID}" \
-        --data "message_id=${message_id}" >/dev/null
 }
 
 # Elimina un messaggio. Serve per ripulire i messaggi di prova/collaudo

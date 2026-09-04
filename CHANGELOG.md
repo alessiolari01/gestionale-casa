@@ -2,6 +2,30 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_NIENTE_PIN_20260904 -->
+# 04/09/2026 — Tolto il pin: lascia una notifica fantasma che non si ripulisce
+
+Trovato da Alessio guardando la chat vera dopo un collaudo del countdown: il
+messaggio di prova era stato fissato (pin) e poi eliminato a fine collaudo,
+ma restava comunque una riga "Gestionale_Bot pinned Deleted message" — una
+notifica di sistema che Telegram genera per l'azione di pin, indipendente
+dal messaggio pinnato, e che **non ha un `message_id` restituito dall'API
+utilizzabile per eliminarla**.
+
+Tolto il pin del tutto da `scripts/telegram-api.sh`: `tg_invia_e_fissa` e
+`tg_sblocca` diventano `tg_invia` (senza `pinChatMessage`/
+`unpinChatMessage`). Non serve fissare il messaggio per tenerlo "fermo": è
+comunque l'unico messaggio che l'agente continua a modificare, e la chat
+dell'amministratore principale — l'unico destinatario, verificato che
+`tg_leggi_credenziali` cerca proprio quel chat_id — non ha altro traffico
+nel mezzo durante un collaudo.
+
+Riprovato su chat svuotata a mano da Alessio: countdown al secondo, nessuna
+notifica fantasma. `docs/previsto/automazione-ciclo-sviluppo.md` aggiornato
+nei punti 6 e 8 e nella sezione delle decisioni.
+
+Nessun test Rust coinvolto. Totale invariato: 270.
+
 <!-- CHANGELOG_GESTIONE_PROCESSO_20260904 -->
 # 04/09/2026 — Avviare e fermare il bot da remoto, senza lasciarlo appeso alla sessione SSH
 

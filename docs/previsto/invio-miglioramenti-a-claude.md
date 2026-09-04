@@ -68,6 +68,16 @@ Se rifiuti il collaudo, il miglioramento resta `da_fare` con le note di
 cosa non ha funzionato, coerente con il rollback già previsto nel ciclo di
 automazione.
 
+**Regola sui backup, legata a questo momento**: quando la conferma archivia
+il miglioramento, sul database restano **sempre e solo i 5 backup più
+recenti** — se il ciclo ne ha creato uno nuovo, il più vecchio oltre i 5
+viene rimosso. Non è un meccanismo nuovo da costruire: `aggiorna-s9.sh` lo fa
+già da solo a ogni esecuzione (`BACKUP_DA_TENERE=5`, verificato il
+4 settembre 2026 — sull'S9 ce n'erano già esattamente 5), quindi la garanzia
+vale già prima ancora che arrivi la conferma. Resta scritta qui perché e' il
+punto in cui l'amministratore principale se lo aspetta: dopo aver confermato
+e archiviato, il numero di backup non deve mai essere diverso da 5.
+
 ## Deciso il 3 settembre 2026
 
 - **invii duplicati**: una colonna `in_coda_claude` (booleano) + timestamp

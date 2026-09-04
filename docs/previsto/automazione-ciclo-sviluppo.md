@@ -53,15 +53,20 @@ singolo.
 6. Se la CI è verde, avvia un deploy a downtime minimo:
    - salva/tiene disponibile l'ultimo binario/commit funzionante, così un
      rollback non richiede mai una ricompilazione;
-   - fissa (pin) un messaggio con un countdown alla manutenzione, aggiornato
-     per modifica del messaggio stesso, mai un nuovo messaggio. **Deciso il
+   - manda un messaggio con un countdown alla manutenzione, aggiornato per
+     modifica del messaggio stesso, mai un nuovo messaggio. **Deciso il
      3 settembre 2026**: non lo pilota il bot sull'S9, lo pilota l'agente
      orchestratore stesso, con chiamate dirette all'API Telegram
-     (`sendMessage` + `pinChatMessage` una volta, poi solo
-     `editMessageText`). Il motivo è che deve continuare ad aggiornarsi anche
-     nel momento in cui il processo S9 è fermo per lo swap — l'unico in cui
-     serve di più. Il token viene letto via SSH dall'S9 al momento del
-     bisogno, mai scritto su disco sul dispositivo che esegue l'agente;
+     (`sendMessage` una volta, poi solo `editMessageText`). Il motivo è che
+     deve continuare ad aggiornarsi anche nel momento in cui il processo S9 è
+     fermo per lo swap — l'unico in cui serve di più. Il token viene letto
+     via SSH dall'S9 al momento del bisogno, mai scritto su disco sul
+     dispositivo che esegue l'agente. **Niente pin (deciso il
+     4 settembre 2026, dopo un secondo collaudo)**: fissare il messaggio e
+     poi eliminarlo a fine collaudo lasciava in chat una notifica di sistema
+     fantasma («Gestionale_Bot pinned Deleted message»), non ripulibile via
+     API. Un messaggio normale aggiornato sempre sullo stesso id basta —
+     resta comunque l'unico messaggio che cambia nella chat;
    - prima di fermare il processo, controlla se qualche chat ha uno stato
      "in attesa di input testuale" attivo e, se sì, rimanda lo stop fino a
      quando si libera, con un tempo massimo di attesa oltre il quale procede
@@ -94,9 +99,9 @@ singolo.
 7. Notifica Telegram con il riepilogo di cosa è stato implementato e i passi
    concreti da provare — l'amministratore principale ha già accesso alla
    versione nuova in modalità riservata, gli altri utenti no.
-8. Durante il collaudo guidato, un messaggio pinnato mostra una checklist
-   dinamica degli step (☐ → ✅ via edit, mai nuovi messaggi), che si sblocca
-   da sola a fine collaudo.
+8. Durante il collaudo guidato, un messaggio (senza pin — stessa decisione
+   del punto 6) mostra una checklist dinamica degli step (☐ → ✅ via edit,
+   mai nuovi messaggi), che si sblocca da sola a fine collaudo.
 9. Solo dopo la conferma funzionale esplicita dell'amministratore principale,
    data su Telegram:
    - il bot esce dalla modalità riservata, sblocca l'uso normale per tutti e
@@ -120,8 +125,11 @@ vigore nel progetto (vedi la sezione 0 di `STATO.md`).
 
 ## Deciso il 3 settembre 2026
 
-- **chi pilota il messaggio pinnato**: l'agente orchestratore, via API
-  Telegram diretta, non il bot sull'S9 — vedi il punto 6 sopra;
+- **chi pilota il messaggio di countdown/checklist**: l'agente orchestratore,
+  via API Telegram diretta, non il bot sull'S9 — vedi il punto 6 sopra;
+- **niente pin**, deciso il 4 settembre dopo un secondo collaudo: lascia una
+  notifica di sistema fantasma quando il messaggio pinnato viene eliminato,
+  non ripulibile via API — vedi il punto 6 sopra;
 - **interfaccia per tipo/orario del messaggio di manutenzione**: schermata
   `🛠️ Amministrazione → 🚀 Distribuzione` con default + scelta puntuale —
   vedi il punto 6 sopra;
