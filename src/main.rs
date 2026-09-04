@@ -29,7 +29,7 @@ use teloxide::{
     dispatching::ShutdownToken,
     dptree,
     prelude::*,
-    types::{InlineKeyboardButton, InlineKeyboardMarkup, User},
+    types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, User},
 };
 
 type Bot = context_bot::ContextBot;
@@ -73,6 +73,76 @@ impl IdentitySessionStore {
             .unwrap_or_else(|p| p.into_inner())
             .remove(&chat_id);
     }
+
+    /// Chat con una sessione attiva in questa mappa. Usata dal controllo
+    /// pre-swap (sotto-step 4/5 del punto 6 del ciclo di automazione) per
+    /// sapere se rimandare lo spegnimento del bot.
+    #[allow(dead_code)]
+    fn active_chat_ids(&self) -> Vec<i64> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .keys()
+            .copied()
+            .collect()
+    }
+}
+
+/// Attesa di un valore digitato per la schermata admin 🚀 Distribuzione
+/// (sotto-step 3/5 del punto 6 del ciclo di automazione): input ibrido,
+/// bottoni con valori preimpostati oppure testo libero. Stesso schema di
+/// `IdentitySessionStore`, una mappa indipendente in più — deciso il
+/// 3 settembre 2026 di non unificare le mappe di sessione esistenti.
+#[derive(Clone, Default)]
+struct DistribuzioneSessionStore {
+    inner: Arc<Mutex<HashMap<i64, DistribuzioneConversationState>>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum DistribuzioneConversationState {
+    AwaitingMinuti,
+    AwaitingOrario,
+}
+
+impl DistribuzioneSessionStore {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn get(&self, chat_id: i64) -> Option<DistribuzioneConversationState> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(&chat_id)
+            .copied()
+    }
+
+    fn set(&self, chat_id: i64, state: DistribuzioneConversationState) {
+        self.inner
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(chat_id, state);
+    }
+
+    fn clear_chat(&self, chat_id: i64) {
+        self.inner
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&chat_id);
+    }
+
+    /// Chat con una sessione attiva in questa mappa. Usata dal controllo
+    /// pre-swap (sotto-step 4/5 del punto 6 del ciclo di automazione) per
+    /// sapere se rimandare lo spegnimento del bot.
+    #[allow(dead_code)]
+    fn active_chat_ids(&self) -> Vec<i64> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .keys()
+            .copied()
+            .collect()
+    }
 }
 
 #[derive(Clone, Default)]
@@ -98,6 +168,65 @@ impl ShutdownController {
     }
 }
 
+/// Sotto-step 5c del punto 6 del ciclo di automazione: lo stato del
+/// collaudo guidato dopo uno swap (riepilogo, checklist, message_id da
+/// modificare). Un solo collaudo alla volta ha senso — un solo
+/// amministratore principale, un solo deploy in corso — quindi `Option`
+/// invece di una mappa per chat come le dieci sessioni testuali.
+#[derive(Clone, Default)]
+struct CollaudoStore {
+    stato: Arc<Mutex<Option<modules::collaudo::StatoCollaudo>>>,
+}
+
+impl CollaudoStore {
+    fn imposta(&self, stato: modules::collaudo::StatoCollaudo) {
+        *self.stato.lock().unwrap_or_else(|p| p.into_inner()) = Some(stato);
+    }
+
+    /// Applica `f` allo stato attivo, se c'è. `None` se non c'è nessun
+    /// collaudo in corso (bottone di un messaggio vecchio, o modalità
+    /// normale).
+    fn con_stato<T>(
+        &self,
+        f: impl FnOnce(&mut modules::collaudo::StatoCollaudo) -> T,
+    ) -> Option<T> {
+        let mut guard = self.stato.lock().unwrap_or_else(|p| p.into_inner());
+        guard.as_mut().map(f)
+    }
+
+    fn concludi(&self) {
+        *self.stato.lock().unwrap_or_else(|p| p.into_inner()) = None;
+    }
+}
+
+/// Sotto-step 5a del punto 6 del ciclo di automazione: solo l'amministratore
+/// principale può usare il bot mentre è attiva, gli altri vedono un avviso
+/// di manutenzione. Un `AtomicBool` condiviso, non una variabile letta una
+/// volta sola all'avvio: deve poter tornare `false` premendo un bottone in
+/// chat, senza riavviare il processo — deciso insieme ad Alessio il
+/// 4 settembre 2026.
+#[derive(Clone, Default)]
+struct ModalitaRiservata {
+    attiva: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl ModalitaRiservata {
+    fn new(attiva: bool) -> Self {
+        Self {
+            attiva: Arc::new(std::sync::atomic::AtomicBool::new(attiva)),
+        }
+    }
+
+    fn is_attiva(&self) -> bool {
+        self.attiva.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    fn disattiva(&self) {
+        self.attiva
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 #[derive(Clone)]
 struct HandlerDependencies {
     config: Arc<Config>,
@@ -111,8 +240,113 @@ struct HandlerDependencies {
     improvement_sessions: ImprovementSessionStore,
     recipe_sessions: RecipeSessionStore,
     identity_sessions: IdentitySessionStore,
+    distribuzione_sessions: DistribuzioneSessionStore,
     shutdown_controller: ShutdownController,
+    modalita_riservata: ModalitaRiservata,
+    collaudo_store: CollaudoStore,
 }
+
+/// Vera solo quando la modalità riservata è attiva e chi scrive non è
+/// l'amministratore principale — pura e testabile senza Telegram né
+/// database, stessa scelta di `calcola_tempo_rimanente` in
+/// `modules::distribuzione`.
+fn deve_bloccare_per_manutenzione(riservato: bool, primario: bool) -> bool {
+    riservato && !primario
+}
+
+fn testo_manutenzione() -> &'static str {
+    "🚧 Manutenzione in corso\n\nStiamo aggiornando il gestionale. Riprova tra poco."
+}
+
+/// Percorso del file di stato letto dall'agente orchestratore, relativo
+/// alla cartella da cui gira il processo (`~/gestionale-casa` sull'S9,
+/// stessa convenzione di `data/run/bot.pid` in `avvia-bot.sh`). Usato solo
+/// dal canale SIGUSR1, che esiste solo su unix — vedi
+/// `avvia_ascolto_segnale_stato_sessioni`.
+#[cfg(unix)]
+const FILE_STATO_SESSIONI: &str = "data/run/sessioni.txt";
+
+/// Chat con una sessione "in attesa di input testuale" attiva, in una
+/// qualunque delle dieci mappe indipendenti — deciso il 3 settembre 2026 di
+/// interrogarle così come sono, senza unificarle prima. Un set invece di
+/// una somma: una chat non dovrebbe mai comparire in due mappe assieme, ma
+/// se succedesse contarla due volte darebbe un numero fuorviante.
+#[cfg(unix)]
+fn chat_con_sessione_attiva(deps: &HandlerDependencies) -> std::collections::BTreeSet<i64> {
+    let mut chat_ids = std::collections::BTreeSet::new();
+    chat_ids.extend(deps.sessions.active_chat_ids());
+    chat_ids.extend(deps.location_sessions.active_chat_ids());
+    chat_ids.extend(deps.container_sessions.active_chat_ids());
+    chat_ids.extend(deps.photo_sessions.active_chat_ids());
+    chat_ids.extend(deps.food_sessions.active_chat_ids());
+    chat_ids.extend(deps.profile_sessions.active_chat_ids());
+    chat_ids.extend(deps.improvement_sessions.active_chat_ids());
+    chat_ids.extend(deps.recipe_sessions.active_chat_ids());
+    chat_ids.extend(deps.identity_sessions.active_chat_ids());
+    chat_ids.extend(deps.distribuzione_sessions.active_chat_ids());
+    chat_ids
+}
+
+/// Scrive il numero di chat con una sessione attiva in
+/// `FILE_STATO_SESSIONI`, seguito dall'istante (secondi epoch) in cui è
+/// stato scritto — utile a chi legge il file per accorgersi di un valore
+/// vecchio. Il contenuto basta a `scripts/controlla-sessioni-attive.sh`
+/// per decidere se rimandare lo stop del bot.
+#[cfg(unix)]
+async fn scrivi_stato_sessioni(deps: &HandlerDependencies) {
+    let numero = chat_con_sessione_attiva(deps).len();
+    let adesso = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|durata| durata.as_secs())
+        .unwrap_or(0);
+    let contenuto = format!("{numero}\n{adesso}\n");
+
+    if let Some(cartella) = std::path::Path::new(FILE_STATO_SESSIONI).parent() {
+        if let Err(error) = tokio::fs::create_dir_all(cartella).await {
+            tracing::error!(
+                ?error,
+                "Impossibile creare la cartella del file di stato sessioni"
+            );
+            return;
+        }
+    }
+    if let Err(error) = tokio::fs::write(FILE_STATO_SESSIONI, contenuto).await {
+        tracing::error!(?error, "Impossibile scrivere il file di stato sessioni");
+    } else {
+        tracing::info!(numero, "Stato sessioni scritto su richiesta (SIGUSR1)");
+    }
+}
+
+/// Ascolta SIGUSR1 e, a ogni segnale, riscrive `FILE_STATO_SESSIONI` con lo
+/// stato corrente. Un segnale su richiesta invece di una scrittura
+/// periodica (deciso insieme ad Alessio il 4 settembre 2026): lo scrive
+/// solo quando all'agente orchestratore serve davvero saperlo, prima di
+/// fermare il bot per uno swap (sotto-step 4/5 del punto 6 del ciclo).
+///
+/// Non tocca SIGINT: `ferma-bot.sh` continua a usarlo per lo spegnimento
+/// pulito già collaudato nel sotto-step 2/5, questo è un canale a parte.
+#[cfg(unix)]
+fn avvia_ascolto_segnale_stato_sessioni(deps: Arc<HandlerDependencies>) {
+    tokio::spawn(async move {
+        let mut segnale =
+            match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::user_defined1()) {
+                Ok(segnale) => segnale,
+                Err(error) => {
+                    tracing::error!(?error, "Impossibile registrare il gestore di SIGUSR1");
+                    return;
+                }
+            };
+        while segnale.recv().await.is_some() {
+            scrivi_stato_sessioni(&deps).await;
+        }
+    });
+}
+
+/// SIGUSR1 non esiste su Windows: questo canale serve solo sull'S9, dove il
+/// processo gira davvero. Sviluppare e collaudare in locale su Windows (fmt/
+/// check/test/clippy) resta possibile senza di lui.
+#[cfg(not(unix))]
+fn avvia_ascolto_segnale_stato_sessioni(_deps: Arc<HandlerDependencies>) {}
 
 static UNEXPECTED_INPUT_COUNTS: OnceLock<Mutex<HashMap<i64, u8>>> = OnceLock::new();
 
@@ -274,7 +508,20 @@ async fn async_main() -> anyhow::Result<()> {
     let improvement_sessions = ImprovementSessionStore::new();
     let recipe_sessions = RecipeSessionStore::new();
     let identity_sessions = IdentitySessionStore::new();
+    let distribuzione_sessions = DistribuzioneSessionStore::new();
     let shutdown_controller = ShutdownController::default();
+    // Sotto-step 5a del punto 6 del ciclo di automazione: solo lo swap
+    // vero (scripts/avvia-bot.sh) imposta RISERVATO=1 per il binario
+    // nuovo. Un avvio normale (`cargo run` a mano, o senza la variabile)
+    // resta aperto a tutti come oggi -- deciso insieme ad Alessio.
+    let riservato_da_avvio = std::env::var("RISERVATO")
+        .map(|valore| valore == "1")
+        .unwrap_or(false);
+    if riservato_da_avvio {
+        tracing::info!("Avvio in modalità riservata (RISERVATO=1)");
+    }
+    let modalita_riservata = ModalitaRiservata::new(riservato_da_avvio);
+    let collaudo_store = CollaudoStore::default();
     let handler_dependencies = Arc::new(HandlerDependencies {
         config: config.clone(),
         pool: pool.clone(),
@@ -287,8 +534,73 @@ async fn async_main() -> anyhow::Result<()> {
         improvement_sessions,
         recipe_sessions,
         identity_sessions,
+        distribuzione_sessions,
         shutdown_controller: shutdown_controller.clone(),
+        modalita_riservata,
+        collaudo_store: collaudo_store.clone(),
     });
+
+    // Sotto-step 5c del punto 6 del ciclo di automazione: solo a un avvio
+    // riservato con un riepilogo pronto ha senso mandare il messaggio di
+    // collaudo -- un avvio normale non ha nulla da far provare.
+    if riservato_da_avvio {
+        if let Some(riepilogo) =
+            modules::collaudo::leggi_riepilogo(modules::collaudo::FILE_RIEPILOGO).await
+        {
+            match identity::list_primary_admin_chat_ids(&pool).await {
+                Ok(chat_ids) => {
+                    for id in chat_ids {
+                        let chat_id = ChatId(id);
+                        let stato = modules::collaudo::StatoCollaudo::nuovo(
+                            chat_id,
+                            MessageId(0),
+                            riepilogo.clone(),
+                        );
+                        match bot
+                            .send_message_without_improve(chat_id, stato.testo_messaggio())
+                            .reply_markup(stato.tastiera())
+                            .await
+                        {
+                            Ok(messaggio) => {
+                                let stato = modules::collaudo::StatoCollaudo::nuovo(
+                                    chat_id,
+                                    messaggio.id,
+                                    riepilogo.clone(),
+                                );
+                                collaudo_store.imposta(stato);
+                            }
+                            Err(error) => {
+                                tracing::error!(
+                                    chat_id = id,
+                                    ?error,
+                                    "Impossibile inviare il messaggio di collaudo"
+                                );
+                            }
+                        }
+                    }
+                }
+                Err(error) => {
+                    tracing::error!(
+                        ?error,
+                        "Impossibile leggere la chat dell'amministratore principale per il collaudo"
+                    );
+                }
+            }
+        } else {
+            tracing::warn!(
+                "Avvio riservato senza un riepilogo leggibile in {}",
+                modules::collaudo::FILE_RIEPILOGO
+            );
+        }
+    }
+
+    // Sotto-step 4/5 del punto 6 del ciclo di automazione: il controllo
+    // pre-swap ("qualche chat sta scrivendo?") lo fa l'agente orchestratore
+    // via SSH, non il bot da solo -- ma le mappe di sessione vivono solo
+    // nella memoria di questo processo, quindi serve un canale che le
+    // esponga su richiesta. Vedi `avvia_ascolto_segnale_stato_sessioni`.
+    avvia_ascolto_segnale_stato_sessioni(handler_dependencies.clone());
+
     let handler = dptree::entry()
         .branch(Update::filter_message().endpoint(handle_message))
         .branch(Update::filter_callback_query().endpoint(handle_callback));
@@ -348,6 +660,8 @@ async fn handle_message(
     let improvement_sessions = deps.improvement_sessions.clone();
     let recipe_sessions = deps.recipe_sessions.clone();
     let identity_sessions = deps.identity_sessions.clone();
+    let distribuzione_sessions = deps.distribuzione_sessions.clone();
+    let modalita_riservata = deps.modalita_riservata.clone();
     let chat_id = msg.chat.id.0;
     bot.cleanup_transient_media(msg.chat.id).await;
     bot.record_text(chat_id, msg.text().or_else(|| msg.caption()));
@@ -399,6 +713,16 @@ async fn handle_message(
         }
     };
 
+    if modalita_riservata.is_attiva() {
+        let primario = identity::is_primary_admin(&pool, &actor)
+            .await
+            .unwrap_or(false);
+        if deve_bloccare_per_manutenzione(true, primario) {
+            bot.send_message(msg.chat.id, testo_manutenzione()).await?;
+            return respond(());
+        }
+    }
+
     let result = identity::with_actor(
         actor.clone(),
         Box::pin(handle_authorized_message(
@@ -414,6 +738,8 @@ async fn handle_message(
             improvement_sessions,
             recipe_sessions,
             identity_sessions,
+            distribuzione_sessions,
+            modalita_riservata,
             actor,
         )),
     )
@@ -442,6 +768,8 @@ async fn handle_authorized_message(
     improvement_sessions: ImprovementSessionStore,
     recipe_sessions: RecipeSessionStore,
     identity_sessions: IdentitySessionStore,
+    distribuzione_sessions: DistribuzioneSessionStore,
+    modalita_riservata: ModalitaRiservata,
     actor: identity::AuditActor,
 ) -> ResponseResult<()> {
     let chat_id = msg.chat.id.0;
@@ -457,6 +785,7 @@ async fn handle_authorized_message(
         improvement_sessions.clear_chat(chat_id);
         recipe_sessions.clear_chat(chat_id);
         identity_sessions.clear_chat(chat_id);
+        distribuzione_sessions.clear_chat(chat_id);
         return respond(());
     }
 
@@ -472,6 +801,7 @@ async fn handle_authorized_message(
         food_sessions.clear_chat(chat_id);
         recipe_sessions.clear_chat(chat_id);
         identity_sessions.clear_chat(chat_id);
+        distribuzione_sessions.clear_chat(chat_id);
         return respond(());
     }
 
@@ -495,6 +825,7 @@ async fn handle_authorized_message(
         food_sessions.clear_chat(chat_id);
         improvement_sessions.clear_chat(chat_id);
         identity_sessions.clear_chat(chat_id);
+        distribuzione_sessions.clear_chat(chat_id);
         return respond(());
     }
 
@@ -542,12 +873,20 @@ async fn handle_authorized_message(
             && command != Some("/annulla")
         {
             identity_sessions.clear_chat(chat_id);
+            distribuzione_sessions.clear_chat(chat_id);
         }
     }
 
     if command == Some("/annulla") && identity_sessions.get(chat_id).is_some() {
         identity_sessions.clear_chat(chat_id);
+        distribuzione_sessions.clear_chat(chat_id);
         send_spaces(&bot, msg.chat.id, &pool, &actor).await?;
+        return respond(());
+    }
+
+    if command == Some("/annulla") && distribuzione_sessions.get(chat_id).is_some() {
+        distribuzione_sessions.clear_chat(chat_id);
+        send_admin_distribuzione(&bot, msg.chat.id, &pool, &actor).await?;
         return respond(());
     }
 
@@ -573,6 +912,7 @@ async fn handle_authorized_message(
             match result {
                 Ok(message) => {
                     identity_sessions.clear_chat(chat_id);
+                    distribuzione_sessions.clear_chat(chat_id);
                     bot.send_message(msg.chat.id, message)
                         .reply_markup(profile_keyboard())
                         .await?;
@@ -591,6 +931,68 @@ async fn handle_authorized_message(
         }
     }
 
+    if command.is_none() {
+        if let Some(state) = distribuzione_sessions.get(chat_id) {
+            match state {
+                DistribuzioneConversationState::AwaitingMinuti => {
+                    match modules::distribuzione::valida_minuti(text) {
+                        Ok(minuti) => {
+                            distribuzione_sessions.clear_chat(chat_id);
+                            if let Err(error) =
+                                modules::distribuzione::imposta_countdown(&pool, minuti).await
+                            {
+                                tracing::error!(?error, "Errore impostazione countdown default");
+                                bot.send_message(
+                                    msg.chat.id,
+                                    "⚠️ Non sono riuscito a salvare il default.",
+                                )
+                                .reply_markup(
+                                    modules::distribuzione::schermata_principale_keyboard(),
+                                )
+                                .await?;
+                            } else {
+                                send_admin_distribuzione(&bot, msg.chat.id, &pool, &actor).await?;
+                            }
+                        }
+                        Err(messaggio) => {
+                            bot.send_message(msg.chat.id, format!("⚠️ {messaggio}"))
+                                .reply_markup(modules::distribuzione::scelta_minuti_keyboard())
+                                .await?;
+                        }
+                    }
+                }
+                DistribuzioneConversationState::AwaitingOrario => {
+                    match modules::distribuzione::valida_orario(text) {
+                        Ok(orario) => {
+                            distribuzione_sessions.clear_chat(chat_id);
+                            if let Err(error) =
+                                modules::distribuzione::imposta_programmato(&pool, &orario).await
+                            {
+                                tracing::error!(?error, "Errore impostazione orario default");
+                                bot.send_message(
+                                    msg.chat.id,
+                                    "⚠️ Non sono riuscito a salvare il default.",
+                                )
+                                .reply_markup(
+                                    modules::distribuzione::schermata_principale_keyboard(),
+                                )
+                                .await?;
+                            } else {
+                                send_admin_distribuzione(&bot, msg.chat.id, &pool, &actor).await?;
+                            }
+                        }
+                        Err(messaggio) => {
+                            bot.send_message(msg.chat.id, format!("⚠️ {messaggio}"))
+                                .reply_markup(modules::distribuzione::scelta_orario_keyboard())
+                                .await?;
+                        }
+                    }
+                }
+            }
+            return respond(());
+        }
+    }
+
     if modules::planner_alimentare::handle_message(&bot, &msg, &pool, text).await? {
         sessions.clear_chat(chat_id);
         location_sessions.clear_chat(chat_id);
@@ -600,6 +1002,7 @@ async fn handle_authorized_message(
         improvement_sessions.clear_chat(chat_id);
         recipe_sessions.clear_chat(chat_id);
         identity_sessions.clear_chat(chat_id);
+        distribuzione_sessions.clear_chat(chat_id);
         return respond(());
     }
 
@@ -614,6 +1017,7 @@ async fn handle_authorized_message(
         improvement_sessions.clear_chat(chat_id);
         recipe_sessions.clear_chat(chat_id);
         identity_sessions.clear_chat(chat_id);
+        distribuzione_sessions.clear_chat(chat_id);
         return respond(());
     }
     // Box intenzionale: Alimentazione ha un future molto grande; tenerlo
@@ -633,6 +1037,7 @@ async fn handle_authorized_message(
         photo_sessions.clear_chat(chat_id);
         recipe_sessions.clear_chat(chat_id);
         identity_sessions.clear_chat(chat_id);
+        distribuzione_sessions.clear_chat(chat_id);
         return respond(());
     }
 
@@ -801,7 +1206,7 @@ async fn handle_authorized_message(
             }
         },
         Some("/admin") => {
-            send_admin_menu(&bot, msg.chat.id, &pool, &actor).await?;
+            send_admin_menu(&bot, msg.chat.id, &pool, &actor, &modalita_riservata).await?;
         }
         Some("/status") => {
             send_status(&bot, msg.chat.id, &pool, &actor).await?;
@@ -841,7 +1246,10 @@ async fn handle_callback(
     let improvement_sessions = deps.improvement_sessions.clone();
     let recipe_sessions = deps.recipe_sessions.clone();
     let identity_sessions = deps.identity_sessions.clone();
+    let distribuzione_sessions = deps.distribuzione_sessions.clone();
     let shutdown_controller = deps.shutdown_controller.clone();
+    let modalita_riservata = deps.modalita_riservata.clone();
+    let collaudo_store = deps.collaudo_store.clone();
     bot.answer_callback_query(q.id.clone()).await?;
 
     let Some(message) = q.regular_message() else {
@@ -889,6 +1297,16 @@ async fn handle_callback(
         }
     };
 
+    if modalita_riservata.is_attiva() {
+        let primario = identity::is_primary_admin(&pool, &actor)
+            .await
+            .unwrap_or(false);
+        if deve_bloccare_per_manutenzione(true, primario) {
+            bot.send_message(chat_id, testo_manutenzione()).await?;
+            return respond(());
+        }
+    }
+
     if !bot.claim_callback(chat_id.0, message.id, &data) {
         let is_admin = identity::is_system_admin(&pool, &actor)
             .await
@@ -920,7 +1338,10 @@ async fn handle_callback(
             improvement_sessions,
             recipe_sessions,
             identity_sessions,
+            distribuzione_sessions,
             shutdown_controller,
+            modalita_riservata,
+            collaudo_store,
             actor,
             data,
         )),
@@ -942,7 +1363,10 @@ async fn handle_authorized_callback(
     improvement_sessions: ImprovementSessionStore,
     recipe_sessions: RecipeSessionStore,
     identity_sessions: IdentitySessionStore,
+    distribuzione_sessions: DistribuzioneSessionStore,
     shutdown_controller: ShutdownController,
+    modalita_riservata: ModalitaRiservata,
+    collaudo_store: CollaudoStore,
     actor: identity::AuditActor,
     data: String,
 ) -> ResponseResult<()> {
@@ -966,6 +1390,7 @@ async fn handle_authorized_callback(
         food_sessions.clear_chat(chat_id.0);
         recipe_sessions.clear_chat(chat_id.0);
         identity_sessions.clear_chat(chat_id.0);
+        distribuzione_sessions.clear_chat(chat_id.0);
         return respond(());
     }
 
@@ -980,6 +1405,7 @@ async fn handle_authorized_callback(
         profile_sessions.clear_chat(chat_id.0);
         recipe_sessions.clear_chat(chat_id.0);
         identity_sessions.clear_chat(chat_id.0);
+        distribuzione_sessions.clear_chat(chat_id.0);
         return respond(());
     }
 
@@ -1002,6 +1428,7 @@ async fn handle_authorized_callback(
         improvement_sessions.clear_chat(chat_id.0);
         recipe_sessions.clear_chat(chat_id.0);
         identity_sessions.clear_chat(chat_id.0);
+        distribuzione_sessions.clear_chat(chat_id.0);
         return respond(());
     }
     if data.starts_with("recipe:") || (data == "menu:main" && recipe_sessions.has_active(chat_id.0))
@@ -1022,6 +1449,7 @@ async fn handle_authorized_callback(
             food_sessions.clear_chat(chat_id.0);
             improvement_sessions.clear_chat(chat_id.0);
             identity_sessions.clear_chat(chat_id.0);
+            distribuzione_sessions.clear_chat(chat_id.0);
             return respond(());
         }
     } else {
@@ -1046,6 +1474,7 @@ async fn handle_authorized_callback(
             photo_sessions.clear_chat(chat_id.0);
             recipe_sessions.clear_chat(chat_id.0);
             identity_sessions.clear_chat(chat_id.0);
+            distribuzione_sessions.clear_chat(chat_id.0);
             return respond(());
         }
     } else {
@@ -1064,6 +1493,7 @@ async fn handle_authorized_callback(
         improvement_sessions.clear_chat(chat_id.0);
         recipe_sessions.clear_chat(chat_id.0);
         identity_sessions.clear_chat(chat_id.0);
+        distribuzione_sessions.clear_chat(chat_id.0);
         return respond(());
     }
 
@@ -1187,7 +1617,7 @@ async fn handle_authorized_callback(
             }
         }
         "admin:menu" => {
-            send_admin_menu(&bot, chat_id, &pool, &actor).await?;
+            send_admin_menu(&bot, chat_id, &pool, &actor, &modalita_riservata).await?;
         }
         "admin:overview" => {
             send_admin_overview(&bot, chat_id, &pool, &actor).await?;
@@ -1260,6 +1690,218 @@ async fn handle_authorized_callback(
         }
         "admin:status" | "system:status" => {
             send_status(&bot, chat_id, &pool, &actor).await?;
+        }
+        "admin:riservato:sblocca" => {
+            if ensure_primary_admin_access(&bot, chat_id, &pool, &actor).await? {
+                esci_da_modalita_riservata(&bot, &pool, &modalita_riservata).await;
+                send_admin_menu(&bot, chat_id, &pool, &actor, &modalita_riservata).await?;
+            }
+        }
+        "collaudo:conferma" | "collaudo:rifiuta" => {
+            if ensure_primary_admin_access(&bot, chat_id, &pool, &actor).await? {
+                let pronto = collaudo_store
+                    .con_stato(|stato| stato.tutto_fatto())
+                    .unwrap_or(false);
+                if !pronto {
+                    // Bottone premuto prima di spuntare tutta la checklist
+                    // (o messaggio di un collaudo già concluso): la
+                    // tastiera non dovrebbe nemmeno mostrarli, ma non ci si
+                    // fida del solo stato lato client.
+                    return respond(());
+                }
+                let confermato = data == "collaudo:conferma";
+                let esito = if confermato {
+                    "confermato"
+                } else {
+                    "rifiutato"
+                };
+                if let Err(error) = modules::collaudo::scrivi_esito(esito).await {
+                    tracing::error!(?error, "Impossibile scrivere l'esito del collaudo");
+                }
+                let testo = if confermato {
+                    modules::collaudo::testo_confermato()
+                } else {
+                    modules::collaudo::testo_rifiutato()
+                };
+                // L'edit del messaggio di collaudo viene PRIMA della
+                // notifica broadcast, non dopo: quest'ultima manda un
+                // messaggio nuovo alla stessa chat e, come ogni altra
+                // schermata del progetto, cancella quella attiva
+                // precedente. Se arrivasse prima, cancellerebbe la
+                // checklist ancora da modificare (trovato per davvero
+                // collaudando sull'S9); in quest'ordine, invece, cancella
+                // il messaggio "confermato" appena mostrato — la stessa
+                // transizione "vecchia schermata sparisce, nuova arriva"
+                // di sempre, non un caso speciale.
+                if let Some((chat_id_messaggio, message_id)) =
+                    collaudo_store.con_stato(|stato| (stato.chat_id, stato.message_id))
+                {
+                    if let Err(error) = bot
+                        .edit_message_text(chat_id_messaggio, message_id, testo)
+                        .await
+                    {
+                        tracing::error!(?error, "Impossibile aggiornare il messaggio di collaudo");
+                    }
+                }
+                if confermato {
+                    esci_da_modalita_riservata(&bot, &pool, &modalita_riservata).await;
+                }
+                collaudo_store.concludi();
+            }
+        }
+        _ if data.starts_with("collaudo:toggle:") => {
+            if ensure_primary_admin_access(&bot, chat_id, &pool, &actor).await? {
+                let indice = data
+                    .strip_prefix("collaudo:toggle:")
+                    .and_then(|value| value.parse::<usize>().ok());
+                let aggiornato = indice.and_then(|indice| {
+                    collaudo_store.con_stato(|stato| {
+                        stato.alterna(indice);
+                        (
+                            stato.chat_id,
+                            stato.message_id,
+                            stato.testo_messaggio(),
+                            stato.tastiera(),
+                        )
+                    })
+                });
+                if let Some((chat_id_messaggio, message_id, testo, tastiera)) = aggiornato {
+                    if let Err(error) = bot
+                        .edit_message_text(chat_id_messaggio, message_id, testo)
+                        .reply_markup(tastiera)
+                        .await
+                    {
+                        tracing::error!(?error, "Impossibile aggiornare la checklist di collaudo");
+                    }
+                }
+            }
+        }
+        "admin:distribuzione" => {
+            if ensure_primary_admin_access(&bot, chat_id, &pool, &actor).await? {
+                distribuzione_sessions.clear_chat(chat_id.0);
+                send_admin_distribuzione(&bot, chat_id, &pool, &actor).await?;
+            }
+        }
+        "admin:distribuzione:cambia" => {
+            if ensure_primary_admin_access(&bot, chat_id, &pool, &actor).await? {
+                distribuzione_sessions.clear_chat(chat_id.0);
+                bot.send_message(chat_id, modules::distribuzione::testo_scelta_tipo())
+                    .reply_markup(modules::distribuzione::scelta_tipo_keyboard())
+                    .await?;
+            }
+        }
+        "admin:distribuzione:tipo:subito" => {
+            if ensure_primary_admin_access(&bot, chat_id, &pool, &actor).await? {
+                distribuzione_sessions.clear_chat(chat_id.0);
+                match modules::distribuzione::imposta_subito(&pool).await {
+                    Ok(()) => send_admin_distribuzione(&bot, chat_id, &pool, &actor).await?,
+                    Err(error) => {
+                        tracing::error!(?error, "Errore impostazione default Subito");
+                        bot.send_message(chat_id, "⚠️ Non sono riuscito a salvare il default.")
+                            .reply_markup(modules::distribuzione::schermata_principale_keyboard())
+                            .await?;
+                    }
+                }
+            }
+        }
+        "admin:distribuzione:tipo:countdown" => {
+            if ensure_primary_admin_access(&bot, chat_id, &pool, &actor).await? {
+                distribuzione_sessions
+                    .set(chat_id.0, DistribuzioneConversationState::AwaitingMinuti);
+                bot.send_message(chat_id, modules::distribuzione::testo_scelta_minuti())
+                    .reply_markup(modules::distribuzione::scelta_minuti_keyboard())
+                    .await?;
+            }
+        }
+        "admin:distribuzione:tipo:programmato" => {
+            if ensure_primary_admin_access(&bot, chat_id, &pool, &actor).await? {
+                distribuzione_sessions
+                    .set(chat_id.0, DistribuzioneConversationState::AwaitingOrario);
+                bot.send_message(chat_id, modules::distribuzione::testo_scelta_orario())
+                    .reply_markup(modules::distribuzione::scelta_orario_keyboard())
+                    .await?;
+            }
+        }
+        "admin:distribuzione:minuti:altro" => {
+            if ensure_primary_admin_access(&bot, chat_id, &pool, &actor).await? {
+                distribuzione_sessions
+                    .set(chat_id.0, DistribuzioneConversationState::AwaitingMinuti);
+                bot.send_message(
+                    chat_id,
+                    "✏️ Scrivi i minuti del countdown (un numero tra 1 e 180).",
+                )
+                .await?;
+            }
+        }
+        "admin:distribuzione:orario:altro" => {
+            if ensure_primary_admin_access(&bot, chat_id, &pool, &actor).await? {
+                distribuzione_sessions
+                    .set(chat_id.0, DistribuzioneConversationState::AwaitingOrario);
+                bot.send_message(chat_id, "✏️ Scrivi l'orario nel formato HH:MM, es. 03:00.")
+                    .await?;
+            }
+        }
+        _ if data.starts_with("admin:distribuzione:minuti:") => {
+            if ensure_primary_admin_access(&bot, chat_id, &pool, &actor).await? {
+                let minuti = data
+                    .strip_prefix("admin:distribuzione:minuti:")
+                    .and_then(|value| value.parse::<i64>().ok());
+                match minuti {
+                    Some(minuti) => {
+                        distribuzione_sessions.clear_chat(chat_id.0);
+                        match modules::distribuzione::imposta_countdown(&pool, minuti).await {
+                            Ok(()) => {
+                                send_admin_distribuzione(&bot, chat_id, &pool, &actor).await?
+                            }
+                            Err(error) => {
+                                tracing::error!(?error, "Errore impostazione countdown default");
+                                bot.send_message(
+                                    chat_id,
+                                    "⚠️ Non sono riuscito a salvare il default.",
+                                )
+                                .reply_markup(
+                                    modules::distribuzione::schermata_principale_keyboard(),
+                                )
+                                .await?;
+                            }
+                        }
+                    }
+                    None => {
+                        bot.send_message(chat_id, "⚠️ Valore non valido.").await?;
+                    }
+                }
+            }
+        }
+        _ if data.starts_with("admin:distribuzione:orario:") => {
+            if ensure_primary_admin_access(&bot, chat_id, &pool, &actor).await? {
+                let orario = data
+                    .strip_prefix("admin:distribuzione:orario:")
+                    .and_then(modules::distribuzione::orario_da_callback);
+                match orario {
+                    Some(orario) => {
+                        distribuzione_sessions.clear_chat(chat_id.0);
+                        match modules::distribuzione::imposta_programmato(&pool, &orario).await {
+                            Ok(()) => {
+                                send_admin_distribuzione(&bot, chat_id, &pool, &actor).await?
+                            }
+                            Err(error) => {
+                                tracing::error!(?error, "Errore impostazione orario default");
+                                bot.send_message(
+                                    chat_id,
+                                    "⚠️ Non sono riuscito a salvare il default.",
+                                )
+                                .reply_markup(
+                                    modules::distribuzione::schermata_principale_keyboard(),
+                                )
+                                .await?;
+                            }
+                        }
+                    }
+                    None => {
+                        bot.send_message(chat_id, "⚠️ Valore non valido.").await?;
+                    }
+                }
+            }
         }
         _ if data.starts_with("history:") || data.starts_with("h:") => {
             sessions.clear_chat(chat_id.0);
@@ -1494,6 +2136,7 @@ async fn send_admin_menu(
     chat_id: ChatId,
     pool: &SqlitePool,
     actor: &identity::AuditActor,
+    modalita_riservata: &ModalitaRiservata,
 ) -> ResponseResult<()> {
     if !ensure_admin_access(bot, chat_id, pool, actor).await? {
         return Ok(());
@@ -1510,7 +2153,11 @@ async fn send_admin_menu(
         chat_id,
         "🛠️ Amministrazione\n\nArea riservata per monitorare il gestionale. I ruoli di sistema sono separati dai permessi negli spazi e sulle singole risorse.",
     )
-    .reply_markup(admin_menu_keyboard(primary, pending))
+    .reply_markup(admin_menu_keyboard(
+        primary,
+        pending,
+        modalita_riservata.is_attiva(),
+    ))
     .await?;
     Ok(())
 }
@@ -1594,6 +2241,52 @@ async fn send_admin_overview(
             bot.send_message(
                 chat_id,
                 "⚠️ Non riesco a leggere la panoramica del gestionale.",
+            )
+            .reply_markup(admin_back_keyboard())
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+async fn send_admin_distribuzione(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    actor: &identity::AuditActor,
+) -> ResponseResult<()> {
+    if !ensure_primary_admin_access(bot, chat_id, pool, actor).await? {
+        return Ok(());
+    }
+
+    match modules::distribuzione::leggi(pool).await {
+        Ok(impostazioni) => {
+            let tempo_rimanente = match impostazioni.tipo_default {
+                modules::distribuzione::TipoManutenzione::Programmato => {
+                    match &impostazioni.orario_programmato_default {
+                        Some(orario) => modules::distribuzione::tempo_rimanente(pool, orario)
+                            .await
+                            .unwrap_or_default(),
+                        None => None,
+                    }
+                }
+                _ => None,
+            };
+            bot.send_message(
+                chat_id,
+                modules::distribuzione::testo_schermata_principale(
+                    &impostazioni,
+                    tempo_rimanente.as_deref(),
+                ),
+            )
+            .reply_markup(modules::distribuzione::schermata_principale_keyboard())
+            .await?;
+        }
+        Err(error) => {
+            tracing::error!(?error, "Errore lettura impostazioni di distribuzione");
+            bot.send_message(
+                chat_id,
+                "⚠️ Non riesco a leggere le impostazioni di distribuzione.",
             )
             .reply_markup(admin_back_keyboard())
             .await?;
@@ -1926,6 +2619,54 @@ async fn ensure_primary_admin_access(
     }
 }
 
+/// Disattiva la modalità riservata (se attiva) e notifica tutte le chat di
+/// utenti attivi. Condivisa dal bottone `admin:riservato:sblocca`
+/// (sotto-step 5a) e dalla conferma del collaudo guidato (sotto-step 5c):
+/// stesso comportamento, due modi di arrivarci.
+async fn esci_da_modalita_riservata(
+    bot: &Bot,
+    pool: &SqlitePool,
+    modalita_riservata: &ModalitaRiservata,
+) {
+    if !modalita_riservata.is_attiva() {
+        return;
+    }
+    modalita_riservata.disattiva();
+    let chat_ids = identity::list_active_chat_ids(pool)
+        .await
+        .unwrap_or_default();
+    // `send_message_without_improve` (tracciata: diventa la schermata attiva
+    // e cancella quella precedente), non `send_message_untracked`: qui serve
+    // che il bottone `menu:main` sia poi cliccabile, e `claim_callback`
+    // accetta solo click su una schermata registrata come attiva. È sicuro
+    // farlo qui perché chi chiama questa funzione ha già modificato in place
+    // (mai cancellato) l'eventuale schermata precedente che voleva
+    // conservare, prima di arrivare a questo punto — vedi `collaudo:conferma`.
+    // Un bottone verso `menu:main`, non un menù pre-costruito qui: quel
+    // callback passa dal dispatch normale, che risolve l'attore vero al
+    // momento del click (ruolo admin incluso) invece di doverlo ricostruire
+    // per ogni chat attiva senza un update Telegram reale sottomano. Chiesto
+    // da Alessio dopo il primo collaudo: poter riprendere a usare il
+    // gestionale subito, senza scrivere un comando a mano.
+    let torna_al_menu = InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
+        "🏠 Menù principale".to_string(),
+        "menu:main".to_string(),
+    )]]);
+    for id in chat_ids {
+        if let Err(error) = bot
+            .send_message_without_improve(ChatId(id), "✅ Di nuovo online.")
+            .reply_markup(torna_al_menu.clone())
+            .await
+        {
+            tracing::warn!(
+                chat_id = id,
+                ?error,
+                "Impossibile notificare la fine della modalità riservata"
+            );
+        }
+    }
+}
+
 async fn send_admin_access_requests(
     bot: &Bot,
     chat_id: ChatId,
@@ -2166,7 +2907,11 @@ fn access_request_status_label(value: &str) -> &'static str {
     }
 }
 
-fn admin_menu_keyboard(primary: bool, pending_access: i64) -> InlineKeyboardMarkup {
+fn admin_menu_keyboard(
+    primary: bool,
+    pending_access: i64,
+    modalita_riservata_attiva: bool,
+) -> InlineKeyboardMarkup {
     let mut rows = vec![
         vec![
             InlineKeyboardButton::callback(
@@ -2184,9 +2929,19 @@ fn admin_menu_keyboard(primary: bool, pending_access: i64) -> InlineKeyboardMark
         )],
     ];
     if primary {
+        if modalita_riservata_attiva {
+            rows.push(vec![InlineKeyboardButton::callback(
+                "✅ Sblocca, torna online per tutti".to_string(),
+                "admin:riservato:sblocca".to_string(),
+            )]);
+        }
         rows.push(vec![InlineKeyboardButton::callback(
             format!("📨 Richieste di accesso ({pending_access})"),
             "admin:access".to_string(),
+        )]);
+        rows.push(vec![InlineKeyboardButton::callback(
+            "🚀 Distribuzione".to_string(),
+            "admin:distribuzione".to_string(),
         )]);
         rows.push(vec![InlineKeyboardButton::callback(
             "⏻ Spegni gestionale".to_string(),
@@ -2262,8 +3017,19 @@ fn first_command(text: &str) -> Option<&str> {
 
 #[cfg(test)]
 mod runtime_tests {
-    use super::{unexpected_input_notice, TELEGRAM_REQUEST_TIMEOUT, TOKIO_THREAD_STACK_SIZE};
+    use super::{
+        deve_bloccare_per_manutenzione, unexpected_input_notice, TELEGRAM_REQUEST_TIMEOUT,
+        TOKIO_THREAD_STACK_SIZE,
+    };
     use std::time::Duration;
+
+    #[test]
+    fn manutenzione_blocca_solo_chi_non_e_amministratore_principale() {
+        assert!(deve_bloccare_per_manutenzione(true, false));
+        assert!(!deve_bloccare_per_manutenzione(true, true));
+        assert!(!deve_bloccare_per_manutenzione(false, false));
+        assert!(!deve_bloccare_per_manutenzione(false, true));
+    }
 
     #[test]
     fn timeout_http_telegram_supporta_upload_lunghi() {

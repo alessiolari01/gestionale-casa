@@ -83,6 +83,20 @@ impl ProfileSessionStore {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .contains_key(&chat_id)
     }
+
+    /// Chat con una sessione attiva in questa mappa. Usata dal controllo
+    /// pre-swap (sotto-step 4/5 del punto 6 del ciclo di automazione) per
+    /// sapere se rimandare lo spegnimento del bot, non da un singolo
+    /// handler — quelli usano `has_active` su un chat_id preciso.
+    #[allow(dead_code)]
+    pub fn active_chat_ids(&self) -> Vec<i64> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .keys()
+            .copied()
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone, FromRow)]

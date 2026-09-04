@@ -221,7 +221,7 @@ L'export è stato collaudato realmente: ZIP ricevuto da Telegram, scaricato e po
 ## Backlog residuo al checkpoint
 
 - **#7**: eliminazione/reset/revoca account — rimane `da_fare`, richiede uno step amministrativo dedicato;
-- **#9**: `🧪 Zona test` / aggiornamenti quasi zero-downtime — requisito futuro e ultimo dell'infrastruttura, non da implementare durante l'attuale uso personale.
+- **#9**: `🧪 Zona test` / aggiornamenti quasi zero-downtime — requisito futuro e ultimo dell'infrastruttura, non da implementare durante l'attuale uso personale. Specifica completa in `docs/previsto/automazione-ciclo-sviluppo.md` (ciclo dev → deploy) e `docs/previsto/invio-miglioramenti-a-claude.md` (canale di invio dal bot).
 
 ## Export tecnico del progetto
 

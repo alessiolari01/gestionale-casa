@@ -12,8 +12,10 @@
 // Alcune API backend restano riservate ai successivi sotto-step 6C.3/6C.4.
 pub mod alimentazione;
 pub mod calendario;
+pub mod collaudo;
 #[allow(dead_code)]
 pub mod contenitori;
+pub mod distribuzione;
 pub mod foto;
 pub mod liste;
 pub mod luoghi;

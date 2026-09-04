@@ -2,6 +2,798 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_5D_COLLAUDO_ENDTOEND_20260904 -->
+# 04/09/2026 — Sotto-step 5d collaudato end-to-end: il punto 6 e' completo
+
+Tre ridistribuzioni reali dello stesso commit gia' in produzione (nessun
+codice nuovo, solo per esercitare `deploy.sh` sull'S9 vero), concordate
+con Alessio. La sequenza intera ha funzionato, ma solo dopo due bug sul
+messaggio di manutenzione trovati dal vivo, non a tavolino.
+
+**Bloccato per sempre su "in corso"**: `deploy.sh` scartava l'id del
+messaggio di countdown (`>/dev/null`), quindi non poteva piu' aggiornarlo
+a swap concluso. Corretto catturando l'id in `ID_MANUTENZIONE`, aggiornato
+sia sui percorsi di errore (via `fallisci()`) sia a swap riuscito.
+
+**Il banner "completato" restava comunque visibile**: la prima
+correzione lo aggiornava a "✅ Aggiornamento completato", ma Alessio ha
+mostrato via screenshot che restava sopra il menu principale gia' in uso
+normale, dopo che il bot aveva gia' preso il racconto (riepilogo,
+checklist, conferma, "di nuovo online"). Un residuo, non
+un'informazione utile. Corretto sostituendo l'aggiornamento con
+un'eliminazione (`tg_elimina`) sul percorso di successo, mantenendo
+l'aggiornamento solo dove resta utile: i percorsi di errore.
+
+Ricollaudato dal vivo con una quarta ridistribuzione mirata: il
+messaggio sparisce del tutto a swap confermato, confermato da Alessio
+sulla chat reale. Con questo, il sotto-step 5d -- e l'intero punto 6
+"deploy a downtime minimo" -- e' completo. Non ancora esercitato dal
+vivo: il percorso di merge reale su `main` di `completa-deploy.sh`
+(`--confermo-merge`).
+
+Nessun test Rust coinvolto (solo `scripts/deploy.sh`). Totale invariato: 289.
+
+<!-- CHANGELOG_ORCHESTRAZIONE_DEPLOY_20260904 -->
+# 04/09/2026 — L'orchestrazione dello swap (sotto-step 5d, scritta)
+
+Ultimo pezzo del sotto-step 5/5 (lo swap vero): tre script legano insieme
+tutto quello costruito e collaudato nei sotto-step 1-5c.
+
+`scripts/countdown-manutenzione.sh` (nuovo) e' la versione "vera" del
+countdown gia' collaudato in `prova-countdown.sh` -- stessa meccanica a
+scadenza fissa -- ma legge il default (tipo/minuti/orario) dalla tabella
+`impostazioni_distribuzione` invece di un valore fisso da riga di comando.
+Il tipo "countdown" e' l'unico collaudato per davvero fin qui (e' l'unico
+default operativo del progetto); "subito" e "programmato" sono scritti ma
+meno esercitati.
+
+`scripts/deploy.sh` (nuovo) e' la sequenza vera: countdown →
+`controlla-sessioni-attive.sh` → `salva-binario.sh` (prima di aggiornare
+il codice, non dopo) → `ferma-bot.sh` → `aggiorna-s9.sh --ramo X
+--solo-controlli` (ricompila e riverifica sull'S9, non un `git pull`
+nudo -- il binario resta pronto per il passo dopo senza ricompilare di
+nuovo) → copia del riepilogo/checklist e `avvia-bot.sh --riservato` →
+controllo di stabilita' (online + resta vivo per una finestra, default
+20s) → rollback automatico se qualcosa va storto, con notifica Telegram
+dell'errore preciso a ogni passo che fallisce. Da li' l'agente si ferma:
+il collaudo lo gestisce il bot stesso (5c).
+
+`scripts/completa-deploy.sh` (nuovo) e' il seguito: legge
+`esito_collaudo.txt` sull'S9 e, se "confermato", fa il merge del ramo su
+`main` -- **solo con `--confermo-merge` esplicito**, deciso per non
+rendere irreversibile un'azione con conseguenze reali senza un secondo
+controllo. Se "rifiutato", rollback -- ma qui serve un nuovo flag
+`--riservato` su `rollback-binario.sh` (sotto-step 5b), trovato scrivendo
+questo pezzo: il rollback per salute fallita torna in modalita' normale
+(il binario vecchio era gia' in produzione, non ha bisogno di ripartire
+riservato), ma un collaudo *rifiutato* dalla specifica deve restare in
+manutenzione per gli utenti normali finche' non c'e' una versione
+corretta -- lo stesso script di rollback, due comportamenti diversi a
+seconda di perche' viene chiamato.
+
+Nessun test Rust coinvolto (solo script bash). Collaudo end-to-end non
+ancora fatto: la prima prova reale sara' una "ridistribuzione" dello
+stesso commit gia' in produzione, per esercitare la sequenza vera senza
+rischio funzionale. Totale invariato: 289.
+
+<!-- CHANGELOG_SOTTOSTEP_5C_COMPLETO_20260904 -->
+# 04/09/2026 — Sotto-step 5c completo: collaudo end-to-end confermato
+
+Ultimo giro sull'S9, dopo tre correzioni trovate collaudando per davvero:
+checklist di prova spuntata voce per voce, bottoni di conferma comparsi
+solo a completamento, "✅ Confermo, funziona" premuto → messaggio diventato
+"✅ Collaudo confermato", notifica separata "✅ Di nuovo online." con il
+bottone `🏠 Menù principale`, premuto quel bottone → menu principale vero
+e operativo. Confermato da Alessio sulla chat reale.
+
+Bot fermato con `ferma-bot.sh` a fine collaudo. File di prova
+(`riepilogo_deploy.txt`, `esito_collaudo.txt`) ripuliti da `data/run/`
+sull'S9.
+
+Con 5a, 5b e 5c fatti, resta solo il sotto-step 5d: l'orchestrazione che
+lega insieme i pezzi già costruiti e collaudati singolarmente (controllo
+sessioni, salvataggio del binario, stop/avvio, riepilogo/checklist, esito)
+in un'unica sequenza automatica.
+
+Nessun codice nuovo (solo verifica e pulizia). Totale invariato: 289.
+
+<!-- CHANGELOG_MENU_DOPO_CONFERMA_20260904 -->
+# 04/09/2026 — Dopo la conferma, un bottone per tornare subito operativi
+
+Collaudata per davvero sull'S9 la correzione precedente
+(`send_message_untracked`): la checklist e' rimasta "Collaudo confermato",
+la notifica "Di nuovo online" separata, senza il bottone Migliora.
+
+Alessio ha chiesto un miglioramento a caldo, dopo aver visto il
+comportamento corretto: poter riprendere a usare il gestionale subito
+dopo la conferma, senza dover scrivere un comando a mano. Aggiunto un
+bottone `🏠 Menu principale` (callback `menu:main`, lo stesso di ogni
+altra schermata) alla notifica "Di nuovo online".
+
+Perche' quel bottone sia davvero cliccabile, pero', la notifica dev'essere
+di nuovo *tracciata* da `ContextBot` (`send_message_without_improve`, non
+`send_message_untracked`): `claim_callback` accetta un click solo su una
+schermata registrata come "attiva" per quella chat, e un messaggio
+untracked non lo e' mai. Per restare sicuri senza reintrodurre il bug
+delle due voci precedenti, riordinato il gestore di `collaudo:conferma`:
+l'edit del messaggio di collaudo in "confermato" avviene *prima* della
+notifica broadcast, non dopo -- cosi' la notifica tracciata (che cancella
+la schermata attiva precedente, come ogni altra schermata del progetto)
+cancella il messaggio "confermato" gia' mostrato, non la checklist ancora
+da completare.
+
+Nessun test nuovo. Totale invariato: 289. Ricollaudo sull'S9 nel prossimo
+commit.
+
+<!-- CHANGELOG_SEND_MESSAGE_UNTRACKED_20260904 -->
+# 04/09/2026 — Il primo tentativo di correzione non bypassava davvero ContextBot
+
+Il commit precedente diceva di correggere il problema con
+`(*bot).send_message(...)`, per bypassare il wrapper `ContextBot` e
+raggiungere il bot grezzo di teloxide. Non era vero, e il ricollaudo
+sull'S9 se n'e' accorto subito: in chat compariva di nuovo il bottone
+"💡 Migliora" sul messaggio "Di nuovo online.", segno che il messaggio era
+ancora tracciato da `ContextBot` esattamente come prima.
+
+La causa dell'errore: `*bot` dove `bot: &ContextBot` e' il deref
+*built-in* del riferimento, che restituisce `ContextBot` stesso -- non
+passa mai dal suo `impl Deref<Target = TelegramBot>`, che si attiverebbe
+solo derefando *quel* valore un'altra volta (`**bot`). Quindi
+`(*bot).send_message(...)` era, di fatto, identico a
+`bot.send_message(...)`: stesso identico bug di prima, mascherato da un
+cambiamento che sembrava dover funzionare.
+
+Corretto per davvero con `send_message_untracked`, un metodo che esiste
+gia' in `context_bot.rs` (usato altrove nel progetto, es. per l'avviso di
+input inatteso) proprio per le notifiche che non devono toccare lo stato
+di "schermata attiva" di nessuno: usa il bot grezzo di teloxide senza
+passare dal wrapper, nessun trucco di dereferenziazione necessario.
+
+Nessun test nuovo. Totale invariato: 289. Ricollaudo sull'S9 nel prossimo
+commit.
+
+<!-- CHANGELOG_NOTIFICA_CANCELLAVA_COLLAUDO_20260904 -->
+# 04/09/2026 — La notifica di "di nuovo online" cancellava la checklist appena confermata
+
+Trovato per davvero collaudando la conferma sull'S9, subito dopo il fix
+precedente: premuto "✅ Confermo, funziona", in chat e' rimasto solo
+"✅ Di nuovo online." -- la checklist con scritto "Collaudo confermato"
+non c'era piu'.
+
+Causa: `esci_da_modalita_riservata` manda quella notifica con
+`send_message_without_improve`, che passa dal wrapper `ContextBot` e dalla
+sua regola "una sola schermata UI attiva per chat" -- mandare un messaggio
+nuovo a una chat cancella quello attivo precedente. Per l'amministratore
+principale, il messaggio attivo precedente era proprio la checklist di
+collaudo appena modificata: la cancellazione arriva prima che l'edit
+"confermato" abbia effetto (o lo cancella subito dopo), quindi l'edit
+fallisce silenziosamente su un messaggio gia' sparito.
+
+Corretto mandando quella notifica con il bot grezzo (`(*bot).send_message`,
+bypassando il wrapper `ContextBot`): e' una notifica di cortesia a
+chat qualsiasi (compresi utenti che non hanno nessuna schermata di
+collaudo aperta), non una nuova schermata -- non deve toccare lo stato di
+"schermata attiva" di nessuno.
+
+Nessun test nuovo (comportamento verificato dal collaudo reale sull'S9).
+Totale invariato: 289. Ricollaudo nel prossimo commit.
+
+<!-- CHANGELOG_CLAIM_CALLBACK_RIPETIBILE_20260904 -->
+# 04/09/2026 — La checklist di collaudo si bloccava al secondo click
+
+Trovato per davvero collaudando il sotto-step 5c sull'S9, su Telegram
+vero: Alessio ha spuntato la prima voce della checklist con successo, poi
+la seconda ha fatto comparire "⚠️ Questa schermata non è più attiva. Ho
+aperto un nuovo Menù principale." -- come se il messaggio fosse vecchio,
+anche se era lo stesso appena arrivato.
+
+Causa: `ContextBot::claim_callback` (`src/context_bot.rs`) permette una
+sola rivendicazione per `message_id` e poi lo segna come "gia' usato" per
+sempre. E' una protezione corretta per come funziona il resto del
+progetto -- ogni altra schermata manda sempre un messaggio nuovo a ogni
+cambio, mai una modifica in place -- ma la checklist del collaudo guidato
+(sotto-step 5c) e' la prima a modificare piu' volte lo stesso messaggio
+via edit: ogni click dopo il primo sullo stesso `message_id` falliva
+sempre, a prescindere dalla velocita' con cui veniva premuto.
+
+Corretto estendendo ai callback `collaudo:*` la stessa eccezione gia'
+esistente per i bottoni `*:noop`, che verifica "e' ancora il messaggio
+attivo?" invece di "non e' mai stato rivendicato prima?" -- la checklist
+puo' essere premuta piu' volte finche' resta la schermata attiva, come
+serve a un messaggio che si aggiorna via edit invece di rimandarne uno
+nuovo.
+
+Nessun test nuovo (la logica di `claim_callback` non ha una suite propria
+in questo file; il comportamento e' verificato dal collaudo reale sull'S9,
+non da un unit test). Totale invariato: 289. Ricollaudo sull'S9 nel
+prossimo commit.
+
+<!-- CHANGELOG_BIT_ESECUZIONE_SCRIPT_20260904 -->
+# 04/09/2026 — Gli script nuovi non avevano il bit di esecuzione
+
+Trovato per davvero aggiornando l'S9 al commit del sotto-step 5c:
+`aggiorna-s9.sh` si e' fermato per modifiche locali non committate su
+`scripts/rollback-binario.sh` e `scripts/salva-binario.sh` -- il `chmod +x`
+dato a mano durante il collaudo del sotto-step 5b, mai tornato indietro.
+
+La causa di fondo: `avvia-bot.sh` e `ferma-bot.sh` sono tracciati in git
+come eseguibili (`100755`), ma i tre script piu' recenti
+(`controlla-sessioni-attive.sh`, `rollback-binario.sh`,
+`salva-binario.sh`), creati su questa macchina Windows, sono finiti nel
+repository come file normali (`100644`) -- Windows non ha il concetto di
+bit di esecuzione, quindi git li ha aggiunti senza. Sull'S9 (Termux, Unix
+vero) `./scripts/x.sh` fallisce senza quel bit, servirebbe un `chmod +x`
+manuale a ogni checkout pulito.
+
+Corretto impostando il bit in git (`git update-index --chmod=+x`), non sul
+filesystem: cosi' resta nel repository e ogni futuro `git clone`/checkout
+sull'S9 lo trova gia' giusto.
+
+Nessun test coinvolto (permessi, non codice). Totale invariato: 289.
+
+<!-- CHANGELOG_COLLAUDO_GUIDATO_20260904 -->
+# 04/09/2026 — Riepilogo, checklist e conferma pilotati dal bot (sotto-step 5c, scritto)
+
+Terzo pezzo del sotto-step 5/5 (lo swap vero): i punti 7-8-9 della
+specifica (riepilogo di cosa e' stato implementato, checklist di collaudo
+guidato, conferma/rifiuto finale dell'amministratore principale).
+
+Deciso insieme ad Alessio prima di scrivere codice: a differenza del
+countdown (agente orchestratore, API diretta, perche' deve continuare ad
+aggiornarsi anche col vecchio processo fermo), qui e' il bot nuovo stesso
+a pilotare tutto — e' gia' acceso e in ascolto su Telegram appena lo swap
+e' completo, non serve altro.
+
+Il contenuto (riepilogo + passi da provare) arriva da un file scritto
+dall'agente prima dello swap (`data/run/riepilogo_deploy.txt`: testo
+libero, poi una riga `---CHECKLIST---`, poi una voce per riga) — stesso
+canale a file gia' usato per `RISERVATO` e per lo stato delle sessioni,
+non un parametro nuovo per ogni pezzo. All'avvio, con `RISERVATO=1` e il
+file leggibile, il bot manda da solo il messaggio all'amministratore
+principale (`identity::list_primary_admin_chat_ids`): checklist a bottoni
+`☐`/`✅` che si spuntano via edit dello stesso messaggio, mai un messaggio
+nuovo. I bottoni `✅ Confermo, funziona` / `❌ Non funziona` compaiono solo
+a checklist completa — e il server li rifiuta comunque se qualcuno li
+premesse prima, senza fidarsi del solo stato lato client.
+
+Alla conferma: disattiva la modalita' riservata e notifica tutte le chat
+attive, con `esci_da_modalita_riservata` — la stessa funzione gia' usata
+dal bottone di sblocco del sotto-step 5a, condivisa invece di duplicata.
+Al rifiuto: resta in modalita' riservata, come da specifica. In entrambi i
+casi scrive `data/run/esito_collaudo.txt` ("confermato"/"rifiutato"), che
+l'agente orchestratore (sotto-step 5d) leggera' per decidere se procedere
+al merge su `main` o innescare il rollback del sotto-step 5b — non ancora
+collegato a nessuno dei due.
+
+289 test (280 prima), 9 nuovi in `src/modules/collaudo.rs`: interpretazione
+del file (separatore mancante, checklist vuota, righe vuote ignorate),
+`tutto_fatto`/`alterna` (incluso un indice inesistente), la tastiera che
+mostra conferma/rifiuto solo a checklist completa, il troncamento delle
+etichette lunghe. Collaudo reale sull'S9 nel prossimo commit.
+
+<!-- CHANGELOG_ROLLBACK_BINARIO_COLLAUDO_20260904 -->
+# 04/09/2026 — Sotto-step 5b collaudato per davvero: rollback in ~2 secondi
+
+Il rollback del binario descritto nella voce precedente e' stato
+collaudato sul bot vero, sull'S9 vero. `salva-binario.sh` ha copiato il
+binario (50M). Avviato il bot normale con `avvia-bot.sh`, poi lanciato
+`rollback-binario.sh`: ha fermato quel processo e fatto ripartire il
+binario salvato in **~2 secondi** (misurato con `time`), log senza nessuna
+riga "Compiling" — conferma diretta che non c'e' stata ricompilazione — e
+senza `RISERVATO` nel log, cioe' tornato in modalita' normale come
+deciso (era gia' la versione in produzione, non ha bisogno di ripartire
+riservata). `ferma-bot.sh` ha poi fermato il processo ripristinato con lo
+spegnimento pulito consueto, senza saperne nulla del rollback avvenuto
+prima.
+
+Nessun codice Rust coinvolto (verifica di due script bash). Totale
+invariato: 280.
+
+<!-- CHANGELOG_ROLLBACK_BINARIO_20260904 -->
+# 04/09/2026 — Rollback del binario senza ricompilazione (sotto-step 5b, scritto)
+
+Secondo pezzo del sotto-step 5/5 (lo swap vero): il rollback "automatico e
+immediato al binario precedente" richiesto dalla specifica non puo'
+aspettare una `cargo build`, che potrebbe anche essere quella appena
+rivelatasi rotta.
+
+Deciso insieme ad Alessio prima di scrivere codice: una copia del binario
+compilato, non due cartelle di lavoro separate (blue/green) — piu'
+semplice e meno spazio su un telefono. `scripts/salva-binario.sh` copia
+`target/debug/gestionale-casa` in `data/run/binario_precedente`, e va
+lanciato mentre quel binario corrisponde ancora al codice in esecuzione —
+cioe' *prima* di aggiornare il codice e ricompilare per lo swap, non dopo
+(lanciarlo dopo salverebbe il binario sbagliato).
+
+`scripts/rollback-binario.sh` ferma quello che sta girando (necessario:
+Telegram rifiuta un secondo long-polling con lo stesso token, 409
+Conflict) ed esegue direttamente il binario salvato — nessuna build.
+Stesso schema di processo di `avvia-bot.sh` (nohup+disown, `data/run/bot.pid`,
+`data/run/bot.out`), cosi' `ferma-bot.sh` continua a funzionare dopo un
+rollback senza saperne nulla. Il binario ripristinato torna in modalita'
+normale (senza `RISERVATO`): era gia' la versione in produzione prima
+dello swap fallito.
+
+Timeout di avvio molto piu' corto di `avvia-bot.sh` (30s contro 180s): non
+c'e' nessuna build da aspettare, se il binario gia' compilato non parte in
+pochi secondi il problema e' un altro.
+
+Nessun codice Rust coinvolto (due script bash). Collaudo reale sull'S9 nel
+prossimo commit. Totale invariato: 280.
+
+<!-- CHANGELOG_MODALITA_RISERVATA_COLLAUDO_20260904 -->
+# 04/09/2026 — Sotto-step 5a collaudato per davvero: admin passa, bottone sblocca
+
+La modalita' riservata descritta nella voce precedente e' stata collaudata
+sul bot vero, sull'S9 vero. Aggiornamento sul ramo: 280 test verdi anche
+sulla sua toolchain, backup del database, nessuna migration nuova da
+provare. Bot avviato con `avvia-bot.sh --riservato`, log che conferma
+"Avvio in modalita' riservata (RISERVATO=1)".
+
+Alessio (amministratore principale) ha continuato a usare il bot
+normalmente con la modalita' attiva: `/start` e navigazione, nessun avviso
+di manutenzione. Nel menu' `🛠️ Amministrazione` e' comparso il bottone
+`✅ Sblocca, torna online per tutti`; premuto, e' sparito dal menu' — segno
+che il flag e' tornato a modalita' normale — senza errori nel log durante
+la notifica "✅ Di nuovo online." alle chat attive. Bot fermato a fine
+collaudo con `ferma-bot.sh`, spegnimento pulito.
+
+Resta non collaudabile per davvero la meta' "blocca chi non e'
+amministratore": serve un secondo account Telegram, che il progetto non ha
+ancora (punto 6 aperto in `STATO.md`). Copertura solo via unit test per
+quella parte, non un limite di questo collaudo.
+
+Nessun test nuovo (nessuna modifica al codice, solo verifica). Totale
+invariato: 280.
+
+<!-- CHANGELOG_MODALITA_RISERVATA_20260904 -->
+# 04/09/2026 — Modalità riservata (sotto-step 5a, meccanica scritta, collaudo sull'S9 in corso)
+
+Primo pezzo del sotto-step 5/5 (lo swap vero), il più delicato del ciclo di
+automazione: spezzato in quattro sotto-pezzi concordati con Alessio prima
+di scrivere codice (5a modalità riservata, 5b rollback del binario, 5c
+riepilogo/checklist/conferma pilotati dal bot stesso, 5d l'orchestrazione).
+
+Decisioni prese insieme ad Alessio:
+
+- **il flag vive in memoria**, non su file né come variabile letta una
+  volta sola: `ModalitaRiservata` è un `AtomicBool` condiviso, stesso
+  schema di `ShutdownController`. Deve poter tornare disattivo premendo un
+  bottone in chat senza riavviare il processo — è proprio quel momento
+  (la conferma dell'amministratore) a farlo tornare online per tutti;
+- **chi pilota il riepilogo/checklist finale (punti 7-9 della specifica)
+  è il bot nuovo stesso**, non l'agente orchestratore via API diretta come
+  il countdown: a differenza del countdown (che deve aggiornarsi anche col
+  vecchio processo fermo), qui il bot nuovo è già acceso e in ascolto su
+  Telegram, quindi può gestire i suoi stessi bottoni come ogni altra
+  schermata — arriva col sotto-step 5c.
+
+`scripts/avvia-bot.sh --riservato` imposta `RISERVATO=1` solo per quel
+lancio; un avvio normale (uso quotidiano su Termux, o senza il flag) resta
+aperto a tutti come oggi. Il bot legge la variabile una volta all'avvio e
+la tiene nel flag condiviso. Il gate (`deve_bloccare_per_manutenzione`,
+pura e unit-testata) si applica sia ai messaggi sia ai callback, appena
+risolta l'identità di chi scrive — prima di toccare qualunque handler dei
+moduli. Il bottone `✅ Sblocca, torna online per tutti`, visibile solo
+all'amministratore principale nel menù `🛠️ Amministrazione` quando la
+modalità è attiva, disattiva il flag e manda "✅ Di nuovo online." a tutte
+le chat di utenti attivi (`identity::list_active_chat_ids`, nuova — non
+solo agli amministratori, a differenza della notifica di spegnimento).
+
+**Limite noto, non un problema di questa modifica**: verificare per davvero
+che un utente *non* amministratore veda l'avviso di manutenzione richiede
+un secondo account Telegram, che il progetto non ha ancora — stessa lacuna
+già segnata al punto 6 di `STATO.md`. La logica di blocco resta comunque
+coperta da un unit test con i quattro casi possibili
+(`manutenzione_blocca_solo_chi_non_e_amministratore_principale`). Il
+collaudo reale sull'S9 verificherà quello che si può verificare oggi:
+l'amministratore principale continua a usare il bot normalmente con la
+modalità attiva, e il bottone la disattiva senza riavviare nulla.
+
+280 test (279 prima), 1 nuovo.
+
+<!-- CHANGELOG_SESSIONI_ATTIVE_COLLAUDO_20260904 -->
+# 04/09/2026 — Sotto-step 4/5 collaudato per davvero: bot libero, sessione aperta, bot liberato
+
+Il canale SIGUSR1 descritto nella voce precedente e' stato collaudato sul
+bot vero, sull'S9 vero, non a tavolino. Prima di tutto l'S9 e' stato
+aggiornato sul ramo: 279 test verdi anche sulla sua toolchain (diversa da
+questa macchina e dalla CI), backup del database creato, la nuova migration
+della schermata Distribuzione provata su una copia senza errori.
+
+Bot avviato con `avvia-bot.sh`. A bot libero, `controlla-sessioni-attive.sh`
+ha riportato subito "0 sessioni attive". Alessio ha poi aperto per davvero
+`🚀 Distribuzione → ✏️ Cambia default → Countdown standard → ✏️ Altro
+valore` sulla chat reale: lo script ha rilevato "1" a ogni ripetizione, e al
+timeout di prova e' uscito con "procedo comunque" come previsto dalla
+specifica. Liberata la sessione (valore scritto nella chat), il conteggio
+e' tornato a "0". Bot fermato a fine collaudo con `ferma-bot.sh`.
+
+Un bug reale trovato al primo giro, non a tavolino: lo script falliva con
+"nessun file PID" anche a bot avviato. La causa era un `~` dentro una
+variabile del PC (`CARTELLA_RUN_S9="~/gestionale-casa/data/run"`)
+interpolata tra apici singoli nel comando remoto — l'espansione della tilde
+vale solo a inizio parola durante il parsing della shell, non dentro un
+valore gia' sostituito da un'altra variabile, quindi restava un carattere
+`~` letterale e il file cercato non esisteva mai. Corretto usando un
+percorso relativo (`data/run`), dato che il comando remoto fa gia' `cd
+~/gestionale-casa` prima di usarlo.
+
+Nessun test Rust coinvolto (il bug era in uno script bash). Totale
+invariato: 279.
+
+<!-- CHANGELOG_SESSIONI_ATTIVE_20260904 -->
+# 04/09/2026 — Il bot sa dire se qualcuno sta scrivendo, su richiesta (meccanica scritta, collaudo sull'S9 in corso)
+
+Sotto-step 4/5 del punto 6 del ciclo (deploy): il controllo pre-swap che
+rimanda lo stop del bot finche' qualche chat ha una sessione "in attesa di
+input testuale" attiva, deciso il 3 settembre. Le dieci mappe che tengono
+quello stato (nove piu' `distribuzione_sessions` del sotto-step 3) vivono
+solo nella memoria del processo Rust sull'S9: un controllo esterno via SSH
+non puo' leggerle, serve un canale che il bot esponga.
+
+Decisione presa insieme ad Alessio prima di scrivere codice: un segnale
+Unix su richiesta invece di una scrittura periodica. Il bot ascolta
+`SIGUSR1` (nuovo, non tocca il `SIGINT` gia' collaudato nel sotto-step 2 per
+lo spegnimento pulito) e alla ricezione scrive `data/run/sessioni.txt` con
+il numero di chat con una sessione attiva. Il nuovo
+`scripts/controlla-sessioni-attive.sh` manda il segnale via SSH, legge il
+file, e ripete con un intervallo fino a "0 sessioni attive" o a un timeout
+massimo, oltre il quale procede comunque com'e' scritto nella specifica.
+
+`SIGUSR1` non esiste su Windows: il canale (`avvia_ascolto_segnale_stato_sessioni`
+e le funzioni che chiama) e' dietro `#[cfg(unix)]`, un'alternativa vuota lo
+sostituisce sulle altre piattaforme, cosi' `fmt`/`check`/`test`/`clippy`
+restano verdi in locale su questa macchina esattamente come prima — l'unico
+posto dove il canale serve davvero e' l'S9.
+
+Aggiunto `active_chat_ids()` a ciascuna delle dieci mappe di sessione (le
+otto nei moduli piu' le due in `main.rs`): stesso schema di `has_active`
+gia' presente in quattro di loro, ma senza un chat_id specifico — serve solo
+al controllo pre-swap, non ai singoli handler.
+
+Non ancora collegato a `ferma-bot.sh`: la sequenza reale (aspetta, poi
+ferma, poi swap) arriva con il sotto-step 5.
+
+<!-- CHANGELOG_VERIFICA_CI_SHA_20260904 -->
+# 04/09/2026 — verifica-ci.sh poteva riportare "verde" leggendo il commit sbagliato
+
+Trovato verificando la CI del push precedente (schermata Distribuzione,
+sotto-step 3/5): subito dopo `git push`, `scripts/verifica-ci.sh` ha
+stampato "OK CI verde" leggendo la run del **commit precedente**
+(`7c730932`, gia' completata con successo), non di quello appena pushato
+(`760089b`), che in quel momento era ancora `in_progress` e non ancora
+comparso nell'API — `per_page=1` prende la run piu' recente per ramo senza
+controllare a quale commit appartiene. Stesso errore del 2 settembre (un
+riassunto letto verde dove non lo era), in una forma nuova: uno script
+pensato apposta per non fidarsi di un riassunto locale si e' fidato di una
+run del commit sbagliato.
+
+Corretto confrontando lo `head_sha` dell'API con `git rev-parse <ramo>`: se
+non coincidono la run viene trattata come "non ancora quella giusta" e lo
+script continua ad aspettare. Ricollaudato per davvero sul push di questo
+stesso commit: il controllo singolo ha riconosciuto correttamente la run
+giusta (#77) ancora in corso, e `--attendi` ha aspettato ~80s prima di
+riportare l'esito reale (success) della run del commit corretto.
+
+Nessun test Rust coinvolto (lo script e' bash). Totale invariato: 279.
+
+<!-- CHANGELOG_DISTRIBUZIONE_ADMIN_20260904 -->
+# 04/09/2026 — Schermata admin 🚀 Distribuzione: il default della manutenzione
+
+Sotto-step 3/5 del punto 6 del ciclo (deploy): la schermata
+`🛠️ Amministrazione → 🚀 Distribuzione`, per configurare il default di
+tipo/orario della manutenzione proposto a ogni deploy automatico (Subito /
+Countdown standard / Programma orario), decisa il 3 settembre.
+
+Schema dati concordato con Alessio prima di scrivere codice (due domande
+puntuali, non deciso da solo): tabella a riga singola
+`impostazioni_distribuzione` (`migrations/20260904150000_impostazioni_distribuzione.sql`),
+con `CHECK` che tengono coerenti tipo e parametro (un `subito` non porta ne'
+minuti ne' orario, un `countdown` richiede i minuti, un `programmato`
+richiede l'orario). Le colonne `scelta_puntuale_*` esistono gia' nello
+schema per la scelta puntuale del singolo deploy, ma non hanno ancora una
+UI: arriva con il sotto-step 5, quando esiste un deploy vero che la offre —
+costruirla ora sarebbe stata un'interazione senza niente da innescare.
+
+L'inserimento dei valori (minuti del countdown, orario della manutenzione
+programmata) e' ibrido su richiesta esplicita di Alessio: bottoni con
+valori preimpostati (3/5/10/15 minuti; 02:00/03:00/04:00/05:00) piu' testo
+libero validato (`valida_minuti`, `valida_orario` in
+`src/modules/distribuzione.rs`, pure e testate). Per il testo libero serve
+sapere quando un chat sta aspettando un valore: una decima mappa di
+sessione indipendente in `main.rs` (`distribuzione_sessions`), sullo stesso
+schema di `identity_sessions` — coerente con la decisione del 3 settembre
+di non unificare le nove mappe esistenti prima del sotto-step 4. Ogni punto
+del codice che azzera le altre nove per cambiare contesto azzera anche
+questa.
+
+Per il default "Programma orario" la schermata mostra anche il tempo
+rimanente fino a quell'orario (es. "alle 03:00, tra 2h 30m"), letto
+dall'ora locale di SQLite — stessa scelta gia' presa per il calendario,
+perche' e' l'unico posto che conosce davvero il fuso orario del telefono.
+
+Nel rispondere a una domanda di Alessio sul comportamento del countdown
+gia' collaudato (sotto-step 1) durante un intoppo di rete, si e' trovato un
+bug reale in `scripts/prova-countdown.sh`: il tempo mostrato veniva
+decrementato di 1 a ogni giro del loop, non calcolato da una scadenza
+fissa, quindi un tick piu' lento di un secondo (un retry di rete) faceva
+restare il numero indietro rispetto al tempo vero senza mai recuperare.
+Corretto calcolando il rimanente da `scadenza - ora_attuale` a ogni giro.
+Ricollaudato per davvero sulla chat reale (10s): due `Recv failure:
+Connection was reset` transitori assorbiti dai retry, countdown arrivato a
+0 con i salti nel numero dovuti proprio ai due intoppi — comportamento
+atteso, confermato da Alessio dopo la spiegazione. Messaggio di prova
+ripulito a fine collaudo.
+
+279 test (270 prima), 9 nuovi su `src/modules/distribuzione.rs`: validazione
+minuti/orario e calcolo del tempo rimanente, incluso l'attraversamento della
+mezzanotte.
+
+Trovato usando `pipeline-locale.sh --commit` per la prima volta con un file
+nuovo citato da un documento nello stesso commit: `controlla-documenti.sh`
+verifica i rimandi sull'albero **tracciato da git** (`git ls-files`), ma la
+pipeline lo eseguiva **prima** del `git add` — un commit legittimo che
+aggiunge insieme un file e il documento che lo cita avrebbe sempre fallito.
+Corretto spostando quel controllo dopo `git add` (solo in modalita'
+`--commit`; fuori da quella modalita' resta dove'era, non c'e' nessun add
+da aspettare), con `git reset` dei file se fallisce, cosi' niente resta
+staged da un tentativo fallito.
+
+<!-- CHANGELOG_NIENTE_PIN_20260904 -->
+# 04/09/2026 — Tolto il pin: lascia una notifica fantasma che non si ripulisce
+
+Trovato da Alessio guardando la chat vera dopo un collaudo del countdown: il
+messaggio di prova era stato fissato (pin) e poi eliminato a fine collaudo,
+ma restava comunque una riga "Gestionale_Bot pinned Deleted message" — una
+notifica di sistema che Telegram genera per l'azione di pin, indipendente
+dal messaggio pinnato, e che **non ha un `message_id` restituito dall'API
+utilizzabile per eliminarla**.
+
+Tolto il pin del tutto da `scripts/telegram-api.sh`: `tg_invia_e_fissa` e
+`tg_sblocca` diventano `tg_invia` (senza `pinChatMessage`/
+`unpinChatMessage`). Non serve fissare il messaggio per tenerlo "fermo": è
+comunque l'unico messaggio che l'agente continua a modificare, e la chat
+dell'amministratore principale — l'unico destinatario, verificato che
+`tg_leggi_credenziali` cerca proprio quel chat_id — non ha altro traffico
+nel mezzo durante un collaudo.
+
+Riprovato su chat svuotata a mano da Alessio: countdown al secondo, nessuna
+notifica fantasma. `docs/previsto/automazione-ciclo-sviluppo.md` aggiornato
+nei punti 6 e 8 e nella sezione delle decisioni.
+
+Nessun test Rust coinvolto. Totale invariato: 270.
+
+<!-- CHANGELOG_GESTIONE_PROCESSO_20260904 -->
+# 04/09/2026 — Avviare e fermare il bot da remoto, senza lasciarlo appeso alla sessione SSH
+
+Sotto-step 2/5 del punto 6 del ciclo (deploy): `scripts/avvia-bot.sh` e
+`scripts/ferma-bot.sh`. Oggi il bot vive solo dentro una sessione Termux
+tenuta aperta a mano (`cargo run` in foreground) — non c'è nessun
+supervisore di processo sull'S9, verificato prima di scrivere qualunque
+cosa (né `tmux`, né `screen`, né un servizio). Deciso il 4 settembre:
+`nohup ... & disown` con il PID salvato in un file, niente pacchetto nuovo
+da installare — coerente con la scelta già fatta nel progetto contro
+Docker/i container (`docs/architettura.md`, 2.4).
+
+**`ferma-bot.sh` manda `SIGINT`, non `SIGTERM`** — letto nel codice prima di
+agire, non per tentativi sul processo vero: in `main.rs` il dispatcher è
+collegato solo a `.enable_ctrlc_handler()`, che ascolta SIGINT (lo stesso
+del Ctrl+C interattivo). Un SIGTERM avrebbe ucciso il processo senza
+passare dal percorso che manda "🔴 Gestionale Casa è offline." agli
+amministratori.
+
+Provato per davvero contro l'S9 vero, partendo da bot spento (confermato
+con `ps`, non dato per scontato — un tentativo precedente di verificarlo
+con `pgrep -f` aveva dato un falso positivo, la ricerca vedeva se stessa
+nell'elenco processi):
+
+- `avvia-bot.sh`: avvio in background, PID scritto su file, il processo
+  sopravvive alla chiusura della sessione SSH (verificato con `ps`: nessun
+  terminale di controllo). Riconosce l'avvenuto avvio cercando "Gestionale
+  Casa online" nel log — la riga vera che il codice scrive dopo essersi
+  collegato a Telegram, non un segnale indovinato;
+- `ferma-bot.sh`: SIGINT, poi attesa fino a un timeout. Log confermato:
+  `^C received`, `Dispatching has been shut down`, `Gestionale Casa
+  offline`. File PID ripulito da solo.
+
+Aggiunto anche `tg_elimina` a `telegram-api.sh` (API `deleteMessage`), per
+ripulire dalla chat reale i messaggi di prova lasciati dai collaudi — non
+fa parte del ciclo di deploy, è igiene dopo i test.
+
+## Trovato collaudando, fuori da questo blocco
+
+Il messaggio "ℹ️ Non sto aspettando un input in questo momento"
+(`unexpected_input_notice` in `main.rs`) appare sotto la schermata
+principale invece che vicino ad essa, spostandola fuori dalla vista —
+limite strutturale di Telegram, non un bug banale (non si può inserire un
+messaggio "sopra" uno esistente). Il meccanismo che lo fa sparire alla
+prossima interazione (`cleanup_transient_media`) esiste già, ma non è stato
+messo alla prova per davvero: nel collaudo del 4 settembre il bot è stato
+spento subito dopo la sua comparsa. Segnato in `STATO.md` come miglioramento
+a sé, non affrontato in questo commit.
+
+Nessun test Rust coinvolto in questo commit. Totale invariato: 270.
+
+<!-- CHANGELOG_COUNTDOWN_PINNATO_20260904 -->
+# 04/09/2026 — Il countdown pinnato, e due bug di rete trovati provandolo per davvero
+
+Sotto-step 1/5 del punto 6 del ciclo (deploy): `scripts/telegram-api.sh`
+(`tg_leggi_credenziali`, `tg_invia_e_fissa`, `tg_modifica`, `tg_sblocca`) e
+`scripts/prova-countdown.sh` per collaudarlo isolato, senza nessun deploy
+vero attaccato. Deciso il 3 settembre: pilotato dall'agente via API diretta,
+non dal bot sull'S9, perché deve continuare ad aggiornarsi anche quando il
+processo S9 è fermo per lo swap.
+
+Provato sulla chat reale dell'amministratore principale, non su un caso
+finto. Prima versione: tick ogni 15s, confermato che il meccanismo di
+pin/edit funziona ma il countdown "non si vedeva scendere". Corretto a un
+tick al secondo — modificare non spamma la chat come inviare farebbe.
+
+## Due problemi di rete, trovati provando
+
+`curl --data-urlencode` su questa macchina (curl 8.21/mingw-w64) **corrompe
+i caratteri non-ASCII**: una vocale accentata diventa `U+FFFD` prima ancora
+di essere codificata, e Telegram rifiuta con "strings must be encoded in
+UTF-8". Isolato con `https://httpbin.org/get` prima di incolpare Telegram.
+Aggirato codificando il testo con Python (`urllib.parse.quote`, stesso
+rilevamento `python3`/`python` già usato in `verifica-ci.sh` e
+`controlla-documenti.sh`) e passandolo già pronto a curl con `--data`
+semplice, che non lo ritocca più.
+
+Un test da 30 tick ha incontrato **tre fallimenti di connessione
+transitori** (`Recv failure: Connection was reset`) — non un limite di
+frequenza di Telegram, la rete. `curl --retry 4 --retry-all-errors
+--retry-delay 2` li assorbe da solo, e dal 7.66 rispetta anche l'header
+`Retry-After` di un eventuale 429 senza doverlo leggere a mano: più semplice
+di un retry scritto a mano, e il countdown è arrivato in fondo lo stesso
+(un piccolo scatto visibile una sola volta, confermato irrilevante).
+
+Nessun test Rust coinvolto. Totale invariato: 270.
+
+<!-- CHANGELOG_COLLAUDO_REMOTO_20260904 -->
+# 04/09/2026 — Il collaudo sull'S9 lanciato dall'agente, non più a mano da Termux
+
+`scripts/collauda-remoto.sh`: punto 4 del ciclo. Si collega via SSH e lancia
+`aggiorna-s9.sh --ramo <nome> --solo-controlli` — sempre `--solo-controlli`,
+perché questo passo verifica che il codice sia sano (compilazione, Clippy,
+test, migration di prova) e non deve mai avviare il bot: quello è il passo 6
+(swap), non questo. Controlla anche che il ramo richiesto sia stato pushato
+su GitHub prima di collaudarlo — l'S9 vede solo quello, non l'albero locale
+del PC (STATO.md, sezione 4).
+
+**Provato per davvero contro l'S9 vero**, non un caso finto: l'S9 era su
+`ux-spazi-profilo`, lo script lo ha portato su `automazione-ciclo-sviluppo`,
+compilato, passati 270 test (confermato uguale a quanto dichiarato in
+`STATO.md` — lo confronto lo fa già `aggiorna-s9.sh` da solo), creato un
+backup del database reale, verificata l'integrità, controllato che non ci
+fossero migration pendenti, fermato prima dell'avvio. Il bot non è mai
+partito.
+
+L'S9 resta sul ramo appena collaudato invece di tornare a quello precedente:
+comportamento voluto, lo stesso di quando lo lancia una persona — il passo 6
+del ciclo (deploy vero) parte da questo stesso stato.
+
+Nessun test Rust coinvolto in questo commit (non è codice Rust). Totale
+invariato: 270.
+
+<!-- CHANGELOG_PIPELINE_LOCALE_20260904 -->
+# 04/09/2026 — La pipeline locale, e un bug di `controlla-documenti.sh` che c'era da settimane
+
+`scripts/pipeline-locale.sh`: punto 2 del ciclo in
+`docs/previsto/automazione-ciclo-sviluppo.md`. Stessa sequenza di
+`.github/workflows/ci.yml`, stesso ordine (documenti → fmt → check → test →
+clippy), in locale. `--commit FILE_MESSAGGIO FILE... [--push]` aggiunge,
+committa e pusha **solo se tutti i controlli passano** — la regola "niente
+commit o push se la pipeline fallisce" (STATO.md, sezione 7) diventa
+meccanica invece che da ricordarsi ogni volta.
+
+Provato in entrambi i sensi: pipeline vera, verde, 270 test; e pipeline fatta
+fallire apposta (un file con formattazione sbagliata) — fermata su "Formato",
+nessun commit creato, verificato con `git status` subito dopo.
+
+## Un bug reale, non di oggi, trovato scrivendo lo script sopra
+
+`scripts/controlla-documenti.sh` usava `os.path.normpath`. Su Windows quello
+e' `ntpath`, che normalizza i separatori con `\`: un percorso valido come
+`docs/architettura.md` restituito da `git ls-files` (sempre con `/`) smette
+di essere uguale a se stesso dopo la normalizzazione, e **ogni** rimando del
+progetto risultava "rotto" — compresi quelli mai toccati. Non si era mai
+notato perche' lo script gira in CI su Linux, dove `os.path` **e'**
+`posixpath` e il bug non esiste; in locale, su Windows, veniva semplicemente
+scavalcato leggendo il diff a mano. Corretto usando sempre `posixpath`
+esplicitamente, indipendentemente dal sistema operativo (Termux, CI, o
+Windows in locale) — cosi' come lo script rileva anche da solo se `python3`
+sul `PATH` e' lo stub Microsoft Store che non esegue nulla, e ripiega su
+`python` (stessa soluzione gia' scritta in `verifica-ci.sh`).
+
+Nessun test Rust coinvolto: nessun cambiamento al totale, **270**.
+
+<!-- CHANGELOG_VERIFICA_CI_20260904 -->
+# 04/09/2026 — Il primo pezzo dell'automazione: leggere la CI, non riassumerla
+
+`scripts/verifica-ci.sh`, primo passo verificabile del ciclo descritto in
+`docs/previsto/automazione-ciclo-sviluppo.md` (punto 5): legge l'ultima run
+CI di un ramo direttamente dall'API di GitHub Actions. Nessuna scrittura,
+nessun token — il repository è pubblico.
+
+Provato su una run vera e non su un caso finto: `#70`, la run generata dal
+commit precedente su questo stesso ramo. Letta correttamente sia mentre era
+`in_progress` (osservato prima che finisse) sia dopo, `completed`/`success`.
+Provati anche un ramo inesistente (nessuna run trovata, uscita 1) e
+`--attendi` su una run già conclusa (esce subito, non aspetta il timeout).
+
+**Un bug trovato scrivendolo, non dopo**: la prima versione passava la
+risposta JSON dell'API sullo stdin dello stesso comando invocato come
+`python - <<EOF` — cioè lo stdin già usato per lo script Python stesso.
+Arrivava sempre vuota (`Expecting value: line 1 column 1`). Corretto
+scrivendo lo script Python in un file temporaneo e passando la risposta
+dell'API come secondo file, non su uno stdin conteso.
+
+**Una trappola di Windows, la stessa già scritta in `claude/stato-reale-progetto.md`**:
+`python3` esiste sul `PATH` di questa macchina ma è lo stub del Microsoft
+Store, che esce con un errore invece di eseguire — `command -v python3` lo
+trova comunque, perché esiste come file. Lo script ora verifica anche che
+l'interprete risponda a `--version` prima di fidarsi, e ripiega su `python`.
+
+Nessun test Rust coinvolto (non è codice Rust): nessun cambiamento al
+totale, resta **270**.
+
+<!-- CHANGELOG_AUTOMAZIONE_SPEC_20260903 -->
+# 03/09/2026 — Specifica dell'automazione del ciclo dev → deploy, e una topologia da correggere
+
+Nessun codice: solo documenti, apertura del ramo `automazione-ciclo-sviluppo`
+e le prime verifiche prima di scrivere qualunque cosa.
+
+Aggiunti `docs/previsto/automazione-ciclo-sviluppo.md` (il ciclo completo:
+richiesta → scrittura → collaudo locale → push → collaudo S9 via SSH →
+verifica reale della CI → deploy a downtime minimo in modalità riservata →
+conferma funzionale → merge) e `docs/previsto/invio-miglioramenti-a-claude.md`
+(il canale `📤 Invia a Claude` sui miglioramenti `da_fare`, complementare alla
+richiesta in chat). Esplicitamente fuori scope, per ora: nodi di standby,
+failover automatico fra macchine.
+
+## Una cosa da correggere prima di iniziare
+
+`docs/infrastruttura.md` descriveva un **PC fisso** distinto dal portatile,
+dove dovrebbe girare l'agente — non esiste ancora. Verificato: questa sessione
+gira **sul portatile stesso** (`galaxybookalessio`), che ha già Tailscale e
+SSH verso l'S9 funzionanti (`ssh s9` risponde). Per ora il portatile fa da
+host; la migrazione a un PC fisso futuro resta a basso costo (repository via
+git, Rust/GCC da reinstallare, una chiave SSH **nuova e dedicata** per quel
+PC, non quella del portatile).
+
+Anche `ContextState` in `src/context_bot.rs`, citato nella specifica come il
+posto dove vive lo stato "in attesa di input testuale", non lo è: tiene lo
+storico di `💡 Migliora`. Lo stato vero vive in nove mappe indipendenti in
+`main.rs` (`identity_sessions`, `food_sessions`, `profile_sessions`,
+`recipe_sessions`, `improvement_sessions`, `container_sessions`,
+`location_sessions`, `photo_sessions`, `sessions`).
+
+## Decisioni prese, prima di scrivere codice
+
+Quattro punti "Aperto" nei due documenti, con opzioni proposte e non decise
+da soli:
+
+- il messaggio pinnato (countdown, poi checklist) è pilotato dall'**agente**
+  via API Telegram diretta, non dal bot sull'S9 — deve continuare ad
+  aggiornarsi anche mentre il processo S9 è fermo per lo swap;
+- tipo/orario della manutenzione: schermata
+  `🛠️ Amministrazione → 🚀 Distribuzione`, default + scelta puntuale a ogni
+  deploy;
+- coda "in attesa di input testuale": si interrogano le nove mappe cosi'
+  come sono, nessun refactoring preliminare, timeout massimo prima di
+  procedere comunque;
+- invii duplicati di `📤 Invia a Claude`: un flag `in_coda_claude` +
+  timestamp sulla riga `miglioramenti`, non una tabella coda separata.
+
+**Confermato, non è più un punto aperto**: `cargo test` non tocca mai il
+database reale — ricerca su tutto `src/`, ogni `.connect(...)` nei test usa
+`sqlite::memory:`, zero eccezioni. Il DB reale si raggiunge solo a runtime
+via `DATABASE_URL`.
+
+Nessun test nuovo, nessun cambiamento al totale: **270**.
+
 <!-- CHANGELOG_LISTE_CI_ROSSA_20260902 -->
 # 02/09/2026 — Un `format!` inutile, e quattro run rosse per accorgersene
 
