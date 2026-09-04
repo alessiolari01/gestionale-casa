@@ -2626,14 +2626,24 @@ async fn esci_da_modalita_riservata(
         .await
         .unwrap_or_default();
     for id in chat_ids {
-        // `(*bot)` invece di `bot`: bypassa il wrapper `ContextBot` e la sua
-        // gestione di "una sola schermata UI attiva per chat", che
-        // altrimenti cancellerebbe l'ultima schermata di quella chat -- per
-        // l'amministratore principale, proprio il messaggio di collaudo che
-        // sta per essere modificato in "confermato". Trovato per davvero
-        // collaudando sull'S9: la conferma cancellava la checklist prima
-        // di poterla modificare, lasciando in chat solo questa notifica.
-        if let Err(error) = (*bot).send_message(ChatId(id), "✅ Di nuovo online.").await {
+        // `send_message_untracked`, non `send_message`/`send_message_without_improve`:
+        // quelle passano dalla gestione di "una sola schermata UI attiva per
+        // chat" di `ContextBot`, che cancellerebbe l'ultima schermata di
+        // quella chat -- per l'amministratore principale, proprio il
+        // messaggio di collaudo appena modificato in "confermato". Trovato
+        // per davvero collaudando sull'S9, per ben due volte: prima con
+        // `send_message_without_improve` (stesso problema), poi con un
+        // errato `(*bot).send_message(...)` che in realtà richiama comunque
+        // il metodo di `ContextBot` (il deref di un `&ContextBot` produce
+        // `ContextBot`, non richiama il suo `Deref` verso il bot grezzo) —
+        // si vedeva infatti comparire anche il bottone "💡 Migliora`.
+        // `send_message_untracked` esiste apposta per notifiche come
+        // questa: usa il bot grezzo di teloxide, senza toccare nessuno
+        // stato di `ContextBot`.
+        if let Err(error) = bot
+            .send_message_untracked(ChatId(id), "✅ Di nuovo online.")
+            .await
+        {
             tracing::warn!(
                 chat_id = id,
                 ?error,

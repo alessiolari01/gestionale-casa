@@ -444,10 +444,20 @@ messaggio a una chat **cancella quello attivo precedente**, che per
 l'amministratore principale era proprio il messaggio di collaudo appena
 modificato in "confermato" (o stava per esserlo: la cancellazione avviene
 prima che l'edit abbia effetto, quindi l'edit poi falliva su un messaggio
-già sparito). Corretto mandando quella notifica con il bot grezzo
-(`(*bot).send_message(...)`, bypassando `ContextBot`): è una notifica di
-cortesia a chat qualsiasi, non una nuova schermata, e non deve toccare lo
-stato di "schermata attiva" di nessuno. Ricollaudo sull'S9 in corso.
+già sparito).
+
+Primo tentativo di correzione sbagliato, trovato ricollaudando subito
+dopo: `(*bot).send_message(...)` doveva bypassare `ContextBot` per
+raggiungere il bot grezzo di teloxide, ma il deref di un `&ContextBot`
+produce `ContextBot` stesso (non passa dal suo `impl Deref`, che serve
+solo quando si deref-a un valore *non* di riferimento) — quindi quella
+riga richiamava comunque il metodo di `ContextBot`, di fatto identico a
+`bot.send_message(...)`: in chat compariva anche il bottone "💡 Migliora",
+segno che il messaggio era ancora tracciato. Corretto usando
+`send_message_untracked`, un metodo che esiste già in `context_bot.rs`
+apposta per le notifiche che non devono toccare nessuno stato di
+"schermata attiva": usa il bot grezzo per davvero, senza passare dal
+wrapper. Ricollaudo sull'S9 in corso.
 
 289 test (280 prima), 9 nuovi in `src/modules/collaudo.rs`: interpretazione
 del file (separatore mancante, checklist vuota, righe vuote ignorate),

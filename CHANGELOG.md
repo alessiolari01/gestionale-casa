@@ -2,6 +2,33 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_SEND_MESSAGE_UNTRACKED_20260904 -->
+# 04/09/2026 — Il primo tentativo di correzione non bypassava davvero ContextBot
+
+Il commit precedente diceva di correggere il problema con
+`(*bot).send_message(...)`, per bypassare il wrapper `ContextBot` e
+raggiungere il bot grezzo di teloxide. Non era vero, e il ricollaudo
+sull'S9 se n'e' accorto subito: in chat compariva di nuovo il bottone
+"💡 Migliora" sul messaggio "Di nuovo online.", segno che il messaggio era
+ancora tracciato da `ContextBot` esattamente come prima.
+
+La causa dell'errore: `*bot` dove `bot: &ContextBot` e' il deref
+*built-in* del riferimento, che restituisce `ContextBot` stesso -- non
+passa mai dal suo `impl Deref<Target = TelegramBot>`, che si attiverebbe
+solo derefando *quel* valore un'altra volta (`**bot`). Quindi
+`(*bot).send_message(...)` era, di fatto, identico a
+`bot.send_message(...)`: stesso identico bug di prima, mascherato da un
+cambiamento che sembrava dover funzionare.
+
+Corretto per davvero con `send_message_untracked`, un metodo che esiste
+gia' in `context_bot.rs` (usato altrove nel progetto, es. per l'avviso di
+input inatteso) proprio per le notifiche che non devono toccare lo stato
+di "schermata attiva" di nessuno: usa il bot grezzo di teloxide senza
+passare dal wrapper, nessun trucco di dereferenziazione necessario.
+
+Nessun test nuovo. Totale invariato: 289. Ricollaudo sull'S9 nel prossimo
+commit.
+
 <!-- CHANGELOG_NOTIFICA_CANCELLAVA_COLLAUDO_20260904 -->
 # 04/09/2026 — La notifica di "di nuovo online" cancellava la checklist appena confermata
 
