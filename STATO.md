@@ -369,6 +369,23 @@ di questa sezione. Resta coperto solo dall'unit test
 (`deve_bloccare_per_manutenzione`, quattro casi), non da un collaudo su un
 utente vero non amministratore.
 
+**Sotto-step 5b, scritto — collaudo sull'S9 da fare**: rollback del
+binario senza ricompilazione. Deciso insieme ad Alessio: una copia del
+binario compilato, non due cartelle di lavoro separate (blue/green) —
+più semplice e meno spazio, su un telefono conta. `scripts/salva-binario.sh`
+copia `target/debug/gestionale-casa` in `data/run/binario_precedente`
+**prima** di aggiornare il codice e ricompilare (l'ordine conta: lanciato
+dopo la build nuova salverebbe il binario sbagliato).
+`scripts/rollback-binario.sh` ferma quello che sta girando (necessario:
+Telegram rifiuta un secondo long-polling con lo stesso token, 409
+Conflict) ed esegue direttamente il binario salvato — stesso schema di
+processo di `avvia-bot.sh` (nohup+disown, `data/run/bot.pid`,
+`data/run/bot.out`), così `ferma-bot.sh` continua a funzionare dopo un
+rollback senza saperne nulla. Timeout di avvio molto più corto
+(30s contro i 180s di `avvia-bot.sh`): non c'è nessuna build da aspettare,
+se il binario già compilato non parte in pochi secondi il problema è
+un altro.
+
 **Trovato per davvero verificando la CI di questo stesso push**: subito
 dopo `git push`, `scripts/verifica-ci.sh` ha riportato "OK CI verde"
 leggendo pero' la run del **commit precedente** (`7c730932`, gia'

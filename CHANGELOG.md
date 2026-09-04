@@ -2,6 +2,38 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_ROLLBACK_BINARIO_20260904 -->
+# 04/09/2026 — Rollback del binario senza ricompilazione (sotto-step 5b, scritto)
+
+Secondo pezzo del sotto-step 5/5 (lo swap vero): il rollback "automatico e
+immediato al binario precedente" richiesto dalla specifica non puo'
+aspettare una `cargo build`, che potrebbe anche essere quella appena
+rivelatasi rotta.
+
+Deciso insieme ad Alessio prima di scrivere codice: una copia del binario
+compilato, non due cartelle di lavoro separate (blue/green) — piu'
+semplice e meno spazio su un telefono. `scripts/salva-binario.sh` copia
+`target/debug/gestionale-casa` in `data/run/binario_precedente`, e va
+lanciato mentre quel binario corrisponde ancora al codice in esecuzione —
+cioe' *prima* di aggiornare il codice e ricompilare per lo swap, non dopo
+(lanciarlo dopo salverebbe il binario sbagliato).
+
+`scripts/rollback-binario.sh` ferma quello che sta girando (necessario:
+Telegram rifiuta un secondo long-polling con lo stesso token, 409
+Conflict) ed esegue direttamente il binario salvato — nessuna build.
+Stesso schema di processo di `avvia-bot.sh` (nohup+disown, `data/run/bot.pid`,
+`data/run/bot.out`), cosi' `ferma-bot.sh` continua a funzionare dopo un
+rollback senza saperne nulla. Il binario ripristinato torna in modalita'
+normale (senza `RISERVATO`): era gia' la versione in produzione prima
+dello swap fallito.
+
+Timeout di avvio molto piu' corto di `avvia-bot.sh` (30s contro 180s): non
+c'e' nessuna build da aspettare, se il binario gia' compilato non parte in
+pochi secondi il problema e' un altro.
+
+Nessun codice Rust coinvolto (due script bash). Collaudo reale sull'S9 nel
+prossimo commit. Totale invariato: 280.
+
 <!-- CHANGELOG_MODALITA_RISERVATA_COLLAUDO_20260904 -->
 # 04/09/2026 — Sotto-step 5a collaudato per davvero: admin passa, bottone sblocca
 
