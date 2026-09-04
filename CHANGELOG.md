@@ -2,6 +2,29 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_VERIFICA_CI_SHA_20260904 -->
+# 04/09/2026 — verifica-ci.sh poteva riportare "verde" leggendo il commit sbagliato
+
+Trovato verificando la CI del push precedente (schermata Distribuzione,
+sotto-step 3/5): subito dopo `git push`, `scripts/verifica-ci.sh` ha
+stampato "OK CI verde" leggendo la run del **commit precedente**
+(`7c730932`, gia' completata con successo), non di quello appena pushato
+(`760089b`), che in quel momento era ancora `in_progress` e non ancora
+comparso nell'API — `per_page=1` prende la run piu' recente per ramo senza
+controllare a quale commit appartiene. Stesso errore del 2 settembre (un
+riassunto letto verde dove non lo era), in una forma nuova: uno script
+pensato apposta per non fidarsi di un riassunto locale si e' fidato di una
+run del commit sbagliato.
+
+Corretto confrontando lo `head_sha` dell'API con `git rev-parse <ramo>`: se
+non coincidono la run viene trattata come "non ancora quella giusta" e lo
+script continua ad aspettare. Ricollaudato per davvero sul push di questo
+stesso commit: il controllo singolo ha riconosciuto correttamente la run
+giusta (#77) ancora in corso, e `--attendi` ha aspettato ~80s prima di
+riportare l'esito reale (success) della run del commit corretto.
+
+Nessun test Rust coinvolto (lo script e' bash). Totale invariato: 279.
+
 <!-- CHANGELOG_DISTRIBUZIONE_ADMIN_20260904 -->
 # 04/09/2026 — Schermata admin 🚀 Distribuzione: il default della manutenzione
 

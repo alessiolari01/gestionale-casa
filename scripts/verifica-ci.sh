@@ -60,6 +60,11 @@ if [ -z "$RAMO" ] || [ "$RAMO" = "HEAD" ]; then
     exit 1
 fi
 
+# Usato per scartare una run "piu' recente" ma di un commit precedente (vedi
+# sotto). Vuoto se il ramo non esiste in locale: in quel caso il controllo
+# sul commit e' saltato, com'era prima di questa correzione.
+ATTESO_SHA="$(git rev-parse "$RAMO" 2>/dev/null || true)"
+
 PYTHON=""
 for candidato in python3 python; do
     # Non basta che "command -v" lo trovi: su Windows "python3" puo' essere
@@ -87,7 +92,7 @@ trap 'rm -f "$PY_SCRIPT"' EXIT
 cat > "$PY_SCRIPT" <<'PYEOF'
 import json, sys
 
-ramo, percorso_json = sys.argv[1], sys.argv[2]
+ramo, percorso_json, sha_atteso = sys.argv[1], sys.argv[2], sys.argv[3]
 with open(percorso_json, encoding="utf-8") as f:
     testo = f.read()
 try:
@@ -114,6 +119,23 @@ print(f"Commit:     {sha[:12]}")
 print(f"Stato:      {status}")
 print(f"Esito:      {conclusion or '(nessuno ancora)'}")
 print(f"Pagina:     {html_url}")
+
+# La run piu' recente per il ramo puo' essere quella del commit *precedente*:
+# tra un push e la registrazione della nuova run su GitHub c'e' un ritardo, e
+# in quella finestra "la piu' recente" e' ancora la vecchia -- che puo' gia'
+# essere "completed"/"success". Senza questo controllo lo script riporterebbe
+# verde leggendo l'esito di un commit diverso da quello appena pushato: lo
+# stesso errore, in una forma nuova, che il 2 settembre ha gia' fatto
+# consigliare un merge sulla base di un riassunto sbagliato. Trovato per
+# davvero il 4 settembre: il primo controllo dopo un push ha riportato
+# "OK CI verde" leggendo la run del commit precedente, mentre quella del
+# commit appena pushato era ancora in corso.
+if sha_atteso and sha != sha_atteso:
+    print(
+        f"... la run piu' recente e' del commit {sha[:12]}, non di quello atteso "
+        f"({sha_atteso[:12]}): non ancora registrata su GitHub, continuo ad aspettare."
+    )
+    sys.exit(2)
 
 if status == "completed":
     if conclusion == "success":
@@ -145,7 +167,7 @@ controlla_una_volta() {
         return 1
     fi
 
-    "$PYTHON" "$PY_SCRIPT" "$RAMO" "$json_tmp"
+    "$PYTHON" "$PY_SCRIPT" "$RAMO" "$json_tmp" "$ATTESO_SHA"
     local esito=$?
     rm -f "$json_tmp"
     return $esito

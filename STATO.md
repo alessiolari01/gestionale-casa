@@ -296,6 +296,25 @@ da Alessio dopo la spiegazione. Messaggio di prova ripulito a fine collaudo.
 Restano 2 sotto-step: la coda "in attesa di input testuale", e lo swap vero
 con rollback.
 
+**Trovato per davvero verificando la CI di questo stesso push**: subito
+dopo `git push`, `scripts/verifica-ci.sh` ha riportato "OK CI verde"
+leggendo pero' la run del **commit precedente** (`7c730932`, gia'
+`completed`/`success` da prima), non di quello appena pushato
+(`760089b`) — che in quel momento era ancora `in_progress` e non ancora
+registrato su GitHub nella finestra tra push e comparsa della run nuova.
+`per_page=1` prende la run piu' recente per ramo senza controllare a quale
+commit appartiene: se la piu' recente e' ancora quella vecchia ma gia'
+completata, lo script si ferma li' e riporta un esito che non e' quello del
+push appena fatto — lo stesso errore del 2 settembre (un riassunto letto
+verde dove non lo era), in una forma nuova. Corretto confrontando lo
+`head_sha` restituito dall'API con `git rev-parse <ramo>`: se non
+coincidono, lo script tratta la run come "non ancora quella giusta" e
+continua ad aspettare invece di fidarsi. Ricollaudato per davvero sul push
+di questo stesso commit: la prima chiamata senza `--attendi` ha
+correttamente riconosciuto la run giusta (#77, commit `760089b`) come
+ancora in corso; con `--attendi` ha aspettato ~80s e riportato l'esito reale
+(`success`) solo a run davvero completata.
+
 **Trovato collaudando, fuori dall'ambito di questo blocco**: il messaggio
 "ℹ️ Non sto aspettando un input in questo momento" (`main.rs`,
 `unexpected_input_notice`) appare *sotto* la schermata principale invece
