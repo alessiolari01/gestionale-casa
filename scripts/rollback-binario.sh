@@ -6,9 +6,17 @@
 # un rollback dev'essere istantaneo, non aspettare una build (che
 # potrebbe anche essere quella appena rivelatasi rotta).
 #
-# Il binario ripristinato torna in modalita' normale (senza RISERVATO):
-# era gia' la versione in produzione prima dello swap fallito, non ha
-# bisogno di ripartire riservata.
+# Il binario ripristinato torna in modalita' normale per default (senza
+# RISERVATO): era gia' la versione in produzione prima dello swap fallito,
+# non ha bisogno di ripartire riservata -- e' il caso di un controllo di
+# salute fallito subito dopo l'avvio del binario nuovo (sotto-step 5d).
+#
+# Con --riservato, invece, riparte in modalita' riservata: e' il caso del
+# collaudo guidato *rifiutato* dall'amministratore principale (punto 9
+# della specifica) -- lo swap in se' e' andato bene, ma il collaudo no, e
+# la specifica vuole restare in manutenzione per gli utenti normali finche'
+# non c'e' una versione corretta, non tornare silenziosamente disponibili
+# con la versione vecchia.
 #
 # Stesso schema di processo di avvia-bot.sh (nohup+disown, PID in
 # data/run/bot.pid, log in data/run/bot.out): dopo un rollback,
@@ -16,6 +24,7 @@
 #
 # Uso:
 #   ./scripts/rollback-binario.sh
+#   ./scripts/rollback-binario.sh --riservato
 
 set -uo pipefail
 
@@ -25,6 +34,11 @@ CARTELLA_RUN="$PWD/data/run"
 PIDFILE="$CARTELLA_RUN/bot.pid"
 LOGFILE="$CARTELLA_RUN/bot.out"
 BINARIO="$CARTELLA_RUN/binario_precedente"
+
+RISERVATO=0
+if [ "${1:-}" = "--riservato" ]; then
+    RISERVATO=1
+fi
 
 if [ ! -x "$BINARIO" ]; then
     echo "Nessun binario precedente salvato in $BINARIO (scripts/salva-binario.sh non è mai stato lanciato con successo)." >&2
@@ -56,8 +70,13 @@ if [ -f "$PIDFILE" ]; then
     rm -f "$PIDFILE"
 fi
 
-echo "Avvio il binario precedente (rollback, log in $LOGFILE)..."
-nohup "$BINARIO" > "$LOGFILE" 2>&1 &
+if [ "$RISERVATO" = "1" ]; then
+    echo "Avvio il binario precedente, modalita' riservata (rollback, log in $LOGFILE)..."
+    RISERVATO=1 nohup "$BINARIO" > "$LOGFILE" 2>&1 &
+else
+    echo "Avvio il binario precedente (rollback, log in $LOGFILE)..."
+    nohup "$BINARIO" > "$LOGFILE" 2>&1 &
+fi
 PID=$!
 disown
 

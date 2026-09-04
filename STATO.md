@@ -505,6 +505,43 @@ controlla la salute del nuovo processo, chiama il rollback se serve) in
 un'unica sequenza — oggi ogni pezzo è stato collaudato lanciandolo a mano,
 uno alla volta.
 
+**Sotto-step 5d, scritto — collaudo end-to-end sull'S9 da fare**: tre
+script legano insieme i pezzi 1-5c. `scripts/countdown-manutenzione.sh`
+(nuovo) è la versione "vera" del countdown collaudato in
+`prova-countdown.sh`: stessa meccanica a scadenza fissa, ma legge il
+default (tipo/minuti/orario) dalla tabella `impostazioni_distribuzione`
+invece di un valore fisso — il tipo "countdown" è quello collaudato per
+davvero fin qui, "subito" e "programmato" sono scritti ma meno esercitati
+(l'unico default operativo del progetto oggi è "countdown").
+
+`scripts/deploy.sh` è la sequenza vera: countdown →
+`controlla-sessioni-attive.sh` → `salva-binario.sh` (**prima** di
+aggiornare il codice) → `ferma-bot.sh` → `aggiorna-s9.sh --ramo X
+--solo-controlli` (ricompila e riverifica sull'S9, non un `git pull`
+nudo: build/clippy/test/migration di nuovo, appena prima dello swap) →
+copia del riepilogo/checklist e `avvia-bot.sh --riservato` → controllo di
+stabilità (online + resta vivo per una finestra, default 20s) → rollback
+automatico (`rollback-binario.sh`) se qualcosa va storto, con notifica
+Telegram dell'errore preciso a ogni passo che fallisce — mai un
+fallimento silenzioso. Da lì l'agente si ferma: il collaudo lo gestisce
+il bot stesso (5c).
+
+`scripts/completa-deploy.sh` è il seguito, lanciato quando arriva
+l'esito: legge `esito_collaudo.txt` sull'S9 — "confermato" → merge del
+ramo su `main` (**solo con `--confermo-merge` esplicito**, deciso per non
+rendere irreversibile un'azione con conseguenze reali senza un secondo
+controllo); "rifiutato" → `rollback-binario.sh --riservato` (nuovo
+flag, aggiunto qui: **al contrario** del rollback per salute fallita, che
+torna in modalità normale, un collaudo rifiutato deve restare in
+manutenzione per gli utenti normali finché non arriva una versione
+corretta, come dice esplicitamente la specifica — il vecchio binario
+comunque funzionante non basta a giustificare di riaprire l'accesso).
+
+Collaudo end-to-end non ancora fatto: la prima prova reale sarà una
+"ridistribuzione" dello stesso commit già in produzione (nessun codice
+nuovo, solo per esercitare la sequenza vera sull'S9 vero senza rischio
+funzionale), concordata con Alessio prima di lanciarla.
+
 **Trovato per davvero verificando la CI di questo stesso push**: subito
 dopo `git push`, `scripts/verifica-ci.sh` ha riportato "OK CI verde"
 leggendo pero' la run del **commit precedente** (`7c730932`, gia'
@@ -665,6 +702,13 @@ scripts/telegram-api.sh             pin/edit su Telegram via API diretta, per il
 scripts/prova-countdown.sh          collaudo isolato del countdown pinnato, nessun deploy vero
 scripts/avvia-bot.sh                avvia il bot in background (nohup+disown+PID), per l'agente via SSH
 scripts/ferma-bot.sh                spegnimento pulito via SIGINT, legge il PID da avvia-bot.sh
+scripts/salva-binario.sh            copia il binario compilato per un rollback senza ricompilazione
+scripts/rollback-binario.sh         ferma e riavvia il binario salvato, istantaneo, --riservato opzionale
+scripts/countdown-manutenzione.sh   countdown reale, legge il default da impostazioni_distribuzione
+scripts/deploy.sh                   l'orchestrazione: countdown → sessioni → binario → swap → salute
+scripts/completa-deploy.sh          seguito: merge su main o rollback, in base all'esito del collaudo
+src/modules/distribuzione.rs        default di manutenzione (tipo/minuti/orario), schermata admin
+src/modules/collaudo.rs             riepilogo/checklist/conferma del collaudo guidato dopo lo swap
 ```
 
 ## 6. Punti aperti

@@ -2,6 +2,49 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_ORCHESTRAZIONE_DEPLOY_20260904 -->
+# 04/09/2026 — L'orchestrazione dello swap (sotto-step 5d, scritta)
+
+Ultimo pezzo del sotto-step 5/5 (lo swap vero): tre script legano insieme
+tutto quello costruito e collaudato nei sotto-step 1-5c.
+
+`scripts/countdown-manutenzione.sh` (nuovo) e' la versione "vera" del
+countdown gia' collaudato in `prova-countdown.sh` -- stessa meccanica a
+scadenza fissa -- ma legge il default (tipo/minuti/orario) dalla tabella
+`impostazioni_distribuzione` invece di un valore fisso da riga di comando.
+Il tipo "countdown" e' l'unico collaudato per davvero fin qui (e' l'unico
+default operativo del progetto); "subito" e "programmato" sono scritti ma
+meno esercitati.
+
+`scripts/deploy.sh` (nuovo) e' la sequenza vera: countdown →
+`controlla-sessioni-attive.sh` → `salva-binario.sh` (prima di aggiornare
+il codice, non dopo) → `ferma-bot.sh` → `aggiorna-s9.sh --ramo X
+--solo-controlli` (ricompila e riverifica sull'S9, non un `git pull`
+nudo -- il binario resta pronto per il passo dopo senza ricompilare di
+nuovo) → copia del riepilogo/checklist e `avvia-bot.sh --riservato` →
+controllo di stabilita' (online + resta vivo per una finestra, default
+20s) → rollback automatico se qualcosa va storto, con notifica Telegram
+dell'errore preciso a ogni passo che fallisce. Da li' l'agente si ferma:
+il collaudo lo gestisce il bot stesso (5c).
+
+`scripts/completa-deploy.sh` (nuovo) e' il seguito: legge
+`esito_collaudo.txt` sull'S9 e, se "confermato", fa il merge del ramo su
+`main` -- **solo con `--confermo-merge` esplicito**, deciso per non
+rendere irreversibile un'azione con conseguenze reali senza un secondo
+controllo. Se "rifiutato", rollback -- ma qui serve un nuovo flag
+`--riservato` su `rollback-binario.sh` (sotto-step 5b), trovato scrivendo
+questo pezzo: il rollback per salute fallita torna in modalita' normale
+(il binario vecchio era gia' in produzione, non ha bisogno di ripartire
+riservato), ma un collaudo *rifiutato* dalla specifica deve restare in
+manutenzione per gli utenti normali finche' non c'e' una versione
+corretta -- lo stesso script di rollback, due comportamenti diversi a
+seconda di perche' viene chiamato.
+
+Nessun test Rust coinvolto (solo script bash). Collaudo end-to-end non
+ancora fatto: la prima prova reale sara' una "ridistribuzione" dello
+stesso commit gia' in produzione, per esercitare la sequenza vera senza
+rischio funzionale. Totale invariato: 289.
+
 <!-- CHANGELOG_SOTTOSTEP_5C_COMPLETO_20260904 -->
 # 04/09/2026 — Sotto-step 5c completo: collaudo end-to-end confermato
 

@@ -190,7 +190,17 @@ singolo.
 Qualunque fallimento in un passaggio (connessione SSH persa, build o
 collaudo in errore) genera una notifica Telegram immediata con l'errore
 specifico e lo stato in cui è stato lasciato l'S9 — mai un fallimento
-silenzioso.
+silenzioso. **Scritto (sotto-step 5d, 4 settembre 2026), collaudo
+end-to-end sull'S9 da fare**: `scripts/deploy.sh` lega insieme i passi 1-6
+(countdown, controllo sessioni, salvataggio del binario, arresto,
+aggiornamento e riverifica del codice, avvio riservato con
+riepilogo/checklist pronti, controllo di stabilità con rollback
+automatico se qualcosa va storto); `scripts/completa-deploy.sh` gestisce
+i passi 7-9 quando arriva l'esito del collaudo — merge su `main` (solo
+con `--confermo-merge` esplicito, per non rendere irreversibile un'azione
+con conseguenze reali senza un secondo controllo) se confermato, rollback
+*in modalità riservata* (non normale: la specifica vuole restare in
+manutenzione finché non c'è una versione corretta) se rifiutato.
 
 ## Tracciamento
 
