@@ -2,6 +2,29 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_BIT_ESECUZIONE_SCRIPT_20260904 -->
+# 04/09/2026 — Gli script nuovi non avevano il bit di esecuzione
+
+Trovato per davvero aggiornando l'S9 al commit del sotto-step 5c:
+`aggiorna-s9.sh` si e' fermato per modifiche locali non committate su
+`scripts/rollback-binario.sh` e `scripts/salva-binario.sh` -- il `chmod +x`
+dato a mano durante il collaudo del sotto-step 5b, mai tornato indietro.
+
+La causa di fondo: `avvia-bot.sh` e `ferma-bot.sh` sono tracciati in git
+come eseguibili (`100755`), ma i tre script piu' recenti
+(`controlla-sessioni-attive.sh`, `rollback-binario.sh`,
+`salva-binario.sh`), creati su questa macchina Windows, sono finiti nel
+repository come file normali (`100644`) -- Windows non ha il concetto di
+bit di esecuzione, quindi git li ha aggiunti senza. Sull'S9 (Termux, Unix
+vero) `./scripts/x.sh` fallisce senza quel bit, servirebbe un `chmod +x`
+manuale a ogni checkout pulito.
+
+Corretto impostando il bit in git (`git update-index --chmod=+x`), non sul
+filesystem: cosi' resta nel repository e ogni futuro `git clone`/checkout
+sull'S9 lo trova gia' giusto.
+
+Nessun test coinvolto (permessi, non codice). Totale invariato: 289.
+
 <!-- CHANGELOG_COLLAUDO_GUIDATO_20260904 -->
 # 04/09/2026 — Riepilogo, checklist e conferma pilotati dal bot (sotto-step 5c, scritto)
 

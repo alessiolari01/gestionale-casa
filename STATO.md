@@ -425,6 +425,14 @@ del file (separatore mancante, checklist vuota, righe vuote ignorate),
 mostra conferma/rifiuto solo a checklist completa, il troncamento delle
 etichette lunghe.
 
+**Trovato per davvero aggiornando l'S9 su questo commit**: gli script più
+recenti creati su questa macchina Windows (`controlla-sessioni-attive.sh`,
+`rollback-binario.sh`, `salva-binario.sh`) erano finiti in git come file
+normali (`100644`), non eseguibili (`100755`) come `avvia-bot.sh` e
+`ferma-bot.sh` — Windows non ha il bit di esecuzione, quindi git li aveva
+aggiunti senza. Corretto in git (`git update-index --chmod=+x`), non sul
+filesystem, così ogni futuro checkout sull'S9 li trova già giusti.
+
 **Trovato per davvero verificando la CI di questo stesso push**: subito
 dopo `git push`, `scripts/verifica-ci.sh` ha riportato "OK CI verde"
 leggendo pero' la run del **commit precedente** (`7c730932`, gia'
