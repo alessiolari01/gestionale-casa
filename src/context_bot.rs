@@ -279,7 +279,15 @@ impl ImproveContextStore {
     }
 
     fn claim_callback(&self, chat_id: i64, message_id: MessageId, data: &str) -> bool {
-        if data == "improve:noop" || data.ends_with(":noop") {
+        // Ogni altra schermata del progetto manda un messaggio nuovo per ogni
+        // cambio, quindi un `message_id` va rivendicato una volta sola.  La
+        // checklist del collaudo guidato (sotto-step 5c) è la prima a
+        // modificare più volte lo stesso messaggio via edit: qui serve poter
+        // premere più bottoni in sequenza sullo stesso `message_id`, non solo
+        // una volta. Trovato per davvero collaudando sull'S9: il secondo
+        // click su qualunque voce della checklist veniva rifiutato come se
+        // la schermata fosse vecchia.
+        if data == "improve:noop" || data.ends_with(":noop") || data.starts_with("collaudo:") {
             return self.is_current_message(chat_id, message_id);
         }
         let mut state = self

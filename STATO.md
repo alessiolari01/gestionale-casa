@@ -419,6 +419,19 @@ che l'agente orchestratore (sotto-step 5d) leggerà per decidere se
 procedere al merge o innescare il rollback del sotto-step 5b — non ancora
 collegato a nessuno dei due.
 
+Bug reale trovato collaudando per davvero sull'S9, non a tavolino: il
+secondo click su una qualunque voce della checklist veniva rifiutato con
+"⚠️ Questa schermata non è più attiva", come se il messaggio fosse vecchio.
+Causa: `ContextBot::claim_callback` (`src/context_bot.rs`) permette **una
+sola rivendicazione per `message_id`**, perché finora ogni altra schermata
+del progetto manda sempre un messaggio nuovo a ogni cambio — mai una
+modifica in place. La checklist del collaudo è la prima a modificare più
+volte lo stesso messaggio via edit, quindi ogni click dopo il primo sullo
+stesso messaggio falliva sempre, non per un doppio click veloce. Corretto
+estendendo la stessa eccezione già esistente per `*:noop` (che usa "è
+ancora il messaggio corrente?" invece di "rivendicato una volta sola") ai
+callback `collaudo:*`. Ricollaudo sull'S9 in corso.
+
 289 test (280 prima), 9 nuovi in `src/modules/collaudo.rs`: interpretazione
 del file (separatore mancante, checklist vuota, righe vuote ignorate),
 `tutto_fatto`/`alterna` (incluso un indice inesistente), la tastiera che

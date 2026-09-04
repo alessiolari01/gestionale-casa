@@ -2,6 +2,36 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_CLAIM_CALLBACK_RIPETIBILE_20260904 -->
+# 04/09/2026 — La checklist di collaudo si bloccava al secondo click
+
+Trovato per davvero collaudando il sotto-step 5c sull'S9, su Telegram
+vero: Alessio ha spuntato la prima voce della checklist con successo, poi
+la seconda ha fatto comparire "⚠️ Questa schermata non è più attiva. Ho
+aperto un nuovo Menù principale." -- come se il messaggio fosse vecchio,
+anche se era lo stesso appena arrivato.
+
+Causa: `ContextBot::claim_callback` (`src/context_bot.rs`) permette una
+sola rivendicazione per `message_id` e poi lo segna come "gia' usato" per
+sempre. E' una protezione corretta per come funziona il resto del
+progetto -- ogni altra schermata manda sempre un messaggio nuovo a ogni
+cambio, mai una modifica in place -- ma la checklist del collaudo guidato
+(sotto-step 5c) e' la prima a modificare piu' volte lo stesso messaggio
+via edit: ogni click dopo il primo sullo stesso `message_id` falliva
+sempre, a prescindere dalla velocita' con cui veniva premuto.
+
+Corretto estendendo ai callback `collaudo:*` la stessa eccezione gia'
+esistente per i bottoni `*:noop`, che verifica "e' ancora il messaggio
+attivo?" invece di "non e' mai stato rivendicato prima?" -- la checklist
+puo' essere premuta piu' volte finche' resta la schermata attiva, come
+serve a un messaggio che si aggiorna via edit invece di rimandarne uno
+nuovo.
+
+Nessun test nuovo (la logica di `claim_callback` non ha una suite propria
+in questo file; il comportamento e' verificato dal collaudo reale sull'S9,
+non da un unit test). Totale invariato: 289. Ricollaudo sull'S9 nel
+prossimo commit.
+
 <!-- CHANGELOG_BIT_ESECUZIONE_SCRIPT_20260904 -->
 # 04/09/2026 — Gli script nuovi non avevano il bit di esecuzione
 
