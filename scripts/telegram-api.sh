@@ -120,3 +120,17 @@ tg_sblocca() {
         --data "chat_id=${TG_CHAT_ID}" \
         --data "message_id=${message_id}" >/dev/null
 }
+
+# Elimina un messaggio. Serve per ripulire i messaggi di prova/collaudo
+# dalla chat reale, non fa parte del ciclo di deploy in se'.
+tg_elimina() {
+    local message_id="$1" risposta
+    risposta="$(_tg_curl "https://api.telegram.org/bot${TG_TOKEN}/deleteMessage" \
+        --data "chat_id=${TG_CHAT_ID}" \
+        --data "message_id=${message_id}")"
+    if echo "$risposta" | grep -q '"ok":true'; then
+        return 0
+    fi
+    echo "Eliminazione di $message_id fallita: $risposta" >&2
+    return 1
+}

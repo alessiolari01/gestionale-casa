@@ -238,9 +238,36 @@ Due problemi trovati collaudando per davvero, non a tavolino:
   mano): il countdown è arrivato in fondo lo stesso, con un piccolo scatto
   visibile una sola volta.
 
-Restano 4 sotto-step: gestione del processo sull'S9 (`nohup`+`disown`+file
-PID, deciso il 4 settembre), la schermata admin `🚀 Distribuzione`, la coda
-"in attesa di input testuale", e lo swap vero con rollback.
+**Sotto-step 2/5 fatto**: `scripts/avvia-bot.sh` e `scripts/ferma-bot.sh`,
+gestione del processo sull'S9 con `nohup`+`disown`+file PID (deciso il
+4 settembre — niente tmux/screen/supervisore nuovo, coerente con la scelta
+già fatta nel progetto contro Docker/container). Provato per davvero,
+partendo da bot spento (verificato con `ps`, non dato per scontato): avvio,
+online confermato dal log (`Gestionale Casa online`), spegnimento con
+`SIGINT` — non `SIGTERM`, perché il dispatcher in `main.rs` è collegato solo
+a `.enable_ctrlc_handler()`, che ascolta SIGINT — e spegnimento pulito
+confermato dal log (`^C received`, `Gestionale Casa offline`) e dal
+messaggio che il bot manda da solo agli amministratori.
+
+Aggiunto anche `tg_elimina` a `telegram-api.sh`, per ripulire i messaggi di
+prova dalla chat reale dopo un collaudo — non fa parte del ciclo di deploy,
+serve solo a non lasciare la chat sporca di test.
+
+Restano 3 sotto-step: la schermata admin `🚀 Distribuzione`, la coda "in
+attesa di input testuale", e lo swap vero con rollback.
+
+**Trovato collaudando, fuori dall'ambito di questo blocco**: il messaggio
+"ℹ️ Non sto aspettando un input in questo momento" (`main.rs`,
+`unexpected_input_notice`) appare *sotto* la schermata principale invece
+che vicino ad essa, spostandola fuori dalla vista — limite strutturale di
+Telegram (non si può inserire un messaggio "sopra" uno esistente, solo in
+fondo alla cronologia). Il meccanismo che lo fa sparire alla prossima
+interazione (`cleanup_transient_media`, chiamato sia su un nuovo testo sia
+su un pulsante premuto) esiste già nel codice, ma non è stato collaudato
+per davvero: nello screenshot del 4 settembre il bot è stato spento subito
+dopo la comparsa del messaggio, senza che nessuna interazione successiva
+lo mettesse alla prova. Da riprendere come miglioramento a sé, non dentro
+questo blocco di automazione.
 
 ## 3. Stato tecnico verificato
 
@@ -363,6 +390,8 @@ scripts/pipeline-locale.sh          fmt/check/test/clippy in locale, commit/push
 scripts/collauda-remoto.sh          lancia aggiorna-s9.sh --solo-controlli sull'S9 via SSH
 scripts/telegram-api.sh             pin/edit su Telegram via API diretta, per il countdown/checklist
 scripts/prova-countdown.sh          collaudo isolato del countdown pinnato, nessun deploy vero
+scripts/avvia-bot.sh                avvia il bot in background (nohup+disown+PID), per l'agente via SSH
+scripts/ferma-bot.sh                spegnimento pulito via SIGINT, legge il PID da avvia-bot.sh
 ```
 
 ## 6. Punti aperti

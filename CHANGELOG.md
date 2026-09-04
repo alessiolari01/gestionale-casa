@@ -2,6 +2,57 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_GESTIONE_PROCESSO_20260904 -->
+# 04/09/2026 — Avviare e fermare il bot da remoto, senza lasciarlo appeso alla sessione SSH
+
+Sotto-step 2/5 del punto 6 del ciclo (deploy): `scripts/avvia-bot.sh` e
+`scripts/ferma-bot.sh`. Oggi il bot vive solo dentro una sessione Termux
+tenuta aperta a mano (`cargo run` in foreground) — non c'è nessun
+supervisore di processo sull'S9, verificato prima di scrivere qualunque
+cosa (né `tmux`, né `screen`, né un servizio). Deciso il 4 settembre:
+`nohup ... & disown` con il PID salvato in un file, niente pacchetto nuovo
+da installare — coerente con la scelta già fatta nel progetto contro
+Docker/i container (`docs/architettura.md`, 2.4).
+
+**`ferma-bot.sh` manda `SIGINT`, non `SIGTERM`** — letto nel codice prima di
+agire, non per tentativi sul processo vero: in `main.rs` il dispatcher è
+collegato solo a `.enable_ctrlc_handler()`, che ascolta SIGINT (lo stesso
+del Ctrl+C interattivo). Un SIGTERM avrebbe ucciso il processo senza
+passare dal percorso che manda "🔴 Gestionale Casa è offline." agli
+amministratori.
+
+Provato per davvero contro l'S9 vero, partendo da bot spento (confermato
+con `ps`, non dato per scontato — un tentativo precedente di verificarlo
+con `pgrep -f` aveva dato un falso positivo, la ricerca vedeva se stessa
+nell'elenco processi):
+
+- `avvia-bot.sh`: avvio in background, PID scritto su file, il processo
+  sopravvive alla chiusura della sessione SSH (verificato con `ps`: nessun
+  terminale di controllo). Riconosce l'avvenuto avvio cercando "Gestionale
+  Casa online" nel log — la riga vera che il codice scrive dopo essersi
+  collegato a Telegram, non un segnale indovinato;
+- `ferma-bot.sh`: SIGINT, poi attesa fino a un timeout. Log confermato:
+  `^C received`, `Dispatching has been shut down`, `Gestionale Casa
+  offline`. File PID ripulito da solo.
+
+Aggiunto anche `tg_elimina` a `telegram-api.sh` (API `deleteMessage`), per
+ripulire dalla chat reale i messaggi di prova lasciati dai collaudi — non
+fa parte del ciclo di deploy, è igiene dopo i test.
+
+## Trovato collaudando, fuori da questo blocco
+
+Il messaggio "ℹ️ Non sto aspettando un input in questo momento"
+(`unexpected_input_notice` in `main.rs`) appare sotto la schermata
+principale invece che vicino ad essa, spostandola fuori dalla vista —
+limite strutturale di Telegram, non un bug banale (non si può inserire un
+messaggio "sopra" uno esistente). Il meccanismo che lo fa sparire alla
+prossima interazione (`cleanup_transient_media`) esiste già, ma non è stato
+messo alla prova per davvero: nel collaudo del 4 settembre il bot è stato
+spento subito dopo la sua comparsa. Segnato in `STATO.md` come miglioramento
+a sé, non affrontato in questo commit.
+
+Nessun test Rust coinvolto in questo commit. Totale invariato: 270.
+
 <!-- CHANGELOG_COUNTDOWN_PINNATO_20260904 -->
 # 04/09/2026 — Il countdown pinnato, e due bug di rete trovati provandolo per davvero
 
