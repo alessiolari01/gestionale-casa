@@ -2,6 +2,31 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_MODALITA_RISERVATA_COLLAUDO_20260904 -->
+# 04/09/2026 — Sotto-step 5a collaudato per davvero: admin passa, bottone sblocca
+
+La modalita' riservata descritta nella voce precedente e' stata collaudata
+sul bot vero, sull'S9 vero. Aggiornamento sul ramo: 280 test verdi anche
+sulla sua toolchain, backup del database, nessuna migration nuova da
+provare. Bot avviato con `avvia-bot.sh --riservato`, log che conferma
+"Avvio in modalita' riservata (RISERVATO=1)".
+
+Alessio (amministratore principale) ha continuato a usare il bot
+normalmente con la modalita' attiva: `/start` e navigazione, nessun avviso
+di manutenzione. Nel menu' `🛠️ Amministrazione` e' comparso il bottone
+`✅ Sblocca, torna online per tutti`; premuto, e' sparito dal menu' — segno
+che il flag e' tornato a modalita' normale — senza errori nel log durante
+la notifica "✅ Di nuovo online." alle chat attive. Bot fermato a fine
+collaudo con `ferma-bot.sh`, spegnimento pulito.
+
+Resta non collaudabile per davvero la meta' "blocca chi non e'
+amministratore": serve un secondo account Telegram, che il progetto non ha
+ancora (punto 6 aperto in `STATO.md`). Copertura solo via unit test per
+quella parte, non un limite di questo collaudo.
+
+Nessun test nuovo (nessuna modifica al codice, solo verifica). Totale
+invariato: 280.
+
 <!-- CHANGELOG_MODALITA_RISERVATA_20260904 -->
 # 04/09/2026 — Modalità riservata (sotto-step 5a, meccanica scritta, collaudo sull'S9 in corso)
 

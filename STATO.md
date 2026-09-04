@@ -338,8 +338,7 @@ conferma pilotati dal bot stesso (non dall'agente via API diretta, a
 differenza del countdown: qui il bot nuovo è già acceso e in ascolto,
 non serve altro), 5d l'orchestrazione che li lega.
 
-**Sotto-step 5a, meccanica scritta — collaudo sull'S9 in corso, non ancora
-confermato**: la modalità riservata (solo l'amministratore principale può
+**Sotto-step 5a fatto**: la modalità riservata (solo l'amministratore principale può
 usare il bot, gli altri vedono "🚧 Manutenzione in corso"). Deciso insieme
 ad Alessio: un flag in memoria (`ModalitaRiservata`, un `AtomicBool`
 condiviso come `ShutdownController`), non un file o una variabile letta
@@ -352,13 +351,23 @@ principale quando la modalità è attiva, disattiva il flag e manda
 "✅ Di nuovo online." a tutte le chat di utenti attivi
 (`identity::list_active_chat_ids`, nuova).
 
-Verificabile solo in parte per ora: il gate vero e proprio (bloccare chi
-*non* è amministratore principale) richiederebbe un secondo account
+Collaudato per davvero sull'S9 (bot aggiornato sul ramo, 280 test verdi
+anche sulla sua toolchain, avviato con `avvia-bot.sh --riservato`, log che
+conferma "Avvio in modalità riservata (RISERVATO=1)"): Alessio (amministratore
+principale) ha continuato a usare il bot normalmente con la modalità
+attiva (`/start` e navigazione, nessun avviso di manutenzione); nel menù
+`🛠️ Amministrazione` è comparso il bottone `✅ Sblocca, torna online per
+tutti`; premuto, il bottone è sparito dal menù, segno che il flag è
+tornato a modalità normale — nessun errore nel log durante la notifica
+"✅ Di nuovo online." alle chat attive. Bot fermato a fine collaudo con
+`ferma-bot.sh`.
+
+**Verificabile solo in parte per ora**: il gate vero e proprio (bloccare
+chi *non* è amministratore principale) richiederebbe un secondo account
 Telegram per il collaudo reale — la stessa lacuna già segnata al punto 6
-di questa sezione. La logica è comunque coperta da un unit test
-(`deve_bloccare_per_manutenzione`, quattro casi); resta da verificare per
-davvero, sull'S9, che l'amministratore principale continui a usare il bot
-normalmente con la modalità attiva e che il bottone la disattivi.
+di questa sezione. Resta coperto solo dall'unit test
+(`deve_bloccare_per_manutenzione`, quattro casi), non da un collaudo su un
+utente vero non amministratore.
 
 **Trovato per davvero verificando la CI di questo stesso push**: subito
 dopo `git push`, `scripts/verifica-ci.sh` ha riportato "OK CI verde"

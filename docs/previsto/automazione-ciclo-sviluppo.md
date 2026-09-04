@@ -100,8 +100,8 @@ singolo.
      principale può usarlo davvero (ruoli/permessi già esistenti in
      `access_control.rs`). Gli utenti normali vedono lo stato di
      manutenzione e non possono interagire con la nuova versione finché non
-     arriva la conferma. **Meccanica scritta (sotto-step 5a, 4 settembre
-     2026), collaudo sull'S9 in corso**: un flag in memoria condiviso
+     arriva la conferma. **Costruito e collaudato per davvero sull'S9
+     (sotto-step 5a, 4 settembre 2026)**: un flag in memoria condiviso
      (`ModalitaRiservata`, un `AtomicBool` come `ShutdownController`), non
      un file o una variabile letta una volta sola all'avvio — deve poter
      tornare disattivo premendo un bottone in chat, senza riavviare il
@@ -109,10 +109,13 @@ singolo.
      imposta `RISERVATO=1` solo per quel lancio. Il bottone
      `✅ Sblocca, torna online per tutti`, visibile solo all'amministratore
      principale quando la modalità è attiva, disattiva il flag e notifica
-     tutte le chat di utenti attivi. Non collaudabile fino in fondo senza un
-     secondo account Telegram (stessa lacuna del punto 6 aperto in
-     `STATO.md`): la logica di blocco è coperta da un unit test, non da un
-     collaudo reale su un utente non amministratore;
+     tutte le chat di utenti attivi. Collaudo reale: l'amministratore
+     principale continua a usare il bot normalmente con la modalità attiva,
+     il bottone compare e, premuto, disattiva il flag. **Non collaudabile
+     fino in fondo**: verificare che un utente *non* amministratore veda
+     l'avviso di manutenzione richiede un secondo account Telegram, che il
+     progetto non ha ancora (stessa lacuna del punto 6 aperto in
+     `STATO.md`) — quella parte resta coperta solo da un unit test;
    - tipo di messaggio di manutenzione e momento dell'aggiornamento
      (immediato o programmato) sono configurabili dall'amministratore
      principale. **Deciso il 3 settembre 2026**: una schermata
