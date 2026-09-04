@@ -90,19 +90,36 @@ fi
 echo "Leggo le credenziali dall'S9..."
 tg_leggi_credenziali || exit 1
 
+# Id del messaggio di manutenzione (stampato in stdout da
+# countdown-manutenzione.sh): la sequenza lo aggiorna in place se qualcosa
+# va storto (mai un messaggio nuovo per l'errore), e lo elimina del tutto
+# a swap riuscito -- non lo lascia come banner "completato": trovato per
+# davvero da Alessio collaudando, sia il primo problema (restava bloccato
+# su "in corso" anche a swap concluso) sia il secondo (anche corretto in
+# "completato", restava un residuo visibile pure a collaudo confermato).
+ID_MANUTENZIONE=""
+
 # Ogni passo che fallisce avvisa su Telegram con l'errore preciso, poi
-# esce: mai un fallimento silenzioso (regola della specifica).
+# esce: mai un fallimento silenzioso (regola della specifica). Se il
+# messaggio di manutenzione esiste gia', lo modifica invece di mandarne
+# uno nuovo.
 fallisci() {
     local motivo="$1"
     echo "FERMO: $motivo" >&2
-    tg_invia "🔴 Deploy fermato
+    if [ -n "$ID_MANUTENZIONE" ]; then
+        tg_modifica "$ID_MANUTENZIONE" "🔴 Aggiornamento fermato
 
 $motivo" >/dev/null 2>&1 || true
+    else
+        tg_invia "🔴 Deploy fermato
+
+$motivo" >/dev/null 2>&1 || true
+    fi
     exit 1
 }
 
 echo "--- 1/7 Countdown di manutenzione ---"
-./scripts/countdown-manutenzione.sh ${MINUTI:+--minuti "$MINUTI"} >/dev/null \
+ID_MANUTENZIONE="$(./scripts/countdown-manutenzione.sh ${MINUTI:+--minuti "$MINUTI"})" \
     || fallisci "Il countdown di manutenzione è fallito."
 
 echo "--- 2/7 Controllo sessioni attive ---"
@@ -139,6 +156,13 @@ if ! ssh s9 "cd ~/gestionale-casa && PID=\$(cat data/run/bot.pid 2>/dev/null) &&
         || fallisci "Il binario nuovo è andato in errore subito dopo l'avvio, E il rollback al binario precedente È FALLITO. L'S9 potrebbe essere giù: intervento manuale urgente."
     fallisci "Il binario nuovo è andato in errore subito dopo l'avvio (finestra di stabilità di ${FINESTRA_STABILITA}s). Rollback al binario precedente riuscito, l'S9 è di nuovo online con la versione di prima."
 fi
+
+# Eliminato, non modificato: a swap riuscito il messaggio di manutenzione
+# non serve più -- il bot stesso prende il racconto da qui (riepilogo,
+# checklist, conferma). Lasciarlo come banner "completato" è un residuo
+# in chat, non un'informazione utile: trovato per davvero da Alessio,
+# restava visibile anche a collaudo confermato e menù di nuovo in uso.
+tg_elimina "$ID_MANUTENZIONE" >/dev/null 2>&1 || true
 
 echo "OK Deploy completato: il bot nuovo è online in modalità riservata, stabile da ${FINESTRA_STABILITA}s."
 echo "Il bot ha mandato da solo il riepilogo e la checklist all'amministratore principale."

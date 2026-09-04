@@ -190,8 +190,8 @@ singolo.
 Qualunque fallimento in un passaggio (connessione SSH persa, build o
 collaudo in errore) genera una notifica Telegram immediata con l'errore
 specifico e lo stato in cui è stato lasciato l'S9 — mai un fallimento
-silenzioso. **Scritto (sotto-step 5d, 4 settembre 2026), collaudo
-end-to-end sull'S9 da fare**: `scripts/deploy.sh` lega insieme i passi 1-6
+silenzioso. **Scritto e collaudato end-to-end sull'S9 (sotto-step 5d, 4
+settembre 2026)**: `scripts/deploy.sh` lega insieme i passi 1-6
 (countdown, controllo sessioni, salvataggio del binario, arresto,
 aggiornamento e riverifica del codice, avvio riservato con
 riepilogo/checklist pronti, controllo di stabilità con rollback
@@ -201,6 +201,20 @@ con `--confermo-merge` esplicito, per non rendere irreversibile un'azione
 con conseguenze reali senza un secondo controllo) se confermato, rollback
 *in modalità riservata* (non normale: la specifica vuole restare in
 manutenzione finché non c'è una versione corretta) se rifiutato.
+
+Collaudato per davvero con tre ridistribuzioni reali dello stesso commit
+già in produzione (nessun rischio funzionale). Due bug trovati dal vivo
+sul messaggio di countdown: restava bloccato su "in corso" anche a swap
+concluso (l'id veniva scartato invece che riusato per l'edit finale), e
+— corretto quello — restava comunque visibile come banner "✅
+Aggiornamento completato" sopra il menù principale già in uso normale, un
+residuo non un'informazione utile una volta che il bot stesso prende il
+racconto (riepilogo, checklist, conferma). Risolto eliminando il
+messaggio (invece di aggiornarlo) a swap riuscito, mantenendo l'edit solo
+sui percorsi di errore. Ricollaudato con una quarta ridistribuzione
+mirata, confermato da Alessio sulla chat reale: **con questo il punto 6
+(deploy a downtime minimo) è completo**. Non ancora esercitato dal vivo:
+il percorso di merge reale su `main` (`--confermo-merge`).
 
 ## Tracciamento
 

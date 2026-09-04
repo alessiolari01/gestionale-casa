@@ -537,10 +537,59 @@ manutenzione per gli utenti normali finché non arriva una versione
 corretta, come dice esplicitamente la specifica — il vecchio binario
 comunque funzionante non basta a giustificare di riaprire l'accesso).
 
-Collaudo end-to-end non ancora fatto: la prima prova reale sarà una
-"ridistribuzione" dello stesso commit già in produzione (nessun codice
-nuovo, solo per esercitare la sequenza vera sull'S9 vero senza rischio
-funzionale), concordata con Alessio prima di lanciarla.
+**Collaudo end-to-end fatto per davvero, sotto-step 5d completo**: tre
+ridistribuzioni reali dello stesso commit già in produzione (nessun
+codice nuovo, solo per esercitare la sequenza vera sull'S9 vero), tutte
+concordate con Alessio prima di lanciarle. La sequenza intera (countdown
+→ sessioni → salvataggio binario → arresto → ricompilazione e riverifica
+→ riavvio riservato → riepilogo/checklist mandati dal bot stesso →
+conferma del collaudo → ritorno alla modalità normale) ha funzionato
+end-to-end, ma solo dopo tre correzioni trovate dal vivo, non a tavolino:
+
+1. **Click ripetuti sulla checklist bloccati**: `claim_callback` in
+   `context_bot.rs` reclama ogni `message_id` una sola volta, pensato per
+   evitare doppie azioni sullo stesso pulsante — ma la checklist del
+   collaudo va spuntata più volte sullo stesso messaggio. Corretto
+   estendendo il bypass già esistente per i callback `*:noop` (che usa
+   `is_current_message` invece del claim one-shot) anche ai callback
+   `collaudo:*`.
+2. **Il messaggio di conferma spariva subito dopo**: `esci_da_modalita_riservata`
+   manda un messaggio "di nuovo online" a tutte le chat attive usando il
+   percorso *tracciato* di `ContextBot` (una sola schermata attiva per
+   chat), che quindi cancellava come effetto collaterale il messaggio
+   "Collaudo confermato" appena mostrato. Un primo tentativo di correzione
+   con `(*bot).send_message(...)` non ha funzionato — `*bot` su un
+   `&ContextBot` è la deref built-in del riferimento esterno, non invoca
+   la `impl Deref` di `ContextBot` verso il bot grezzo (ci vorrebbe
+   `**bot`) — riconosciuto dal ricomparire del pulsante "Migliora".
+   Corretto usando il metodo già esistente `send_message_untracked`.
+   Aggiunto anche un pulsante "torna al menù" al messaggio di conferma
+   (richiesto da Alessio, per non dover riscrivere un messaggio a mano
+   dopo il collaudo) — che per essere cliccabile ha richiesto di tornare
+   al percorso *tracciato* solo per quel messaggio specifico, e di
+   spostare la modifica della checklist a "confermato" *prima* della
+   notifica broadcast (altrimenti il broadcast tracciato cancella la
+   checklist ancora aperta invece del messaggio finale).
+3. **Il messaggio di manutenzione restava bloccato**: `deploy.sh`
+   scartava l'id del messaggio di countdown (`>/dev/null`), quindi non
+   poteva più aggiornarlo a swap concluso — restava per sempre su
+   "🚧 Manutenzione in corso". Corretto catturando l'id in
+   `ID_MANUTENZIONE`. La prima correzione lo aggiornava a "✅ Aggiornamento
+   completato", ma Alessio ha notato dal vivo (screenshot) che restava
+   comunque visibile come banner sopra il menù principale già in uso
+   normale — un residuo, non un'informazione utile, dato che a quel punto
+   il racconto lo prende il bot stesso (riepilogo, checklist, conferma,
+   "di nuovo online"). Corretto sostituendo l'aggiornamento con
+   un'eliminazione (`tg_elimina`) a swap riuscito, mantenendo
+   l'aggiornamento solo sui percorsi di errore (dove resta un'informazione
+   utile).
+
+Con questi tre fix ricollaudati dal vivo (l'ultimo con una quarta
+ridistribuzione mirata), il sotto-step 5d — e quindi l'intero punto 6
+"deploy a downtime minimo" — è completo. Non ancora esercitato dal vivo:
+il percorso di merge reale su `main` di `completa-deploy.sh`
+(`--confermo-merge`), rimandato a quando Alessio deciderà di promuovere
+per davvero questo ramo.
 
 **Trovato per davvero verificando la CI di questo stesso push**: subito
 dopo `git push`, `scripts/verifica-ci.sh` ha riportato "OK CI verde"

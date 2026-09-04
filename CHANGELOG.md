@@ -2,6 +2,37 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_5D_COLLAUDO_ENDTOEND_20260904 -->
+# 04/09/2026 — Sotto-step 5d collaudato end-to-end: il punto 6 e' completo
+
+Tre ridistribuzioni reali dello stesso commit gia' in produzione (nessun
+codice nuovo, solo per esercitare `deploy.sh` sull'S9 vero), concordate
+con Alessio. La sequenza intera ha funzionato, ma solo dopo due bug sul
+messaggio di manutenzione trovati dal vivo, non a tavolino.
+
+**Bloccato per sempre su "in corso"**: `deploy.sh` scartava l'id del
+messaggio di countdown (`>/dev/null`), quindi non poteva piu' aggiornarlo
+a swap concluso. Corretto catturando l'id in `ID_MANUTENZIONE`, aggiornato
+sia sui percorsi di errore (via `fallisci()`) sia a swap riuscito.
+
+**Il banner "completato" restava comunque visibile**: la prima
+correzione lo aggiornava a "✅ Aggiornamento completato", ma Alessio ha
+mostrato via screenshot che restava sopra il menu principale gia' in uso
+normale, dopo che il bot aveva gia' preso il racconto (riepilogo,
+checklist, conferma, "di nuovo online"). Un residuo, non
+un'informazione utile. Corretto sostituendo l'aggiornamento con
+un'eliminazione (`tg_elimina`) sul percorso di successo, mantenendo
+l'aggiornamento solo dove resta utile: i percorsi di errore.
+
+Ricollaudato dal vivo con una quarta ridistribuzione mirata: il
+messaggio sparisce del tutto a swap confermato, confermato da Alessio
+sulla chat reale. Con questo, il sotto-step 5d -- e l'intero punto 6
+"deploy a downtime minimo" -- e' completo. Non ancora esercitato dal
+vivo: il percorso di merge reale su `main` di `completa-deploy.sh`
+(`--confermo-merge`).
+
+Nessun test Rust coinvolto (solo `scripts/deploy.sh`). Totale invariato: 289.
+
 <!-- CHANGELOG_ORCHESTRAZIONE_DEPLOY_20260904 -->
 # 04/09/2026 — L'orchestrazione dello swap (sotto-step 5d, scritta)
 
