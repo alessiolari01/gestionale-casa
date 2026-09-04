@@ -2,6 +2,36 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_SESSIONI_ATTIVE_COLLAUDO_20260904 -->
+# 04/09/2026 — Sotto-step 4/5 collaudato per davvero: bot libero, sessione aperta, bot liberato
+
+Il canale SIGUSR1 descritto nella voce precedente e' stato collaudato sul
+bot vero, sull'S9 vero, non a tavolino. Prima di tutto l'S9 e' stato
+aggiornato sul ramo: 279 test verdi anche sulla sua toolchain (diversa da
+questa macchina e dalla CI), backup del database creato, la nuova migration
+della schermata Distribuzione provata su una copia senza errori.
+
+Bot avviato con `avvia-bot.sh`. A bot libero, `controlla-sessioni-attive.sh`
+ha riportato subito "0 sessioni attive". Alessio ha poi aperto per davvero
+`🚀 Distribuzione → ✏️ Cambia default → Countdown standard → ✏️ Altro
+valore` sulla chat reale: lo script ha rilevato "1" a ogni ripetizione, e al
+timeout di prova e' uscito con "procedo comunque" come previsto dalla
+specifica. Liberata la sessione (valore scritto nella chat), il conteggio
+e' tornato a "0". Bot fermato a fine collaudo con `ferma-bot.sh`.
+
+Un bug reale trovato al primo giro, non a tavolino: lo script falliva con
+"nessun file PID" anche a bot avviato. La causa era un `~` dentro una
+variabile del PC (`CARTELLA_RUN_S9="~/gestionale-casa/data/run"`)
+interpolata tra apici singoli nel comando remoto — l'espansione della tilde
+vale solo a inizio parola durante il parsing della shell, non dentro un
+valore gia' sostituito da un'altra variabile, quindi restava un carattere
+`~` letterale e il file cercato non esisteva mai. Corretto usando un
+percorso relativo (`data/run`), dato che il comando remoto fa gia' `cd
+~/gestionale-casa` prima di usarlo.
+
+Nessun test Rust coinvolto (il bug era in uno script bash). Totale
+invariato: 279.
+
 <!-- CHANGELOG_SESSIONI_ATTIVE_20260904 -->
 # 04/09/2026 — Il bot sa dire se qualcuno sta scrivendo, su richiesta (meccanica scritta, collaudo sull'S9 in corso)
 

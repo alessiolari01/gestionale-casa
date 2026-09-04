@@ -293,8 +293,7 @@ dai retry di `_tg_curl`, countdown arrivato a 0 con i salti nel numero
 mostrato dovuti proprio ai due intoppi — comportamento atteso e confermato
 da Alessio dopo la spiegazione. Messaggio di prova ripulito a fine collaudo.
 
-**Sotto-step 4/5, meccanica scritta — collaudo sull'S9 in corso, non ancora
-confermato**: il controllo pre-swap "qualche chat sta scrivendo?"
+**Sotto-step 4/5 fatto**: il controllo pre-swap "qualche chat sta scrivendo?"
 (le dieci mappe di sessione — nove più `distribuzione_sessions` del
 sotto-step 3 — interrogate così come sono, senza unificarle, deciso il
 3 settembre). Decisione di schema presa insieme ad Alessio prima di
@@ -312,8 +311,27 @@ quale procede comunque, come deciso nella specifica. Non tocca ancora
 `ferma-bot.sh`: il collegamento dei due nella sequenza reale di stop arriva
 con il sotto-step 5.
 
-Restano il collaudo reale di questo sotto-step sull'S9 e il sotto-step 5
-(lo swap vero con rollback).
+Collaudato per davvero sull'S9 (bot aggiornato sul ramo, 279 test verdi
+anche sulla sua toolchain, avviato con `avvia-bot.sh`): a bot libero
+`controlla-sessioni-attive.sh` ha riportato subito "0 sessioni attive";
+messa una sessione vera in attesa sulla chat dell'amministratore principale
+(`🚀 Distribuzione → ✏️ Cambia default → Countdown standard → ✏️ Altro
+valore`, che apre `AwaitingMinuti`), lo script ha rilevato "1" a ogni
+ripetizione e, al timeout di prova (20s), è uscito con "procedo comunque"
+come da specifica; liberata la sessione (valore scritto), il conteggio è
+tornato a "0". Bot fermato a fine collaudo con `ferma-bot.sh`, spegnimento
+pulito confermato come nel sotto-step 2.
+
+Un bug reale trovato collaudando, non a tavolino: il primo giro dello
+script falliva con "nessun file PID" anche a bot avviato. La causa era un
+`~` dentro una variabile del PC (`CARTELLA_RUN_S9="~/gestionale-casa/data/run"`)
+interpolata dentro apici singoli nel comando remoto: l'espansione della
+tilde vale solo a inizio parola durante il parsing, non dentro un valore
+già sostituito, quindi restava letterale. Corretto usando un percorso
+relativo (`data/run`), visto che il comando remoto fa già `cd
+~/gestionale-casa` prima di usarlo.
+
+Resta 1 sotto-step: lo swap vero con rollback.
 
 **Trovato per davvero verificando la CI di questo stesso push**: subito
 dopo `git push`, `scripts/verifica-ci.sh` ha riportato "OK CI verde"

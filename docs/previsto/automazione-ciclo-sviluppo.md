@@ -78,8 +78,8 @@ singolo.
      `recipe_sessions`, `improvement_sessions`, `container_sessions`,
      `location_sessions`, `photo_sessions`, `sessions`), ognuna con il proprio
      `has_active(chat_id)`. Il controllo pre-swap le interroga tutte, senza
-     unificarle prima — vedi la decisione in `STATO.md`. **Meccanica scritta
-     (sotto-step 4/5, 4 settembre 2026), collaudo sull'S9 in corso**: le
+     unificarle prima — vedi la decisione in `STATO.md`. **Costruito e
+     collaudato per davvero sull'S9 (sotto-step 4/5, 4 settembre 2026)**: le
      mappe (dieci, con
      `distribuzione_sessions` del sotto-step 3) vivono solo nella memoria
      del processo Rust sull'S9, quindi il controllo esterno via SSH non

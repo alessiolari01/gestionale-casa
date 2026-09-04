@@ -31,7 +31,14 @@ set -uo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
-CARTELLA_RUN_S9="~/gestionale-casa/data/run"
+# Relativo, non "~/gestionale-casa/data/run": il comando remoto fa gia'
+# `cd ~/gestionale-casa` prima di usarlo, e la tilde dentro una variabile
+# passata tra apici singoli alla shell remota non verrebbe comunque
+# espansa (l'espansione della tilde vale solo a inizio parola, non dentro
+# un valore gia' sostituito) -- trovato per davvero collaudando questo
+# script sull'S9, non a tavolino: falliva con "nessun file PID" anche a
+# bot avviato.
+CARTELLA_RUN_S9="data/run"
 TIMEOUT=120
 INTERVALLO=5
 
