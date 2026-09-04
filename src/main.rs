@@ -2626,10 +2626,14 @@ async fn esci_da_modalita_riservata(
         .await
         .unwrap_or_default();
     for id in chat_ids {
-        if let Err(error) = bot
-            .send_message_without_improve(ChatId(id), "✅ Di nuovo online.")
-            .await
-        {
+        // `(*bot)` invece di `bot`: bypassa il wrapper `ContextBot` e la sua
+        // gestione di "una sola schermata UI attiva per chat", che
+        // altrimenti cancellerebbe l'ultima schermata di quella chat -- per
+        // l'amministratore principale, proprio il messaggio di collaudo che
+        // sta per essere modificato in "confermato". Trovato per davvero
+        // collaudando sull'S9: la conferma cancellava la checklist prima
+        // di poterla modificare, lasciando in chat solo questa notifica.
+        if let Err(error) = (*bot).send_message(ChatId(id), "✅ Di nuovo online.").await {
             tracing::warn!(
                 chat_id = id,
                 ?error,

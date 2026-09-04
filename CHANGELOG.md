@@ -2,6 +2,32 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_NOTIFICA_CANCELLAVA_COLLAUDO_20260904 -->
+# 04/09/2026 — La notifica di "di nuovo online" cancellava la checklist appena confermata
+
+Trovato per davvero collaudando la conferma sull'S9, subito dopo il fix
+precedente: premuto "✅ Confermo, funziona", in chat e' rimasto solo
+"✅ Di nuovo online." -- la checklist con scritto "Collaudo confermato"
+non c'era piu'.
+
+Causa: `esci_da_modalita_riservata` manda quella notifica con
+`send_message_without_improve`, che passa dal wrapper `ContextBot` e dalla
+sua regola "una sola schermata UI attiva per chat" -- mandare un messaggio
+nuovo a una chat cancella quello attivo precedente. Per l'amministratore
+principale, il messaggio attivo precedente era proprio la checklist di
+collaudo appena modificata: la cancellazione arriva prima che l'edit
+"confermato" abbia effetto (o lo cancella subito dopo), quindi l'edit
+fallisce silenziosamente su un messaggio gia' sparito.
+
+Corretto mandando quella notifica con il bot grezzo (`(*bot).send_message`,
+bypassando il wrapper `ContextBot`): e' una notifica di cortesia a
+chat qualsiasi (compresi utenti che non hanno nessuna schermata di
+collaudo aperta), non una nuova schermata -- non deve toccare lo stato di
+"schermata attiva" di nessuno.
+
+Nessun test nuovo (comportamento verificato dal collaudo reale sull'S9).
+Totale invariato: 289. Ricollaudo nel prossimo commit.
+
 <!-- CHANGELOG_CLAIM_CALLBACK_RIPETIBILE_20260904 -->
 # 04/09/2026 — La checklist di collaudo si bloccava al secondo click
 

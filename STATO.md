@@ -430,7 +430,24 @@ volte lo stesso messaggio via edit, quindi ogni click dopo il primo sullo
 stesso messaggio falliva sempre, non per un doppio click veloce. Corretto
 estendendo la stessa eccezione già esistente per `*:noop` (che usa "è
 ancora il messaggio corrente?" invece di "rivendicato una volta sola") ai
-callback `collaudo:*`. Ricollaudo sull'S9 in corso.
+callback `collaudo:*`. Ricollaudato sull'S9: le tre voci della checklist di
+prova si sono spuntate correttamente una dopo l'altra, e i bottoni
+`✅ Confermo` / `❌ Non funziona` sono comparsi solo a checklist completa.
+
+**Secondo bug reale, trovato subito dopo collaudando la conferma**:
+premendo `✅ Confermo, funziona`, in chat è rimasto solo "✅ Di nuovo
+online." — la checklist con "Collaudo confermato" non si vedeva più.
+Causa: `esci_da_modalita_riservata` manda quel messaggio con
+`send_message_without_improve`, che passa dal wrapper `ContextBot` e dalla
+sua regola "una sola schermata UI attiva per chat" — mandare un nuovo
+messaggio a una chat **cancella quello attivo precedente**, che per
+l'amministratore principale era proprio il messaggio di collaudo appena
+modificato in "confermato" (o stava per esserlo: la cancellazione avviene
+prima che l'edit abbia effetto, quindi l'edit poi falliva su un messaggio
+già sparito). Corretto mandando quella notifica con il bot grezzo
+(`(*bot).send_message(...)`, bypassando `ContextBot`): è una notifica di
+cortesia a chat qualsiasi, non una nuova schermata, e non deve toccare lo
+stato di "schermata attiva" di nessuno. Ricollaudo sull'S9 in corso.
 
 289 test (280 prima), 9 nuovi in `src/modules/collaudo.rs`: interpretazione
 del file (separatore mancante, checklist vuota, righe vuote ignorate),
