@@ -623,21 +623,59 @@ dopo la comparsa del messaggio, senza che nessuna interazione successiva
 lo mettesse alla prova. Da riprendere come miglioramento a sé, non dentro
 questo blocco di automazione.
 
+## 2ter. Badge "🆕" per le novità — infrastruttura pronta, in attesa del primo uso reale
+
+Deciso con Alessio il 5 settembre 2026, indipendente dall'automazione del
+ciclo di sviluppo (sezione 2bis): quando una funzionalità è nuova o cambia in
+modo significativo, il suo pulsante e ogni pulsante di menù che porta fino a
+lì (su su fino al menù principale) mostrano `🆕 `. Sparisce solo per chi
+arriva davvero fino alla schermata cambiata (non aprendo un menù intermedio),
+e solo per quella persona — non un flag condiviso, perché più persone usano
+lo stesso bot. Alla prima visita di ciascuno, la schermata mostra anche un
+breve tutorial, chiudibile con `✅ Ho capito`. Dettagli e motivazione in
+`docs/convenzioni-telegram.md` (C14).
+
+**Deciso**: si applica solo da questa data in avanti — **nessun retrofit**
+delle schermate esistenti, che quindi oggi non mostrano nessun badge.
+
+**Costruita l'infrastruttura di base**: `src/modules/novita.rs` (nuovo),
+`migrations/20260905090000_novita_lette.sql` (nuova tabella, additiva). "Cosa
+è nuovo" vive in un registro statico nel codice (`REGISTRO`: chiave,
+genitore per la risalita nel menù, tutorial opzionale), non nel database — nel
+database (`novita_lette`) si tiene traccia solo di chi ha già visto cosa, per
+utente. `REGISTRO` **parte vuoto**: nessuna funzionalità è ancora dichiarata,
+in attesa del primo pezzo di codice reale che la userà.
+
+Un bug reale trovato scrivendo il primo test (non a tavolino): i nodi
+intermedi del registro (es. una categoria usata solo per risalire al menù
+superiore, mai una schermata che qualcuno visita davvero) non vengono mai
+segnati come "visti" da nessuno — contarli come "ancora da vedere" avrebbe
+tenuto il badge acceso per sempre anche a foglie tutte viste. Corretto
+distinguendo le foglie del registro (funzionalità vere, visitabili) dai nodi
+intermedi (usati solo per la catena verso il menù): solo le foglie contano
+per decidere se un pulsante deve mostrare il badge.
+
+**Non ancora collaudato dal vivo su Telegram**: senza nessuna voce nel
+registro non c'è nessun badge da vedere sul bot. Il collaudo reale (SSH +
+Telegram) arriva insieme alla prima funzionalità che lo userà davvero — per
+non dichiarare verificato un meccanismo mai esercitato con un caso concreto.
+
+8 nuovi test (5 sulla logica pura di propagazione/foglie, 1 sull'etichetta, 2
+sulle funzioni DB con `sqlite::memory:`). Totale: 297 (289 prima).
+
 ## 3. Stato tecnico verificato
 
-- **43 migration** nel repository. Le prime 42 sono **applicate** al database
-  reale dell'S9, confermato dall'avvio del 1 settembre sera:
-  `applied_migrations=42`. Le versioni precedenti di questo file dicevano che
-  `20260901013000_versione_contenuto_ricetta.sql` fosse ancora da applicare:
-  non era vero, ed e' bastato leggere `_sqlx_migrations` per accorgersene.
-  La 43esima, `20260904150000_impostazioni_distribuzione.sql`, non e' ancora
-  stata applicata sull'S9 al momento di scrivere questo: lo sara' al
-  prossimo `aggiorna-s9.sh`;
+- **44 migration** nel repository. Le prime 43 sono **applicate** al database
+  reale dell'S9, verificato il 5 settembre 2026 leggendo `_sqlx_migrations`
+  via SSH (`applied_migrations=43`) — non dedotto, per la stessa ragione già
+  scritta qui altre volte. La 44esima, `20260905090000_novita_lette.sql`,
+  non e' ancora stata applicata sull'S9 al momento di scrivere questo: lo
+  sara' al prossimo `aggiorna-s9.sh`;
 - pipeline verde: `fmt`, `check --locked`, `clippy --all-targets --locked
-  -- -D warnings`, `test --locked` — **289 test** (280 prima del sotto-step
-  5c, 279 prima del sotto-step 5a, 270 prima del sotto-step 3/5 della
-  distribuzione, 248 prima del 2 settembre: e' il numero da confrontare
-  dopo ogni aggiornamento dell'S9);
+  -- -D warnings`, `test --locked` — **297 test** (289 prima del badge
+  "🆕", 280 prima del sotto-step 5c, 279 prima del sotto-step 5a, 270 prima
+  del sotto-step 3/5 della distribuzione, 248 prima del 2 settembre: e' il
+  numero da confrontare dopo ogni aggiornamento dell'S9);
 - CI su GitHub Actions **verde** dalla run #42, la prima dello Step 7.
 
 Regola invariata: una migration applicata al database reale e' immutabile. Ogni
@@ -758,6 +796,7 @@ scripts/deploy.sh                   l'orchestrazione: countdown → sessioni →
 scripts/completa-deploy.sh          seguito: merge su main o rollback, in base all'esito del collaudo
 src/modules/distribuzione.rs        default di manutenzione (tipo/minuti/orario), schermata admin
 src/modules/collaudo.rs             riepilogo/checklist/conferma del collaudo guidato dopo lo swap
+src/modules/novita.rs               registro delle novità e badge "🆕" propagato nei menù
 ```
 
 ## 6. Punti aperti

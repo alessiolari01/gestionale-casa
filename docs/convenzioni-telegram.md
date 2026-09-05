@@ -317,6 +317,24 @@ una croce: `⬅️ ❌` faceva sembrare che «indietro» fosse rotto.
 Esempio, il calendario del planner: `[1]` è oggi, `•` segna i giorni che hanno
 già dei pasti, `·` sono i giorni di altri mesi.
 
+### C14. Le novità si vedono da lontano, e per persona
+
+Deciso con Alessio il 5 settembre 2026, si applica solo da questa data in
+avanti (nessun retrofit delle schermate esistenti). Quando una funzionalità è
+nuova o è cambiata in modo significativo, il suo pulsante porta `🆕 ` davanti
+all'etichetta — e lo stesso badge risale ogni pulsante di menù che porta fino
+a lì, fino al menù principale, non solo l'ultimo passo. Sparisce solo quando
+un utente arriva **fino alla schermata specifica** che è cambiata, non
+aprendo un menù intermedio — e solo per lui: ogni persona nello spazio scopre
+le novità ai propri tempi, non è un flag condiviso.
+
+La schermata specifica, alla prima visita di ciascun utente, anteporrà anche
+un breve tutorial su come usarla (un pulsante `✅ Ho capito` la nasconde
+senza bisogno di rivederla). Meccanica in `src/modules/novita.rs`: un
+registro statico nel codice (`REGISTRO`, chiave/genitore/tutorial), e una
+sola tabella nel database (`novita_lette`) che tiene traccia di chi ha visto
+cosa.
+
 ```text
 |  ⬅️   |Settembre 2026|  ➡️   |
 | Lun | Mar | Mer | Gio | Ven | Sab | Dom |
@@ -381,6 +399,10 @@ di applicazione è questo, dal più visibile al meno:
 4. **Spazi e Profilo** — C5, la parte concettualmente più difficile;
 5. **menù principale** — C12;
 6. **date** — C13, ovunque se ne inserisca una a mano.
+7. **novità (C14)** — non un blocco da "applicare" una volta: da qui in
+   avanti, ogni funzionalità nuova o modificata in modo significativo entra
+   nel `REGISTRO` di `src/modules/novita.rs` insieme al codice che la
+   introduce, nello stesso commit.
 
 Ogni blocco chiude con il collaudo su Telegram sull'S9, e questo documento si
 aggiorna quando una convenzione si rivela sbagliata all'uso — non quando è

@@ -2,6 +2,37 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_NOVITA_INFRASTRUTTURA_20260905 -->
+# 05/09/2026 — Badge "🆕" per le novità: infrastruttura pronta, registro vuoto
+
+Deciso con Alessio: da ora in avanti, ogni funzionalità nuova o modificata
+in modo significativo mostra "🆕" sul proprio pulsante e su ogni pulsante
+di menù che ci porta, fino al menù principale -- sparisce solo per chi
+arriva davvero fino alla schermata cambiata, e solo per quella persona
+(non un flag condiviso: più persone usano lo stesso bot). Alla prima
+visita, la schermata mostra anche un breve tutorial. Nessun retrofit delle
+schermate esistenti: si applica solo da qui in avanti.
+
+Nuovo modulo `src/modules/novita.rs`: un registro statico nel codice
+(chiave, genitore per la risalita nel menù, tutorial opzionale) -- "cosa è
+nuovo" vive nel codice, non nel database. Nuova migration additiva
+(`20260905090000_novita_lette.sql`): una sola tabella, che tiene traccia
+solo di chi ha già visto cosa, per utente.
+
+Bug reale trovato scrivendo il primo test (non a tavolino): i nodi
+intermedi del registro (categorie usate solo per risalire al menù
+superiore, mai visitate direttamente) non vengono mai segnati come
+"visti" da nessuno -- contarli come "ancora da vedere" avrebbe tenuto il
+badge acceso per sempre anche a foglie tutte viste. Corretto distinguendo
+le foglie (funzionalità vere) dai nodi intermedi: solo le foglie contano
+per decidere se un pulsante mostra il badge.
+
+`REGISTRO` parte vuoto: nessuna funzionalità è ancora dichiarata. Il
+collaudo dal vivo su Telegram arriva insieme al primo caso reale che lo
+userà -- un meccanismo senza nessuna voce non ha nulla da mostrare sul
+bot. 8 nuovi test (297 totali, 289 prima), tutti su logica pura o
+`sqlite::memory:`, nessuno tocca il database reale.
+
 <!-- CHANGELOG_5D_COLLAUDO_ENDTOEND_20260904 -->
 # 04/09/2026 — Sotto-step 5d collaudato end-to-end: il punto 6 e' completo
 
