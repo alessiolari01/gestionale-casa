@@ -2,6 +2,28 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_ALLEGATO_VIDEO_MIGLIORAMENTI_20260905 -->
+# 05/09/2026 — Anche i miglioramenti accettano un video, non solo una foto
+
+Primo uso reale del badge "🆕" appena costruito. Prima solo gli allegati di
+*verifica* (il collaudo guidato di un miglioramento) accettavano un video;
+l'allegato descrittivo iniziale (`miglioramento_allegati`) era fermo a
+`CHECK (tipo = 'foto')`. Corretto con una migration che ricostruisce la
+tabella (e la sua copia archiviata, stesso vincolo) per accettare
+`'foto'` o `'video'`. `save_original_media` (prima `save_original_photo`)
+riconosce da sola cosa è arrivato e lo dice nella conferma, ricalcando
+`save_verification_media` che già lo faceva.
+
+Registrata la prima voce reale in `novita::REGISTRO`. Alla prima volta che
+un utente riesce ad allegare qualcosa, invece della conferma normale il
+bot propone un piccolo esercizio guidato -- idea di Alessio: non solo
+spiegare, far provare -- con due bottoni per tenere o eliminare l'allegato
+di prova appena inviato. Solo un tentativo riuscito segna la novità come
+vista.
+
+3 nuovi test (300 totali, 297 prima). Non ancora collaudato dal vivo su
+Telegram.
+
 <!-- CHANGELOG_NOVITA_INFRASTRUTTURA_20260905 -->
 # 05/09/2026 — Badge "🆕" per le novità: infrastruttura pronta, registro vuoto
 

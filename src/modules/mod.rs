@@ -20,10 +20,6 @@ pub mod foto;
 pub mod liste;
 pub mod luoghi;
 pub mod miglioramenti;
-// Registro vuoto finché non arriva la prima funzionalità reale da
-// dichiarare (deciso il 5 settembre 2026: si applica solo da qui in
-// avanti, nessun retrofit) -- niente ancora la chiama.
-#[allow(dead_code)]
 pub mod novita;
 pub mod oggetti;
 pub mod planner_alimentare;

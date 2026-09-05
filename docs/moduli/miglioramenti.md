@@ -46,7 +46,8 @@ Utente normale approvato:
 
 - crea suggerimenti;
 - legge/modifica/elimina i propri suggerimenti ancora gestibili;
-- aggiunge screenshot/allegati ai propri.
+- aggiunge screenshot/video/allegati ai propri (video dal 5 settembre 2026:
+  prima `miglioramento_allegati` accettava solo `tipo = 'foto'`).
 
 Admin:
 
@@ -102,7 +103,9 @@ La creazione può raccogliere più messaggi consecutivi e unirli in ordine fino 
 - etichetta azione;
 - callback per aprire direttamente la schermata da testare.
 
-Foto/video/documenti di verifica sono separati dagli allegati descrittivi originali.
+Foto/video di verifica sono separati dagli allegati descrittivi originali
+(`miglioramento_allegati`), che dal 5 settembre 2026 accettano anch'essi
+foto o video.
 
 ## `💡 Migliora` contestuale
 

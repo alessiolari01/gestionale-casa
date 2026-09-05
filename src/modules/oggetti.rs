@@ -296,7 +296,7 @@ struct ObjectLocationInput<'a> {
 ///
 /// Convenzione C4: la lampadina è una sola. `💡 Migliora` segnala un problema
 /// sulla schermata corrente; la lista dei miglioramenti è `📋 Miglioramenti`.
-pub fn main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup {
+pub fn main_menu_keyboard(is_admin: bool, badge_miglioramenti: bool) -> InlineKeyboardMarkup {
     let mut rows = vec![
         vec![button("🍽️ Alimentazione", "food:menu")],
         vec![button("🏷️ Oggetti", "oggetti:menu")],
@@ -306,7 +306,10 @@ pub fn main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup {
             button("👤 Profilo", "identity:profile"),
             button("👥 Spazi", "identity:spaces"),
         ],
-        vec![button("📋 Miglioramenti", "improve:menu")],
+        vec![button(
+            &crate::modules::novita::etichetta_con_badge("📋 Miglioramenti", badge_miglioramenti),
+            "improve:menu",
+        )],
     ];
     if is_admin {
         rows.push(vec![button("🛠️ Amministrazione", "admin:menu")]);
@@ -3204,12 +3207,20 @@ fn push_optional_line(lines: &mut Vec<String>, label: &str, value: Option<&str>)
 mod tests {
     #[test]
     fn menu_principale_mostra_amministrazione_solo_agli_admin() {
-        let normal = main_menu_keyboard(false);
-        let admin = main_menu_keyboard(true);
+        let normal = main_menu_keyboard(false, false);
+        let admin = main_menu_keyboard(true, false);
         let normal_text = format!("{normal:?}");
         let admin_text = format!("{admin:?}");
         assert!(!normal_text.contains("Amministrazione"));
         assert!(admin_text.contains("Amministrazione"));
+    }
+
+    #[test]
+    fn menu_principale_mostra_il_badge_solo_se_richiesto() {
+        let senza_badge = main_menu_keyboard(false, false);
+        let con_badge = main_menu_keyboard(false, true);
+        assert!(!format!("{senza_badge:?}").contains("🆕"));
+        assert!(format!("{con_badge:?}").contains("🆕 📋 Miglioramenti"));
     }
 
     use super::*;

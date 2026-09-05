@@ -1311,11 +1311,12 @@ async fn handle_callback(
         let is_admin = identity::is_system_admin(&pool, &actor)
             .await
             .unwrap_or(false);
+        let badge = badge_miglioramenti(&pool, &actor).await;
         bot.send_message(
             chat_id,
             "⚠️ Questa schermata non è più attiva. Ho aperto un nuovo Menù principale.",
         )
-        .reply_markup(modules::oggetti::main_menu_keyboard(is_admin))
+        .reply_markup(modules::oggetti::main_menu_keyboard(is_admin, badge))
         .await?;
         return respond(());
     }
@@ -1964,12 +1965,33 @@ async fn handle_authorized_callback(
     respond(())
 }
 
+/// Se il pulsante "📋 Miglioramenti" del menù principale deve mostrare
+/// "🆕": vero se questo utente non ha ancora visto una foglia del
+/// registro `novita::REGISTRO` con genitore `"improve_menu"`. Mai in
+/// errore: un problema nel calcolo del badge non deve mai bloccare
+/// l'apertura del menù.
+async fn badge_miglioramenti(pool: &SqlitePool, actor: &identity::AuditActor) -> bool {
+    let Some(utente_id) = actor.utente_id else {
+        return false;
+    };
+    match modules::novita::viste_da_utente(pool, utente_id).await {
+        Ok(viste) => modules::novita::serve_badge("improve_menu", &viste),
+        Err(error) => {
+            tracing::warn!(?error, "Errore lettura novità viste, badge nascosto");
+            false
+        }
+    }
+}
+
 async fn send_online_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
         "🟢 Gestionale Casa è online.\n\n🏠 Menù principale\nScegli una sezione.",
     )
-    .reply_markup(modules::oggetti::main_menu_keyboard(true))
+    // Notifica di avvio, mandata subito dopo il boot: niente attore
+    // risolto a questo punto, il badge si aggiorna comunque alla prossima
+    // apertura reale del menù.
+    .reply_markup(modules::oggetti::main_menu_keyboard(true, false))
     .await?;
     Ok(())
 }
@@ -1990,8 +2012,9 @@ async fn send_main_menu(
             false
         }
     };
+    let badge = badge_miglioramenti(pool, actor).await;
     bot.send_message(chat_id, "🏠 Gestionale Casa\n\nScegli una sezione.")
-        .reply_markup(modules::oggetti::main_menu_keyboard(is_admin))
+        .reply_markup(modules::oggetti::main_menu_keyboard(is_admin, badge))
         .await?;
     Ok(())
 }

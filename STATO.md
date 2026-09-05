@@ -655,27 +655,55 @@ distinguendo le foglie del registro (funzionalità vere, visitabili) dai nodi
 intermedi (usati solo per la catena verso il menù): solo le foglie contano
 per decidere se un pulsante deve mostrare il badge.
 
-**Non ancora collaudato dal vivo su Telegram**: senza nessuna voce nel
-registro non c'è nessun badge da vedere sul bot. Il collaudo reale (SSH +
-Telegram) arriva insieme alla prima funzionalità che lo userà davvero — per
-non dichiarare verificato un meccanismo mai esercitato con un caso concreto.
-
 8 nuovi test (5 sulla logica pura di propagazione/foglie, 1 sull'etichetta, 2
 sulle funzioni DB con `sqlite::memory:`). Totale: 297 (289 prima).
 
+**Primo uso reale, scritto — collaudo dal vivo su Telegram da fare**: gli
+allegati di un miglioramento accettano ora anche un video, non solo una
+foto (`miglioramento_allegati` aveva `CHECK (tipo = 'foto')`, corretto in
+`CHECK (tipo IN ('foto','video'))` con la stessa migration che sistema
+anche `miglioramento_archivio_allegati` — altrimenti un miglioramento con
+un video non si sarebbe mai potuto archiviare). `save_original_media`
+(prima `save_original_photo`) riconosce da sola quale dei due è arrivato e
+lo dice nella conferma ("✅ Video aggiunto..." / "✅ Screenshot
+aggiunto..."), ricalcando `save_verification_media` che già lo faceva per
+le prove di collaudo.
+
+Registrata la prima voce reale in `novita::REGISTRO`
+(`miglioramenti_allegato_video`, genitore `improve_menu`): il pulsante
+`📋 Miglioramenti` del menù principale mostra "🆕" finché l'utente non
+arriva davvero a inviare un allegato. La prima volta che ci riesce, invece
+della conferma normale, il bot gli propone un piccolo tutorial guidato —
+idea di Alessio: non solo spiegare a parole, ma far *provare* la
+funzione — con due bottoni `✅ Tienilo` / `🗑️ Era una prova, elimina` per
+decidere se l'allegato appena inviato durante la prova resta vero o va
+tolto. Solo un tentativo riuscito (allegato salvato davvero) segna la
+novità come vista: chi annulla o non riesce a inviare nulla la ritrova al
+tentativo successivo.
+
+3 nuovi test (300 totali, 297 prima): un allegato `tipo = 'video'`
+accettato dal CHECK reale (non solo dal codice), le etichette
+foto/video, e il badge sul menù principale mostrato/nascosto secondo il
+parametro. **Non ancora collaudato dal vivo**: serve un giro reale su
+Telegram (creare un miglioramento, allegare prima una foto poi un video,
+vedere il tutorial comparire una sola volta e il badge sparire dal menù
+principale dopo).
+
 ## 3. Stato tecnico verificato
 
-- **44 migration** nel repository. Le prime 43 sono **applicate** al database
+- **45 migration** nel repository. Le prime 43 sono **applicate** al database
   reale dell'S9, verificato il 5 settembre 2026 leggendo `_sqlx_migrations`
   via SSH (`applied_migrations=43`) — non dedotto, per la stessa ragione già
-  scritta qui altre volte. La 44esima, `20260905090000_novita_lette.sql`,
-  non e' ancora stata applicata sull'S9 al momento di scrivere questo: lo
-  sara' al prossimo `aggiorna-s9.sh`;
+  scritta qui altre volte. La 44esima (`20260905090000_novita_lette.sql`) e
+  la 45esima (`20260905130000_miglioramenti_allegati_video.sql`) non sono
+  ancora state applicate sull'S9 al momento di scrivere questo: lo saranno
+  al prossimo `aggiorna-s9.sh`;
 - pipeline verde: `fmt`, `check --locked`, `clippy --all-targets --locked
-  -- -D warnings`, `test --locked` — **297 test** (289 prima del badge
-  "🆕", 280 prima del sotto-step 5c, 279 prima del sotto-step 5a, 270 prima
-  del sotto-step 3/5 della distribuzione, 248 prima del 2 settembre: e' il
-  numero da confrontare dopo ogni aggiornamento dell'S9);
+  -- -D warnings`, `test --locked` — **300 test** (297 prima dell'allegato
+  video, 289 prima del badge "🆕", 280 prima del sotto-step 5c, 279 prima
+  del sotto-step 5a, 270 prima del sotto-step 3/5 della distribuzione, 248
+  prima del 2 settembre: e' il numero da confrontare dopo ogni
+  aggiornamento dell'S9);
 - CI su GitHub Actions **verde** dalla run #42, la prima dello Step 7.
 
 Regola invariata: una migration applicata al database reale e' immutabile. Ogni

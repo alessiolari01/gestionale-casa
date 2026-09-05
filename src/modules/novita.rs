@@ -29,7 +29,22 @@ pub struct VoceNovita {
 
 /// Registro delle novità attualmente segnalate. Resta vuoto finché non
 /// arriva la prima funzionalità reale da dichiarare qui.
-pub const REGISTRO: &[VoceNovita] = &[];
+///
+/// Primo caso reale (5 settembre 2026): l'allegato di un miglioramento
+/// accetta anche un video, non solo una foto. Genitore `"improve_menu"` è
+/// il pulsante `📋 Miglioramenti` del menù principale (callback
+/// `improve:menu` in `oggetti::main_menu_keyboard`) -- non serve una sua
+/// voce separata nel registro: `ha_antenato_in` legge il campo `genitore`
+/// direttamente sulla foglia, senza dover risalire oltre un livello.
+pub const REGISTRO: &[VoceNovita] = &[VoceNovita {
+    chiave: "miglioramenti_allegato_video",
+    genitore: Some("improve_menu"),
+    tutorial: Some(
+        "🆕 Ora puoi allegare anche un video, non solo una foto. Prova a \
+         mandarne uno di esempio: alla fine potrai scegliere se tenerlo o \
+         eliminarlo.",
+    ),
+}];
 
 /// Vero se nessun'altra voce del registro ha `chiave` come genitore: cioè
 /// se `chiave` è una funzionalità vera e propria (una schermata che un

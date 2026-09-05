@@ -28,6 +28,7 @@ type Bot = crate::context_bot::ContextBot;
 
 const MEDIA_ROOT: &str = "data/media/miglioramenti";
 use crate::modules::liste;
+use crate::modules::novita;
 
 const LIST_PAGE_SIZE: i64 = 5;
 const MAX_DESCRIPTION_CHARS: usize = 50_000;
@@ -318,6 +319,7 @@ struct ArchivedImprovementRecord {
 #[derive(Debug, Clone, FromRow)]
 struct AttachmentRecord {
     id: i64,
+    tipo: String,
     percorso_file: String,
     descrizione: Option<String>,
 }
@@ -438,10 +440,10 @@ pub async fn handle_message(
             context,
             origin_token,
         } => {
-            if msg.photo().is_none() {
+            if msg.photo().is_none() && msg.video().is_none() {
                 bot.send_message(
                     msg.chat.id,
-                    "📷 Sto aspettando una foto/screenshot. In alternativa usa ✅ Salva senza foto o ❌ Annulla.",
+                    "📷🎥 Sto aspettando una foto o un video. In alternativa usa ✅ Salva senza foto o ❌ Annulla.",
                 )
                 .reply_markup(optional_photo_keyboard())
                 .await?;
@@ -451,27 +453,32 @@ pub async fn handle_message(
                 match create_improvement(pool, &description, context.as_deref()).await {
                     Ok(id) => id,
                     Err(error) => {
-                        tracing::error!(?error, "Errore creazione miglioramento con foto");
+                        tracing::error!(?error, "Errore creazione miglioramento con allegato");
                         bot.send_message(msg.chat.id, "⚠️ Non riesco a creare il miglioramento.")
                             .await?;
                         return Ok(true);
                     }
                 };
-            match save_original_photo(bot, msg, pool, improvement_id).await {
-                Ok(()) => {
+            match save_original_media(bot, msg, pool, improvement_id).await {
+                Ok((attachment_id, kind)) => {
                     sessions.clear_chat(chat_id);
                     bot.delete_user_input(msg.chat.id, msg.id).await;
-                    if !restore_origin_after_save(
-                        bot,
-                        msg.chat.id,
-                        origin_token,
-                        "✅ Miglioramento salvato con screenshot.",
-                    )
-                    .await?
-                    {
-                        bot.send_message(msg.chat.id, "✅ Miglioramento salvato con screenshot.")
-                            .reply_markup(after_save_keyboard(improvement_id))
+                    if tutorial_allegato_prima_volta(pool).await {
+                        bot.send_message(msg.chat.id, testo_tutorial_allegato(kind))
+                            .reply_markup(tutorial_allegato_keyboard(improvement_id, attachment_id))
                             .await?;
+                    } else {
+                        let notice = format!(
+                            "✅ Miglioramento salvato con {}.",
+                            etichetta_kind_minuscola(kind)
+                        );
+                        if !restore_origin_after_save(bot, msg.chat.id, origin_token, &notice)
+                            .await?
+                        {
+                            bot.send_message(msg.chat.id, notice)
+                                .reply_markup(after_save_keyboard(improvement_id))
+                                .await?;
+                        }
                     }
                 }
                 Err(error) => {
@@ -479,7 +486,7 @@ pub async fn handle_message(
                     let _ = delete_owned_improvement(pool, improvement_id).await;
                     bot.send_message(
                         msg.chat.id,
-                        "⚠️ Non sono riuscito a salvare lo screenshot. Il miglioramento non è stato registrato: puoi riprovare.",
+                        "⚠️ Non sono riuscito a salvare l'allegato. Il miglioramento non è stato registrato: puoi riprovare.",
                     )
                     .reply_markup(optional_photo_keyboard())
                     .await?;
@@ -488,31 +495,37 @@ pub async fn handle_message(
             Ok(true)
         }
         ImprovementConversationState::ExistingPhoto { improvement_id } => {
-            if msg.photo().is_none() {
+            if msg.photo().is_none() && msg.video().is_none() {
                 bot.send_message(
                     msg.chat.id,
-                    "📷 Invia una foto/screenshot oppure usa ❌ Annulla.",
+                    "📷🎥 Invia una foto o un video oppure usa ❌ Annulla.",
                 )
                 .reply_markup(flow_cancel_keyboard())
                 .await?;
                 return Ok(true);
             }
-            match save_original_photo(bot, msg, pool, improvement_id).await {
-                Ok(()) => {
+            match save_original_media(bot, msg, pool, improvement_id).await {
+                Ok((attachment_id, kind)) => {
                     sessions.clear_chat(chat_id);
                     bot.delete_user_input(msg.chat.id, msg.id).await;
-                    bot.send_message(msg.chat.id, "✅ Screenshot aggiunto al miglioramento.")
+                    if tutorial_allegato_prima_volta(pool).await {
+                        bot.send_message(msg.chat.id, testo_tutorial_allegato(kind))
+                            .reply_markup(tutorial_allegato_keyboard(improvement_id, attachment_id))
+                            .await?;
+                    } else {
+                        bot.send_message(
+                            msg.chat.id,
+                            format!("✅ {} aggiunto al miglioramento.", etichetta_kind(kind)),
+                        )
                         .reply_markup(after_save_keyboard(improvement_id))
                         .await?;
+                    }
                 }
                 Err(error) => {
-                    tracing::error!(?error, improvement_id, "Errore aggiunta screenshot");
-                    bot.send_message(
-                        msg.chat.id,
-                        "⚠️ Non riesco a salvare lo screenshot. Riprova.",
-                    )
-                    .reply_markup(flow_cancel_keyboard())
-                    .await?;
+                    tracing::error!(?error, improvement_id, "Errore aggiunta allegato");
+                    bot.send_message(msg.chat.id, "⚠️ Non riesco a salvare l'allegato. Riprova.")
+                        .reply_markup(flow_cancel_keyboard())
+                        .await?;
                 }
             }
             Ok(true)
@@ -756,7 +769,7 @@ pub async fn handle_callback(
 📍 Contesto corrente
 {context}
 
-Descrivi cosa vorresti cambiare o migliorare. Puoi usare più messaggi; quando hai finito premi ✅ Fine descrizione. Dopo potrai allegare uno screenshot facoltativo."
+Descrivi cosa vorresti cambiare o migliorare. Puoi usare più messaggi; quando hai finito premi ✅ Fine descrizione. Dopo potrai allegare una foto o un video facoltativi."
                 ),
             )
             .reply_markup(flow_cancel_keyboard())
@@ -845,16 +858,13 @@ Descrivi cosa vorresti cambiare o migliorare. Puoi usare più messaggi; quando h
                 chat_id.0,
                 ImprovementConversationState::ExistingPhoto { improvement_id: id },
             );
-            bot.send_message(
-                chat_id,
-                "📷 Invia ora lo screenshot da associare al miglioramento.",
-            )
-            .reply_markup(flow_cancel_keyboard())
-            .await?;
+            bot.send_message(chat_id, prompt_invio_allegato(pool).await)
+                .reply_markup(flow_cancel_keyboard())
+                .await?;
         } else {
             bot.send_message(
                 chat_id,
-                "⚠️ Puoi aggiungere screenshot soltanto a un tuo suggerimento attivo.",
+                "⚠️ Puoi aggiungere allegati soltanto a un tuo suggerimento attivo.",
             )
             .await?;
         }
@@ -877,6 +887,40 @@ Descrivi cosa vorresti cambiare o migliorare. Puoi usare più messaggi; quando h
                         bot.send_message(chat_id, "🗑️ Screenshot eliminato.")
                             .await?;
                         show_detail(bot, chat_id, pool, improvement_id, None).await?;
+                    }
+                    Err(error) => {
+                        bot.send_message(chat_id, format!("⚠️ {error}")).await?;
+                    }
+                }
+                return Ok(true);
+            }
+        }
+    }
+
+    // Esito dell'esercizio guidato del tutorial "miglioramenti_allegato_video"
+    // (novita.rs): l'allegato è già stato salvato per davvero prima di
+    // arrivare qui, questi due callback decidono solo se tenerlo o
+    // eliminarlo. Nessuna eccezione a `claim_callback` necessaria: è un
+    // messaggio nuovo, cliccabile una volta sola, come ogni altra
+    // schermata del modulo.
+    if let Some(id) = parse_id(data, "improve:tutorial:tieni:") {
+        bot.send_message(chat_id, "✅ Allegato mantenuto.")
+            .reply_markup(after_save_keyboard(id))
+            .await?;
+        return Ok(true);
+    }
+
+    if let Some(raw) = data.strip_prefix("improve:tutorial:elimina:") {
+        let mut parts = raw.split(':');
+        let improvement_id = parts.next().and_then(|value| value.parse::<i64>().ok());
+        let attachment_id = parts.next().and_then(|value| value.parse::<i64>().ok());
+        if parts.next().is_none() {
+            if let (Some(improvement_id), Some(attachment_id)) = (improvement_id, attachment_id) {
+                match delete_original_attachment(pool, improvement_id, attachment_id).await {
+                    Ok(()) => {
+                        bot.send_message(chat_id, "🗑️ Allegato di prova eliminato.")
+                            .reply_markup(after_save_keyboard(improvement_id))
+                            .await?;
                     }
                     Err(error) => {
                         bot.send_message(chat_id, format!("⚠️ {error}")).await?;
@@ -1258,12 +1302,15 @@ async fn finish_description(
             origin_token,
         },
     );
-    bot.send_message(
-        chat_id,
-        "📷 Vuoi aggiungere uno screenshot?\n\nInvia una foto oppure premi ✅ Salva senza foto.",
-    )
-    .reply_markup(optional_photo_keyboard())
-    .await?;
+    let base =
+        "📷🎥 Vuoi aggiungere una foto o un video?\n\nInviala oppure premi ✅ Salva senza foto.";
+    let testo = match tutorial_da_mostrare(pool).await {
+        Some(tutorial) => format!("{base}\n\n{tutorial}"),
+        None => base.to_string(),
+    };
+    bot.send_message(chat_id, testo)
+        .reply_markup(optional_photo_keyboard())
+        .await?;
     Ok(())
 }
 
@@ -2321,7 +2368,7 @@ async fn show_original_attachments(
         return Ok(());
     }
     let attachments: Vec<AttachmentRecord> = match sqlx::query_as(
-        "SELECT id, percorso_file, descrizione FROM miglioramento_allegati \
+        "SELECT id, tipo, percorso_file, descrizione FROM miglioramento_allegati \
          WHERE miglioramento_id = ? ORDER BY creato_il, id",
     )
     .bind(improvement_id)
@@ -2341,7 +2388,7 @@ async fn show_original_attachments(
         }
     };
     if attachments.is_empty() {
-        bot.send_message(chat_id, "📷 Nessuno screenshot associato.")
+        bot.send_message(chat_id, "📷 Nessun allegato associato.")
             .reply_markup(after_save_keyboard(improvement_id))
             .await?;
         return Ok(());
@@ -2349,33 +2396,45 @@ async fn show_original_attachments(
     let can_edit = can_edit_owned(pool, improvement_id).await.unwrap_or(false);
     for attachment in attachments {
         let path = PathBuf::from(&attachment.percorso_file);
-        let caption = attachment
-            .descrizione
-            .clone()
-            .unwrap_or_else(|| format!("📷 Screenshot #{}", attachment.id));
+        let is_video = attachment.tipo == "video";
+        let caption = attachment.descrizione.clone().unwrap_or_else(|| {
+            if is_video {
+                format!("🎥 Video #{}", attachment.id)
+            } else {
+                format!("📷 Screenshot #{}", attachment.id)
+            }
+        });
         if path.exists() {
-            bot.send_photo(chat_id, InputFile::file(path))
-                .caption(caption)
-                .await?;
+            if is_video {
+                bot.send_video(chat_id, InputFile::file(path))
+                    .caption(caption)
+                    .await?;
+            } else {
+                bot.send_photo(chat_id, InputFile::file(path))
+                    .caption(caption)
+                    .await?;
+            }
         } else {
-            bot.send_message(
-                chat_id,
-                format!("⚠️ File screenshot non trovato: {caption}"),
-            )
-            .await?;
+            bot.send_message(chat_id, format!("⚠️ File allegato non trovato: {caption}"))
+                .await?;
         }
         if can_edit {
-            bot.send_message(chat_id, format!("Gestione screenshot #{}", attachment.id))
+            let elimina_etichetta = if is_video {
+                "🗑️ Elimina video"
+            } else {
+                "🗑️ Elimina screenshot"
+            };
+            bot.send_message(chat_id, format!("Gestione allegato #{}", attachment.id))
                 .reply_markup(InlineKeyboardMarkup::new(vec![vec![
                     InlineKeyboardButton::callback(
-                        "🗑️ Elimina screenshot".to_string(),
+                        elimina_etichetta.to_string(),
                         format!("improve:photo:delete:{improvement_id}:{}", attachment.id),
                     ),
                 ]]))
                 .await?;
         }
     }
-    bot.send_message(chat_id, "📷 Fine screenshot.")
+    bot.send_message(chat_id, "📷 Fine allegati.")
         .reply_markup(after_save_keyboard(improvement_id))
         .await?;
     Ok(())
@@ -2701,29 +2760,44 @@ async fn delete_original_attachment(
     Ok(())
 }
 
-async fn save_original_photo(
+/// Salva l'allegato originale di un miglioramento, foto o video (video dal
+/// 5 settembre 2026: prima solo la foto era ammessa qui, a differenza degli
+/// allegati di verifica che già accettavano entrambi -- vedi
+/// `save_verification_media`, di cui questa funzione ricalca la struttura).
+/// Ritorna l'id della riga inserita e il tipo riconosciuto, per il
+/// messaggio di conferma e per l'eventuale scelta "tienilo/elimina" del
+/// tutorial guidato in `novita::REGISTRO`.
+async fn save_original_media(
     bot: &Bot,
     msg: &Message,
     pool: &SqlitePool,
     improvement_id: i64,
-) -> Result<()> {
+) -> Result<(i64, &'static str)> {
     if !can_edit_owned(pool, improvement_id).await? {
-        bail!("Puoi aggiungere screenshot soltanto a un tuo suggerimento attivo");
+        bail!("Puoi aggiungere allegati soltanto a un tuo suggerimento attivo");
     }
-    let photo_sizes = msg.photo().context("Foto Telegram non presente")?;
-    let photo = photo_sizes
-        .iter()
-        .max_by_key(|photo| u64::from(photo.width) * u64::from(photo.height))
-        .context("Foto Telegram non leggibile")?;
+    let (kind, file_id): (&'static str, teloxide::types::FileId) =
+        if let Some(photo_sizes) = msg.photo() {
+            let photo = photo_sizes
+                .iter()
+                .max_by_key(|photo| u64::from(photo.width) * u64::from(photo.height))
+                .context("Foto Telegram non leggibile")?;
+            ("foto", photo.file.id.clone())
+        } else if let Some(video) = msg.video() {
+            ("video", video.file.id.clone())
+        } else {
+            bail!("Foto o video Telegram non presente");
+        };
     let telegram_file = bot
-        .get_file(photo.file.id.clone())
+        .get_file(file_id)
         .await
         .context("Impossibile leggere il file Telegram")?;
-    let extension = safe_extension(&telegram_file.path, "jpg");
+    let fallback = if kind == "video" { "mp4" } else { "jpg" };
+    let extension = safe_extension(&telegram_file.path, fallback);
     let directory = PathBuf::from(MEDIA_ROOT).join(improvement_id.to_string());
     tokio::fs::create_dir_all(&directory)
         .await
-        .context("Impossibile creare la cartella screenshot")?;
+        .context("Impossibile creare la cartella allegati")?;
     let filename = format!("telegram_{}_{}.{}", msg.chat.id.0, msg.id.0, extension);
     let local_path = directory.join(filename);
     download_to_path(bot, &telegram_file.path, &local_path).await?;
@@ -2732,20 +2806,101 @@ async fn save_original_photo(
         .map(str::trim)
         .filter(|caption| !caption.is_empty());
     let path_for_db = local_path.to_string_lossy().into_owned();
-    if let Err(error) = sqlx::query(
-        "INSERT INTO miglioramento_allegati (miglioramento_id, percorso_file, descrizione) VALUES (?, ?, ?)",
+    let inserted = match sqlx::query(
+        "INSERT INTO miglioramento_allegati (miglioramento_id, tipo, percorso_file, descrizione) VALUES (?, ?, ?, ?)",
     )
     .bind(improvement_id)
+    .bind(kind)
     .bind(&path_for_db)
     .bind(description)
     .execute(pool)
     .await
     {
-        let _ = tokio::fs::remove_file(&local_path).await;
-        return Err(error).context("Impossibile registrare lo screenshot");
-    }
+        Ok(esito) => esito.last_insert_rowid(),
+        Err(error) => {
+            let _ = tokio::fs::remove_file(&local_path).await;
+            return Err(error).context("Impossibile registrare l'allegato");
+        }
+    };
     reset_to_todo_after_content_change(pool, improvement_id).await?;
-    Ok(())
+    Ok((inserted, kind))
+}
+
+fn etichetta_kind(kind: &str) -> &'static str {
+    if kind == "video" {
+        "Video"
+    } else {
+        "Screenshot"
+    }
+}
+
+fn etichetta_kind_minuscola(kind: &str) -> &'static str {
+    if kind == "video" {
+        "video"
+    } else {
+        "screenshot"
+    }
+}
+
+/// Vero se, per l'attore corrente, questa è la prima volta che riesce ad
+/// allegare foto o video a un miglioramento (`novita::REGISTRO`, chiave
+/// "miglioramenti_allegato_video") -- e la segna come vista. Chi chiama
+/// questa funzione con esito vero deve mostrare il tutorial guidato
+/// (`testo_tutorial_allegato`/`tutorial_allegato_keyboard`) invece della
+/// normale conferma di salvataggio: deciso con Alessio il 5 settembre
+/// 2026, prima novità reale che usa il meccanismo di `novita.rs`.
+async fn tutorial_allegato_prima_volta(pool: &SqlitePool) -> bool {
+    match identity::current_actor().utente_id {
+        Some(utente_id) => novita::segna_vista(pool, utente_id, "miglioramenti_allegato_video")
+            .await
+            .unwrap_or(false),
+        None => false,
+    }
+}
+
+fn testo_tutorial_allegato(kind: &str) -> String {
+    format!(
+        "✅ {} di prova salvato.\n\n{}\n\nEra solo per farti vedere come si fa: vuoi tenerlo come allegato vero del miglioramento, o era solo una prova?",
+        etichetta_kind(kind),
+        novita::tutorial_per("miglioramenti_allegato_video").unwrap_or_default(),
+    )
+}
+
+/// Il testo del tutorial per l'allegato video/foto, solo se questo utente
+/// non l'ha ancora visto -- una semplice lettura, non lo segna come vista
+/// (quello avviene solo se l'esercizio riesce davvero, in
+/// `tutorial_allegato_prima_volta`, altrimenti chi annulla o non riesce a
+/// inviare nulla continuerebbe a non aver "visto" la novità e se la
+/// ritroverebbe al tentativo successivo, come voluto).
+async fn tutorial_da_mostrare(pool: &SqlitePool) -> Option<String> {
+    let utente_id = identity::current_actor().utente_id?;
+    let viste = novita::viste_da_utente(pool, utente_id).await.ok()?;
+    if novita::serve_badge("miglioramenti_allegato_video", &viste) {
+        novita::tutorial_per("miglioramenti_allegato_video").map(str::to_string)
+    } else {
+        None
+    }
+}
+
+async fn prompt_invio_allegato(pool: &SqlitePool) -> String {
+    let base = "📷🎥 Invia ora una foto o un video da associare al miglioramento.";
+    match tutorial_da_mostrare(pool).await {
+        Some(testo) => format!("{base}\n\n{testo}"),
+        None => base.to_string(),
+    }
+}
+
+fn tutorial_allegato_keyboard(improvement_id: i64, attachment_id: i64) -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![vec![
+        InlineKeyboardButton::callback(
+            "✅ Tienilo".to_string(),
+            format!("improve:tutorial:tieni:{improvement_id}"),
+        ),
+        InlineKeyboardButton::callback(
+            "🗑️ Era una prova, elimina".to_string(),
+            format!("improve:tutorial:elimina:{improvement_id}:{attachment_id}"),
+        ),
+    ]])
 }
 
 async fn save_verification_media(
@@ -3551,13 +3706,13 @@ fn detail_keyboard(
                     .unwrap_or_else(|| format!("improve:edit:{}", item.id)),
             ),
             InlineKeyboardButton::callback(
-                "📷 Aggiungi screenshot".to_string(),
+                "📷🎥 Aggiungi foto/video".to_string(),
                 format!("improve:add_photo:{}", item.id),
             ),
         ]);
         if item.allegati > 0 {
             rows.push(vec![InlineKeyboardButton::callback(
-                format!("🖼️ Vedi/gestisci screenshot ({})", item.allegati),
+                format!("🖼️ Vedi/gestisci allegati ({})", item.allegati),
                 format!("improve:photos:{}", item.id),
             )]);
         }
@@ -3567,7 +3722,7 @@ fn detail_keyboard(
         )]);
     } else if item.allegati > 0 {
         rows.push(vec![InlineKeyboardButton::callback(
-            format!("🖼️ Vedi screenshot ({})", item.allegati),
+            format!("🖼️ Vedi allegati ({})", item.allegati),
             format!("improve:photos:{}", item.id),
         )]);
     }
@@ -3913,6 +4068,49 @@ mod tests {
         .await
         .expect("conteggio");
         assert_eq!(count, 2);
+    }
+
+    #[tokio::test]
+    async fn allegato_originale_accetta_anche_il_video() {
+        // Prima del 5 settembre 2026 il CHECK ammetteva solo 'foto': un
+        // video sarebbe stato rifiutato dal database, non solo dal codice.
+        let pool = test_pool().await;
+        let user_id = sqlx::query("INSERT INTO utenti (nome_visualizzato) VALUES ('Tester')")
+            .execute(&pool)
+            .await
+            .expect("utente")
+            .last_insert_rowid();
+        let improvement_id = sqlx::query(
+            "INSERT INTO miglioramenti (autore_utente_id, descrizione) VALUES (?, 'Migliorare pulsante')",
+        )
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("miglioramento")
+        .last_insert_rowid();
+        sqlx::query(
+            "INSERT INTO miglioramento_allegati (miglioramento_id, tipo, percorso_file) VALUES (?, 'video', 'data/media/a.mp4')",
+        )
+        .bind(improvement_id)
+        .execute(&pool)
+        .await
+        .expect("allegato video accettato dal CHECK");
+        let tipo: String = sqlx::query_scalar(
+            "SELECT tipo FROM miglioramento_allegati WHERE miglioramento_id = ?",
+        )
+        .bind(improvement_id)
+        .fetch_one(&pool)
+        .await
+        .expect("lettura tipo");
+        assert_eq!(tipo, "video");
+    }
+
+    #[test]
+    fn etichette_kind_distinguono_foto_e_video() {
+        assert_eq!(etichetta_kind("video"), "Video");
+        assert_eq!(etichetta_kind("foto"), "Screenshot");
+        assert_eq!(etichetta_kind_minuscola("video"), "video");
+        assert_eq!(etichetta_kind_minuscola("foto"), "screenshot");
     }
 
     #[test]
