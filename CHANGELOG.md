@@ -2,6 +2,17 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_COLLAUDO_ALLEGATO_VIDEO_20260906 -->
+# 06/09/2026 — Collaudo dal vivo confermato, "Salva senza allegato"
+
+Collaudato per davvero su Telegram da Alessio (badge "🆕" visibile sul
+menù principale, tutorial comparso alla prima prova con i bottoni
+"tienilo/elimina" funzionanti, foto e video riconosciuti correttamente
+nel messaggio di conferma, badge sparito dopo). Corretta anche un'etichetta
+notata durante il collaudo: "✅ Salva senza foto" diventa "✅ Salva senza
+allegato" nei tre punti in cui compariva, coerente con l'aver aggiunto il
+video. Nessun test nuovo, nessuna logica cambiata. Totale invariato: 300.
+
 <!-- CHANGELOG_ALLEGATO_VIDEO_MIGLIORAMENTI_20260905 -->
 # 05/09/2026 — Anche i miglioramenti accettano un video, non solo una foto
 

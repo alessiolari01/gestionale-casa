@@ -443,7 +443,7 @@ pub async fn handle_message(
             if msg.photo().is_none() && msg.video().is_none() {
                 bot.send_message(
                     msg.chat.id,
-                    "📷🎥 Sto aspettando una foto o un video. In alternativa usa ✅ Salva senza foto o ❌ Annulla.",
+                    "📷🎥 Sto aspettando una foto o un video. In alternativa usa ✅ Salva senza allegato o ❌ Annulla.",
                 )
                 .reply_markup(optional_photo_keyboard())
                 .await?;
@@ -1303,7 +1303,7 @@ async fn finish_description(
         },
     );
     let base =
-        "📷🎥 Vuoi aggiungere una foto o un video?\n\nInviala oppure premi ✅ Salva senza foto.";
+        "📷🎥 Vuoi aggiungere una foto o un video?\n\nInviala oppure premi ✅ Salva senza allegato.";
     let testo = match tutorial_da_mostrare(pool).await {
         Some(tutorial) => format!("{base}\n\n{tutorial}"),
         None => base.to_string(),
@@ -3649,7 +3649,7 @@ fn description_keyboard() -> InlineKeyboardMarkup {
 fn optional_photo_keyboard() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
         vec![InlineKeyboardButton::callback(
-            "✅ Salva senza foto".to_string(),
+            "✅ Salva senza allegato".to_string(),
             "improve:save:no_photo".to_string(),
         )],
         vec![

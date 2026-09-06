@@ -684,10 +684,26 @@ tentativo successivo.
 3 nuovi test (300 totali, 297 prima): un allegato `tipo = 'video'`
 accettato dal CHECK reale (non solo dal codice), le etichette
 foto/video, e il badge sul menù principale mostrato/nascosto secondo il
-parametro. **Non ancora collaudato dal vivo**: serve un giro reale su
-Telegram (creare un miglioramento, allegare prima una foto poi un video,
-vedere il tutorial comparire una sola volta e il badge sparire dal menù
-principale dopo).
+parametro.
+
+**Collaudato per davvero su Telegram (6 settembre 2026), confermato da
+Alessio**: badge "🆕" visibile su "📋 Miglioramenti" nel menù principale,
+tutorial comparso alla prima prova di allegato con i bottoni
+`✅ Tienilo` / `🗑️ Era una prova, elimina` funzionanti, foto e video
+riconosciuti correttamente nella conferma, badge sparito dal menù
+principale dopo. Corretta un'etichetta notata durante il collaudo:
+"✅ Salva senza foto" → "✅ Salva senza allegato" (tre punti), coerente
+con l'aver aggiunto il video.
+
+**Trovato analizzando una registrazione del collaudo, non ancora
+corretto**: durante la creazione di un miglioramento, se si preme
+`🏠 Menù principale` mentre la bozza è attiva (es. alla schermata "vuoi
+aggiungere una foto o un video?"), il bot annulla il flusso e mostra il
+sotto-menù Miglioramenti con "❌ Operazione annullata." invece del vero
+menù principale — comportamento preesistente, non introdotto da questo
+blocco. Ovunque nel resto del bot lo stesso pulsante porta al menù vero;
+qui no. Decisione rimandata: da correggere se Alessio conferma di
+volerlo.
 
 ## 3. Stato tecnico verificato
 
