@@ -2,6 +2,19 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_FALSO_ALLARME_MENU_PRINCIPALE_20260906 -->
+# 06/09/2026 — Correzione: "🏠 Menù principale" non ha nessun difetto
+
+Il commit precedente segnalava che `🏠 Menù principale`, premuto durante
+la creazione di un miglioramento, annullasse il flusso invece di aprire
+il vero menù. Era una lettura sbagliata di una registrazione video
+campionata a 1 fotogramma al secondo: un messaggio "❌ Operazione
+annullata." già presente in chat da un'azione precedente era stato
+attribuito al tocco sbagliato. Alessio ha riprovato dal vivo: il pulsante
+funziona correttamente, porta al menù principale senza annullare nulla.
+Nessun codice toccato, solo la correzione del documento. Totale
+invariato: 300.
+
 <!-- CHANGELOG_COLLAUDO_ALLEGATO_VIDEO_20260906 -->
 # 06/09/2026 — Collaudo dal vivo confermato, "Salva senza allegato"
 

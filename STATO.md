@@ -695,15 +695,18 @@ principale dopo. Corretta un'etichetta notata durante il collaudo:
 "✅ Salva senza foto" → "✅ Salva senza allegato" (tre punti), coerente
 con l'aver aggiunto il video.
 
-**Trovato analizzando una registrazione del collaudo, non ancora
-corretto**: durante la creazione di un miglioramento, se si preme
-`🏠 Menù principale` mentre la bozza è attiva (es. alla schermata "vuoi
-aggiungere una foto o un video?"), il bot annulla il flusso e mostra il
-sotto-menù Miglioramenti con "❌ Operazione annullata." invece del vero
-menù principale — comportamento preesistente, non introdotto da questo
-blocco. Ovunque nel resto del bot lo stesso pulsante porta al menù vero;
-qui no. Decisione rimandata: da correggere se Alessio conferma di
-volerlo.
+**Falso allarme, corretto dopo un ricollaudo dal vivo**: analizzando una
+registrazione del collaudo era sembrato che `🏠 Menù principale`, premuto
+mentre una bozza di miglioramento è attiva, annullasse il flusso invece
+di aprire il vero menù principale. Il campionamento a 1 fotogramma al
+secondo aveva probabilmente attribuito al tocco un messaggio
+"❌ Operazione annullata." già presente in chat da un'azione precedente,
+non la risposta vera a quel tocco. Alessio ha riprovato dal vivo:
+`🏠 Menù principale` porta correttamente al menù principale, senza nessun
+messaggio di annullamento. Nessun codice da correggere qui — lezione
+per la prossima volta: un'analisi video a campionamento sparso non
+sostituisce un collaudo dal vivo, soprattutto quando il campione è troppo
+rado per essere sicuri di cosa causa cosa.
 
 ## 3. Stato tecnico verificato
 
