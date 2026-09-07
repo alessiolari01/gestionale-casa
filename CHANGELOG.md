@@ -2,6 +2,30 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_ANNULLA_DA_MENU_PRINCIPALE_20260907 -->
+# 07/09/2026 — "Menù principale" avvisa quando annulla davvero qualcosa
+
+Deciso con Alessio: premere `🏠 Menù principale` mentre una bozza/un
+input atteso è attivo (la stessa situazione in cui compare `❌ Annulla`)
+deve avvisare "❌ Operazione annullata." come farebbe il pulsante locale
+-- prima andava al menù in silenzio, senza dire che qualcosa era stato
+scartato.
+
+Centralizzato in un solo punto (`handle_authorized_callback` in
+`main.rs`), non ripetuto in ogni modulo: calcolato subito, prima che
+qualunque modulo pulisca la propria sessione, controllando le dieci
+mappe di sessione esistenti (le stesse già interrogate dal pre-swap
+dell'automazione di deploy). Aggiunto `has_active` alle sei mappe che non
+lo avevano ancora.
+
+Trovato sistemando questo, non a tavolino: il blocco che pulisce le
+sessioni su "menu:main" non toccava mai `profile_sessions`,
+`identity_sessions` e `distribuzione_sessions` -- un input testuale in
+attesa lì poteva restare appeso. Corretto insieme, stessa causa.
+
+Nessun test nuovo (logica di dispatch, non isolabile senza un `Bot`
+reale come il resto del file). Totale invariato: 300.
+
 <!-- CHANGELOG_FALSO_ALLARME_MENU_PRINCIPALE_20260906 -->
 # 06/09/2026 — Correzione: "🏠 Menù principale" non ha nessun difetto
 

@@ -31,6 +31,13 @@ impl ContainerSessionStore {
         });
     }
 
+    /// Vero se questa chat ha una sessione attiva -- usato per far dire
+    /// "❌ Operazione annullata." a "🏠 Menù principale" quando davvero
+    /// annulla qualcosa (deciso con Alessio il 7 settembre 2026).
+    pub fn has_active(&self, chat_id: i64) -> bool {
+        self.with_sessions(|sessions| sessions.contains_key(&chat_id))
+    }
+
     /// Chat con una sessione attiva in questa mappa. Usata dal controllo
     /// pre-swap (sotto-step 4/5 del punto 6 del ciclo di automazione) per
     /// sapere se rimandare lo spegnimento del bot.

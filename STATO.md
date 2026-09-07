@@ -695,6 +695,26 @@ principale dopo. Corretta un'etichetta notata durante il collaudo:
 "✅ Salva senza foto" → "✅ Salva senza allegato" (tre punti), coerente
 con l'aver aggiunto il video.
 
+**Deciso e costruito il 7 settembre 2026**: `🏠 Menù principale`, premuto
+mentre una bozza/un input atteso è attivo (la stessa situazione in cui
+compare il pulsante `❌ Annulla` locale), ora avvisa "❌ Operazione
+annullata." esattamente come annullare dalla schermata — prima andava al
+menù in silenzio. Centralizzato in un unico punto in `main.rs`
+(`handle_authorized_callback`): calcolato subito, prima che qualunque
+modulo pulisca la propria sessione, se una qualunque delle dieci mappe di
+sessione ha uno stato attivo per quella chat (le stesse già interrogate
+dal pre-swap dell'automazione). Aggiunto anche `has_active` a sei mappe
+che non lo avevano ancora (`SessionStore`, `LocationSessionStore`,
+`ContainerSessionStore`, `PhotoSessionStore`, `IdentitySessionStore`,
+`DistribuzioneSessionStore`) — tutte già lo avevano per le altre quattro.
+
+Trovato mentre si sistemava questo: il blocco generico "menu:main" non
+puliva mai `profile_sessions`, `identity_sessions` e
+`distribuzione_sessions` (a differenza delle altre sette mappe) — un
+input testuale in attesa lì poteva restare appeso dopo aver premuto
+"Menù principale". Corretto aggiungendo la pulizia delle tre mappe
+mancanti nello stesso blocco.
+
 **Falso allarme, corretto dopo un ricollaudo dal vivo**: analizzando una
 registrazione del collaudo era sembrato che `🏠 Menù principale`, premuto
 mentre una bozza di miglioramento è attiva, annullasse il flusso invece

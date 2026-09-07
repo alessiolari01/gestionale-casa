@@ -74,6 +74,17 @@ impl IdentitySessionStore {
             .remove(&chat_id);
     }
 
+    /// Vero se questa chat ha una sessione attiva -- usato per capire se
+    /// "🏠 Menù principale" sta davvero annullando qualcosa (deciso con
+    /// Alessio il 7 settembre 2026: in quel caso avvisa "❌ Operazione
+    /// annullata." come farebbe il pulsante "❌ Annulla" locale).
+    fn has_active(&self, chat_id: i64) -> bool {
+        self.inner
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .contains_key(&chat_id)
+    }
+
     /// Chat con una sessione attiva in questa mappa. Usata dal controllo
     /// pre-swap (sotto-step 4/5 del punto 6 del ciclo di automazione) per
     /// sapere se rimandare lo spegnimento del bot.
@@ -129,6 +140,15 @@ impl DistribuzioneSessionStore {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .remove(&chat_id);
+    }
+
+    /// Vero se questa chat ha una sessione attiva -- vedi il commento
+    /// gemello su `IdentitySessionStore::has_active`.
+    fn has_active(&self, chat_id: i64) -> bool {
+        self.inner
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .contains_key(&chat_id)
     }
 
     /// Chat con una sessione attiva in questa mappa. Usata dal controllo
@@ -1373,6 +1393,25 @@ async fn handle_authorized_callback(
 ) -> ResponseResult<()> {
     let data = data.as_str();
 
+    // Calcolato subito, prima che qualunque modulo pulisca la propria
+    // sessione: "🏠 Menù principale" premuto mentre una bozza/un input
+    // atteso è attivo deve avvisare "❌ Operazione annullata." esattamente
+    // come premere il pulsante "❌ Annulla" locale della schermata (deciso
+    // con Alessio il 7 settembre 2026) -- non solo silenziosamente portare
+    // al menù. Le stesse dieci mappe già interrogate dal pre-swap
+    // dell'automazione (`chat_con_sessione_attiva`).
+    let annullamento_da_sessione = data == "menu:main"
+        && (sessions.has_active(chat_id.0)
+            || location_sessions.has_active(chat_id.0)
+            || container_sessions.has_active(chat_id.0)
+            || photo_sessions.has_active(chat_id.0)
+            || food_sessions.has_active(chat_id.0)
+            || profile_sessions.has_active(chat_id.0)
+            || improvement_sessions.has_active(chat_id.0)
+            || recipe_sessions.has_active(chat_id.0)
+            || identity_sessions.has_active(chat_id.0)
+            || distribuzione_sessions.has_active(chat_id.0));
+
     if (data.starts_with("improve:")
         || (data == "menu:main" && improvement_sessions.has_active(chat_id.0)))
         && modules::miglioramenti::handle_callback(
@@ -1505,8 +1544,15 @@ async fn handle_authorized_callback(
             container_sessions.clear_chat(chat_id.0);
             photo_sessions.clear_chat(chat_id.0);
             food_sessions.clear_chat(chat_id.0);
+            profile_sessions.clear_chat(chat_id.0);
             improvement_sessions.clear_chat(chat_id.0);
             recipe_sessions.clear_chat(chat_id.0);
+            identity_sessions.clear_chat(chat_id.0);
+            distribuzione_sessions.clear_chat(chat_id.0);
+            if annullamento_da_sessione {
+                bot.send_message(chat_id, "❌ Operazione annullata.")
+                    .await?;
+            }
             send_main_menu(&bot, chat_id, &pool, &actor).await?;
         }
         "identity:profile" => {

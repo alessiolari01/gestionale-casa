@@ -217,6 +217,14 @@ Nessuna tastiera scrive `💡 Migliora` da sé: lo inserisce `context_bot.rs`
 prima dell'**ultimo** pulsante `menu:main` della riga. Chi scrive una tastiera
 deve solo mettere il pulsante del menù per ultimo.
 
+**Deciso il 7 settembre 2026**: durante un passo di procedura (quando la
+riga ha `❌ Annulla`), premere `🏠 Menù principale` invece di `❌ Annulla`
+deve avvisare "❌ Operazione annullata." allo stesso modo — non solo
+portare via in silenzio. Un solo punto in codice decide questo, non ogni
+tastiera per conto proprio: `handle_authorized_callback` in `main.rs`
+controlla, prima che qualunque modulo pulisca la propria sessione, se una
+qualunque delle mappe di sessione ha uno stato attivo per la chat.
+
 ### C4. Un simbolo, un significato
 
 | simbolo | significato | dove |
