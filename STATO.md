@@ -715,6 +715,21 @@ input testuale in attesa lì poteva restare appeso dopo aver premuto
 "Menù principale". Corretto aggiungendo la pulizia delle tre mappe
 mancanti nello stesso blocco.
 
+**Secondo bug reale, trovato collaudando per davvero (non a tavolino)**:
+la prima versione mandava l'avviso "❌ Operazione annullata." come
+messaggio **separato**, mandato subito prima del menù principale.
+Alessio ha visto il vero comportamento sul bot: l'avviso compariva per
+una frazione di secondo e spariva subito, sostituito dal menù principale
+— la regola "una sola schermata attiva per chat" (`ContextBot`) cancella
+un messaggio non appena arriva il successivo. Corretto unendo avviso e
+menù principale in un **unico** messaggio (`send_main_menu_con_avviso`,
+avviso anteposto al testo normale), esattamente come fa già da sempre
+`❌ Annulla` in `cancel_improvement_flow`. **Diventata regola globale**
+(C3 in `docs/convenzioni-telegram.md`): un avviso di annullamento va
+sempre nello stesso messaggio della schermata di destinazione, mai
+separato. Audit in corso sugli altri moduli per verificare che ogni
+`❌ Annulla` esistente la rispetti già.
+
 **Falso allarme, corretto dopo un ricollaudo dal vivo**: analizzando una
 registrazione del collaudo era sembrato che `🏠 Menù principale`, premuto
 mentre una bozza di miglioramento è attiva, annullasse il flusso invece

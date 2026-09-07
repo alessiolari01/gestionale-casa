@@ -2,6 +2,26 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_AVVISO_UNICO_MESSAGGIO_20260907 -->
+# 07/09/2026 — L'avviso di annullamento va unito al messaggio di destinazione
+
+Bug reale trovato collaudando: la versione precedente mandava
+"❌ Operazione annullata." come messaggio separato prima del menù
+principale. Alessio ha visto il vero risultato sul bot: l'avviso
+compariva per una frazione di secondo e spariva subito, sostituito dal
+menù -- la regola "una sola schermata attiva per chat" cancella un
+messaggio non appena arriva il successivo.
+
+Corretto unendo avviso e destinazione in un solo messaggio
+(`send_main_menu_con_avviso`), come fa già da sempre `❌ Annulla`.
+Diventata regola globale (C3): un avviso di annullamento sta sempre nello
+stesso messaggio della schermata di destinazione, mai separato. Avviato
+un audit di tutti gli altri punti `❌ Annulla` del bot per verificare che
+la rispettino già.
+
+Nessun test nuovo (stessa ragione della voce precedente). Totale
+invariato: 300.
+
 <!-- CHANGELOG_ANNULLA_DA_MENU_PRINCIPALE_20260907 -->
 # 07/09/2026 — "Menù principale" avvisa quando annulla davvero qualcosa
 

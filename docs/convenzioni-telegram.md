@@ -225,6 +225,20 @@ tastiera per conto proprio: `handle_authorized_callback` in `main.rs`
 controlla, prima che qualunque modulo pulisca la propria sessione, se una
 qualunque delle mappe di sessione ha uno stato attivo per la chat.
 
+**Regola globale, stessa data**: l'avviso "❌ Operazione annullata." (da
+`❌ Annulla` come da `🏠 Menù principale`) va **sempre nello stesso
+messaggio** della schermata di destinazione — mai un messaggio separato
+mandato subito prima. La regola C1 ("una sola schermata attiva per chat")
+cancella un messaggio non appena il successivo viene mandato: un avviso
+per conto suo sparirebbe in una frazione di secondo, sostituito
+dall'arrivo della schermata di destinazione, senza dare il tempo di
+leggerlo — trovato per davvero collaudando "🏠 Menù principale" prima di
+questa correzione. Il testo dell'avviso va anteposto al testo normale
+della schermata di destinazione, che compare **solo dopo** l'interazione
+successiva (un pulsante, un comando) — esattamente come fa da sempre
+`❌ Annulla`, che questa regola generalizza a ogni punto che mostra lo
+stesso avviso.
+
 ### C4. Un simbolo, un significato
 
 | simbolo | significato | dove |
