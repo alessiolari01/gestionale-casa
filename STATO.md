@@ -763,12 +763,20 @@ notato su "➕ Nuovo oggetto" che `❌ Annulla` stava da solo su una riga e
 `💡 Migliora | 🏠 Menù principale` sulla riga sotto, invece dell'unica
 riga di navigazione prevista da C3 — `context_bot.rs` inserisce
 "💡 Migliora" solo accanto a "Menù principale", quindi due righe separate
-lasciano "Annulla" isolato. Cercato lo stesso difetto in tutto il bot:
-altri cinque punti (`oggetti.rs` una seconda volta nella schermata
-riepilogo della bozza, `foto.rs`, due in `ricette.rs`,
-`miglioramenti.rs`), due dei quali (`foto.rs`,
-`miglioramenti.rs::discarded:delete_all`) non avevano proprio nessun
-pulsante "Menù principale". Tutti uniti in un'unica riga finale.
+lasciano l'altro pulsante isolato. Prima ricerca nel bot: sei punti
+(`oggetti.rs` due volte, `foto.rs`, `ricette.rs` due volte,
+`miglioramenti.rs`), due senza alcun pulsante "Menù principale". Tutti
+uniti in un'unica riga finale.
+
+**Stesso audit, secondo giro più a fondo**: continuando a cercare lo
+stesso schema sono emersi altri **15 punti**: `oggetti.rs` (5 in più),
+`contenitori.rs` (3), `storico.rs` (7, tre delle quali senza "Menù
+principale" del tutto). Dove il pulsante era "↩️ Cambia casa/stanza" o
+"↩️ Torna a X" (funzionalmente un Indietro contestuale anche se scritto
+diverso), trattato come "⬅️ Indietro"/"❌ Annulla" — stessa regola.
+21 punti corretti in totale tra i due giri: la stessa disattenzione
+(due righe invece di una) si era ripetuta più e più volte scrivendo
+tastiere diverse nel tempo, non un errore isolato.
 
 **Uniformate le emoticon, trovato collaudando dal vivo**: Alessio ha
 notato su Telegram che `oggetti.rs` mostrava `↩️ Operazione annullata.`

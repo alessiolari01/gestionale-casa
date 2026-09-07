@@ -1475,8 +1475,10 @@ async fn show_scope_picker_for_new(
             &format!("c:nn:{}:{}", encode_id(home_id), encode_id(room.id)),
         )]);
     }
-    rows.push(vec![button("↩️ Cambia casa", "c:n")]);
-    rows.push(vec![button("🏠 Menù principale", "menu:main")]);
+    rows.push(vec![
+        button("↩️ Cambia casa", "c:n"),
+        button("🏠 Menù principale", "menu:main"),
+    ]);
 
     bot.send_message(
         chat_id,
@@ -2081,13 +2083,10 @@ async fn delete_container_and_report(
                 chat_id,
                 "⚠️ Non riesco a eliminare il contenitore. Se la promozione creasse due contenitori con lo stesso nome allo stesso livello, rinomina prima uno dei due.",
             )
-            .reply_markup(InlineKeyboardMarkup::new(vec![
-                vec![button(
-                    "↩️ Torna al contenitore",
-                    &format!("c:v:{}", encode_id(id)),
-                )],
-                vec![button("🏠 Menù principale", "menu:main")],
-            ]))
+            .reply_markup(InlineKeyboardMarkup::new(vec![vec![
+                button("↩️ Torna al contenitore", &format!("c:v:{}", encode_id(id))),
+                button("🏠 Menù principale", "menu:main"),
+            ]]))
             .await?;
         }
     }
@@ -2287,13 +2286,10 @@ async fn move_container_and_report(
                 chat_id,
                 "⚠️ Spostamento non riuscito. La destinazione potrebbe creare un ciclo oppure un conflitto di nomi.",
             )
-            .reply_markup(InlineKeyboardMarkup::new(vec![
-                vec![button(
-                    "↩️ Torna al contenitore",
-                    &format!("c:v:{}", encode_id(id)),
-                )],
-                vec![button("🏠 Menù principale", "menu:main")],
-            ]))
+            .reply_markup(InlineKeyboardMarkup::new(vec![vec![
+                button("↩️ Torna al contenitore", &format!("c:v:{}", encode_id(id))),
+                button("🏠 Menù principale", "menu:main"),
+            ]]))
             .await?;
         }
     }

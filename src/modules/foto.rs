@@ -600,11 +600,10 @@ fn photo_menu_keyboard(item_id: i64, count: i64) -> InlineKeyboardMarkup {
         )]);
     }
 
-    rows.push(vec![button(
-        "⬅️ Torna all'oggetto",
-        &format!("oggetti:view:{item_id}"),
-    )]);
-    rows.push(vec![button("🏠 Menù principale", "menu:main")]);
+    rows.push(vec![
+        button("⬅️ Torna all'oggetto", &format!("oggetti:view:{item_id}")),
+        button("🏠 Menù principale", "menu:main"),
+    ]);
     InlineKeyboardMarkup::new(rows)
 }
 

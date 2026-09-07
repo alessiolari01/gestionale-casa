@@ -2751,8 +2751,10 @@ fn new_object_home_picker_keyboard(
         "⏭ Nessun luogo",
         "oggetti:draft:location:skip-home",
     )]);
-    rows.push(vec![button("↩️ Torna ai dettagli", "oggetti:draft:back")]);
-    rows.push(vec![button("🏠 Menù principale", "menu:main")]);
+    rows.push(vec![
+        button("↩️ Torna ai dettagli", "oggetti:draft:back"),
+        button("🏠 Menù principale", "menu:main"),
+    ]);
     InlineKeyboardMarkup::new(rows)
 }
 
@@ -2775,8 +2777,10 @@ fn new_object_room_picker_keyboard(
         &format!("oggetti:draft:location:home-only:{home_id}"),
     )]);
     rows.push(vec![button("↩️ Cambia casa", "oggetti:draft:location")]);
-    rows.push(vec![button("↩️ Torna ai dettagli", "oggetti:draft:back")]);
-    rows.push(vec![button("🏠 Menù principale", "menu:main")]);
+    rows.push(vec![
+        button("↩️ Torna ai dettagli", "oggetti:draft:back"),
+        button("🏠 Menù principale", "menu:main"),
+    ]);
     InlineKeyboardMarkup::new(rows)
 }
 
@@ -2823,12 +2827,16 @@ fn other_details_keyboard(draft: &ObjectDraft) -> InlineKeyboardMarkup {
     let value = section_label("💰 Valore stimato", draft.estimated_value_cents.is_some());
     let serial = section_label("🔢 Numero seriale", draft.serial_number.is_some());
 
+    // C3: riga di navigazione unica, non due righe separate (stesso
+    // difetto trovato da Alessio in `cancel_keyboard` più sopra).
     InlineKeyboardMarkup::new(vec![
         vec![button(&description, "oggetti:draft:description")],
         vec![button(&value, "oggetti:draft:value")],
         vec![button(&serial, "oggetti:draft:serial")],
-        vec![button("⬅️ Dettagli", "oggetti:draft:back")],
-        vec![button("🏠 Menù principale", "menu:main")],
+        vec![
+            button("⬅️ Dettagli", "oggetti:draft:back"),
+            button("🏠 Menù principale", "menu:main"),
+        ],
     ])
 }
 
@@ -2873,10 +2881,16 @@ fn object_detail_keyboard(
             button("🏷️ Menu oggetti", "oggetti:menu"),
         ],
     ];
-    if let Some(return_button) = contextual_return {
-        rows.push(vec![return_button]);
+    // C3: riga di navigazione unica -- "↩️ Torna a X" è un Indietro
+    // contestuale e va sulla stessa riga di "Menù principale", non su
+    // due righe separate.
+    match contextual_return {
+        Some(return_button) => rows.push(vec![
+            return_button,
+            button("🏠 Menù principale", "menu:main"),
+        ]),
+        None => rows.push(vec![button("🏠 Menù principale", "menu:main")]),
     }
-    rows.push(vec![button("🏠 Menù principale", "menu:main")]);
     InlineKeyboardMarkup::new(rows)
 }
 
@@ -2886,8 +2900,10 @@ fn delete_confirmation_keyboard(id: i64) -> InlineKeyboardMarkup {
             "🗑 Sì, elimina definitivamente",
             &format!("oggetti:delete:do:{id}"),
         )],
-        vec![button("↩️ Annulla", &format!("oggetti:view:{id}"))],
-        vec![button("🏠 Menù principale", "menu:main")],
+        vec![
+            button("❌ Annulla", &format!("oggetti:view:{id}")),
+            button("🏠 Menù principale", "menu:main"),
+        ],
     ])
 }
 

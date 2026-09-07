@@ -2,6 +2,23 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_LAYOUT_RIGA_NAVIGAZIONE_SECONDO_GIRO_20260907 -->
+# 07/09/2026 — Stesso difetto di layout, secondo giro: altri 15 punti
+
+Alessio ha trovato un'altra schermata ("⋯ Altri dettagli" nella
+creazione di un oggetto) con lo stesso difetto del commit precedente:
+riga di navigazione spezzata in due. Cercato più a fondo in tutto il
+bot (non solo "❌ Annulla" ma anche "↩️ Torna a X"/"↩️ Cambia
+casa/stanza", funzionalmente un Indietro contestuale): altri 15 punti in
+`oggetti.rs`, `contenitori.rs`, `storico.rs`. Tre di questi non avevano
+proprio nessun pulsante "Menù principale" (i picker di filtro dello
+storico). Tutti uniti in un'unica riga finale, aggiunto "Menù principale"
+dove mancava. Uniformata anche un'ultima emoticon di annullamento
+(`oggetti::delete_confirmation_keyboard`, ↩️ → ❌).
+
+21 punti corretti in totale tra i due giri di questo audit. Nessun test
+nuovo (solo tastiere). Totale invariato: 303.
+
 <!-- CHANGELOG_LAYOUT_RIGA_NAVIGAZIONE_20260907 -->
 # 07/09/2026 — La riga di navigazione (C3) torna unica in sei punti
 
