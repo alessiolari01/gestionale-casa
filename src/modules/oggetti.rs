@@ -2673,7 +2673,14 @@ fn objects_menu_keyboard() -> InlineKeyboardMarkup {
             button("🔎 Cerca", "oggetti:search"),
         ],
         vec![button("🏠 Filtra per casa / stanza", "loc:home:list")],
-        vec![button("🏠 Menù principale", "menu:main")],
+        // Deciso il 7 settembre 2026: "⬅️ Indietro" resta visibile a
+        // sinistra anche nelle sezioni di primo livello, dove porta dove
+        // porta gia' "Menù principale" -- vedi la nota gemella in
+        // alimentazione::alimentation_menu_keyboard.
+        vec![
+            button("⬅️ Indietro", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
+        ],
     ])
 }
 

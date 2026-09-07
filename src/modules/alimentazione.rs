@@ -4803,10 +4803,15 @@ fn alimentation_menu_keyboard() -> InlineKeyboardMarkup {
         vec![button("🍳 Ricette", "recipe:menu")],
         vec![button("👥 Profili alimentari", "foodprof:menu")],
         vec![button("📅 Planner alimentare", "planner:menu")],
-        // Convenzione C3: Alimentazione e' una sezione di primo livello, quindi
-        // `⬅️ Indietro` porterebbe esattamente dove porta `🏠 Menù principale`.
-        // Due pulsanti per la stessa destinazione non aiutano nessuno.
-        vec![button("🏠 Menù principale", "menu:main")],
+        // Deciso il 7 settembre 2026: anche se `⬅️ Indietro` porterebbe
+        // esattamente dove porta `🏠 Menù principale`, resta comunque
+        // visibile a sinistra -- Alessio si aspetta "indietro" sempre
+        // nella stessa posizione, come i tre tasti fissi di un telefono.
+        // Vale per ogni sezione di primo livello, non solo questa.
+        vec![
+            button("⬅️ Indietro", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
+        ],
     ])
 }
 

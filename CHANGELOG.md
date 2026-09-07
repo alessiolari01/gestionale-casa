@@ -2,6 +2,26 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_INDIETRO_SEMPRE_VISIBILE_20260907 -->
+# 07/09/2026 — "⬅️ Indietro" compare sempre, anche a primo livello
+
+Cambiata una decisione di design precedente, non un bug: Alessio si è
+confuso davvero a non trovare "⬅️ Indietro" nelle sezioni di primo
+livello (Alimentazione, Oggetti, Case/stanze/contenitori, Storico,
+Spazi, Miglioramenti, Amministrazione), dove la vecchia C3 lo ometteva
+perché avrebbe portato esattamente dove porta già "🏠 Menù principale".
+Si aspetta "indietro" sempre nella stessa posizione, come i tre tasti
+fissi di un telefono -- la prevedibilità vale più della pulizia di un
+pulsante ridondante.
+
+C3 aggiornata di conseguenza. Applicato alle sette sezioni che ne erano
+prive (una, Profilo, ce l'aveva già). Entrambi i pulsanti puntano alla
+stessa callback `menu:main`. Le tastiere di fallback/errore che riusano
+le stesse funzioni (decine di punti in `oggetti.rs` e `luoghi.rs`) ne
+beneficiano senza bisogno di toccarle una per una.
+
+Nessun test nuovo (solo tastiere). Totale invariato: 303.
+
 <!-- CHANGELOG_LAYOUT_RIGA_NAVIGAZIONE_SECONDO_GIRO_20260907 -->
 # 07/09/2026 — Stesso difetto di layout, secondo giro: altri 15 punti
 

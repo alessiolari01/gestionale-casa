@@ -3711,7 +3711,13 @@ fn locations_menu_keyboard() -> InlineKeyboardMarkup {
             button("🌳 Struttura", "loc:tree"),
         ],
         vec![button("➕ Crea…", "loc:create")],
-        vec![button("🏠 Menù principale", "menu:main")],
+        // Deciso il 7 settembre 2026: "⬅️ Indietro" resta visibile a
+        // sinistra anche nelle sezioni di primo livello -- vedi la nota
+        // gemella in alimentazione::alimentation_menu_keyboard.
+        vec![
+            button("⬅️ Indietro", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
+        ],
     ])
 }
 

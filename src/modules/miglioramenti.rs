@@ -3525,10 +3525,13 @@ fn menu_keyboard_con_conteggi(
             ),
         ]);
     }
-    rows.push(vec![InlineKeyboardButton::callback(
-        "🏠 Menù principale".to_string(),
-        "menu:main".to_string(),
-    )]);
+    // Deciso il 7 settembre 2026: "⬅️ Indietro" resta visibile a sinistra
+    // anche nelle sezioni di primo livello -- vedi la nota gemella in
+    // alimentazione::alimentation_menu_keyboard.
+    rows.push(vec![
+        InlineKeyboardButton::callback("⬅️ Indietro".to_string(), "menu:main".to_string()),
+        InlineKeyboardButton::callback("🏠 Menù principale".to_string(), "menu:main".to_string()),
+    ]);
     InlineKeyboardMarkup::new(rows)
 }
 

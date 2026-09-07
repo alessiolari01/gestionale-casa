@@ -201,14 +201,20 @@ Se un pulsante non si capisce da solo, si cambia il nome del pulsante.
 Sempre ultima riga, sempre in quest'ordine:
 
 ```text
-sezione di primo livello   💡 Migliora | 🏠 Menù principale
+sezione di primo livello   ⬅️ Indietro | 💡 Migliora | 🏠 Menù principale
 schermata più interna      ⬅️ Indietro | 💡 Migliora | 🏠 Menù principale
 passo di una procedura     ❌ Annulla  | 💡 Migliora | 🏠 Menù principale
 ```
 
-**`⬅️ Indietro` esiste solo se porta da qualche altra parte.** In una sezione
-di primo livello coinciderebbe con `🏠 Menù principale`: in quel caso non si
-mette.
+**Deciso il 7 settembre 2026, cambia la riga precedente**: `⬅️ Indietro`
+compare **sempre**, anche in una sezione di primo livello dove porta
+esattamente dove porta già `🏠 Menù principale` (stessa callback
+`menu:main` su entrambi i pulsanti). Prima veniva omesso in quel caso
+per non avere due pulsanti alla stessa destinazione — ma Alessio si è
+confuso davvero a non trovarlo: si aspetta "indietro" sempre nella
+stessa posizione, come i tre tasti fissi di un telefono. La prevedibilità
+della posizione vale più della pulizia di togliere un pulsante
+ridondante.
 
 `⬅️ Indietro` torna sempre alla schermata da cui si è arrivati, mai a una
 schermata "logicamente superiore" scelta dal codice.

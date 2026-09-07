@@ -758,6 +758,22 @@ meccanismo invece di tenerne due diversi. 3 nuovi test sul meccanismo
 (coda consumata una sola volta, isolamento tra chat, che l'avviso vada
 davvero nel testo/nella didascalia). 303 test totali (300 prima).
 
+**Decisione di design cambiata dopo il collaudo (7 settembre 2026)**:
+Alessio si è confuso a non trovare `⬅️ Indietro` nelle sezioni di primo
+livello (dove prima veniva tolto perché avrebbe portato dove porta già
+`🏠 Menù principale`) — si aspetta "indietro" sempre nella stessa
+posizione, come i tre tasti fissi di un telefono. C3 aggiornata: da ora
+`⬅️ Indietro` compare **sempre**, anche quando punta alla stessa
+`menu:main`. Applicato a tutte le sette sezioni di primo livello che ne
+erano prive (trovate con una ricognizione completa, un'ottava —
+`👤 Profilo` — ce l'aveva già): `alimentazione::alimentation_menu_keyboard`,
+`oggetti::objects_menu_keyboard`, `luoghi::locations_menu_keyboard`,
+`storico::global_history_keyboard`, `main::send_spaces`,
+`miglioramenti::menu_keyboard_con_conteggi`, `main::admin_menu_keyboard`.
+Le tastiere di fallback/errore che riusano queste stesse funzioni
+(decine di punti in `oggetti.rs` e `luoghi.rs`) ne beneficiano
+automaticamente, senza toccarle una per una.
+
 **Audit di layout su C3, trovato collaudando dal vivo**: Alessio ha
 notato su "➕ Nuovo oggetto" che `❌ Annulla` stava da solo su una riga e
 `💡 Migliora | 🏠 Menù principale` sulla riga sotto, invece dell'unica
