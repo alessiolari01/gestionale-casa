@@ -48,6 +48,13 @@ impl PhotoSessionStore {
         });
     }
 
+    /// Vero se questa chat ha una sessione attiva -- usato per far dire
+    /// "❌ Operazione annullata." a "🏠 Menù principale" quando davvero
+    /// annulla qualcosa (deciso con Alessio il 7 settembre 2026).
+    pub fn has_active(&self, chat_id: i64) -> bool {
+        self.with_sessions(|sessions| sessions.contains_key(&chat_id))
+    }
+
     /// Chat con una sessione attiva in questa mappa. Usata dal controllo
     /// pre-swap (sotto-step 4/5 del punto 6 del ciclo di automazione) per
     /// sapere se rimandare lo spegnimento del bot.
@@ -122,8 +129,7 @@ pub async fn handle_message(
                 }
                 "/annulla" if sessions.get(chat_id).is_some() => {
                     if let Some(item_id) = sessions.take(chat_id) {
-                        bot.send_message(msg.chat.id, "Aggiunta foto annullata.")
-                            .await?;
+                        bot.annulla_e_avvisa(chat_id, "❌ Aggiunta foto annullata.");
                         show_photo_menu(bot, msg.chat.id, pool, item_id).await?;
                     }
                     return Ok(true);
@@ -276,6 +282,7 @@ pub async fn handle_callback(
 
     if let Some(item_id) = callback_id(data, "foto:cancel:") {
         sessions.clear_chat(chat_id.0);
+        bot.annulla_e_avvisa(chat_id.0, "❌ Operazione annullata.");
         show_photo_menu(bot, chat_id, pool, item_id).await?;
         return Ok(true);
     }
@@ -593,21 +600,26 @@ fn photo_menu_keyboard(item_id: i64, count: i64) -> InlineKeyboardMarkup {
         )]);
     }
 
-    rows.push(vec![button(
-        "⬅️ Torna all'oggetto",
-        &format!("oggetti:view:{item_id}"),
-    )]);
-    rows.push(vec![button("🏠 Menù principale", "menu:main")]);
+    rows.push(vec![
+        button("⬅️ Torna all'oggetto", &format!("oggetti:view:{item_id}")),
+        button("🏠 Menù principale", "menu:main"),
+    ]);
     InlineKeyboardMarkup::new(rows)
 }
 
 fn cancel_photo_keyboard(item_id: i64) -> InlineKeyboardMarkup {
+    // C3: mancava del tutto "🏠 Menù principale" su questa schermata, e
+    // la riga di navigazione va unica -- trovato collaudando lo stesso
+    // difetto in oggetti.rs (cancel_keyboard).
     InlineKeyboardMarkup::new(vec![
-        vec![button("❌ Annulla", &format!("foto:cancel:{item_id}"))],
         vec![button(
             "⬅️ Torna all'oggetto",
             &format!("oggetti:view:{item_id}"),
         )],
+        vec![
+            button("❌ Annulla", &format!("foto:cancel:{item_id}")),
+            button("🏠 Menù principale", "menu:main"),
+        ],
     ])
 }
 

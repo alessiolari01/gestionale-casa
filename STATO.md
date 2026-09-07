@@ -623,21 +623,210 @@ dopo la comparsa del messaggio, senza che nessuna interazione successiva
 lo mettesse alla prova. Da riprendere come miglioramento a sé, non dentro
 questo blocco di automazione.
 
+## 2ter. Badge "🆕" per le novità — infrastruttura pronta, in attesa del primo uso reale
+
+Deciso con Alessio il 5 settembre 2026, indipendente dall'automazione del
+ciclo di sviluppo (sezione 2bis): quando una funzionalità è nuova o cambia in
+modo significativo, il suo pulsante e ogni pulsante di menù che porta fino a
+lì (su su fino al menù principale) mostrano `🆕 `. Sparisce solo per chi
+arriva davvero fino alla schermata cambiata (non aprendo un menù intermedio),
+e solo per quella persona — non un flag condiviso, perché più persone usano
+lo stesso bot. Alla prima visita di ciascuno, la schermata mostra anche un
+breve tutorial, chiudibile con `✅ Ho capito`. Dettagli e motivazione in
+`docs/convenzioni-telegram.md` (C14).
+
+**Deciso**: si applica solo da questa data in avanti — **nessun retrofit**
+delle schermate esistenti, che quindi oggi non mostrano nessun badge.
+
+**Costruita l'infrastruttura di base**: `src/modules/novita.rs` (nuovo),
+`migrations/20260905090000_novita_lette.sql` (nuova tabella, additiva). "Cosa
+è nuovo" vive in un registro statico nel codice (`REGISTRO`: chiave,
+genitore per la risalita nel menù, tutorial opzionale), non nel database — nel
+database (`novita_lette`) si tiene traccia solo di chi ha già visto cosa, per
+utente. `REGISTRO` **parte vuoto**: nessuna funzionalità è ancora dichiarata,
+in attesa del primo pezzo di codice reale che la userà.
+
+Un bug reale trovato scrivendo il primo test (non a tavolino): i nodi
+intermedi del registro (es. una categoria usata solo per risalire al menù
+superiore, mai una schermata che qualcuno visita davvero) non vengono mai
+segnati come "visti" da nessuno — contarli come "ancora da vedere" avrebbe
+tenuto il badge acceso per sempre anche a foglie tutte viste. Corretto
+distinguendo le foglie del registro (funzionalità vere, visitabili) dai nodi
+intermedi (usati solo per la catena verso il menù): solo le foglie contano
+per decidere se un pulsante deve mostrare il badge.
+
+8 nuovi test (5 sulla logica pura di propagazione/foglie, 1 sull'etichetta, 2
+sulle funzioni DB con `sqlite::memory:`). Totale: 297 (289 prima).
+
+**Primo uso reale, scritto — collaudo dal vivo su Telegram da fare**: gli
+allegati di un miglioramento accettano ora anche un video, non solo una
+foto (`miglioramento_allegati` aveva `CHECK (tipo = 'foto')`, corretto in
+`CHECK (tipo IN ('foto','video'))` con la stessa migration che sistema
+anche `miglioramento_archivio_allegati` — altrimenti un miglioramento con
+un video non si sarebbe mai potuto archiviare). `save_original_media`
+(prima `save_original_photo`) riconosce da sola quale dei due è arrivato e
+lo dice nella conferma ("✅ Video aggiunto..." / "✅ Screenshot
+aggiunto..."), ricalcando `save_verification_media` che già lo faceva per
+le prove di collaudo.
+
+Registrata la prima voce reale in `novita::REGISTRO`
+(`miglioramenti_allegato_video`, genitore `improve_menu`): il pulsante
+`📋 Miglioramenti` del menù principale mostra "🆕" finché l'utente non
+arriva davvero a inviare un allegato. La prima volta che ci riesce, invece
+della conferma normale, il bot gli propone un piccolo tutorial guidato —
+idea di Alessio: non solo spiegare a parole, ma far *provare* la
+funzione — con due bottoni `✅ Tienilo` / `🗑️ Era una prova, elimina` per
+decidere se l'allegato appena inviato durante la prova resta vero o va
+tolto. Solo un tentativo riuscito (allegato salvato davvero) segna la
+novità come vista: chi annulla o non riesce a inviare nulla la ritrova al
+tentativo successivo.
+
+3 nuovi test (300 totali, 297 prima): un allegato `tipo = 'video'`
+accettato dal CHECK reale (non solo dal codice), le etichette
+foto/video, e il badge sul menù principale mostrato/nascosto secondo il
+parametro.
+
+**Collaudato per davvero su Telegram (6 settembre 2026), confermato da
+Alessio**: badge "🆕" visibile su "📋 Miglioramenti" nel menù principale,
+tutorial comparso alla prima prova di allegato con i bottoni
+`✅ Tienilo` / `🗑️ Era una prova, elimina` funzionanti, foto e video
+riconosciuti correttamente nella conferma, badge sparito dal menù
+principale dopo. Corretta un'etichetta notata durante il collaudo:
+"✅ Salva senza foto" → "✅ Salva senza allegato" (tre punti), coerente
+con l'aver aggiunto il video.
+
+**Deciso e costruito il 7 settembre 2026**: `🏠 Menù principale`, premuto
+mentre una bozza/un input atteso è attivo (la stessa situazione in cui
+compare il pulsante `❌ Annulla` locale), ora avvisa "❌ Operazione
+annullata." esattamente come annullare dalla schermata — prima andava al
+menù in silenzio. Centralizzato in un unico punto in `main.rs`
+(`handle_authorized_callback`): calcolato subito, prima che qualunque
+modulo pulisca la propria sessione, se una qualunque delle dieci mappe di
+sessione ha uno stato attivo per quella chat (le stesse già interrogate
+dal pre-swap dell'automazione). Aggiunto anche `has_active` a sei mappe
+che non lo avevano ancora (`SessionStore`, `LocationSessionStore`,
+`ContainerSessionStore`, `PhotoSessionStore`, `IdentitySessionStore`,
+`DistribuzioneSessionStore`) — tutte già lo avevano per le altre quattro.
+
+Trovato mentre si sistemava questo: il blocco generico "menu:main" non
+puliva mai `profile_sessions`, `identity_sessions` e
+`distribuzione_sessions` (a differenza delle altre sette mappe) — un
+input testuale in attesa lì poteva restare appeso dopo aver premuto
+"Menù principale". Corretto aggiungendo la pulizia delle tre mappe
+mancanti nello stesso blocco.
+
+**Secondo bug reale, trovato collaudando per davvero (non a tavolino)**:
+la prima versione mandava l'avviso "❌ Operazione annullata." come
+messaggio **separato**, mandato subito prima del menù principale.
+Alessio ha visto il vero comportamento sul bot: l'avviso compariva per
+una frazione di secondo e spariva subito, sostituito dal menù principale
+— la regola "una sola schermata attiva per chat" (`ContextBot`) cancella
+un messaggio non appena arriva il successivo. Corretto unendo avviso e
+menù principale in un **unico** messaggio (`send_main_menu_con_avviso`,
+avviso anteposto al testo normale), esattamente come fa già da sempre
+`❌ Annulla` in `cancel_improvement_flow`. **Diventata regola globale**
+(C3 in `docs/convenzioni-telegram.md`): un avviso di annullamento va
+sempre nello stesso messaggio della schermata di destinazione, mai
+separato. Audit in corso sugli altri moduli per verificare che ogni
+`❌ Annulla` esistente la rispetti già.
+
+**Audit completo e correzione di tutti gli altri punti "❌ Annulla" del
+bot (7 settembre 2026)**: chiesto da Alessio dopo il collaudo del punto
+precedente. Trovate 8 violazioni reali (stesso bug del messaggio
+separato che sparisce) in `alimentazione.rs` (quattro punti, incluso un
+"menu:main" locale che ne produceva perfino due) e un punto ciascuno in
+`contenitori.rs`, `luoghi.rs`, `oggetti.rs`, `foto.rs` — quest'ultimo
+condiviso da comando testuale e pulsante. Più quattro punti dove
+l'avviso mancava del tutto (non lo stesso bug, ma comunque fuori dalla
+regola): `/annulla` per le sessioni identity/distribuzione in `main.rs`,
+il pulsante `foto:cancel`, il pulsante `foodprof:cancel`.
+
+**Cambiata strategia di correzione durante il lavoro**: la prima
+correzione (menu:main) aveva aggiunto un parametro `avviso: Option<&str>`
+a `send_main_menu`. Estendere lo stesso schema a `contenitori.rs` e
+`luoghi.rs` avrebbe richiesto aggiungerlo anche alle **cinque** funzioni
+di destinazione diverse a cui un `/annulla` può portare in quei moduli
+(alcune in un modulo diverso, es. `luoghi::show_home_detail`) — poco
+sostenibile. Costruito invece un meccanismo centrale in `context_bot.rs`:
+`ContextBot::annulla_e_avvisa(chat_id, testo)` mette l'avviso "in coda"
+per quella chat; il punto unico in cui ogni messaggio tracciato viene
+davvero mandato (`ContextRequest::send`) lo preleva e lo antepone al
+testo, una sola volta, prima di mandarlo — qualunque sia la schermata di
+destinazione, senza dover cambiare la sua funzione. Le correzioni già
+fatte (menu:main, Alimentazione) sono state riscritte con lo stesso
+meccanismo invece di tenerne due diversi. 3 nuovi test sul meccanismo
+(coda consumata una sola volta, isolamento tra chat, che l'avviso vada
+davvero nel testo/nella didascalia). 303 test totali (300 prima).
+
+**Decisione di design cambiata dopo il collaudo (7 settembre 2026)**:
+Alessio si è confuso a non trovare `⬅️ Indietro` nelle sezioni di primo
+livello (dove prima veniva tolto perché avrebbe portato dove porta già
+`🏠 Menù principale`) — si aspetta "indietro" sempre nella stessa
+posizione, come i tre tasti fissi di un telefono. C3 aggiornata: da ora
+`⬅️ Indietro` compare **sempre**, anche quando punta alla stessa
+`menu:main`. Applicato a tutte le sette sezioni di primo livello che ne
+erano prive (trovate con una ricognizione completa, un'ottava —
+`👤 Profilo` — ce l'aveva già): `alimentazione::alimentation_menu_keyboard`,
+`oggetti::objects_menu_keyboard`, `luoghi::locations_menu_keyboard`,
+`storico::global_history_keyboard`, `main::send_spaces`,
+`miglioramenti::menu_keyboard_con_conteggi`, `main::admin_menu_keyboard`.
+Le tastiere di fallback/errore che riusano queste stesse funzioni
+(decine di punti in `oggetti.rs` e `luoghi.rs`) ne beneficiano
+automaticamente, senza toccarle una per una.
+
+**Audit di layout su C3, trovato collaudando dal vivo**: Alessio ha
+notato su "➕ Nuovo oggetto" che `❌ Annulla` stava da solo su una riga e
+`💡 Migliora | 🏠 Menù principale` sulla riga sotto, invece dell'unica
+riga di navigazione prevista da C3 — `context_bot.rs` inserisce
+"💡 Migliora" solo accanto a "Menù principale", quindi due righe separate
+lasciano l'altro pulsante isolato. Prima ricerca nel bot: sei punti
+(`oggetti.rs` due volte, `foto.rs`, `ricette.rs` due volte,
+`miglioramenti.rs`), due senza alcun pulsante "Menù principale". Tutti
+uniti in un'unica riga finale.
+
+**Stesso audit, secondo giro più a fondo**: continuando a cercare lo
+stesso schema sono emersi altri **15 punti**: `oggetti.rs` (5 in più),
+`contenitori.rs` (3), `storico.rs` (7, tre delle quali senza "Menù
+principale" del tutto). Dove il pulsante era "↩️ Cambia casa/stanza" o
+"↩️ Torna a X" (funzionalmente un Indietro contestuale anche se scritto
+diverso), trattato come "⬅️ Indietro"/"❌ Annulla" — stessa regola.
+21 punti corretti in totale tra i due giri: la stessa disattenzione
+(due righe invece di una) si era ripetuta più e più volte scrivendo
+tastiere diverse nel tempo, non un errore isolato.
+
+**Uniformate le emoticon, trovato collaudando dal vivo**: Alessio ha
+notato su Telegram che `oggetti.rs` mostrava `↩️ Operazione annullata.`
+invece di `❌`. Cercato in tutto il bot: altri due punti con la stessa
+incoerenza (`contenitori.rs`, `luoghi.rs`), entrambi corretti. Aggiunta
+la riga in C4 (`docs/convenzioni-telegram.md`): il simbolo
+dell'annullamento è sempre `❌`, mai `↩️`.
+
+**Falso allarme, corretto dopo un ricollaudo dal vivo**: analizzando una
+registrazione del collaudo era sembrato che `🏠 Menù principale`, premuto
+mentre una bozza di miglioramento è attiva, annullasse il flusso invece
+di aprire il vero menù principale. Il campionamento a 1 fotogramma al
+secondo aveva probabilmente attribuito al tocco un messaggio
+"❌ Operazione annullata." già presente in chat da un'azione precedente,
+non la risposta vera a quel tocco. Alessio ha riprovato dal vivo:
+`🏠 Menù principale` porta correttamente al menù principale, senza nessun
+messaggio di annullamento. Nessun codice da correggere qui — lezione
+per la prossima volta: un'analisi video a campionamento sparso non
+sostituisce un collaudo dal vivo, soprattutto quando il campione è troppo
+rado per essere sicuri di cosa causa cosa.
+
 ## 3. Stato tecnico verificato
 
-- **43 migration** nel repository. Le prime 42 sono **applicate** al database
-  reale dell'S9, confermato dall'avvio del 1 settembre sera:
-  `applied_migrations=42`. Le versioni precedenti di questo file dicevano che
-  `20260901013000_versione_contenuto_ricetta.sql` fosse ancora da applicare:
-  non era vero, ed e' bastato leggere `_sqlx_migrations` per accorgersene.
-  La 43esima, `20260904150000_impostazioni_distribuzione.sql`, non e' ancora
-  stata applicata sull'S9 al momento di scrivere questo: lo sara' al
-  prossimo `aggiorna-s9.sh`;
+- **45 migration** nel repository, tutte **applicate** al database reale
+  dell'S9, verificato il 7 settembre 2026 leggendo `_sqlx_migrations` via
+  SSH (`applied_migrations=45`) — non dedotto, per la stessa ragione già
+  scritta qui altre volte;
 - pipeline verde: `fmt`, `check --locked`, `clippy --all-targets --locked
-  -- -D warnings`, `test --locked` — **289 test** (280 prima del sotto-step
-  5c, 279 prima del sotto-step 5a, 270 prima del sotto-step 3/5 della
-  distribuzione, 248 prima del 2 settembre: e' il numero da confrontare
-  dopo ogni aggiornamento dell'S9);
+  -- -D warnings`, `test --locked` — **303 test** (300 prima dell'audit
+  annulla, 297 prima dell'allegato video, 289 prima del badge "🆕", 280
+  prima del sotto-step 5c, 279 prima del sotto-step 5a, 270 prima del
+  sotto-step 3/5 della distribuzione, 248 prima del 2 settembre: e' il
+  numero da confrontare dopo ogni
+  aggiornamento dell'S9);
 - CI su GitHub Actions **verde** dalla run #42, la prima dello Step 7.
 
 Regola invariata: una migration applicata al database reale e' immutabile. Ogni
@@ -758,6 +947,7 @@ scripts/deploy.sh                   l'orchestrazione: countdown → sessioni →
 scripts/completa-deploy.sh          seguito: merge su main o rollback, in base all'esito del collaudo
 src/modules/distribuzione.rs        default di manutenzione (tipo/minuti/orario), schermata admin
 src/modules/collaudo.rs             riepilogo/checklist/conferma del collaudo guidato dopo lo swap
+src/modules/novita.rs               registro delle novità e badge "🆕" propagato nei menù
 ```
 
 ## 6. Punti aperti

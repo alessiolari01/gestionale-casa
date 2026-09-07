@@ -349,6 +349,7 @@ pub async fn handle_callback(
         }
         "foodprof:cancel" => {
             sessions.clear_chat(chat_id.0);
+            bot.annulla_e_avvisa(chat_id.0, "❌ Operazione annullata.");
             show_menu(bot, chat_id, pool).await?;
             Ok(true)
         }

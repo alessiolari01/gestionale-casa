@@ -20,6 +20,7 @@ pub mod foto;
 pub mod liste;
 pub mod luoghi;
 pub mod miglioramenti;
+pub mod novita;
 pub mod oggetti;
 pub mod planner_alimentare;
 pub mod porzioni;

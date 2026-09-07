@@ -201,14 +201,20 @@ Se un pulsante non si capisce da solo, si cambia il nome del pulsante.
 Sempre ultima riga, sempre in quest'ordine:
 
 ```text
-sezione di primo livello   💡 Migliora | 🏠 Menù principale
+sezione di primo livello   ⬅️ Indietro | 💡 Migliora | 🏠 Menù principale
 schermata più interna      ⬅️ Indietro | 💡 Migliora | 🏠 Menù principale
 passo di una procedura     ❌ Annulla  | 💡 Migliora | 🏠 Menù principale
 ```
 
-**`⬅️ Indietro` esiste solo se porta da qualche altra parte.** In una sezione
-di primo livello coinciderebbe con `🏠 Menù principale`: in quel caso non si
-mette.
+**Deciso il 7 settembre 2026, cambia la riga precedente**: `⬅️ Indietro`
+compare **sempre**, anche in una sezione di primo livello dove porta
+esattamente dove porta già `🏠 Menù principale` (stessa callback
+`menu:main` su entrambi i pulsanti). Prima veniva omesso in quel caso
+per non avere due pulsanti alla stessa destinazione — ma Alessio si è
+confuso davvero a non trovarlo: si aspetta "indietro" sempre nella
+stessa posizione, come i tre tasti fissi di un telefono. La prevedibilità
+della posizione vale più della pulizia di togliere un pulsante
+ridondante.
 
 `⬅️ Indietro` torna sempre alla schermata da cui si è arrivati, mai a una
 schermata "logicamente superiore" scelta dal codice.
@@ -216,6 +222,36 @@ schermata "logicamente superiore" scelta dal codice.
 Nessuna tastiera scrive `💡 Migliora` da sé: lo inserisce `context_bot.rs`
 prima dell'**ultimo** pulsante `menu:main` della riga. Chi scrive una tastiera
 deve solo mettere il pulsante del menù per ultimo.
+
+**Deciso il 7 settembre 2026**: durante un passo di procedura (quando la
+riga ha `❌ Annulla`), premere `🏠 Menù principale` invece di `❌ Annulla`
+deve avvisare "❌ Operazione annullata." allo stesso modo — non solo
+portare via in silenzio. Un solo punto in codice decide questo, non ogni
+tastiera per conto proprio: `handle_authorized_callback` in `main.rs`
+controlla, prima che qualunque modulo pulisca la propria sessione, se una
+qualunque delle mappe di sessione ha uno stato attivo per la chat.
+
+**Regola globale, stessa data**: l'avviso "❌ Operazione annullata." (da
+`❌ Annulla` come da `🏠 Menù principale`) va **sempre nello stesso
+messaggio** della schermata di destinazione — mai un messaggio separato
+mandato subito prima. La regola C1 ("una sola schermata attiva per chat")
+cancella un messaggio non appena il successivo viene mandato: un avviso
+per conto suo sparirebbe in una frazione di secondo, sostituito
+dall'arrivo della schermata di destinazione, senza dare il tempo di
+leggerlo — trovato per davvero collaudando "🏠 Menù principale" prima di
+questa correzione, e ritrovato in altri 8 punti del bot con un audit
+completo subito dopo.
+
+**Come si applica in pratica**: mai aggiungere un parametro "avviso" a
+ogni funzione che disegna una schermata — in `contenitori.rs`/`luoghi.rs`
+un `/annulla` può portare a cinque schermate di destinazione diverse, a
+volte in un altro modulo. Si chiama invece
+`bot.annulla_e_avvisa(chat_id, "❌ ...")` (in `context_bot.rs`) subito
+prima di mostrare la schermata di destinazione come si farebbe comunque:
+l'avviso resta "in coda" per quella chat e viene anteposto in automatico
+al testo del **prossimo** messaggio tracciato mandato lì
+(`ContextRequest::send`), una sola volta, qualunque sia la funzione che
+lo manda.
 
 ### C4. Un simbolo, un significato
 
@@ -229,9 +265,15 @@ deve solo mettere il pulsante del menù per ultimo.
 | `👤` | mio / personale | proprietà dei contenuti |
 | `👥` | condiviso | proprietà dei contenuti |
 | `🌐` | globale, di tutti | proprietà dei contenuti |
+| `❌` | annullamento di un'operazione | ovunque, vedi C3 |
 
 Un simbolo non compare mai con due significati, e uno stato non si scrive mai
 con due simboli diversi in due schermate.
+
+**Deciso il 7 settembre 2026**: trovate durante l'audit di C3 tre eccezioni
+(`contenitori.rs`, `luoghi.rs`, `oggetti.rs`) che usavano `↩️` invece di `❌`
+per lo stesso avviso "Operazione/Modifica annullata." — corrette per
+uniformità. Il simbolo dell'annullamento è sempre `❌`, mai `↩️`.
 
 `💡 Migliora` (segnala un problema su questa schermata) e la lista dei
 miglioramenti non possono avere la stessa icona: la lista diventa
@@ -317,6 +359,24 @@ una croce: `⬅️ ❌` faceva sembrare che «indietro» fosse rotto.
 Esempio, il calendario del planner: `[1]` è oggi, `•` segna i giorni che hanno
 già dei pasti, `·` sono i giorni di altri mesi.
 
+### C14. Le novità si vedono da lontano, e per persona
+
+Deciso con Alessio il 5 settembre 2026, si applica solo da questa data in
+avanti (nessun retrofit delle schermate esistenti). Quando una funzionalità è
+nuova o è cambiata in modo significativo, il suo pulsante porta `🆕 ` davanti
+all'etichetta — e lo stesso badge risale ogni pulsante di menù che porta fino
+a lì, fino al menù principale, non solo l'ultimo passo. Sparisce solo quando
+un utente arriva **fino alla schermata specifica** che è cambiata, non
+aprendo un menù intermedio — e solo per lui: ogni persona nello spazio scopre
+le novità ai propri tempi, non è un flag condiviso.
+
+La schermata specifica, alla prima visita di ciascun utente, anteporrà anche
+un breve tutorial su come usarla (un pulsante `✅ Ho capito` la nasconde
+senza bisogno di rivederla). Meccanica in `src/modules/novita.rs`: un
+registro statico nel codice (`REGISTRO`, chiave/genitore/tutorial), e una
+sola tabella nel database (`novita_lette`) che tiene traccia di chi ha visto
+cosa.
+
 ```text
 |  ⬅️   |Settembre 2026|  ➡️   |
 | Lun | Mar | Mer | Gio | Ven | Sab | Dom |
@@ -381,6 +441,10 @@ di applicazione è questo, dal più visibile al meno:
 4. **Spazi e Profilo** — C5, la parte concettualmente più difficile;
 5. **menù principale** — C12;
 6. **date** — C13, ovunque se ne inserisca una a mano.
+7. **novità (C14)** — non un blocco da "applicare" una volta: da qui in
+   avanti, ogni funzionalità nuova o modificata in modo significativo entra
+   nel `REGISTRO` di `src/modules/novita.rs` insieme al codice che la
+   introduce, nello stesso commit.
 
 Ogni blocco chiude con il collaudo su Telegram sull'S9, e questo documento si
 aggiorna quando una convenzione si rivela sbagliata all'uso — non quando è

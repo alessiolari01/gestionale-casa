@@ -35,6 +35,13 @@ impl SessionStore {
         });
     }
 
+    /// Vero se questa chat ha una sessione attiva -- usato per far dire
+    /// "❌ Operazione annullata." a "🏠 Menù principale" quando davvero
+    /// annulla qualcosa (deciso con Alessio il 7 settembre 2026).
+    pub fn has_active(&self, chat_id: i64) -> bool {
+        self.with_sessions(|sessions| sessions.contains_key(&chat_id))
+    }
+
     /// Chat con una sessione attiva in questa mappa. Usata dal controllo
     /// pre-swap (sotto-step 4/5 del punto 6 del ciclo di automazione) per
     /// sapere se rimandare lo spegnimento del bot.
@@ -296,7 +303,7 @@ struct ObjectLocationInput<'a> {
 ///
 /// Convenzione C4: la lampadina è una sola. `💡 Migliora` segnala un problema
 /// sulla schermata corrente; la lista dei miglioramenti è `📋 Miglioramenti`.
-pub fn main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup {
+pub fn main_menu_keyboard(is_admin: bool, badge_miglioramenti: bool) -> InlineKeyboardMarkup {
     let mut rows = vec![
         vec![button("🍽️ Alimentazione", "food:menu")],
         vec![button("🏷️ Oggetti", "oggetti:menu")],
@@ -306,7 +313,10 @@ pub fn main_menu_keyboard(is_admin: bool) -> InlineKeyboardMarkup {
             button("👤 Profilo", "identity:profile"),
             button("👥 Spazi", "identity:spaces"),
         ],
-        vec![button("📋 Miglioramenti", "improve:menu")],
+        vec![button(
+            &crate::modules::novita::etichetta_con_badge("📋 Miglioramenti", badge_miglioramenti),
+            "improve:menu",
+        )],
     ];
     if is_admin {
         rows.push(vec![button("🛠️ Amministrazione", "admin:menu")]);
@@ -736,13 +746,12 @@ async fn cancel_current_operation(
     );
     sessions.clear_chat(raw_chat_id);
 
-    if was_update {
-        bot.send_message(chat_id, "↩️ Modifica annullata. Nessuna modifica salvata.")
-            .await?;
+    let avviso = if was_update {
+        "❌ Modifica annullata. Nessuna modifica salvata."
     } else {
-        bot.send_message(chat_id, "↩️ Operazione annullata.")
-            .await?;
-    }
+        "❌ Operazione annullata."
+    };
+    bot.annulla_e_avvisa(raw_chat_id, avviso);
     show_object_return_target(bot, chat_id, pool, target).await
 }
 
@@ -2664,7 +2673,14 @@ fn objects_menu_keyboard() -> InlineKeyboardMarkup {
             button("🔎 Cerca", "oggetti:search"),
         ],
         vec![button("🏠 Filtra per casa / stanza", "loc:home:list")],
-        vec![button("🏠 Menù principale", "menu:main")],
+        // Deciso il 7 settembre 2026: "⬅️ Indietro" resta visibile a
+        // sinistra anche nelle sezioni di primo livello, dove porta dove
+        // porta gia' "Menù principale" -- vedi la nota gemella in
+        // alimentazione::alimentation_menu_keyboard.
+        vec![
+            button("⬅️ Indietro", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
+        ],
     ])
 }
 
@@ -2707,18 +2723,22 @@ fn draft_keyboard(draft: &ObjectDraft) -> InlineKeyboardMarkup {
         button(&notes, "oggetti:draft:notes"),
     ]);
     rows.push(vec![button(&other, "oggetti:draft:other")]);
+    rows.push(vec![button(
+        if draft.is_update() {
+            "💾 Salva modifiche"
+        } else {
+            "✅ Salva"
+        },
+        "oggetti:draft:save",
+    )]);
+    // C3: la riga di navigazione ("❌ Annulla | 💡 Migliora |
+    // 🏠 Menù principale") va sempre unica e per ultima -- "Salva" è
+    // un'azione, non fa parte della navigazione (trovato da Alessio
+    // collaudando, stesso difetto di `cancel_keyboard` in questo file).
     rows.push(vec![
-        button(
-            if draft.is_update() {
-                "💾 Salva modifiche"
-            } else {
-                "✅ Salva"
-            },
-            "oggetti:draft:save",
-        ),
         button("❌ Annulla", "oggetti:draft:cancel"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
-    rows.push(vec![button("🏠 Menù principale", "menu:main")]);
     InlineKeyboardMarkup::new(rows)
 }
 
@@ -2738,8 +2758,10 @@ fn new_object_home_picker_keyboard(
         "⏭ Nessun luogo",
         "oggetti:draft:location:skip-home",
     )]);
-    rows.push(vec![button("↩️ Torna ai dettagli", "oggetti:draft:back")]);
-    rows.push(vec![button("🏠 Menù principale", "menu:main")]);
+    rows.push(vec![
+        button("↩️ Torna ai dettagli", "oggetti:draft:back"),
+        button("🏠 Menù principale", "menu:main"),
+    ]);
     InlineKeyboardMarkup::new(rows)
 }
 
@@ -2762,8 +2784,10 @@ fn new_object_room_picker_keyboard(
         &format!("oggetti:draft:location:home-only:{home_id}"),
     )]);
     rows.push(vec![button("↩️ Cambia casa", "oggetti:draft:location")]);
-    rows.push(vec![button("↩️ Torna ai dettagli", "oggetti:draft:back")]);
-    rows.push(vec![button("🏠 Menù principale", "menu:main")]);
+    rows.push(vec![
+        button("↩️ Torna ai dettagli", "oggetti:draft:back"),
+        button("🏠 Menù principale", "menu:main"),
+    ]);
     InlineKeyboardMarkup::new(rows)
 }
 
@@ -2810,20 +2834,29 @@ fn other_details_keyboard(draft: &ObjectDraft) -> InlineKeyboardMarkup {
     let value = section_label("💰 Valore stimato", draft.estimated_value_cents.is_some());
     let serial = section_label("🔢 Numero seriale", draft.serial_number.is_some());
 
+    // C3: riga di navigazione unica, non due righe separate (stesso
+    // difetto trovato da Alessio in `cancel_keyboard` più sopra).
     InlineKeyboardMarkup::new(vec![
         vec![button(&description, "oggetti:draft:description")],
         vec![button(&value, "oggetti:draft:value")],
         vec![button(&serial, "oggetti:draft:serial")],
-        vec![button("⬅️ Dettagli", "oggetti:draft:back")],
-        vec![button("🏠 Menù principale", "menu:main")],
+        vec![
+            button("⬅️ Dettagli", "oggetti:draft:back"),
+            button("🏠 Menù principale", "menu:main"),
+        ],
     ])
 }
 
 fn cancel_keyboard() -> InlineKeyboardMarkup {
-    InlineKeyboardMarkup::new(vec![
-        vec![button("❌ Annulla", "oggetti:draft:cancel")],
-        vec![button("🏠 Menù principale", "menu:main")],
-    ])
+    // C3: un passo di procedura ha un'unica riga di navigazione
+    // "❌ Annulla | 💡 Migliora | 🏠 Menù principale" -- su due righe
+    // separate `context_bot.rs` inserisce "💡 Migliora" solo accanto a
+    // "Menù principale", lasciando "Annulla" isolato sulla riga sopra
+    // (trovato per davvero da Alessio collaudando "➕ Nuovo oggetto").
+    InlineKeyboardMarkup::new(vec![vec![
+        button("❌ Annulla", "oggetti:draft:cancel"),
+        button("🏠 Menù principale", "menu:main"),
+    ]])
 }
 
 fn object_detail_keyboard(
@@ -2855,10 +2888,16 @@ fn object_detail_keyboard(
             button("🏷️ Menu oggetti", "oggetti:menu"),
         ],
     ];
-    if let Some(return_button) = contextual_return {
-        rows.push(vec![return_button]);
+    // C3: riga di navigazione unica -- "↩️ Torna a X" è un Indietro
+    // contestuale e va sulla stessa riga di "Menù principale", non su
+    // due righe separate.
+    match contextual_return {
+        Some(return_button) => rows.push(vec![
+            return_button,
+            button("🏠 Menù principale", "menu:main"),
+        ]),
+        None => rows.push(vec![button("🏠 Menù principale", "menu:main")]),
     }
-    rows.push(vec![button("🏠 Menù principale", "menu:main")]);
     InlineKeyboardMarkup::new(rows)
 }
 
@@ -2868,8 +2907,10 @@ fn delete_confirmation_keyboard(id: i64) -> InlineKeyboardMarkup {
             "🗑 Sì, elimina definitivamente",
             &format!("oggetti:delete:do:{id}"),
         )],
-        vec![button("↩️ Annulla", &format!("oggetti:view:{id}"))],
-        vec![button("🏠 Menù principale", "menu:main")],
+        vec![
+            button("❌ Annulla", &format!("oggetti:view:{id}")),
+            button("🏠 Menù principale", "menu:main"),
+        ],
     ])
 }
 
@@ -3204,12 +3245,20 @@ fn push_optional_line(lines: &mut Vec<String>, label: &str, value: Option<&str>)
 mod tests {
     #[test]
     fn menu_principale_mostra_amministrazione_solo_agli_admin() {
-        let normal = main_menu_keyboard(false);
-        let admin = main_menu_keyboard(true);
+        let normal = main_menu_keyboard(false, false);
+        let admin = main_menu_keyboard(true, false);
         let normal_text = format!("{normal:?}");
         let admin_text = format!("{admin:?}");
         assert!(!normal_text.contains("Amministrazione"));
         assert!(admin_text.contains("Amministrazione"));
+    }
+
+    #[test]
+    fn menu_principale_mostra_il_badge_solo_se_richiesto() {
+        let senza_badge = main_menu_keyboard(false, false);
+        let con_badge = main_menu_keyboard(false, true);
+        assert!(!format!("{senza_badge:?}").contains("🆕"));
+        assert!(format!("{con_badge:?}").contains("🆕 📋 Miglioramenti"));
     }
 
     use super::*;

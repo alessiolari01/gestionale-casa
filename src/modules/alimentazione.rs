@@ -331,11 +331,10 @@ pub async fn handle_message(
             "/annulla" => {
                 if sessions.has_active(chat_id) {
                     sessions.clear_chat(chat_id);
-                    bot.send_message(
-                        msg.chat.id,
+                    bot.annulla_e_avvisa(
+                        chat_id,
                         "❌ Operazione annullata. Nessuna modifica pendente è stata salvata.",
-                    )
-                    .await?;
+                    );
                     show_menu(bot, msg.chat.id).await?;
                     return Ok(true);
                 }
@@ -1268,7 +1267,7 @@ pub async fn handle_callback(
                 .and_then(parse_positive_id);
             sessions.clear_chat(chat_id.0);
             if let Some(food_id) = food_id {
-                bot.send_message(chat_id, "Modifica annullata.").await?;
+                bot.annulla_e_avvisa(chat_id.0, "❌ Modifica annullata.");
                 send_food_detail(bot, chat_id, pool, food_id).await?;
             }
             Ok(true)
@@ -1427,24 +1426,21 @@ pub async fn handle_callback(
             let had_active_operation = sessions.has_active(chat_id.0);
             sessions.clear_chat(chat_id.0);
             if had_active_operation {
-                bot.send_message(
-                    chat_id,
+                bot.annulla_e_avvisa(
+                    chat_id.0,
                     "❌ Operazione annullata. Nessuna modifica pendente è stata salvata.",
-                )
-                .await?;
+                );
             }
             show_menu(bot, chat_id).await?;
             Ok(true)
         }
-        "menu:main" => {
-            if sessions.has_active(chat_id.0) {
-                sessions.clear_chat(chat_id.0);
-                bot.send_message(
-                    chat_id,
-                    "❌ Operazione Alimentazione annullata. Nessuna modifica pendente è stata salvata.",
-                )
-                .await?;
-            }
+        "menu:main" if sessions.has_active(chat_id.0) => {
+            // Non manda nulla: pulisce solo la propria sessione e lascia
+            // che sia il blocco generico "menu:main" in main.rs a mostrare
+            // l'unico avviso combinato con il menù principale (deciso il
+            // 7 settembre 2026 -- mandarne uno anche qui produrrebbe due
+            // messaggi in sequenza, il primo dei due sparirebbe subito).
+            sessions.clear_chat(chat_id.0);
             Ok(false)
         }
         "food:back" => {
@@ -4807,10 +4803,15 @@ fn alimentation_menu_keyboard() -> InlineKeyboardMarkup {
         vec![button("🍳 Ricette", "recipe:menu")],
         vec![button("👥 Profili alimentari", "foodprof:menu")],
         vec![button("📅 Planner alimentare", "planner:menu")],
-        // Convenzione C3: Alimentazione e' una sezione di primo livello, quindi
-        // `⬅️ Indietro` porterebbe esattamente dove porta `🏠 Menù principale`.
-        // Due pulsanti per la stessa destinazione non aiutano nessuno.
-        vec![button("🏠 Menù principale", "menu:main")],
+        // Deciso il 7 settembre 2026: anche se `⬅️ Indietro` porterebbe
+        // esattamente dove porta `🏠 Menù principale`, resta comunque
+        // visibile a sinistra -- Alessio si aspetta "indietro" sempre
+        // nella stessa posizione, come i tre tasti fissi di un telefono.
+        // Vale per ogni sezione di primo livello, non solo questa.
+        vec![
+            button("⬅️ Indietro", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
+        ],
     ])
 }
 

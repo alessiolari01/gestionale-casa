@@ -74,6 +74,17 @@ impl IdentitySessionStore {
             .remove(&chat_id);
     }
 
+    /// Vero se questa chat ha una sessione attiva -- usato per capire se
+    /// "🏠 Menù principale" sta davvero annullando qualcosa (deciso con
+    /// Alessio il 7 settembre 2026: in quel caso avvisa "❌ Operazione
+    /// annullata." come farebbe il pulsante "❌ Annulla" locale).
+    fn has_active(&self, chat_id: i64) -> bool {
+        self.inner
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .contains_key(&chat_id)
+    }
+
     /// Chat con una sessione attiva in questa mappa. Usata dal controllo
     /// pre-swap (sotto-step 4/5 del punto 6 del ciclo di automazione) per
     /// sapere se rimandare lo spegnimento del bot.
@@ -129,6 +140,15 @@ impl DistribuzioneSessionStore {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .remove(&chat_id);
+    }
+
+    /// Vero se questa chat ha una sessione attiva -- vedi il commento
+    /// gemello su `IdentitySessionStore::has_active`.
+    fn has_active(&self, chat_id: i64) -> bool {
+        self.inner
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .contains_key(&chat_id)
     }
 
     /// Chat con una sessione attiva in questa mappa. Usata dal controllo
@@ -880,12 +900,14 @@ async fn handle_authorized_message(
     if command == Some("/annulla") && identity_sessions.get(chat_id).is_some() {
         identity_sessions.clear_chat(chat_id);
         distribuzione_sessions.clear_chat(chat_id);
+        bot.annulla_e_avvisa(chat_id, "❌ Operazione annullata.");
         send_spaces(&bot, msg.chat.id, &pool, &actor).await?;
         return respond(());
     }
 
     if command == Some("/annulla") && distribuzione_sessions.get(chat_id).is_some() {
         distribuzione_sessions.clear_chat(chat_id);
+        bot.annulla_e_avvisa(chat_id, "❌ Operazione annullata.");
         send_admin_distribuzione(&bot, msg.chat.id, &pool, &actor).await?;
         return respond(());
     }
@@ -1311,11 +1333,12 @@ async fn handle_callback(
         let is_admin = identity::is_system_admin(&pool, &actor)
             .await
             .unwrap_or(false);
+        let badge = badge_miglioramenti(&pool, &actor).await;
         bot.send_message(
             chat_id,
             "⚠️ Questa schermata non è più attiva. Ho aperto un nuovo Menù principale.",
         )
-        .reply_markup(modules::oggetti::main_menu_keyboard(is_admin))
+        .reply_markup(modules::oggetti::main_menu_keyboard(is_admin, badge))
         .await?;
         return respond(());
     }
@@ -1371,6 +1394,25 @@ async fn handle_authorized_callback(
     data: String,
 ) -> ResponseResult<()> {
     let data = data.as_str();
+
+    // Calcolato subito, prima che qualunque modulo pulisca la propria
+    // sessione: "🏠 Menù principale" premuto mentre una bozza/un input
+    // atteso è attivo deve avvisare "❌ Operazione annullata." esattamente
+    // come premere il pulsante "❌ Annulla" locale della schermata (deciso
+    // con Alessio il 7 settembre 2026) -- non solo silenziosamente portare
+    // al menù. Le stesse dieci mappe già interrogate dal pre-swap
+    // dell'automazione (`chat_con_sessione_attiva`).
+    let annullamento_da_sessione = data == "menu:main"
+        && (sessions.has_active(chat_id.0)
+            || location_sessions.has_active(chat_id.0)
+            || container_sessions.has_active(chat_id.0)
+            || photo_sessions.has_active(chat_id.0)
+            || food_sessions.has_active(chat_id.0)
+            || profile_sessions.has_active(chat_id.0)
+            || improvement_sessions.has_active(chat_id.0)
+            || recipe_sessions.has_active(chat_id.0)
+            || identity_sessions.has_active(chat_id.0)
+            || distribuzione_sessions.has_active(chat_id.0));
 
     if (data.starts_with("improve:")
         || (data == "menu:main" && improvement_sessions.has_active(chat_id.0)))
@@ -1504,8 +1546,14 @@ async fn handle_authorized_callback(
             container_sessions.clear_chat(chat_id.0);
             photo_sessions.clear_chat(chat_id.0);
             food_sessions.clear_chat(chat_id.0);
+            profile_sessions.clear_chat(chat_id.0);
             improvement_sessions.clear_chat(chat_id.0);
             recipe_sessions.clear_chat(chat_id.0);
+            identity_sessions.clear_chat(chat_id.0);
+            distribuzione_sessions.clear_chat(chat_id.0);
+            if annullamento_da_sessione {
+                bot.annulla_e_avvisa(chat_id.0, "❌ Operazione annullata.");
+            }
             send_main_menu(&bot, chat_id, &pool, &actor).await?;
         }
         "identity:profile" => {
@@ -1964,12 +2012,33 @@ async fn handle_authorized_callback(
     respond(())
 }
 
+/// Se il pulsante "📋 Miglioramenti" del menù principale deve mostrare
+/// "🆕": vero se questo utente non ha ancora visto una foglia del
+/// registro `novita::REGISTRO` con genitore `"improve_menu"`. Mai in
+/// errore: un problema nel calcolo del badge non deve mai bloccare
+/// l'apertura del menù.
+async fn badge_miglioramenti(pool: &SqlitePool, actor: &identity::AuditActor) -> bool {
+    let Some(utente_id) = actor.utente_id else {
+        return false;
+    };
+    match modules::novita::viste_da_utente(pool, utente_id).await {
+        Ok(viste) => modules::novita::serve_badge("improve_menu", &viste),
+        Err(error) => {
+            tracing::warn!(?error, "Errore lettura novità viste, badge nascosto");
+            false
+        }
+    }
+}
+
 async fn send_online_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
         "🟢 Gestionale Casa è online.\n\n🏠 Menù principale\nScegli una sezione.",
     )
-    .reply_markup(modules::oggetti::main_menu_keyboard(true))
+    // Notifica di avvio, mandata subito dopo il boot: niente attore
+    // risolto a questo punto, il badge si aggiorna comunque alla prossima
+    // apertura reale del menù.
+    .reply_markup(modules::oggetti::main_menu_keyboard(true, false))
     .await?;
     Ok(())
 }
@@ -1990,8 +2059,9 @@ async fn send_main_menu(
             false
         }
     };
+    let badge = badge_miglioramenti(pool, actor).await;
     bot.send_message(chat_id, "🏠 Gestionale Casa\n\nScegli una sezione.")
-        .reply_markup(modules::oggetti::main_menu_keyboard(is_admin))
+        .reply_markup(modules::oggetti::main_menu_keyboard(is_admin, badge))
         .await?;
     Ok(())
 }
@@ -2090,10 +2160,16 @@ async fn send_spaces(
                 "👤 Profilo".to_string(),
                 "identity:profile".to_string(),
             )]);
-            rows.push(vec![InlineKeyboardButton::callback(
-                "🏠 Menù principale".to_string(),
-                "menu:main".to_string(),
-            )]);
+            // Deciso il 7 settembre 2026: "⬅️ Indietro" resta visibile a
+            // sinistra anche nelle sezioni di primo livello -- vedi la
+            // nota gemella in alimentazione::alimentation_menu_keyboard.
+            rows.push(vec![
+                InlineKeyboardButton::callback("⬅️ Indietro".to_string(), "menu:main".to_string()),
+                InlineKeyboardButton::callback(
+                    "🏠 Menù principale".to_string(),
+                    "menu:main".to_string(),
+                ),
+            ]);
 
             bot.send_message(chat_id, summary)
                 .reply_markup(InlineKeyboardMarkup::new(rows))
@@ -2948,10 +3024,13 @@ fn admin_menu_keyboard(
             "admin:shutdown".to_string(),
         )]);
     }
-    rows.push(vec![InlineKeyboardButton::callback(
-        "🏠 Menù principale".to_string(),
-        "menu:main".to_string(),
-    )]);
+    // Deciso il 7 settembre 2026: "⬅️ Indietro" resta visibile a sinistra
+    // anche nelle sezioni di primo livello -- vedi la nota gemella in
+    // alimentazione::alimentation_menu_keyboard.
+    rows.push(vec![
+        InlineKeyboardButton::callback("⬅️ Indietro".to_string(), "menu:main".to_string()),
+        InlineKeyboardButton::callback("🏠 Menù principale".to_string(), "menu:main".to_string()),
+    ]);
     InlineKeyboardMarkup::new(rows)
 }
 

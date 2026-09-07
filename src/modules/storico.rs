@@ -1139,21 +1139,29 @@ fn global_history_keyboard(
         ));
     }
     rows.push(filter_row);
-    // Convenzione C3: lo Storico e' una sezione di primo livello, quindi
-    // `⬅️ Indietro` porterebbe dove porta gia' `🏠 Menù principale`.
-    rows.push(vec![button("🏠 Menù principale", "menu:main")]);
+    // Deciso il 7 settembre 2026: "⬅️ Indietro" resta visibile a sinistra
+    // anche nelle sezioni di primo livello -- vedi la nota gemella in
+    // alimentazione::alimentation_menu_keyboard.
+    rows.push(vec![
+        button("⬅️ Indietro", "menu:main"),
+        button("🏠 Menù principale", "menu:main"),
+    ]);
     InlineKeyboardMarkup::new(rows)
 }
 
 fn global_event_detail_keyboard(page: i64, filters: HistoryFilters) -> InlineKeyboardMarkup {
     let token = filters.to_token();
+    // C3: riga di navigazione unica, per ultima -- "🔎 Filtri" e' un'azione,
+    // non fa parte della navigazione.
     InlineKeyboardMarkup::new(vec![
-        vec![button(
-            "⬅️ Torna allo storico",
-            &format!("h:g:{}:{token}", base62_encode(page)),
-        )],
         vec![button("🔎 Filtri", &format!("h:f:{token}"))],
-        vec![button("🏠 Menù principale", "menu:main")],
+        vec![
+            button(
+                "⬅️ Torna allo storico",
+                &format!("h:g:{}:{token}", base62_encode(page)),
+            ),
+            button("🏠 Menù principale", "menu:main"),
+        ],
     ])
 }
 
@@ -1174,7 +1182,10 @@ fn static_filter_keyboard(
             &format!("h:s:{kind_code}:{value}:{token}"),
         )]);
     }
-    rows.push(vec![button("⬅️ Torna ai filtri", &format!("h:f:{token}"))]);
+    rows.push(vec![
+        button("⬅️ Torna ai filtri", &format!("h:f:{token}")),
+        button("🏠 Menù principale", "menu:main"),
+    ]);
     InlineKeyboardMarkup::new(rows)
 }
 
@@ -1225,15 +1236,18 @@ fn dynamic_filter_keyboard(
         rows.push(nav);
     }
 
-    rows.push(vec![button("⬅️ Torna ai filtri", &format!("h:f:{token}"))]);
+    rows.push(vec![
+        button("⬅️ Torna ai filtri", &format!("h:f:{token}")),
+        button("🏠 Menù principale", "menu:main"),
+    ]);
     InlineKeyboardMarkup::new(rows)
 }
 
 fn filter_back_keyboard(filters: HistoryFilters) -> InlineKeyboardMarkup {
-    InlineKeyboardMarkup::new(vec![vec![button(
-        "⬅️ Torna ai filtri",
-        &format!("h:f:{}", filters.to_token()),
-    )]])
+    InlineKeyboardMarkup::new(vec![vec![
+        button("⬅️ Torna ai filtri", &format!("h:f:{}", filters.to_token())),
+        button("🏠 Menù principale", "menu:main"),
+    ]])
 }
 
 fn filter_subtitle_label(kind: HistoryFilterKind, value: &str) -> String {
@@ -2009,14 +2023,14 @@ fn history_list_keyboard(
         rows.push(nav);
     }
 
+    // C3: riga di navigazione unica, non due righe separate.
     match scope {
         HistoryScope::Global => rows.push(vec![button("🏠 Menù principale", "menu:main")]),
         HistoryScope::Item(item_id) => {
-            rows.push(vec![button(
-                "⬅️ Torna all'oggetto",
-                &format!("oggetti:view:{item_id}"),
-            )]);
-            rows.push(vec![button("🏠 Menù principale", "menu:main")]);
+            rows.push(vec![
+                button("⬅️ Torna all'oggetto", &format!("oggetti:view:{item_id}")),
+                button("🏠 Menù principale", "menu:main"),
+            ]);
         }
     }
 
@@ -2029,10 +2043,10 @@ fn event_detail_keyboard(scope: HistoryScope, page: i64) -> InlineKeyboardMarkup
         HistoryScope::Item(item_id) => format!("history:item:{item_id}:{page}"),
     };
 
-    InlineKeyboardMarkup::new(vec![
-        vec![button("⬅️ Torna allo storico", &back)],
-        vec![button("🏠 Menù principale", "menu:main")],
-    ])
+    InlineKeyboardMarkup::new(vec![vec![
+        button("⬅️ Torna allo storico", &back),
+        button("🏠 Menù principale", "menu:main"),
+    ]])
 }
 
 fn history_home_keyboard() -> InlineKeyboardMarkup {
@@ -2040,13 +2054,10 @@ fn history_home_keyboard() -> InlineKeyboardMarkup {
 }
 
 fn item_return_keyboard(item_id: i64) -> InlineKeyboardMarkup {
-    InlineKeyboardMarkup::new(vec![
-        vec![button(
-            "⬅️ Torna all'oggetto",
-            &format!("oggetti:view:{item_id}"),
-        )],
-        vec![button("🏠 Menù principale", "menu:main")],
-    ])
+    InlineKeyboardMarkup::new(vec![vec![
+        button("⬅️ Torna all'oggetto", &format!("oggetti:view:{item_id}")),
+        button("🏠 Menù principale", "menu:main"),
+    ]])
 }
 
 fn button(text: &str, data: &str) -> InlineKeyboardButton {

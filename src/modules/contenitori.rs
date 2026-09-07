@@ -31,6 +31,13 @@ impl ContainerSessionStore {
         });
     }
 
+    /// Vero se questa chat ha una sessione attiva -- usato per far dire
+    /// "❌ Operazione annullata." a "🏠 Menù principale" quando davvero
+    /// annulla qualcosa (deciso con Alessio il 7 settembre 2026).
+    pub fn has_active(&self, chat_id: i64) -> bool {
+        self.with_sessions(|sessions| sessions.contains_key(&chat_id))
+    }
+
     /// Chat con una sessione attiva in questa mappa. Usata dal controllo
     /// pre-swap (sotto-step 4/5 del punto 6 del ciclo di automazione) per
     /// sapere se rimandare lo spegnimento del bot.
@@ -1093,8 +1100,7 @@ pub async fn handle_message(
                 if let Some(state) = sessions.get(chat_id) {
                     let return_to = container_return_target(&state);
                     sessions.clear_chat(chat_id);
-                    bot.send_message(msg.chat.id, "↩️ Operazione annullata.")
-                        .await?;
+                    bot.annulla_e_avvisa(chat_id, "❌ Operazione annullata.");
                     show_container_return_target(bot, msg.chat.id, pool, return_to).await?;
                     return Ok(true);
                 }
@@ -1469,8 +1475,10 @@ async fn show_scope_picker_for_new(
             &format!("c:nn:{}:{}", encode_id(home_id), encode_id(room.id)),
         )]);
     }
-    rows.push(vec![button("↩️ Cambia casa", "c:n")]);
-    rows.push(vec![button("🏠 Menù principale", "menu:main")]);
+    rows.push(vec![
+        button("↩️ Cambia casa", "c:n"),
+        button("🏠 Menù principale", "menu:main"),
+    ]);
 
     bot.send_message(
         chat_id,
@@ -2075,13 +2083,10 @@ async fn delete_container_and_report(
                 chat_id,
                 "⚠️ Non riesco a eliminare il contenitore. Se la promozione creasse due contenitori con lo stesso nome allo stesso livello, rinomina prima uno dei due.",
             )
-            .reply_markup(InlineKeyboardMarkup::new(vec![
-                vec![button(
-                    "↩️ Torna al contenitore",
-                    &format!("c:v:{}", encode_id(id)),
-                )],
-                vec![button("🏠 Menù principale", "menu:main")],
-            ]))
+            .reply_markup(InlineKeyboardMarkup::new(vec![vec![
+                button("↩️ Torna al contenitore", &format!("c:v:{}", encode_id(id))),
+                button("🏠 Menù principale", "menu:main"),
+            ]]))
             .await?;
         }
     }
@@ -2281,13 +2286,10 @@ async fn move_container_and_report(
                 chat_id,
                 "⚠️ Spostamento non riuscito. La destinazione potrebbe creare un ciclo oppure un conflitto di nomi.",
             )
-            .reply_markup(InlineKeyboardMarkup::new(vec![
-                vec![button(
-                    "↩️ Torna al contenitore",
-                    &format!("c:v:{}", encode_id(id)),
-                )],
-                vec![button("🏠 Menù principale", "menu:main")],
-            ]))
+            .reply_markup(InlineKeyboardMarkup::new(vec![vec![
+                button("↩️ Torna al contenitore", &format!("c:v:{}", encode_id(id))),
+                button("🏠 Menù principale", "menu:main"),
+            ]]))
             .await?;
         }
     }

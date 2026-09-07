@@ -36,6 +36,13 @@ impl LocationSessionStore {
         });
     }
 
+    /// Vero se questa chat ha una sessione attiva -- usato per far dire
+    /// "❌ Operazione annullata." a "🏠 Menù principale" quando davvero
+    /// annulla qualcosa (deciso con Alessio il 7 settembre 2026).
+    pub fn has_active(&self, chat_id: i64) -> bool {
+        self.with_sessions(|sessions| sessions.contains_key(&chat_id))
+    }
+
     /// Chat con una sessione attiva in questa mappa. Usata dal controllo
     /// pre-swap (sotto-step 4/5 del punto 6 del ciclo di automazione) per
     /// sapere se rimandare lo spegnimento del bot.
@@ -495,8 +502,7 @@ pub async fn handle_message(
                 if let Some(state) = sessions.get(chat_id) {
                     let return_to = location_return_target(&state);
                     sessions.clear_chat(chat_id);
-                    bot.send_message(msg.chat.id, "↩️ Operazione annullata.")
-                        .await?;
+                    bot.annulla_e_avvisa(chat_id, "❌ Operazione annullata.");
                     show_location_return_target(bot, msg.chat.id, pool, return_to).await?;
                     return Ok(true);
                 }
@@ -3705,7 +3711,13 @@ fn locations_menu_keyboard() -> InlineKeyboardMarkup {
             button("🌳 Struttura", "loc:tree"),
         ],
         vec![button("➕ Crea…", "loc:create")],
-        vec![button("🏠 Menù principale", "menu:main")],
+        // Deciso il 7 settembre 2026: "⬅️ Indietro" resta visibile a
+        // sinistra anche nelle sezioni di primo livello -- vedi la nota
+        // gemella in alimentazione::alimentation_menu_keyboard.
+        vec![
+            button("⬅️ Indietro", "menu:main"),
+            button("🏠 Menù principale", "menu:main"),
+        ],
     ])
 }
 
