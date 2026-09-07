@@ -758,6 +758,13 @@ meccanismo invece di tenerne due diversi. 3 nuovi test sul meccanismo
 (coda consumata una sola volta, isolamento tra chat, che l'avviso vada
 davvero nel testo/nella didascalia). 303 test totali (300 prima).
 
+**Uniformate le emoticon, trovato collaudando dal vivo**: Alessio ha
+notato su Telegram che `oggetti.rs` mostrava `↩️ Operazione annullata.`
+invece di `❌`. Cercato in tutto il bot: altri due punti con la stessa
+incoerenza (`contenitori.rs`, `luoghi.rs`), entrambi corretti. Aggiunta
+la riga in C4 (`docs/convenzioni-telegram.md`): il simbolo
+dell'annullamento è sempre `❌`, mai `↩️`.
+
 **Falso allarme, corretto dopo un ricollaudo dal vivo**: analizzando una
 registrazione del collaudo era sembrato che `🏠 Menù principale`, premuto
 mentre una bozza di miglioramento è attiva, annullasse il flusso invece

@@ -259,9 +259,15 @@ lo manda.
 | `👤` | mio / personale | proprietà dei contenuti |
 | `👥` | condiviso | proprietà dei contenuti |
 | `🌐` | globale, di tutti | proprietà dei contenuti |
+| `❌` | annullamento di un'operazione | ovunque, vedi C3 |
 
 Un simbolo non compare mai con due significati, e uno stato non si scrive mai
 con due simboli diversi in due schermate.
+
+**Deciso il 7 settembre 2026**: trovate durante l'audit di C3 tre eccezioni
+(`contenitori.rs`, `luoghi.rs`, `oggetti.rs`) che usavano `↩️` invece di `❌`
+per lo stesso avviso "Operazione/Modifica annullata." — corrette per
+uniformità. Il simbolo dell'annullamento è sempre `❌`, mai `↩️`.
 
 `💡 Migliora` (segnala un problema su questa schermata) e la lista dei
 miglioramenti non possono avere la stessa icona: la lista diventa

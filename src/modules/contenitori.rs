@@ -1100,7 +1100,7 @@ pub async fn handle_message(
                 if let Some(state) = sessions.get(chat_id) {
                     let return_to = container_return_target(&state);
                     sessions.clear_chat(chat_id);
-                    bot.annulla_e_avvisa(chat_id, "↩️ Operazione annullata.");
+                    bot.annulla_e_avvisa(chat_id, "❌ Operazione annullata.");
                     show_container_return_target(bot, msg.chat.id, pool, return_to).await?;
                     return Ok(true);
                 }

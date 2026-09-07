@@ -747,9 +747,9 @@ async fn cancel_current_operation(
     sessions.clear_chat(raw_chat_id);
 
     let avviso = if was_update {
-        "↩️ Modifica annullata. Nessuna modifica salvata."
+        "❌ Modifica annullata. Nessuna modifica salvata."
     } else {
-        "↩️ Operazione annullata."
+        "❌ Operazione annullata."
     };
     bot.annulla_e_avvisa(raw_chat_id, avviso);
     show_object_return_target(bot, chat_id, pool, target).await

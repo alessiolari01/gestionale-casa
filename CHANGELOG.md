@@ -2,6 +2,16 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_EMOTICON_ANNULLA_20260907 -->
+# 07/09/2026 — Uniformata l'emoticon di annullamento a "❌"
+
+Trovato collaudando dal vivo: `oggetti.rs` mostrava "↩️ Operazione
+annullata." invece di "❌". Cercato in tutto il bot: la stessa
+incoerenza in `contenitori.rs` e `luoghi.rs`, corrette insieme.
+Aggiunta la regola in C4 (`docs/convenzioni-telegram.md`): il simbolo
+dell'annullamento è sempre "❌". Nessun test nuovo (solo testo). Totale
+invariato: 303.
+
 <!-- CHANGELOG_AUDIT_ANNULLA_20260907 -->
 # 07/09/2026 — Audit completo: ogni "❌ Annulla" del bot avvisa correttamente
 
