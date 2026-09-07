@@ -773,18 +773,16 @@ rado per essere sicuri di cosa causa cosa.
 
 ## 3. Stato tecnico verificato
 
-- **45 migration** nel repository. Le prime 43 sono **applicate** al database
-  reale dell'S9, verificato il 5 settembre 2026 leggendo `_sqlx_migrations`
-  via SSH (`applied_migrations=43`) — non dedotto, per la stessa ragione già
-  scritta qui altre volte. La 44esima (`20260905090000_novita_lette.sql`) e
-  la 45esima (`20260905130000_miglioramenti_allegati_video.sql`) non sono
-  ancora state applicate sull'S9 al momento di scrivere questo: lo saranno
-  al prossimo `aggiorna-s9.sh`;
+- **45 migration** nel repository, tutte **applicate** al database reale
+  dell'S9, verificato il 7 settembre 2026 leggendo `_sqlx_migrations` via
+  SSH (`applied_migrations=45`) — non dedotto, per la stessa ragione già
+  scritta qui altre volte;
 - pipeline verde: `fmt`, `check --locked`, `clippy --all-targets --locked
-  -- -D warnings`, `test --locked` — **300 test** (297 prima dell'allegato
-  video, 289 prima del badge "🆕", 280 prima del sotto-step 5c, 279 prima
-  del sotto-step 5a, 270 prima del sotto-step 3/5 della distribuzione, 248
-  prima del 2 settembre: e' il numero da confrontare dopo ogni
+  -- -D warnings`, `test --locked` — **303 test** (300 prima dell'audit
+  annulla, 297 prima dell'allegato video, 289 prima del badge "🆕", 280
+  prima del sotto-step 5c, 279 prima del sotto-step 5a, 270 prima del
+  sotto-step 3/5 della distribuzione, 248 prima del 2 settembre: e' il
+  numero da confrontare dopo ogni
   aggiornamento dell'S9);
 - CI su GitHub Actions **verde** dalla run #42, la prima dello Step 7.
 
