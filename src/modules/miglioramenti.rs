@@ -1082,10 +1082,16 @@ Verranno rimossi definitivamente anche i relativi allegati. Questa operazione no
                     "✅ Elimina tutti gli scartati".to_string(),
                     "improve:discarded:delete_all:yes".to_string(),
                 )],
-                vec![InlineKeyboardButton::callback(
-                    "❌ Annulla".to_string(),
-                    "improve:list:discarded:0".to_string(),
-                )],
+                vec![
+                    InlineKeyboardButton::callback(
+                        "❌ Annulla".to_string(),
+                        "improve:list:discarded:0".to_string(),
+                    ),
+                    InlineKeyboardButton::callback(
+                        "🏠 Menù principale".to_string(),
+                        "menu:main".to_string(),
+                    ),
+                ],
             ]))
             .await?;
         }

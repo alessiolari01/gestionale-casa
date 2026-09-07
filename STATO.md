@@ -758,6 +758,18 @@ meccanismo invece di tenerne due diversi. 3 nuovi test sul meccanismo
 (coda consumata una sola volta, isolamento tra chat, che l'avviso vada
 davvero nel testo/nella didascalia). 303 test totali (300 prima).
 
+**Audit di layout su C3, trovato collaudando dal vivo**: Alessio ha
+notato su "➕ Nuovo oggetto" che `❌ Annulla` stava da solo su una riga e
+`💡 Migliora | 🏠 Menù principale` sulla riga sotto, invece dell'unica
+riga di navigazione prevista da C3 — `context_bot.rs` inserisce
+"💡 Migliora" solo accanto a "Menù principale", quindi due righe separate
+lasciano "Annulla" isolato. Cercato lo stesso difetto in tutto il bot:
+altri cinque punti (`oggetti.rs` una seconda volta nella schermata
+riepilogo della bozza, `foto.rs`, due in `ricette.rs`,
+`miglioramenti.rs`), due dei quali (`foto.rs`,
+`miglioramenti.rs::discarded:delete_all`) non avevano proprio nessun
+pulsante "Menù principale". Tutti uniti in un'unica riga finale.
+
 **Uniformate le emoticon, trovato collaudando dal vivo**: Alessio ha
 notato su Telegram che `oggetti.rs` mostrava `↩️ Operazione annullata.`
 invece di `❌`. Cercato in tutto il bot: altri due punti con la stessa

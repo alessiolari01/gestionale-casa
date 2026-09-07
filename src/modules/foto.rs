@@ -609,12 +609,18 @@ fn photo_menu_keyboard(item_id: i64, count: i64) -> InlineKeyboardMarkup {
 }
 
 fn cancel_photo_keyboard(item_id: i64) -> InlineKeyboardMarkup {
+    // C3: mancava del tutto "🏠 Menù principale" su questa schermata, e
+    // la riga di navigazione va unica -- trovato collaudando lo stesso
+    // difetto in oggetti.rs (cancel_keyboard).
     InlineKeyboardMarkup::new(vec![
-        vec![button("❌ Annulla", &format!("foto:cancel:{item_id}"))],
         vec![button(
             "⬅️ Torna all'oggetto",
             &format!("oggetti:view:{item_id}"),
         )],
+        vec![
+            button("❌ Annulla", &format!("foto:cancel:{item_id}")),
+            button("🏠 Menù principale", "menu:main"),
+        ],
     ])
 }
 

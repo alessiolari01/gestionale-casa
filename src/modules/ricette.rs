@@ -5947,13 +5947,12 @@ fn step_media_keyboard() -> InlineKeyboardMarkup {
 }
 
 fn step_attachment_cancel_keyboard() -> InlineKeyboardMarkup {
-    InlineKeyboardMarkup::new(vec![
-        vec![button(
-            "❌ Annulla allegato",
-            "recipe:new:step:attachment:cancel",
-        )],
-        vec![button("🏠 Menù principale", "menu:main")],
-    ])
+    // C3: riga di navigazione unica, non due righe separate (trovato
+    // insieme allo stesso difetto in oggetti.rs e foto.rs).
+    InlineKeyboardMarkup::new(vec![vec![
+        button("❌ Annulla allegato", "recipe:new:step:attachment:cancel"),
+        button("🏠 Menù principale", "menu:main"),
+    ]])
 }
 
 fn recipe_confirmation_keyboard() -> InlineKeyboardMarkup {
@@ -5962,8 +5961,8 @@ fn recipe_confirmation_keyboard() -> InlineKeyboardMarkup {
         vec![
             button("⬅️ Visibilità", "recipe:new:steps:done"),
             button("❌ Annulla", "recipe:new:cancel"),
+            button("🏠 Menù principale", "menu:main"),
         ],
-        vec![button("🏠 Menù principale", "menu:main")],
     ])
 }
 

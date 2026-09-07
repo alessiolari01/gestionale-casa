@@ -2,6 +2,21 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_LAYOUT_RIGA_NAVIGAZIONE_20260907 -->
+# 07/09/2026 — La riga di navigazione (C3) torna unica in sei punti
+
+Trovato collaudando dal vivo "➕ Nuovo oggetto": "❌ Annulla" da solo su
+una riga, "💡 Migliora | 🏠 Menù principale" sulla riga sotto -- invece
+dell'unica riga prevista da C3. Causa: `context_bot.rs` inserisce
+"💡 Migliora" solo nella riga che contiene già "Menù principale", quindi
+due righe separate lasciano "Annulla" isolato.
+
+Cercato lo stesso difetto in tutto il bot: altri cinque punti
+(`oggetti.rs` una seconda volta, `foto.rs`, due in `ricette.rs`,
+`miglioramenti.rs`), due dei quali senza alcun pulsante "Menù
+principale". Tutti uniti in un'unica riga finale. Nessun test nuovo
+(solo tastiere). Totale invariato: 303.
+
 <!-- CHANGELOG_EMOTICON_ANNULLA_20260907 -->
 # 07/09/2026 — Uniformata l'emoticon di annullamento a "❌"
 

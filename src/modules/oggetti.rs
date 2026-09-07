@@ -2716,18 +2716,22 @@ fn draft_keyboard(draft: &ObjectDraft) -> InlineKeyboardMarkup {
         button(&notes, "oggetti:draft:notes"),
     ]);
     rows.push(vec![button(&other, "oggetti:draft:other")]);
+    rows.push(vec![button(
+        if draft.is_update() {
+            "💾 Salva modifiche"
+        } else {
+            "✅ Salva"
+        },
+        "oggetti:draft:save",
+    )]);
+    // C3: la riga di navigazione ("❌ Annulla | 💡 Migliora |
+    // 🏠 Menù principale") va sempre unica e per ultima -- "Salva" è
+    // un'azione, non fa parte della navigazione (trovato da Alessio
+    // collaudando, stesso difetto di `cancel_keyboard` in questo file).
     rows.push(vec![
-        button(
-            if draft.is_update() {
-                "💾 Salva modifiche"
-            } else {
-                "✅ Salva"
-            },
-            "oggetti:draft:save",
-        ),
         button("❌ Annulla", "oggetti:draft:cancel"),
+        button("🏠 Menù principale", "menu:main"),
     ]);
-    rows.push(vec![button("🏠 Menù principale", "menu:main")]);
     InlineKeyboardMarkup::new(rows)
 }
 
@@ -2829,10 +2833,15 @@ fn other_details_keyboard(draft: &ObjectDraft) -> InlineKeyboardMarkup {
 }
 
 fn cancel_keyboard() -> InlineKeyboardMarkup {
-    InlineKeyboardMarkup::new(vec![
-        vec![button("❌ Annulla", "oggetti:draft:cancel")],
-        vec![button("🏠 Menù principale", "menu:main")],
-    ])
+    // C3: un passo di procedura ha un'unica riga di navigazione
+    // "❌ Annulla | 💡 Migliora | 🏠 Menù principale" -- su due righe
+    // separate `context_bot.rs` inserisce "💡 Migliora" solo accanto a
+    // "Menù principale", lasciando "Annulla" isolato sulla riga sopra
+    // (trovato per davvero da Alessio collaudando "➕ Nuovo oggetto").
+    InlineKeyboardMarkup::new(vec![vec![
+        button("❌ Annulla", "oggetti:draft:cancel"),
+        button("🏠 Menù principale", "menu:main"),
+    ]])
 }
 
 fn object_detail_keyboard(
