@@ -2,6 +2,25 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_VISTA_UTENTE_NORMALE_PROGETTATA_20260907 -->
+# 07/09/2026 — "Vista come utente normale": progettata, non ancora costruita
+
+Alessio ha chiesto di poter vedere il bot sia da admin sia da utente
+normale senza un secondo account Telegram. Verificato prima di
+proporre qualcosa: `is_system_admin`/`is_primary_admin` rileggono il
+ruolo dal database a ogni chiamata, non si fidano di un valore in
+memoria -- quindi l'idea più semplice ("mascherare" l'attore) non
+basta da sola.
+
+Disegnata una soluzione che ricalca un precedente già nel codice
+(`view_all`, lo stesso schema usato per "vedi tutti i tuoi spazi"):
+una preferenza per utente in `preferenze_utente`, un campo in più su
+`AuditActor` controllato dalle due funzioni di permesso prima di
+interrogare il database, un bottone riservato all'amministratore
+principale. Scritta in STATO.md (punti aperti) con abbastanza dettaglio
+da poterla costruire direttamente in una sessione futura, senza
+riprogettarla da capo. Nessun codice toccato in questo commit.
+
 <!-- CHANGELOG_INDIETRO_SEMPRE_VISIBILE_20260907 -->
 # 07/09/2026 — "⬅️ Indietro" compare sempre, anche a primo livello
 

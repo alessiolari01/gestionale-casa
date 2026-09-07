@@ -1005,6 +1005,43 @@ src/modules/novita.rs               registro delle novità e badge "🆕" propag
 6. **Verifiche differite** che richiedono un secondo account Telegram: invito
    accettato con apertura dello spazio, notifica al creatore, notifica di cambio
    ruolo, notifica di rimozione con perdita dell'accesso.
+7. **"Vista come utente normale" per l'amministratore principale — progettata
+   il 7 settembre 2026, non ancora costruita.** Alessio vuole poter vedere il
+   bot sia da admin sia da utente normale senza un secondo account Telegram.
+   Verificato prima di proporre una soluzione: `identity::is_system_admin` e
+   `identity::is_primary_admin` rileggono il ruolo dal database a ogni
+   chiamata (`WHERE id = ? AND ruolo_sistema = 'admin'`), non si fidano di un
+   valore in memoria — quindi non basta "mascherare" il campo su
+   `AuditActor`, serve un controllo esplicito dentro quelle due funzioni.
+
+   **Disegno proposto, ricalca un precedente diretto già nel codice**: esiste
+   già un interruttore identico per un'altra preferenza, `view_all`
+   (`identity::set_view_all`, bottoni "🌐 Tutti i tuoi spazi" / "🎯 Solo
+   spazio predefinito" in `send_spaces`), salvato per utente in
+   `preferenze_utente` e riletto a ogni richiesta quando si costruisce
+   l'`AuditActor` (in `identity::lookup_telegram_actor` /
+   `resolve_telegram_actor`). La stessa forma per questo caso:
+   - una colonna in più in `preferenze_utente` (es. `vista_normale`,
+     migration additiva);
+   - un nuovo campo su `AuditActor` (es. `vista_forzata_non_admin: bool`),
+     valorizzato leggendo quella colonna nello stesso punto in cui si legge
+     `view_all` oggi;
+   - `is_system_admin`/`is_primary_admin` controllano quel campo **prima**
+     di interrogare il database, e rispondono `false` se attivo — senza mai
+     toccare `ruolo_sistema`/`amministratore_principale` veri;
+   - un bottone "👁️ Vista come utente normale" / "👁️ Torna a vista admin",
+     riservato all'amministratore principale.
+
+   **Cosa copre**: tutto ciò che oggi dipende da
+   `is_system_admin`/`is_primary_admin` — il menù "🛠️ Amministrazione",
+   "✅ Segna Fatto"/archiviazione dei miglioramenti, la schermata
+   "🚀 Distribuzione", la modalità riservata, ecc.
+
+   **Cosa non copre, resta nel punto 6 sopra**: i permessi *dentro* uno
+   spazio condiviso (ruolo di membro: lettura/modifica/gestione — un asse
+   di permessi diverso, indipendente da admin/non-admin) e i flussi che
+   richiedono davvero una seconda persona (accettare un invito, ricevere
+   una notifica). Per quelli serve comunque un secondo account Telegram.
 
 ## 7. Regole operative
 
