@@ -900,12 +900,14 @@ async fn handle_authorized_message(
     if command == Some("/annulla") && identity_sessions.get(chat_id).is_some() {
         identity_sessions.clear_chat(chat_id);
         distribuzione_sessions.clear_chat(chat_id);
+        bot.annulla_e_avvisa(chat_id, "❌ Operazione annullata.");
         send_spaces(&bot, msg.chat.id, &pool, &actor).await?;
         return respond(());
     }
 
     if command == Some("/annulla") && distribuzione_sessions.get(chat_id).is_some() {
         distribuzione_sessions.clear_chat(chat_id);
+        bot.annulla_e_avvisa(chat_id, "❌ Operazione annullata.");
         send_admin_distribuzione(&bot, msg.chat.id, &pool, &actor).await?;
         return respond(());
     }
@@ -1549,8 +1551,10 @@ async fn handle_authorized_callback(
             recipe_sessions.clear_chat(chat_id.0);
             identity_sessions.clear_chat(chat_id.0);
             distribuzione_sessions.clear_chat(chat_id.0);
-            let avviso = annullamento_da_sessione.then_some("❌ Operazione annullata.");
-            send_main_menu_con_avviso(&bot, chat_id, &pool, &actor, avviso).await?;
+            if annullamento_da_sessione {
+                bot.annulla_e_avvisa(chat_id.0, "❌ Operazione annullata.");
+            }
+            send_main_menu(&bot, chat_id, &pool, &actor).await?;
         }
         "identity:profile" => {
             send_profile(&bot, chat_id, &pool, &actor).await?;
@@ -2045,24 +2049,6 @@ async fn send_main_menu(
     pool: &SqlitePool,
     actor: &identity::AuditActor,
 ) -> ResponseResult<()> {
-    send_main_menu_con_avviso(bot, chat_id, pool, actor, None).await
-}
-
-/// Come [`send_main_menu`], con un avviso opzionale anteposto al testo
-/// nello **stesso** messaggio (non un messaggio a parte): la regola "una
-/// sola schermata attiva per chat" cancellerebbe subito un avviso mandato
-/// separatamente, facendolo sparire in una frazione di secondo prima che
-/// si faccia in tempo a leggerlo -- trovato per davvero collaudando
-/// "❌ Operazione annullata." prima di questa versione (deciso con
-/// Alessio il 7 settembre 2026: deve restare visibile come quando lo
-/// stesso avviso accompagna il pulsante "❌ Annulla" locale).
-async fn send_main_menu_con_avviso(
-    bot: &Bot,
-    chat_id: ChatId,
-    pool: &SqlitePool,
-    actor: &identity::AuditActor,
-    avviso: Option<&str>,
-) -> ResponseResult<()> {
     let is_admin = match identity::is_system_admin(pool, actor).await {
         Ok(value) => value,
         Err(error) => {
@@ -2074,11 +2060,7 @@ async fn send_main_menu_con_avviso(
         }
     };
     let badge = badge_miglioramenti(pool, actor).await;
-    let testo = match avviso {
-        Some(avviso) => format!("{avviso}\n\n🏠 Gestionale Casa\n\nScegli una sezione."),
-        None => "🏠 Gestionale Casa\n\nScegli una sezione.".to_string(),
-    };
-    bot.send_message(chat_id, testo)
+    bot.send_message(chat_id, "🏠 Gestionale Casa\n\nScegli una sezione.")
         .reply_markup(modules::oggetti::main_menu_keyboard(is_admin, badge))
         .await?;
     Ok(())

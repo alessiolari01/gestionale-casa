@@ -730,6 +730,34 @@ sempre nello stesso messaggio della schermata di destinazione, mai
 separato. Audit in corso sugli altri moduli per verificare che ogni
 `❌ Annulla` esistente la rispetti già.
 
+**Audit completo e correzione di tutti gli altri punti "❌ Annulla" del
+bot (7 settembre 2026)**: chiesto da Alessio dopo il collaudo del punto
+precedente. Trovate 8 violazioni reali (stesso bug del messaggio
+separato che sparisce) in `alimentazione.rs` (quattro punti, incluso un
+"menu:main" locale che ne produceva perfino due) e un punto ciascuno in
+`contenitori.rs`, `luoghi.rs`, `oggetti.rs`, `foto.rs` — quest'ultimo
+condiviso da comando testuale e pulsante. Più quattro punti dove
+l'avviso mancava del tutto (non lo stesso bug, ma comunque fuori dalla
+regola): `/annulla` per le sessioni identity/distribuzione in `main.rs`,
+il pulsante `foto:cancel`, il pulsante `foodprof:cancel`.
+
+**Cambiata strategia di correzione durante il lavoro**: la prima
+correzione (menu:main) aveva aggiunto un parametro `avviso: Option<&str>`
+a `send_main_menu`. Estendere lo stesso schema a `contenitori.rs` e
+`luoghi.rs` avrebbe richiesto aggiungerlo anche alle **cinque** funzioni
+di destinazione diverse a cui un `/annulla` può portare in quei moduli
+(alcune in un modulo diverso, es. `luoghi::show_home_detail`) — poco
+sostenibile. Costruito invece un meccanismo centrale in `context_bot.rs`:
+`ContextBot::annulla_e_avvisa(chat_id, testo)` mette l'avviso "in coda"
+per quella chat; il punto unico in cui ogni messaggio tracciato viene
+davvero mandato (`ContextRequest::send`) lo preleva e lo antepone al
+testo, una sola volta, prima di mandarlo — qualunque sia la schermata di
+destinazione, senza dover cambiare la sua funzione. Le correzioni già
+fatte (menu:main, Alimentazione) sono state riscritte con lo stesso
+meccanismo invece di tenerne due diversi. 3 nuovi test sul meccanismo
+(coda consumata una sola volta, isolamento tra chat, che l'avviso vada
+davvero nel testo/nella didascalia). 303 test totali (300 prima).
+
 **Falso allarme, corretto dopo un ricollaudo dal vivo**: analizzando una
 registrazione del collaudo era sembrato che `🏠 Menù principale`, premuto
 mentre una bozza di miglioramento è attiva, annullasse il flusso invece

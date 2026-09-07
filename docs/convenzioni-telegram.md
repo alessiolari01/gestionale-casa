@@ -233,11 +233,19 @@ cancella un messaggio non appena il successivo viene mandato: un avviso
 per conto suo sparirebbe in una frazione di secondo, sostituito
 dall'arrivo della schermata di destinazione, senza dare il tempo di
 leggerlo — trovato per davvero collaudando "🏠 Menù principale" prima di
-questa correzione. Il testo dell'avviso va anteposto al testo normale
-della schermata di destinazione, che compare **solo dopo** l'interazione
-successiva (un pulsante, un comando) — esattamente come fa da sempre
-`❌ Annulla`, che questa regola generalizza a ogni punto che mostra lo
-stesso avviso.
+questa correzione, e ritrovato in altri 8 punti del bot con un audit
+completo subito dopo.
+
+**Come si applica in pratica**: mai aggiungere un parametro "avviso" a
+ogni funzione che disegna una schermata — in `contenitori.rs`/`luoghi.rs`
+un `/annulla` può portare a cinque schermate di destinazione diverse, a
+volte in un altro modulo. Si chiama invece
+`bot.annulla_e_avvisa(chat_id, "❌ ...")` (in `context_bot.rs`) subito
+prima di mostrare la schermata di destinazione come si farebbe comunque:
+l'avviso resta "in coda" per quella chat e viene anteposto in automatico
+al testo del **prossimo** messaggio tracciato mandato lì
+(`ContextRequest::send`), una sola volta, qualunque sia la funzione che
+lo manda.
 
 ### C4. Un simbolo, un significato
 

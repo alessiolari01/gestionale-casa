@@ -129,8 +129,7 @@ pub async fn handle_message(
                 }
                 "/annulla" if sessions.get(chat_id).is_some() => {
                     if let Some(item_id) = sessions.take(chat_id) {
-                        bot.send_message(msg.chat.id, "Aggiunta foto annullata.")
-                            .await?;
+                        bot.annulla_e_avvisa(chat_id, "❌ Aggiunta foto annullata.");
                         show_photo_menu(bot, msg.chat.id, pool, item_id).await?;
                     }
                     return Ok(true);
@@ -283,6 +282,7 @@ pub async fn handle_callback(
 
     if let Some(item_id) = callback_id(data, "foto:cancel:") {
         sessions.clear_chat(chat_id.0);
+        bot.annulla_e_avvisa(chat_id.0, "❌ Operazione annullata.");
         show_photo_menu(bot, chat_id, pool, item_id).await?;
         return Ok(true);
     }

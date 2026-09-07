@@ -2,6 +2,33 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_AUDIT_ANNULLA_20260907 -->
+# 07/09/2026 — Audit completo: ogni "❌ Annulla" del bot avvisa correttamente
+
+Chiesto da Alessio dopo aver visto la correzione del punto precedente:
+audit sistematico di tutti gli altri punti del bot con un avviso di
+annullamento. Trovate 8 violazioni reali dello stesso bug (messaggio
+separato che sparisce subito) in `alimentazione.rs` (4 punti, incluso un
+"menu:main" locale che ne produceva perfino due in sequenza),
+`contenitori.rs`, `luoghi.rs`, `oggetti.rs`, `foto.rs`. Più 4 punti dove
+l'avviso mancava del tutto (identity/distribuzione in `main.rs`,
+`foto:cancel`, `foodprof:cancel`).
+
+Cambiata strategia rispetto alla prima correzione: invece di aggiungere
+un parametro `avviso: Option<&str>` a ogni funzione di destinazione (in
+`contenitori.rs`/`luoghi.rs` un `/annulla` può portare a cinque
+schermate diverse, alcune in un altro modulo), costruito un meccanismo
+centrale in `context_bot.rs`: `ContextBot::annulla_e_avvisa(chat_id,
+testo)` mette l'avviso "in coda" per la chat; il punto unico in cui ogni
+messaggio tracciato viene davvero mandato lo preleva e lo antepone al
+testo, una sola volta, prima dell'invio -- qualunque sia la funzione
+chiamata dopo. Le correzioni già fatte (menu:main, Alimentazione)
+riscritte con lo stesso meccanismo invece di tenerne due diversi.
+
+3 nuovi test sul meccanismo in `context_bot.rs` (coda consumata una sola
+volta, isolamento tra chat, l'avviso finisce davvero nel testo/nella
+didascalia). Totale: 303 (300 prima).
+
 <!-- CHANGELOG_AVVISO_UNICO_MESSAGGIO_20260907 -->
 # 07/09/2026 — L'avviso di annullamento va unito al messaggio di destinazione
 

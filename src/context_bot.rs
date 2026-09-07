@@ -66,6 +66,14 @@ struct ChatUiState {
     claimed_messages: HashSet<MessageId>,
     callback_labels: HashMap<String, String>,
     current_section: Option<String>,
+    /// Avviso in attesa di essere anteposto alla **prossima** schermata
+    /// tracciata mandata a questa chat (es. "❌ Operazione annullata."),
+    /// consumato una sola volta. Deciso con Alessio il 7 settembre 2026:
+    /// un avviso mandato come messaggio a parte sparisce subito per la
+    /// regola "una sola schermata attiva per chat" -- va invece unito al
+    /// testo della schermata di destinazione, qualunque essa sia, senza
+    /// dover aggiungere un parametro a ogni funzione che ne mostra una.
+    pending_notice: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -255,6 +263,25 @@ impl ImproveContextStore {
         previous.filter(|old| *old != message_id)
     }
 
+    /// Mette in coda un avviso per la prossima schermata tracciata mandata
+    /// a questa chat -- vedi il commento su `ChatUiState::pending_notice`.
+    pub fn set_pending_notice(&self, chat_id: i64, testo: impl Into<String>) {
+        let mut state = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.ui.entry(chat_id).or_default().pending_notice = Some(testo.into());
+    }
+
+    /// Preleva (e consuma) l'avviso in coda per questa chat, se presente.
+    fn take_pending_notice(&self, chat_id: i64) -> Option<String> {
+        let mut state = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.ui.get_mut(&chat_id)?.pending_notice.take()
+    }
+
     fn register_transient_media(&self, chat_id: i64, message_id: MessageId) {
         let mut state = self
             .inner
@@ -367,6 +394,18 @@ impl ContextBot {
 
     pub fn claim_callback(&self, chat_id: i64, message_id: MessageId, data: &str) -> bool {
         self.contexts.claim_callback(chat_id, message_id, data)
+    }
+
+    /// Mette in coda un avviso (es. "❌ Operazione annullata.") che verrà
+    /// anteposto al testo della **prossima** schermata tracciata mandata a
+    /// questa chat (`send_message`/`send_message_without_improve`), nello
+    /// stesso messaggio -- non un messaggio a parte. Deciso con Alessio il
+    /// 7 settembre 2026 (C3 in `docs/convenzioni-telegram.md`): chi
+    /// annulla un'operazione chiama questo metodo e poi mostra la
+    /// schermata di destinazione come farebbe comunque, senza dover
+    /// aggiungere un parametro "avviso" a ogni funzione che la disegna.
+    pub fn annulla_e_avvisa(&self, chat_id: i64, testo: impl Into<String>) {
+        self.contexts.set_pending_notice(chat_id, testo);
     }
 
     pub async fn cleanup_transient_media(&self, chat_id: ChatId) {
@@ -507,6 +546,9 @@ pub(crate) trait ImprovePayload {
     fn chat_id(&self) -> &Recipient;
     fn context_text(&self) -> String;
     fn reply_markup_mut(&mut self) -> &mut Option<ReplyMarkup>;
+    /// Antepone un avviso al testo/didascalia effettivamente mandato,
+    /// nello stesso messaggio -- vedi `ContextBot::annulla_e_avvisa`.
+    fn prepend_text(&mut self, avviso: &str);
 }
 
 impl ImprovePayload for SendMessage {
@@ -520,6 +562,10 @@ impl ImprovePayload for SendMessage {
 
     fn reply_markup_mut(&mut self) -> &mut Option<ReplyMarkup> {
         &mut self.reply_markup
+    }
+
+    fn prepend_text(&mut self, avviso: &str) {
+        self.text = format!("{avviso}\n\n{}", self.text);
     }
 }
 
@@ -537,6 +583,11 @@ impl ImprovePayload for SendPhoto {
     fn reply_markup_mut(&mut self) -> &mut Option<ReplyMarkup> {
         &mut self.reply_markup
     }
+
+    fn prepend_text(&mut self, avviso: &str) {
+        let base = self.caption.clone().unwrap_or_default();
+        self.caption = Some(format!("{avviso}\n\n{base}"));
+    }
 }
 
 impl ImprovePayload for SendVideo {
@@ -552,6 +603,11 @@ impl ImprovePayload for SendVideo {
 
     fn reply_markup_mut(&mut self) -> &mut Option<ReplyMarkup> {
         &mut self.reply_markup
+    }
+
+    fn prepend_text(&mut self, avviso: &str) {
+        let base = self.caption.clone().unwrap_or_default();
+        self.caption = Some(format!("{avviso}\n\n{base}"));
     }
 }
 
@@ -690,6 +746,13 @@ where
     type SendRef = Pin<Box<dyn Future<Output = Result<Message, Self::Err>> + Send>>;
 
     fn send(mut self) -> Self::Send {
+        if matches!(self.mode, OutputMode::Ui) {
+            if let Some(chat_id) = self.chat_id() {
+                if let Some(avviso) = self.contexts.take_pending_notice(chat_id.0) {
+                    self.request.payload_mut().prepend_text(&avviso);
+                }
+            }
+        }
         self.add_context_button();
         let chat_id = self.chat_id();
         let request = self.request;
@@ -948,6 +1011,48 @@ fn truncate(value: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn avviso_in_coda_si_consuma_una_sola_volta() {
+        let store = ImproveContextStore::default();
+        assert_eq!(store.take_pending_notice(1), None);
+
+        store.set_pending_notice(1, "❌ Operazione annullata.");
+        assert_eq!(
+            store.take_pending_notice(1),
+            Some("❌ Operazione annullata.".to_string())
+        );
+        // Consumato: la seconda lettura non lo ritrova più.
+        assert_eq!(store.take_pending_notice(1), None);
+    }
+
+    #[test]
+    fn avviso_in_coda_non_si_mischia_tra_chat_diverse() {
+        let store = ImproveContextStore::default();
+        store.set_pending_notice(1, "❌ Operazione annullata.");
+        assert_eq!(store.take_pending_notice(2), None);
+        assert_eq!(
+            store.take_pending_notice(1),
+            Some("❌ Operazione annullata.".to_string())
+        );
+    }
+
+    #[test]
+    fn prepend_text_antepone_avviso_a_send_message_e_a_una_didascalia_vuota() {
+        let mut payload = SendMessage::new(Recipient::Id(ChatId(1)), "🏠 Menù principale");
+        payload.prepend_text("❌ Operazione annullata.");
+        assert_eq!(
+            payload.text,
+            "❌ Operazione annullata.\n\n🏠 Menù principale"
+        );
+
+        let mut foto = SendPhoto::new(Recipient::Id(ChatId(1)), InputFile::file_id("x".into()));
+        foto.prepend_text("❌ Operazione annullata.");
+        assert_eq!(
+            foto.caption.as_deref(),
+            Some("❌ Operazione annullata.\n\n")
+        );
+    }
 
     #[test]
     fn titolo_schermata_usa_la_prima_riga_non_vuota() {
