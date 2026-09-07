@@ -1049,6 +1049,17 @@ src/modules/novita.rs               registro delle novità e badge "🆕" propag
    progetto avrà raggiunto la forma "finita" immaginata, non ora. Dettagli,
    motivazione e nomi alternativi scartati in
    `docs/previsto/rinominazione-villica.md`.
+9. **Prossimo macro-step deciso (8 settembre 2026): la lista della spesa**
+   (`docs/previsto/lista-della-spesa.md`) — coerente con la sequenza già
+   scritta in `docs/roadmap.md` e appoggiata sul planner pasti già
+   operativo. Non ancora iniziata.
+10. **Prima ancora, da pianificare con attenzione: riconfigurare l'S9 con
+    un account dedicato**, non più quello personale di Alessio, per le
+    comunicazioni del progetto (Telegram/Google). Decisione presa l'8
+    settembre 2026, dettagli tecnici (cosa si preserva — database reale
+    della famiglia, chiavi SSH, repository — e cosa si sostituisce)
+    ancora da definire: l'S9 è il telefono di produzione con dati reali
+    in uso quotidiano, non va toccato senza un piano esplicito.
 
 ## 7. Regole operative
 
