@@ -2,6 +2,20 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_NOME_VILLICA_20260908 -->
+# 08/09/2026 — Il progetto si chiamerà "Villica"
+
+Deciso da Alessio dopo una lunga ricerca (una quarantina di nomi
+verificati via web, quasi tutti già presi da app reali di organizzazione
+familiare — sorprendentemente vicine a dove sta andando questo progetto).
+"Villica": nell'antica Roma, la donna che amministrava concretamente una
+casa/tenuta -- descrive una funzione attiva, non un contenitore passivo.
+
+**Non applicato da nessuna parte**: deciso esplicitamente di rimandare
+all'applicazione a quando il progetto avrà raggiunto la forma "finita"
+immaginata, non ora. Dettagli, motivazione e alternative scartate in
+`docs/previsto/rinominazione-villica.md`. Nessun codice toccato.
+
 <!-- CHANGELOG_VISTA_UTENTE_NORMALE_PROGETTATA_20260907 -->
 # 07/09/2026 — "Vista come utente normale": progettata, non ancora costruita
 

@@ -1043,6 +1043,13 @@ src/modules/novita.rs               registro delle novità e badge "🆕" propag
    richiedono davvero una seconda persona (accettare un invito, ricevere
    una notifica). Per quelli serve comunque un secondo account Telegram.
 
+8. **Il progetto si chiamerà "Villica"**, deciso l'8 settembre 2026 — non
+   ancora applicato da nessuna parte (nessun file rinominato, il bot
+   Telegram resta `Gestionale_personalizzato_Bot`). Da fare solo quando il
+   progetto avrà raggiunto la forma "finita" immaginata, non ora. Dettagli,
+   motivazione e nomi alternativi scartati in
+   `docs/previsto/rinominazione-villica.md`.
+
 ## 7. Regole operative
 
 - ogni lavoro passa da un branch pushato **prima** che una seconda sessione ci
