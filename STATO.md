@@ -1107,6 +1107,16 @@ src/modules/novita.rs               registro delle novità e badge "🆕" propag
     `docs/previsto/invio-miglioramenti-a-claude.md` — **attenzione**,
     quel documento la cita con l'id vecchio "#41", ora cambiato dal
     reset, cercarla per testo se serve).
+11. **Multipiattaforma: il bot viene finito prima della web app, deciso
+    l'8 settembre 2026.** Discusso con Alessio se e come estendere il
+    progetto oltre Telegram (web app, poi Play Store/App Store/Windows/
+    Mac). Decisione: nessuno sviluppo in parallelo — si completa prima il
+    bot così come già pensato, poi la web app si appoggia alla stessa
+    struttura dati/logica di dominio invece di duplicarla, per evitare il
+    rischio di due implementazioni che divergono (già capitato una volta
+    in questo progetto, vedi Step 7.3B in `docs/storico-del-progetto.md`).
+    Dettagli e motivazione in `docs/previsto/multipiattaforma.md`. Nessun
+    codice toccato da questa decisione.
 
 ## 7. Regole operative
 

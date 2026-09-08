@@ -2,6 +2,17 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_MULTIPIATTAFORMA_20260908 -->
+# 08/09/2026 — Deciso: il bot viene finito prima della web app
+
+Nessun codice. Discusso con Alessio se e come estendere il progetto oltre
+Telegram (web app, poi Play Store/App Store/Windows/Mac). Deciso: niente
+sviluppo in parallelo -- si completa prima il bot così come già pensato,
+poi la web app si appoggia alla stessa struttura dati/logica di dominio
+invece di duplicarla, per evitare che le due implementazioni divergano
+(rischio già concretizzato una volta in questo progetto, Step 7.3B).
+Dettagli in `docs/previsto/multipiattaforma.md` (nuovo).
+
 <!-- CHANGELOG_RESET_DB_E_BADGE_COMPLETO_20260908 -->
 # 08/09/2026 — Reset database (account dedicati) e badge "🆕" fino in fondo
 
