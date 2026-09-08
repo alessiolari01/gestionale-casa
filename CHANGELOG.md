@@ -2,6 +2,45 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_MULTIPIATTAFORMA_20260908 -->
+# 08/09/2026 — Deciso: il bot viene finito prima della web app
+
+Nessun codice. Discusso con Alessio se e come estendere il progetto oltre
+Telegram (web app, poi Play Store/App Store/Windows/Mac). Deciso: niente
+sviluppo in parallelo -- si completa prima il bot così come già pensato,
+poi la web app si appoggia alla stessa struttura dati/logica di dominio
+invece di duplicarla, per evitare che le due implementazioni divergano
+(rischio già concretizzato una volta in questo progetto, Step 7.3B).
+Dettagli in `docs/previsto/multipiattaforma.md` (nuovo).
+
+<!-- CHANGELOG_RESET_DB_E_BADGE_COMPLETO_20260908 -->
+# 08/09/2026 — Reset database (account dedicati) e badge "🆕" fino in fondo
+
+**Reset eseguito**: come deciso (account Google di sistema dedicato
+sull'S9, Termux/progetto intatti), il database è stato svuotato per
+ripartire pulito. Backup esplicito prima del reset
+(`gestionale_PRE_RESET_20260908_021825.db`), poi 45 migration riapplicate
+da zero, bootstrap del solito account admin confermato.
+
+**Badge "🆕" non arrivava fino in fondo**: trovato da Alessio subito dopo
+il reset -- il badge su "📋 Miglioramenti" nel menù principale spariva
+appena entrati nella sezione, senza indicare quale pulsante portasse
+davvero alla novità. La regola C14 già diceva "ogni pulsante che porta
+fino a lì", ma per questo primo caso reale mancava l'applicazione dentro
+la sezione stessa. Corretto: badge aggiunto anche su "➕ Nuovo
+miglioramento" e su "📷🎥 Aggiungi foto/video" nel dettaglio di un
+miglioramento esistente. Deciso che questo vale per ogni futura voce di
+`novita::REGISTRO`, non solo per questa -- C14 aggiornata di conseguenza.
+
+**Recuperati dal backup i miglioramenti `da_fare` non documentati altrove**:
+il reset li aveva cancellati insieme al resto. Controllati uno per uno
+contro tutta la documentazione: uno (zona test/zero-downtime) era già
+documentato e già implementato, lasciato fuori; gli altri cinque
+reinseriti come miglioramenti `da_fare` veri, con testo e data di
+creazione originali.
+
+Nessun test nuovo (solo tastiere). Totale invariato: 303.
+
 <!-- CHANGELOG_NOME_VILLICA_20260908 -->
 # 08/09/2026 — Il progetto si chiamerà "Villica"
 

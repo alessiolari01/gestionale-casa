@@ -377,6 +377,18 @@ registro statico nel codice (`REGISTRO`, chiave/genitore/tutorial), e una
 sola tabella nel database (`novita_lette`) che tiene traccia di chi ha visto
 cosa.
 
+**Rinforzato l'8 settembre 2026, stessa regola, applicazione più severa**:
+"ogni pulsante che porta fino a lì" significa **ogni** passaggio reale, non
+solo il primo (dal menù principale alla sezione). Trovato mancante da
+Alessio sul primo caso reale (`miglioramenti_allegato_video`): il badge
+arrivava su "📋 Miglioramenti" ma spariva subito dentro la sezione, senza
+indicare quale pulsante portasse davvero alla novità (in quel caso
+"➕ Nuovo miglioramento" e "📷🎥 Aggiungi foto/video"). Da qui in avanti, chi
+registra una nuova voce in `novita::REGISTRO` deve anche elencare **ogni**
+schermata intermedia reale sul percorso e aggiungere lì il controllo del
+badge (`novita::etichetta_con_badge`) — non basta far risalire il `genitore`
+fino al menù principale se poi non si segna nessun pulsante nel mezzo.
+
 ```text
 |  ⬅️   |Settembre 2026|  ➡️   |
 | Lun | Mar | Mer | Gio | Ven | Sab | Dom |

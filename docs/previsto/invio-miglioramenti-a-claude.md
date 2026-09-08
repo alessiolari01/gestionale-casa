@@ -166,12 +166,16 @@ coda via SSH e, se trova qualcosa, eseguire da sola l'intero ciclo
 gate umano.
 
 Alessio ha preferito **non costruirlo ora**: l'idea è stata messa in
-coda come un miglioramento vero e proprio nel bot stesso (**#41**,
-creato il 5 settembre 2026, stato `da_fare`: "Creare una sessione
-Claude Code dedicata... che controlli periodicamente la coda dei
-miglioramenti inviati a Claude..."). Per ora le richieste continuano ad
-arrivare scritte a mano in chat, come sempre. Il canale di ingresso
-(bottone + coda, sopra) si può costruire e collaudare indipendentemente
-da questo — l'agente prenderebbe in carico la coda quando gli viene
-chiesto esplicitamente, finché il miglioramento #41 non sarà a sua
-volta implementato.
+coda come un miglioramento vero e proprio nel bot stesso (creato il
+5 settembre 2026, stato `da_fare`: "Creare una sessione Claude Code
+dedicata... che controlli periodicamente la coda dei miglioramenti
+inviati a Claude..."). **Attenzione all'id**: il database è stato
+azzerato l'8 settembre 2026 (account dedicati, vedi `STATO.md` punto
+10 dei "Punti aperti") e il miglioramento è stato ripristinato da un
+backup con un id nuovo — cercarlo per testo, non per numero, se questo
+riferimento risultasse disallineato in futuro. Per ora le richieste
+continuano ad arrivare scritte a mano in chat, come sempre. Il canale di
+ingresso (bottone + coda, sopra) si può costruire e collaudare
+indipendentemente da questo — l'agente prenderebbe in carico la coda
+quando gli viene chiesto esplicitamente, finché quel miglioramento non
+sarà a sua volta implementato.

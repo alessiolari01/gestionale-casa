@@ -779,7 +779,7 @@ Descrivi cosa vorresti cambiare o migliorare. Puoi usare più messaggi; quando h
                 chat_id,
                 "⚠️ Il contesto di questa schermata non è più disponibile. Apri nuovamente la sezione e premi 💡 Migliora.",
             )
-            .reply_markup(menu_keyboard(is_primary_admin(pool).await.unwrap_or(false)))
+            .reply_markup(menu_keyboard(is_primary_admin(pool).await.unwrap_or(false), badge_allegato_video(pool).await))
             .await?;
         }
         return Ok(true);
@@ -1390,7 +1390,10 @@ async fn cancel_improvement_flow(
     }
 
     bot.send_message(chat_id, "❌ Operazione annullata.")
-        .reply_markup(menu_keyboard(is_primary_admin(pool).await.unwrap_or(false)))
+        .reply_markup(menu_keyboard(
+            is_primary_admin(pool).await.unwrap_or(false),
+            badge_allegato_video(pool).await,
+        ))
         .await?;
     Ok(())
 }
@@ -1586,7 +1589,7 @@ async fn start_export(
                 chat_id,
                 "⚠️ Non sono riuscito a creare l'esportazione. Nessun dato del gestionale è stato modificato; puoi riprovare.",
             )
-            .reply_markup(menu_keyboard(true))
+            .reply_markup(menu_keyboard(true, badge_allegato_video(pool).await))
             .await?;
             return Ok(());
         }
@@ -1613,7 +1616,7 @@ async fn start_export(
                     bundle.path.file_name().and_then(|name| name.to_str()).unwrap_or("export miglioramenti")
                 ),
             )
-            .reply_markup(menu_keyboard(true))
+            .reply_markup(menu_keyboard(true, badge_allegato_video(pool).await))
             .await?;
             return Ok(());
         }
@@ -1678,7 +1681,7 @@ async fn start_project_export(
                 chat_id,
                 "⚠️ Non sono riuscito a creare l'esportazione del progetto. Nessun dato del gestionale è stato modificato; puoi riprovare.",
             )
-            .reply_markup(menu_keyboard(true))
+            .reply_markup(menu_keyboard(true, badge_allegato_video(pool).await))
             .await?;
             return Ok(());
         }
@@ -1704,7 +1707,7 @@ async fn start_project_export(
                 chat_id,
                 "⚠️ Telegram non ha confermato l'invio dello ZIP del progetto. Ho eliminato la copia temporanea dall'S9; puoi riprovare.",
             )
-            .reply_markup(menu_keyboard(true))
+            .reply_markup(menu_keyboard(true, badge_allegato_video(pool).await))
             .await?;
             return Ok(());
         }
@@ -1837,7 +1840,7 @@ async fn confirm_export_download(
             chat_id,
             "⚠️ Non c'è un'esportazione corrente da confermare. Creane una nuova dal menu Miglioramenti.",
         )
-        .reply_markup(menu_keyboard(true))
+        .reply_markup(menu_keyboard(true, badge_allegato_video(pool).await))
         .await?;
         return Ok(());
     };
@@ -1848,7 +1851,7 @@ async fn confirm_export_download(
             chat_id,
             "⚠️ Per sicurezza non ho cancellato il file: il percorso non appartiene all'area export prevista.",
         )
-        .reply_markup(menu_keyboard(true))
+        .reply_markup(menu_keyboard(true, badge_allegato_video(pool).await))
         .await?;
         return Ok(());
     }
@@ -1861,7 +1864,7 @@ async fn confirm_export_download(
                 chat_id,
                 "✅ Download confermato. La copia temporanea dello ZIP è stata eliminata dall'S9 e il documento Telegram è stato rimosso.",
             )
-            .reply_markup(menu_keyboard(true))
+            .reply_markup(menu_keyboard(true, badge_allegato_video(pool).await))
             .await?;
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -1871,7 +1874,7 @@ async fn confirm_export_download(
                 chat_id,
                 "✅ Download confermato. La copia temporanea non era più presente sull'S9 e il documento Telegram è stato rimosso.",
             )
-            .reply_markup(menu_keyboard(true))
+            .reply_markup(menu_keyboard(true, badge_allegato_video(pool).await))
             .await?;
         }
         Err(error) => {
@@ -2083,7 +2086,11 @@ pub async fn show_menu(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> Respons
         "💡 Miglioramenti\n\nPuoi creare suggerimenti e gestire soltanto i tuoi: testo, screenshot ed eliminazione del suggerimento attivo. Lo stato amministrativo viene gestito dall'amministratore.".to_string()
     };
     bot.send_message(chat_id, text)
-        .reply_markup(menu_keyboard_con_conteggi(admin, conteggi))
+        .reply_markup(menu_keyboard_con_conteggi(
+            admin,
+            conteggi,
+            badge_allegato_video(pool).await,
+        ))
         .await?;
     Ok(())
 }
@@ -2127,7 +2134,10 @@ async fn show_list(
 
     if rows.is_empty() {
         bot.send_message(chat_id, format!("{}\n\nNessun elemento.", scope.title()))
-            .reply_markup(menu_keyboard(is_primary_admin(pool).await.unwrap_or(false)))
+            .reply_markup(menu_keyboard(
+                is_primary_admin(pool).await.unwrap_or(false),
+                badge_allegato_video(pool).await,
+            ))
             .await?;
         return Ok(());
     }
@@ -2231,7 +2241,7 @@ async fn show_archive(
 
     if rows.is_empty() {
         bot.send_message(chat_id, "📦 L'archivio dei miglioramenti è vuoto.")
-            .reply_markup(menu_keyboard(true))
+            .reply_markup(menu_keyboard(true, badge_allegato_video(pool).await))
             .await?;
         return Ok(());
     }
@@ -2357,6 +2367,7 @@ async fn show_detail(
             owner,
             return_to,
             description_long,
+            badge_allegato_video(pool).await,
         ))
         .await?;
     Ok(())
@@ -2886,6 +2897,22 @@ async fn tutorial_da_mostrare(pool: &SqlitePool) -> Option<String> {
     } else {
         None
     }
+}
+
+/// Vero se il badge "🆕" va mostrato sui pulsanti che portano verso
+/// l'allegato foto/video (`➕ Nuovo miglioramento`,
+/// `📷🎥 Aggiungi foto/video`) -- trovato mancante da Alessio collaudando:
+/// il badge arrivava fino al menù principale ma spariva subito dentro
+/// Miglioramenti invece di continuare a guidare fino al pulsante giusto,
+/// deciso l'8 settembre 2026 di farlo proseguire.
+async fn badge_allegato_video(pool: &SqlitePool) -> bool {
+    let Some(utente_id) = identity::current_actor().utente_id else {
+        return false;
+    };
+    novita::viste_da_utente(pool, utente_id)
+        .await
+        .map(|viste| novita::serve_badge("miglioramenti_allegato_video", &viste))
+        .unwrap_or(false)
 }
 
 async fn prompt_invio_allegato(pool: &SqlitePool) -> String {
@@ -3474,8 +3501,8 @@ async fn is_primary_admin(pool: &SqlitePool) -> Result<bool> {
     identity::is_primary_admin(pool, &identity::current_actor()).await
 }
 
-fn menu_keyboard(admin: bool) -> InlineKeyboardMarkup {
-    menu_keyboard_con_conteggi(admin, None)
+fn menu_keyboard(admin: bool, badge_nuovo: bool) -> InlineKeyboardMarkup {
+    menu_keyboard_con_conteggi(admin, None, badge_nuovo)
 }
 
 /// Menu' Miglioramenti con il conteggio sulle etichette (C7).
@@ -3484,9 +3511,15 @@ fn menu_keyboard(admin: bool) -> InlineKeyboardMarkup {
 /// quelle di prima: una sezione raggiungibile vale piu' di un numero esatto.
 /// Il nome di ogni voce viene da `ListScope::title`, cosi' il pulsante e il
 /// titolo della schermata a cui porta non possono divergere (C10).
+///
+/// `badge_nuovo`: C14 vuole che il badge "🆕" guidi fino al pulsante
+/// specifico, non solo fino al menù principale -- trovato mancante da
+/// Alessio l'8 settembre 2026 (il badge su "📋 Miglioramenti" spariva
+/// appena entrati, senza indicare quale pulsante portasse alla novità).
 fn menu_keyboard_con_conteggi(
     admin: bool,
     conteggi: Option<ConteggiMiglioramenti>,
+    badge_nuovo: bool,
 ) -> InlineKeyboardMarkup {
     let voce = |scope: ListScope| {
         let etichetta = match conteggi {
@@ -3498,7 +3531,7 @@ fn menu_keyboard_con_conteggi(
 
     let mut rows = vec![
         vec![InlineKeyboardButton::callback(
-            "➕ Nuovo miglioramento".to_string(),
+            novita::etichetta_con_badge("➕ Nuovo miglioramento", badge_nuovo),
             "improve:new".to_string(),
         )],
         vec![voce(ListScope::Mine)],
@@ -3696,6 +3729,7 @@ fn detail_keyboard(
     owner: bool,
     return_to: Option<(ListScope, i64)>,
     description_long: bool,
+    badge_allegato: bool,
 ) -> InlineKeyboardMarkup {
     let mut rows = Vec::new();
     if description_long {
@@ -3715,7 +3749,7 @@ fn detail_keyboard(
                     .unwrap_or_else(|| format!("improve:edit:{}", item.id)),
             ),
             InlineKeyboardButton::callback(
-                "📷🎥 Aggiungi foto/video".to_string(),
+                novita::etichetta_con_badge("📷🎥 Aggiungi foto/video", badge_allegato),
                 format!("improve:add_photo:{}", item.id),
             ),
         ]);

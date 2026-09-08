@@ -1053,13 +1053,70 @@ src/modules/novita.rs               registro delle novità e badge "🆕" propag
    (`docs/previsto/lista-della-spesa.md`) — coerente con la sequenza già
    scritta in `docs/roadmap.md` e appoggiata sul planner pasti già
    operativo. Non ancora iniziata.
-10. **Prima ancora, da pianificare con attenzione: riconfigurare l'S9 con
-    un account dedicato**, non più quello personale di Alessio, per le
-    comunicazioni del progetto (Telegram/Google). Decisione presa l'8
-    settembre 2026, dettagli tecnici (cosa si preserva — database reale
-    della famiglia, chiavi SSH, repository — e cosa si sostituisce)
-    ancora da definire: l'S9 è il telefono di produzione con dati reali
-    in uso quotidiano, non va toccato senza un piano esplicito.
+10. **Riconfigurazione dell'S9 con un account dedicato — fatta l'8
+    settembre 2026.** Chiarito con Alessio prima di toccare nulla: resta
+    lo stesso account Telegram amministratore, Termux/il progetto/le
+    chiavi SSH restano intatti; cambia solo l'account Google **di
+    sistema** del telefono (fuori da Termux, non eseguibile via SSH —
+    lo fa Alessio dalle Impostazioni Android) e il database riparte
+    vuoto. Eseguito il reset: backup esplicito del database precedente
+    salvato su `data/db/gestionale_PRE_RESET_20260908_021825.db`
+    sull'S9 (non nella rotazione automatica dei 5 backup, va ripulito a
+    mano quando non serve più), poi database svuotato e bot riavviato —
+    45 migration riapplicate da zero, bootstrap del nuovo account admin
+    confermato (stesso account Telegram di prima). D'ora in poi anche
+    altri membri della famiglia potranno essere approvati come utenti
+    normali.
+
+    **Conseguenza notata da Alessio, non un difetto**: il badge "🆕"
+    è ricomparso su "📋 Miglioramenti" dopo il reset — `novita_lette`
+    tiene traccia di chi ha visto cosa *per utente*, e il reset ha
+    cancellato quella tabella insieme al resto. Sparirà di nuovo
+    arrivando davvero alla schermata dell'allegato, come la prima volta.
+
+    **Trovato collaudando questa stessa conversazione, corretto lo
+    stesso giorno**: il badge su "📋 Miglioramenti" arrivava fino al
+    menù principale ma spariva subito dentro la sezione, senza
+    continuare a indicare *quale* pulsante portasse alla novità.
+    Deciso: da qui in avanti il badge deve guidare fino al pulsante
+    specifico per **ogni** nuova funzionalità registrata in
+    `novita::REGISTRO`, non solo fino al primo livello — vedi C14 in
+    `docs/convenzioni-telegram.md`. Corretto per il caso esistente
+    (`miglioramenti_allegato_video`): badge aggiunto anche su
+    "➕ Nuovo miglioramento" e su "📷🎥 Aggiungi foto/video" nel dettaglio
+    di un miglioramento esistente, non solo sul pulsante del menù
+    principale.
+
+    **Recuperati dal backup pre-reset i miglioramenti `da_fare`** che il
+    reset aveva cancellato (il database ripartiva vuoto, come deciso, ma
+    erano lavoro reale non ancora documentato altrove): controllati uno
+    per uno contro tutta la documentazione esistente. Uno
+    (`🧪 Zona test`/zero-downtime) era già ampiamente documentato **e
+    già implementato** (è il punto 6 del ciclo di automazione,
+    completo) — lasciato fuori di proposito. Gli altri cinque non
+    erano documentati da nessuna parte e sono stati reinseriti come
+    miglioramenti `da_fare` veri (id nuovi, contenuto e data di
+    creazione originali preservati): gestione/reset degli account dalla
+    sezione utenti; la panoramica amministrativa dovrebbe mostrare solo
+    dati globali significativi (utenti attivi/di recente, non conteggi
+    di case/oggetti); l'icona di un pasto segnato "saltato" nel planner
+    non si aggiorna come fa quella di "completato"; possibilità di
+    pianificare una ricetta nel planner senza associare un profilo,
+    usando la ricetta base; la sessione Claude Code dedicata per la coda
+    dei miglioramenti (già discussa sopra e in
+    `docs/previsto/invio-miglioramenti-a-claude.md` — **attenzione**,
+    quel documento la cita con l'id vecchio "#41", ora cambiato dal
+    reset, cercarla per testo se serve).
+11. **Multipiattaforma: il bot viene finito prima della web app, deciso
+    l'8 settembre 2026.** Discusso con Alessio se e come estendere il
+    progetto oltre Telegram (web app, poi Play Store/App Store/Windows/
+    Mac). Decisione: nessuno sviluppo in parallelo — si completa prima il
+    bot così come già pensato, poi la web app si appoggia alla stessa
+    struttura dati/logica di dominio invece di duplicarla, per evitare il
+    rischio di due implementazioni che divergono (già capitato una volta
+    in questo progetto, vedi Step 7.3B in `docs/storico-del-progetto.md`).
+    Dettagli e motivazione in `docs/previsto/multipiattaforma.md`. Nessun
+    codice toccato da questa decisione.
 
 ## 7. Regole operative
 
