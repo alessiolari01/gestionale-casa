@@ -36,15 +36,31 @@ pub struct VoceNovita {
 /// `improve:menu` in `oggetti::main_menu_keyboard`) -- non serve una sua
 /// voce separata nel registro: `ha_antenato_in` legge il campo `genitore`
 /// direttamente sulla foglia, senza dover risalire oltre un livello.
-pub const REGISTRO: &[VoceNovita] = &[VoceNovita {
-    chiave: "miglioramenti_allegato_video",
-    genitore: Some("improve_menu"),
-    tutorial: Some(
-        "🆕 Ora puoi allegare anche un video, non solo una foto. Prova a \
-         mandarne uno di esempio: alla fine potrai scegliere se tenerlo o \
-         eliminarlo.",
-    ),
-}];
+pub const REGISTRO: &[VoceNovita] = &[
+    VoceNovita {
+        chiave: "miglioramenti_allegato_video",
+        genitore: Some("improve_menu"),
+        tutorial: Some(
+            "🆕 Ora puoi allegare anche un video, non solo una foto. Prova a \
+             mandarne uno di esempio: alla fine potrai scegliere se tenerlo o \
+             eliminarlo.",
+        ),
+    },
+    // Lista della spesa (8 settembre 2026): genitore "food_menu" è il
+    // pulsante "🍽️ Alimentazione" del menù principale (callback
+    // "food:menu") -- non ha una voce propria nel registro, esattamente
+    // come "improve_menu": serve solo a far risalire il badge fino in cima.
+    VoceNovita {
+        chiave: "lista_spesa",
+        genitore: Some("food_menu"),
+        tutorial: Some(
+            "🆕 Nuova: la lista della spesa. Aggrega automaticamente gli \
+             ingredienti dei pasti pianificati nell'intervallo scelto -- premi \
+             🔄 Aggiorna lista quando pianifichi pasti nuovi. Puoi anche \
+             aggiungere voci a mano e spuntarle mentre fai la spesa.",
+        ),
+    },
+];
 
 /// Vero se nessun'altra voce del registro ha `chiave` come genitore: cioè
 /// se `chiave` è una funzionalità vera e propria (una schermata che un

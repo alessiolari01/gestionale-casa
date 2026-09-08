@@ -172,6 +172,50 @@ un dettaglio libero specifico del modulo.
 Vedi `docs/moduli/luoghi.md` e
 `migrations/20260815183000_luoghi.sql`.
 
+## Step 7.4: Lista della spesa
+
+Questo documento e' rimasto allo schema degli Step 5-6: le tabelle di
+Alimentazione e del planner (Step 7.2-7.3) sono documentate nei rispettivi
+`docs/moduli/*.md` invece che qui. Le due tabelle qui sotto sono le uniche
+nuove dell'8 settembre 2026 (`migrations/20260908150000_lista_spesa.sql`);
+per il resto dello schema di Alimentazione/Planner vedi
+`docs/moduli/planner.md` e `docs/moduli/lista-spesa.md`.
+
+### `liste_spesa`
+Una sola lista attiva per spazio condiviso, e una per utente senza spazio
+(stesso principio di `planner_alimentari`, indici unique parziali su
+`spazio_id`). Ha un proprio intervallo di date, indipendente dalle
+settimane del planner.
+
+| Campo | Tipo | Note |
+|---|---|---|
+| `proprietario_utente_id` | INTEGER | riferimento a `utenti(id)` |
+| `spazio_id` | INTEGER | nullable: `NULL` per una lista personale |
+| `data_inizio` / `data_fine` | TEXT | intervallo su cui si aggregano i pasti pianificati |
+| `aggiornata_il` | TEXT | ultima volta che è girato un refresh esplicito, `NULL` se mai |
+
+### `liste_spesa_voci`
+Le voci della lista: generate dall'aggregazione dei pasti pianificati, o
+manuali (testo libero, per un prodotto commerciale non modellato).
+
+| Campo | Tipo | Note |
+|---|---|---|
+| `lista_id` | INTEGER | riferimento a `liste_spesa(id)` |
+| `origine` | TEXT | `generato` o `manuale` |
+| `alimento_id` | INTEGER | nullable, riferimento a `alimenti(id)` |
+| `descrizione` | TEXT | nome alimento (generato) o testo libero (manuale) |
+| `quantita` / `unita_simbolo` | REAL / TEXT | nullable solo per `origine = 'manuale'` |
+| `comprato` | INTEGER | flag per riga intera, non quantità parziale |
+| `comprato_il` | TEXT | valorizzato quando `comprato = 1` |
+
+Una volta `comprato = 1` un trigger a database (`trg_lista_spesa_voce_comprata_immutabile`)
+impedisce di modificare gli altri campi — solo il toggle di `comprato`
+stesso resta permesso, stesso principio del congelamento di `planner_pasti`.
+Il refresh esplicito (`🔄 Aggiorna lista`) tocca solo le voci
+`origine = 'generato' AND comprato = 0`: le cancella e re-inserisce da zero
+il risultato fresco dell'aggregazione, senza mai toccare una voce comprata
+o una voce manuale.
+
 ## Cosa NON è in questo schema
 
 Ogni modulo avrà anche proprie tabelle non condivise: per esempio il

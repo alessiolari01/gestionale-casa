@@ -814,18 +814,97 @@ per la prossima volta: un'analisi video a campionamento sparso non
 sostituisce un collaudo dal vivo, soprattutto quando il campione è troppo
 rado per essere sicuri di cosa causa cosa.
 
+## 2quater. Lista della spesa — scritta l'8 settembre 2026, collaudo dal vivo da fare
+
+Prossimo macro-step deciso lo stesso giorno (punto 9 della sezione 6),
+appoggiato sul planner alimentare già operativo: aggrega automaticamente gli
+ingredienti dei pasti pianificati in un intervallo di date scelto
+dall'utente, indipendente dalle settimane del planner. Design completo e
+motivazione in `docs/previsto/lista-della-spesa.md` e
+`docs/moduli/lista-spesa.md`.
+
+Nuovo modulo `src/modules/lista_spesa.rs` (dominio puro, funzioni database,
+UI Telegram, stesso schema di `planner_alimentare.rs`) e due tabelle
+additive (`migrations/20260908150000_lista_spesa.sql`): `liste_spesa` (una
+lista attiva per spazio o personale, `spazio_id` nullable, stesso pattern di
+`planner_alimentari`) e `liste_spesa_voci` (voci generate dall'aggregazione
+o manuali).
+
+**Cosa aggrega**: da `planner_pasto_ingredienti_snapshot`, solo i pasti
+`pianificato` non saltati e non completati, solo le righe con
+`quantita_finale_snapshot` non nullo (le righe nulle sono ingredienti
+esclusi da quel pasto e non contribuiscono come zero), con `data_pasto`
+dentro l'intervallo della lista.
+
+**Conversione di unità**: usa `unita_misura.famiglia_conversione` — stessa
+famiglia (massa/volume) sommata nell'unità-base (`g`/`ml`), famiglie diverse
+o unità senza famiglia (pz, cucchiaio, qb, o un simbolo sconosciuto) restano
+separate, aggregate per simbolo esatto senza conversione.
+
+**Congelamento delle voci comprate, stesso principio di `planner_pasti`**:
+un trigger a database (`trg_lista_spesa_voce_comprata_immutabile`) impedisce
+di modificare quantità/unità/descrizione/origine una volta `comprato = 1` —
+solo il toggle di `comprato` stesso resta permesso. Il refresh esplicito
+(mai automatico, bottone `🔄 Aggiorna lista`) tocca *solo* le voci
+`origine = 'generato' AND comprato = 0`: le cancella e re-inserisce da zero,
+senza mai toccare una voce già comprata o una voce manuale non comprata — se
+dopo il refresh serve più di un alimento già comprato, compare una voce
+nuova per la sola differenza, non un merge con quella vecchia.
+
+**UI**: nuovo bottone `🛒 Lista della spesa` in `🍽️ Alimentazione`, accanto a
+`📅 Planner alimentare`. Voci come bottoni `✅`/`☐` che fanno toggle via
+callback; `➕ Aggiungi voce manuale` con input ibrido a due passi (testo
+libero per la descrizione, poi quantità+unità scritte a mano oppure
+`➖ Senza quantità`) in una nuova mappa di sessione
+(`ListaSpesaSessionStore`, dentro `lista_spesa.rs` stesso — non in
+`main.rs`, perché a differenza di `DistribuzioneSessionStore` questo modulo
+ha un proprio `handle_message`/`handle_callback`, stesso schema delle mappe
+di sessione degli altri moduli come `FoodSessionStore`); `🗓️ Cambia
+intervallo` riusa `modules::calendario` per le due date (inizio, poi fine
+con i giorni precedenti bloccati).
+
+**Badge "🆕" (C14)**: prima voce registrata in `novita::REGISTRO` dopo
+l'allegato video dei miglioramenti (`lista_spesa`, genitore `food_menu`). Il
+badge risale da `🍽️ Alimentazione` nel menù principale
+(`main_menu_keyboard` ha guadagnato un parametro `badge_alimentazione`) fino
+al pulsante `🛒 Lista della spesa` nel sotto-menù, con un breve tutorial
+alla prima vera visita.
+
+25 nuovi test (16 sul dominio puro dell'aggregazione/conversione/validazione
+manuale, 8 sulle funzioni database con `sqlite::memory:`, 1 sul nuovo badge
+in `main_menu_keyboard`), per un totale di **328 (303 prima)**. Pipeline
+`fmt`, `check --locked`, `clippy --all-targets --locked -- -D warnings`,
+`test --locked` verde in locale, tutti i 328 test passano.
+
+Un errore reale trovato dai test stessi, non a tavolino: la prima versione
+di `aggiorna_lista` ricalcolava sempre la somma piena dell'aggregazione,
+ignorando quanto già coperto da una voce comprata — il test
+`refresh_non_tocca_voci_comprate_ne_manuali_non_comprate` si aspettava la
+sola differenza (150 g) e otteneva la somma intera (350 g). Corretto
+aggiungendo `sottrai_gia_comprato` (dominio puro, tre test dedicati): il
+refresh sottrae dal fresco appena aggregato quanto già coperto da voci
+`generato` comprate con la stessa identità/unità, e scarta del tutto una
+voce se il residuo non è positivo.
+
+**Non collaudato dal vivo**: scritto in un worktree isolato, senza accesso a
+Telegram né al database reale dell'S9. Nessuna migration applicata a un
+database reale.
+
 ## 3. Stato tecnico verificato
 
-- **45 migration** nel repository, tutte **applicate** al database reale
-  dell'S9, verificato il 7 settembre 2026 leggendo `_sqlx_migrations` via
-  SSH (`applied_migrations=45`) — non dedotto, per la stessa ragione già
-  scritta qui altre volte;
-- pipeline verde: `fmt`, `check --locked`, `clippy --all-targets --locked
-  -- -D warnings`, `test --locked` — **303 test** (300 prima dell'audit
-  annulla, 297 prima dell'allegato video, 289 prima del badge "🆕", 280
-  prima del sotto-step 5c, 279 prima del sotto-step 5a, 270 prima del
-  sotto-step 3/5 della distribuzione, 248 prima del 2 settembre: e' il
-  numero da confrontare dopo ogni
+- **46 migration** nel repository (`migrations/20260908150000_lista_spesa.sql`
+  aggiunta l'8 settembre 2026, non ancora applicata a nessun database
+  reale — scritta in un worktree isolato). Le **45 precedenti** erano
+  **applicate** al database reale dell'S9, verificato il 7 settembre 2026
+  leggendo `_sqlx_migrations` via SSH (`applied_migrations=45`) — non
+  dedotto, per la stessa ragione già scritta qui altre volte;
+- pipeline verde in locale (in questo worktree, non sull'S9): `fmt`,
+  `check --locked`, `clippy --all-targets --locked -- -D warnings`,
+  `test --locked` — **328 test** (303 prima della lista della spesa, 300
+  prima dell'audit annulla, 297 prima dell'allegato video, 289 prima del
+  badge "🆕", 280 prima del sotto-step 5c, 279 prima del sotto-step 5a,
+  270 prima del sotto-step 3/5 della distribuzione, 248 prima del
+  2 settembre: e' il numero da confrontare dopo ogni
   aggiornamento dell'S9);
 - CI su GitHub Actions **verde** dalla run #42, la prima dello Step 7.
 
@@ -1052,7 +1131,10 @@ src/modules/novita.rs               registro delle novità e badge "🆕" propag
 9. **Prossimo macro-step deciso (8 settembre 2026): la lista della spesa**
    (`docs/previsto/lista-della-spesa.md`) — coerente con la sequenza già
    scritta in `docs/roadmap.md` e appoggiata sul planner pasti già
-   operativo. Non ancora iniziata.
+   operativo. **Scritta lo stesso giorno** (`src/modules/lista_spesa.rs`,
+   `migrations/20260908150000_lista_spesa.sql`, dettagli in sezione 2quater
+   qui sotto) — collaudo dal vivo su Telegram da fare, nessun collaudo
+   reale è stato possibile in questo worktree isolato.
 10. **Riconfigurazione dell'S9 con un account dedicato — fatta l'8
     settembre 2026.** Chiarito con Alessio prima di toccare nulla: resta
     lo stesso account Telegram amministratore, Termux/il progetto/le

@@ -228,12 +228,12 @@ struct NutritionRecord {
     salt_g: Option<f64>,
 }
 
-pub async fn show_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
+pub async fn show_menu(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
-        "🍽️ Alimentazione\n\nScegli alimenti, ricette, profili alimentari oppure il Planner.",
+        "🍽️ Alimentazione\n\nScegli alimenti, ricette, profili alimentari, il Planner oppure la lista della spesa.",
     )
-    .reply_markup(alimentation_menu_keyboard())
+    .reply_markup(alimentation_menu_keyboard(pool).await)
     .await?;
     Ok(())
 }
@@ -262,7 +262,7 @@ pub async fn handle_message(
         match command {
             "/alimentazione" => {
                 sessions.clear_chat(chat_id);
-                show_menu(bot, msg.chat.id).await?;
+                show_menu(bot, msg.chat.id, pool).await?;
                 return Ok(true);
             }
             "/alimenti" => {
@@ -335,7 +335,7 @@ pub async fn handle_message(
                         chat_id,
                         "❌ Operazione annullata. Nessuna modifica pendente è stata salvata.",
                     );
-                    show_menu(bot, msg.chat.id).await?;
+                    show_menu(bot, msg.chat.id, pool).await?;
                     return Ok(true);
                 }
                 return Ok(false);
@@ -779,7 +779,7 @@ pub async fn handle_callback(
         "food:noop" => Ok(true),
         "food:menu" => {
             sessions.clear_chat(chat_id.0);
-            show_menu(bot, chat_id).await?;
+            show_menu(bot, chat_id, pool).await?;
             Ok(true)
         }
         "food:foods" => {
@@ -1431,7 +1431,7 @@ pub async fn handle_callback(
                     "❌ Operazione annullata. Nessuna modifica pendente è stata salvata.",
                 );
             }
-            show_menu(bot, chat_id).await?;
+            show_menu(bot, chat_id, pool).await?;
             Ok(true)
         }
         "menu:main" if sessions.has_active(chat_id.0) => {
@@ -4797,12 +4797,21 @@ fn space_selection_keyboard(spaces: &[SpaceRecord], selected: &[i64]) -> InlineK
     InlineKeyboardMarkup::new(rows)
 }
 
-fn alimentation_menu_keyboard() -> InlineKeyboardMarkup {
+async fn alimentation_menu_keyboard(pool: &SqlitePool) -> InlineKeyboardMarkup {
+    // Convenzione C14: il badge deve guidare fino al pulsante specifico
+    // (`lista_spesa`), non solo fino a "🍽️ Alimentazione" nel menù
+    // principale -- la stessa correzione già fatta per l'allegato video dei
+    // miglioramenti.
+    let badge_lista_spesa = badge_lista_spesa(pool).await;
     InlineKeyboardMarkup::new(vec![
         vec![button("🥕 Alimenti", "food:foods")],
         vec![button("🍳 Ricette", "recipe:menu")],
         vec![button("👥 Profili alimentari", "foodprof:menu")],
         vec![button("📅 Planner alimentare", "planner:menu")],
+        vec![button(
+            crate::modules::novita::etichetta_con_badge("🛒 Lista della spesa", badge_lista_spesa),
+            "lista_spesa:menu",
+        )],
         // Deciso il 7 settembre 2026: anche se `⬅️ Indietro` porterebbe
         // esattamente dove porta `🏠 Menù principale`, resta comunque
         // visibile a sinistra -- Alessio si aspetta "indietro" sempre
@@ -4813,6 +4822,20 @@ fn alimentation_menu_keyboard() -> InlineKeyboardMarkup {
             button("🏠 Menù principale", "menu:main"),
         ],
     ])
+}
+
+/// Vero se il badge "🆕" va mostrato per la lista della spesa (novità
+/// dell'8 settembre 2026), letto una sola volta e passato a chi disegna la
+/// tastiera -- mai in errore: un problema nel calcolo del badge non deve
+/// mai bloccare l'apertura del menù.
+async fn badge_lista_spesa(pool: &SqlitePool) -> bool {
+    let Some(utente_id) = identity::current_actor().utente_id else {
+        return false;
+    };
+    crate::modules::novita::viste_da_utente(pool, utente_id)
+        .await
+        .map(|viste| crate::modules::novita::serve_badge("lista_spesa", &viste))
+        .unwrap_or(false)
 }
 
 fn food_menu_keyboard() -> InlineKeyboardMarkup {

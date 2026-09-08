@@ -17,6 +17,7 @@ pub mod collaudo;
 pub mod contenitori;
 pub mod distribuzione;
 pub mod foto;
+pub mod lista_spesa;
 pub mod liste;
 pub mod luoghi;
 pub mod miglioramenti;

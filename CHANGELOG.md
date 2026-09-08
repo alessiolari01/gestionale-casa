@@ -2,6 +2,56 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_LISTA_SPESA_20260908 -->
+# 08/09/2026 — Lista della spesa (scritta, collaudo dal vivo da fare)
+
+Prossimo macro-step deciso lo stesso giorno (`docs/previsto/lista-della-spesa.md`),
+appoggiato sul planner alimentare già operativo. Nuovo modulo
+`src/modules/lista_spesa.rs` (dominio puro, funzioni database, UI Telegram)
+e due tabelle additive (`migrations/20260908150000_lista_spesa.sql`):
+`liste_spesa` (una lista attiva per spazio o personale, con un proprio
+intervallo di date indipendente dalle settimane del planner) e
+`liste_spesa_voci` (voci generate dall'aggregazione o manuali).
+
+**Perché un intervallo separato dal planner**: le settimane del planner sono
+un concetto tecnico di pianificazione, la lista della spesa è un'azione reale
+("cosa comprare prima di sabato") che non sempre coincide con una settimana
+esatta -- Alessio ha deciso l'intervallo libero proprio per questo.
+
+**Aggregazione e conversione**: solo i pasti `pianificato` non saltati/non
+completati contribuiscono, solo le righe con `quantita_finale_snapshot` non
+nullo (le righe nulle sono ingredienti esclusi per quel pasto, decisione
+esplicita di non farle contribuire come zero). La conversione usa
+`unita_misura.famiglia_conversione`: stessa famiglia (massa/volume) sommata
+nell'unità-base (`g`/`ml`), famiglie diverse o unità senza famiglia (pz,
+cucchiaio, qb, o un simbolo sconosciuto) restano separate, aggregate per
+simbolo esatto.
+
+**Congelamento delle voci comprate, stesso principio di `planner_pasti`**: un
+trigger (`trg_lista_spesa_voce_comprata_immutabile`) impedisce di modificare
+quantità/unità/descrizione/origine una volta `comprato = 1` -- solo il toggle
+di `comprato` stesso resta permesso. Il refresh esplicito (mai automatico,
+bottone `🔄 Aggiorna lista`) tocca *solo* le voci `origine = 'generato' AND
+comprato = 0`: le cancella e re-inserisce da zero, senza mai alterare una
+voce già comprata o una voce manuale non comprata -- se dopo il refresh serve
+più di un alimento già comprato, compare una voce nuova per la sola
+differenza, non un merge con quella vecchia.
+
+**UI**: nuovo bottone `🛒 Lista della spesa` in `🍽️ Alimentazione`, accanto a
+`📅 Planner alimentare`. Voci come bottoni `✅`/`☐` che fanno toggle via
+callback; `➕ Aggiungi voce manuale` con input ibrido (testo libero per la
+descrizione, poi quantità+unità scritte a mano oppure `➖ Senza quantità`) in
+una nuova mappa di sessione (`ListaSpesaSessionStore`, dentro
+`lista_spesa.rs` stesso, sullo schema di `DistribuzioneSessionStore`);
+`🗓️ Cambia intervallo` riusa `modules::calendario` per le due date. Prima
+novità registrata in `novita::REGISTRO` dopo l'allegato video dei
+miglioramenti: badge "🆕" che risale da `🍽️ Alimentazione` nel menù
+principale fino al pulsante `🛒 Lista della spesa` (C14), con un breve
+tutorial alla prima vera visita.
+
+**Non collaudato dal vivo**: scritto in questo worktree isolato, senza
+accesso a Telegram né al database reale -- vedi `STATO.md`.
+
 <!-- CHANGELOG_MULTIPIATTAFORMA_20260908 -->
 # 08/09/2026 — Deciso: il bot viene finito prima della web app
 

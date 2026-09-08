@@ -303,9 +303,16 @@ struct ObjectLocationInput<'a> {
 ///
 /// Convenzione C4: la lampadina è una sola. `💡 Migliora` segnala un problema
 /// sulla schermata corrente; la lista dei miglioramenti è `📋 Miglioramenti`.
-pub fn main_menu_keyboard(is_admin: bool, badge_miglioramenti: bool) -> InlineKeyboardMarkup {
+pub fn main_menu_keyboard(
+    is_admin: bool,
+    badge_alimentazione: bool,
+    badge_miglioramenti: bool,
+) -> InlineKeyboardMarkup {
     let mut rows = vec![
-        vec![button("🍽️ Alimentazione", "food:menu")],
+        vec![button(
+            &crate::modules::novita::etichetta_con_badge("🍽️ Alimentazione", badge_alimentazione),
+            "food:menu",
+        )],
         vec![button("🏷️ Oggetti", "oggetti:menu")],
         vec![button("🏠 Case, stanze e contenitori", "loc:menu")],
         vec![button("📜 Storico", "history:global:0")],
@@ -3245,8 +3252,8 @@ fn push_optional_line(lines: &mut Vec<String>, label: &str, value: Option<&str>)
 mod tests {
     #[test]
     fn menu_principale_mostra_amministrazione_solo_agli_admin() {
-        let normal = main_menu_keyboard(false, false);
-        let admin = main_menu_keyboard(true, false);
+        let normal = main_menu_keyboard(false, false, false);
+        let admin = main_menu_keyboard(true, false, false);
         let normal_text = format!("{normal:?}");
         let admin_text = format!("{admin:?}");
         assert!(!normal_text.contains("Amministrazione"));
@@ -3255,10 +3262,23 @@ mod tests {
 
     #[test]
     fn menu_principale_mostra_il_badge_solo_se_richiesto() {
-        let senza_badge = main_menu_keyboard(false, false);
-        let con_badge = main_menu_keyboard(false, true);
+        let senza_badge = main_menu_keyboard(false, false, false);
+        let con_badge = main_menu_keyboard(false, false, true);
         assert!(!format!("{senza_badge:?}").contains("🆕"));
         assert!(format!("{con_badge:?}").contains("🆕 📋 Miglioramenti"));
+    }
+
+    #[test]
+    fn menu_principale_mostra_il_badge_alimentazione_solo_se_richiesto() {
+        let senza_badge = main_menu_keyboard(false, false, false);
+        let con_badge = main_menu_keyboard(false, true, false);
+        assert!(!format!("{senza_badge:?}").contains("🆕"));
+        // Il debug di `str` scrive il selettore di variazione (U+FE0F) di
+        // "🍽️" come `\u{fe0f}`, quindi un confronto sul `{:?}` andrebbe
+        // cercato sull'emoji spezzata: si controlla invece il testo vero
+        // del primo pulsante.
+        let testo_primo_pulsante = &con_badge.inline_keyboard[0][0].text;
+        assert_eq!(testo_primo_pulsante, "🆕 🍽️ Alimentazione");
     }
 
     use super::*;

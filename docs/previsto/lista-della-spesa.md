@@ -1,12 +1,18 @@
 # Lista della spesa — previsto
 
-> **Non ancora costruita.** Il planner dei pasti, descritto insieme a questa in
-> versioni precedenti del documento, e' invece operativo: vedi
+> **Scritta l'8 settembre 2026, collaudo dal vivo su Telegram da fare.** Il
+> codice (dominio, database, UI Telegram) è in `src/modules/lista_spesa.rs` e
+> descritto in `docs/moduli/lista-spesa.md`; compila ed è verde in locale, ma
+> nessun collaudo reale sul bot è stato ancora fatto in questo worktree
+> isolato — vedi `STATO.md`. Il planner dei pasti, descritto insieme a questa
+> in versioni precedenti del documento, è invece operativo e collaudato: vedi
 > `docs/moduli/planner.md`.
 >
-> La lista si costruira' sugli snapshot dei pasti non completati, con
-> aggiornamento **esplicito e separato** da quello del planner: aggiornare la
-> lista non deve sovrascrivere cio' che e' gia' stato segnato come comprato.
+> La lista si costruisce sugli snapshot dei pasti non completati (solo
+> `stato = 'pianificato'`, non saltati), con aggiornamento **esplicito e
+> separato** da quello del planner: aggiornare la lista non sovrascrive ciò
+> che è già stato segnato come comprato — congelato anche a livello di
+> database, come i pasti del planner.
 
 ---
 

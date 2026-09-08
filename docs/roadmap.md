@@ -54,10 +54,12 @@ Completato:
 
 Prossimi blocchi funzionali, nell'ordine:
 
-1. **Porzioni e override** — quantità personali e override ingrediente;
+1. **Porzioni e override** — quantità personali e override ingrediente — OPERATIVO;
 2. **Turni/routine**;
-3. **Planner pasti** versionato;
-4. **Lista della spesa** aggregata;
+3. **Planner pasti** versionato — OPERATIVO;
+4. **Lista della spesa** aggregata — scritta l'8 settembre 2026
+   (`src/modules/lista_spesa.rs`), collaudo dal vivo su Telegram da fare:
+   vedi `STATO.md` e `docs/moduli/lista-spesa.md`;
 5. reminder/export Alimentazione.
 
 ### 7.3 — Integrazioni — PREVISTO

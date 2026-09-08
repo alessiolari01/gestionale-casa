@@ -21,7 +21,8 @@ use anyhow::Context;
 use config::Config;
 use modules::{
     alimentazione::FoodSessionStore, contenitori::ContainerSessionStore, foto::PhotoSessionStore,
-    luoghi::LocationSessionStore, miglioramenti::ImprovementSessionStore, oggetti::SessionStore,
+    lista_spesa::ListaSpesaSessionStore, luoghi::LocationSessionStore,
+    miglioramenti::ImprovementSessionStore, oggetti::SessionStore,
     profili_alimentari::ProfileSessionStore, ricette::RecipeSessionStore,
 };
 use sqlx::SqlitePool;
@@ -261,6 +262,7 @@ struct HandlerDependencies {
     recipe_sessions: RecipeSessionStore,
     identity_sessions: IdentitySessionStore,
     distribuzione_sessions: DistribuzioneSessionStore,
+    lista_spesa_sessions: ListaSpesaSessionStore,
     shutdown_controller: ShutdownController,
     modalita_riservata: ModalitaRiservata,
     collaudo_store: CollaudoStore,
@@ -304,6 +306,7 @@ fn chat_con_sessione_attiva(deps: &HandlerDependencies) -> std::collections::BTr
     chat_ids.extend(deps.recipe_sessions.active_chat_ids());
     chat_ids.extend(deps.identity_sessions.active_chat_ids());
     chat_ids.extend(deps.distribuzione_sessions.active_chat_ids());
+    chat_ids.extend(deps.lista_spesa_sessions.active_chat_ids());
     chat_ids
 }
 
@@ -529,6 +532,7 @@ async fn async_main() -> anyhow::Result<()> {
     let recipe_sessions = RecipeSessionStore::new();
     let identity_sessions = IdentitySessionStore::new();
     let distribuzione_sessions = DistribuzioneSessionStore::new();
+    let lista_spesa_sessions = ListaSpesaSessionStore::new();
     let shutdown_controller = ShutdownController::default();
     // Sotto-step 5a del punto 6 del ciclo di automazione: solo lo swap
     // vero (scripts/avvia-bot.sh) imposta RISERVATO=1 per il binario
@@ -555,6 +559,7 @@ async fn async_main() -> anyhow::Result<()> {
         recipe_sessions,
         identity_sessions,
         distribuzione_sessions,
+        lista_spesa_sessions,
         shutdown_controller: shutdown_controller.clone(),
         modalita_riservata,
         collaudo_store: collaudo_store.clone(),
@@ -681,6 +686,7 @@ async fn handle_message(
     let recipe_sessions = deps.recipe_sessions.clone();
     let identity_sessions = deps.identity_sessions.clone();
     let distribuzione_sessions = deps.distribuzione_sessions.clone();
+    let lista_spesa_sessions = deps.lista_spesa_sessions.clone();
     let modalita_riservata = deps.modalita_riservata.clone();
     let chat_id = msg.chat.id.0;
     bot.cleanup_transient_media(msg.chat.id).await;
@@ -759,6 +765,7 @@ async fn handle_message(
             recipe_sessions,
             identity_sessions,
             distribuzione_sessions,
+            lista_spesa_sessions,
             modalita_riservata,
             actor,
         )),
@@ -789,6 +796,7 @@ async fn handle_authorized_message(
     recipe_sessions: RecipeSessionStore,
     identity_sessions: IdentitySessionStore,
     distribuzione_sessions: DistribuzioneSessionStore,
+    lista_spesa_sessions: ListaSpesaSessionStore,
     modalita_riservata: ModalitaRiservata,
     actor: identity::AuditActor,
 ) -> ResponseResult<()> {
@@ -806,6 +814,7 @@ async fn handle_authorized_message(
         recipe_sessions.clear_chat(chat_id);
         identity_sessions.clear_chat(chat_id);
         distribuzione_sessions.clear_chat(chat_id);
+        lista_spesa_sessions.clear_chat(chat_id);
         return respond(());
     }
 
@@ -822,6 +831,7 @@ async fn handle_authorized_message(
         recipe_sessions.clear_chat(chat_id);
         identity_sessions.clear_chat(chat_id);
         distribuzione_sessions.clear_chat(chat_id);
+        lista_spesa_sessions.clear_chat(chat_id);
         return respond(());
     }
 
@@ -846,6 +856,7 @@ async fn handle_authorized_message(
         improvement_sessions.clear_chat(chat_id);
         identity_sessions.clear_chat(chat_id);
         distribuzione_sessions.clear_chat(chat_id);
+        lista_spesa_sessions.clear_chat(chat_id);
         return respond(());
     }
 
@@ -894,12 +905,14 @@ async fn handle_authorized_message(
         {
             identity_sessions.clear_chat(chat_id);
             distribuzione_sessions.clear_chat(chat_id);
+            lista_spesa_sessions.clear_chat(chat_id);
         }
     }
 
     if command == Some("/annulla") && identity_sessions.get(chat_id).is_some() {
         identity_sessions.clear_chat(chat_id);
         distribuzione_sessions.clear_chat(chat_id);
+        lista_spesa_sessions.clear_chat(chat_id);
         bot.annulla_e_avvisa(chat_id, "❌ Operazione annullata.");
         send_spaces(&bot, msg.chat.id, &pool, &actor).await?;
         return respond(());
@@ -907,6 +920,7 @@ async fn handle_authorized_message(
 
     if command == Some("/annulla") && distribuzione_sessions.get(chat_id).is_some() {
         distribuzione_sessions.clear_chat(chat_id);
+        lista_spesa_sessions.clear_chat(chat_id);
         bot.annulla_e_avvisa(chat_id, "❌ Operazione annullata.");
         send_admin_distribuzione(&bot, msg.chat.id, &pool, &actor).await?;
         return respond(());
@@ -935,6 +949,7 @@ async fn handle_authorized_message(
                 Ok(message) => {
                     identity_sessions.clear_chat(chat_id);
                     distribuzione_sessions.clear_chat(chat_id);
+                    lista_spesa_sessions.clear_chat(chat_id);
                     bot.send_message(msg.chat.id, message)
                         .reply_markup(profile_keyboard())
                         .await?;
@@ -960,6 +975,7 @@ async fn handle_authorized_message(
                     match modules::distribuzione::valida_minuti(text) {
                         Ok(minuti) => {
                             distribuzione_sessions.clear_chat(chat_id);
+                            lista_spesa_sessions.clear_chat(chat_id);
                             if let Err(error) =
                                 modules::distribuzione::imposta_countdown(&pool, minuti).await
                             {
@@ -987,6 +1003,7 @@ async fn handle_authorized_message(
                     match modules::distribuzione::valida_orario(text) {
                         Ok(orario) => {
                             distribuzione_sessions.clear_chat(chat_id);
+                            lista_spesa_sessions.clear_chat(chat_id);
                             if let Err(error) =
                                 modules::distribuzione::imposta_programmato(&pool, &orario).await
                             {
@@ -1025,6 +1042,7 @@ async fn handle_authorized_message(
         recipe_sessions.clear_chat(chat_id);
         identity_sessions.clear_chat(chat_id);
         distribuzione_sessions.clear_chat(chat_id);
+        lista_spesa_sessions.clear_chat(chat_id);
         return respond(());
     }
 
@@ -1040,6 +1058,7 @@ async fn handle_authorized_message(
         recipe_sessions.clear_chat(chat_id);
         identity_sessions.clear_chat(chat_id);
         distribuzione_sessions.clear_chat(chat_id);
+        lista_spesa_sessions.clear_chat(chat_id);
         return respond(());
     }
     // Box intenzionale: Alimentazione ha un future molto grande; tenerlo
@@ -1057,6 +1076,21 @@ async fn handle_authorized_message(
         location_sessions.clear_chat(chat_id);
         container_sessions.clear_chat(chat_id);
         photo_sessions.clear_chat(chat_id);
+        recipe_sessions.clear_chat(chat_id);
+        identity_sessions.clear_chat(chat_id);
+        distribuzione_sessions.clear_chat(chat_id);
+        lista_spesa_sessions.clear_chat(chat_id);
+        return respond(());
+    }
+
+    if modules::lista_spesa::handle_message(&bot, &msg, &pool, &lista_spesa_sessions, text).await? {
+        sessions.clear_chat(chat_id);
+        location_sessions.clear_chat(chat_id);
+        container_sessions.clear_chat(chat_id);
+        photo_sessions.clear_chat(chat_id);
+        food_sessions.clear_chat(chat_id);
+        profile_sessions.clear_chat(chat_id);
+        improvement_sessions.clear_chat(chat_id);
         recipe_sessions.clear_chat(chat_id);
         identity_sessions.clear_chat(chat_id);
         distribuzione_sessions.clear_chat(chat_id);
@@ -1269,6 +1303,7 @@ async fn handle_callback(
     let recipe_sessions = deps.recipe_sessions.clone();
     let identity_sessions = deps.identity_sessions.clone();
     let distribuzione_sessions = deps.distribuzione_sessions.clone();
+    let lista_spesa_sessions = deps.lista_spesa_sessions.clone();
     let shutdown_controller = deps.shutdown_controller.clone();
     let modalita_riservata = deps.modalita_riservata.clone();
     let collaudo_store = deps.collaudo_store.clone();
@@ -1334,11 +1369,16 @@ async fn handle_callback(
             .await
             .unwrap_or(false);
         let badge = badge_miglioramenti(&pool, &actor).await;
+        let badge_alimentazione = badge_alimentazione(&pool, &actor).await;
         bot.send_message(
             chat_id,
             "⚠️ Questa schermata non è più attiva. Ho aperto un nuovo Menù principale.",
         )
-        .reply_markup(modules::oggetti::main_menu_keyboard(is_admin, badge))
+        .reply_markup(modules::oggetti::main_menu_keyboard(
+            is_admin,
+            badge_alimentazione,
+            badge,
+        ))
         .await?;
         return respond(());
     }
@@ -1362,6 +1402,7 @@ async fn handle_callback(
             recipe_sessions,
             identity_sessions,
             distribuzione_sessions,
+            lista_spesa_sessions,
             shutdown_controller,
             modalita_riservata,
             collaudo_store,
@@ -1387,6 +1428,7 @@ async fn handle_authorized_callback(
     recipe_sessions: RecipeSessionStore,
     identity_sessions: IdentitySessionStore,
     distribuzione_sessions: DistribuzioneSessionStore,
+    lista_spesa_sessions: ListaSpesaSessionStore,
     shutdown_controller: ShutdownController,
     modalita_riservata: ModalitaRiservata,
     collaudo_store: CollaudoStore,
@@ -1412,7 +1454,8 @@ async fn handle_authorized_callback(
             || improvement_sessions.has_active(chat_id.0)
             || recipe_sessions.has_active(chat_id.0)
             || identity_sessions.has_active(chat_id.0)
-            || distribuzione_sessions.has_active(chat_id.0));
+            || distribuzione_sessions.has_active(chat_id.0)
+            || lista_spesa_sessions.has_active(chat_id.0));
 
     if (data.starts_with("improve:")
         || (data == "menu:main" && improvement_sessions.has_active(chat_id.0)))
@@ -1433,6 +1476,7 @@ async fn handle_authorized_callback(
         recipe_sessions.clear_chat(chat_id.0);
         identity_sessions.clear_chat(chat_id.0);
         distribuzione_sessions.clear_chat(chat_id.0);
+        lista_spesa_sessions.clear_chat(chat_id.0);
         return respond(());
     }
 
@@ -1448,6 +1492,7 @@ async fn handle_authorized_callback(
         recipe_sessions.clear_chat(chat_id.0);
         identity_sessions.clear_chat(chat_id.0);
         distribuzione_sessions.clear_chat(chat_id.0);
+        lista_spesa_sessions.clear_chat(chat_id.0);
         return respond(());
     }
 
@@ -1471,6 +1516,7 @@ async fn handle_authorized_callback(
         recipe_sessions.clear_chat(chat_id.0);
         identity_sessions.clear_chat(chat_id.0);
         distribuzione_sessions.clear_chat(chat_id.0);
+        lista_spesa_sessions.clear_chat(chat_id.0);
         return respond(());
     }
     if data.starts_with("recipe:") || (data == "menu:main" && recipe_sessions.has_active(chat_id.0))
@@ -1492,6 +1538,7 @@ async fn handle_authorized_callback(
             improvement_sessions.clear_chat(chat_id.0);
             identity_sessions.clear_chat(chat_id.0);
             distribuzione_sessions.clear_chat(chat_id.0);
+            lista_spesa_sessions.clear_chat(chat_id.0);
             return respond(());
         }
     } else {
@@ -1517,10 +1564,33 @@ async fn handle_authorized_callback(
             recipe_sessions.clear_chat(chat_id.0);
             identity_sessions.clear_chat(chat_id.0);
             distribuzione_sessions.clear_chat(chat_id.0);
+            lista_spesa_sessions.clear_chat(chat_id.0);
             return respond(());
         }
     } else {
         food_sessions.clear_chat(chat_id.0);
+    }
+
+    if data.starts_with("lista_spesa:")
+        || (data == "menu:main" && lista_spesa_sessions.has_active(chat_id.0))
+    {
+        if modules::lista_spesa::handle_callback(&bot, chat_id, &pool, &lista_spesa_sessions, data)
+            .await?
+        {
+            sessions.clear_chat(chat_id.0);
+            location_sessions.clear_chat(chat_id.0);
+            container_sessions.clear_chat(chat_id.0);
+            photo_sessions.clear_chat(chat_id.0);
+            food_sessions.clear_chat(chat_id.0);
+            profile_sessions.clear_chat(chat_id.0);
+            improvement_sessions.clear_chat(chat_id.0);
+            recipe_sessions.clear_chat(chat_id.0);
+            identity_sessions.clear_chat(chat_id.0);
+            distribuzione_sessions.clear_chat(chat_id.0);
+            return respond(());
+        }
+    } else {
+        lista_spesa_sessions.clear_chat(chat_id.0);
     }
 
     if data.starts_with("space-members:")
@@ -1536,6 +1606,7 @@ async fn handle_authorized_callback(
         recipe_sessions.clear_chat(chat_id.0);
         identity_sessions.clear_chat(chat_id.0);
         distribuzione_sessions.clear_chat(chat_id.0);
+        lista_spesa_sessions.clear_chat(chat_id.0);
         return respond(());
     }
 
@@ -1551,6 +1622,7 @@ async fn handle_authorized_callback(
             recipe_sessions.clear_chat(chat_id.0);
             identity_sessions.clear_chat(chat_id.0);
             distribuzione_sessions.clear_chat(chat_id.0);
+            lista_spesa_sessions.clear_chat(chat_id.0);
             if annullamento_da_sessione {
                 bot.annulla_e_avvisa(chat_id.0, "❌ Operazione annullata.");
             }
@@ -1827,12 +1899,14 @@ async fn handle_authorized_callback(
         "admin:distribuzione" => {
             if ensure_primary_admin_access(&bot, chat_id, &pool, &actor).await? {
                 distribuzione_sessions.clear_chat(chat_id.0);
+                lista_spesa_sessions.clear_chat(chat_id.0);
                 send_admin_distribuzione(&bot, chat_id, &pool, &actor).await?;
             }
         }
         "admin:distribuzione:cambia" => {
             if ensure_primary_admin_access(&bot, chat_id, &pool, &actor).await? {
                 distribuzione_sessions.clear_chat(chat_id.0);
+                lista_spesa_sessions.clear_chat(chat_id.0);
                 bot.send_message(chat_id, modules::distribuzione::testo_scelta_tipo())
                     .reply_markup(modules::distribuzione::scelta_tipo_keyboard())
                     .await?;
@@ -1841,6 +1915,7 @@ async fn handle_authorized_callback(
         "admin:distribuzione:tipo:subito" => {
             if ensure_primary_admin_access(&bot, chat_id, &pool, &actor).await? {
                 distribuzione_sessions.clear_chat(chat_id.0);
+                lista_spesa_sessions.clear_chat(chat_id.0);
                 match modules::distribuzione::imposta_subito(&pool).await {
                     Ok(()) => send_admin_distribuzione(&bot, chat_id, &pool, &actor).await?,
                     Err(error) => {
@@ -1897,6 +1972,7 @@ async fn handle_authorized_callback(
                 match minuti {
                     Some(minuti) => {
                         distribuzione_sessions.clear_chat(chat_id.0);
+                        lista_spesa_sessions.clear_chat(chat_id.0);
                         match modules::distribuzione::imposta_countdown(&pool, minuti).await {
                             Ok(()) => {
                                 send_admin_distribuzione(&bot, chat_id, &pool, &actor).await?
@@ -1928,6 +2004,7 @@ async fn handle_authorized_callback(
                 match orario {
                     Some(orario) => {
                         distribuzione_sessions.clear_chat(chat_id.0);
+                        lista_spesa_sessions.clear_chat(chat_id.0);
                         match modules::distribuzione::imposta_programmato(&pool, &orario).await {
                             Ok(()) => {
                                 send_admin_distribuzione(&bot, chat_id, &pool, &actor).await?
@@ -2030,6 +2107,24 @@ async fn badge_miglioramenti(pool: &SqlitePool, actor: &identity::AuditActor) ->
     }
 }
 
+/// Se il pulsante "🍽️ Alimentazione" del menù principale deve mostrare
+/// "🆕" -- vero se questo utente non ha ancora visto una foglia del
+/// registro `novita::REGISTRO` con genitore `"food_menu"` (oggi solo la
+/// lista della spesa, 8 settembre 2026). Stessa logica di
+/// `badge_miglioramenti`, mai in errore.
+async fn badge_alimentazione(pool: &SqlitePool, actor: &identity::AuditActor) -> bool {
+    let Some(utente_id) = actor.utente_id else {
+        return false;
+    };
+    match modules::novita::viste_da_utente(pool, utente_id).await {
+        Ok(viste) => modules::novita::serve_badge("food_menu", &viste),
+        Err(error) => {
+            tracing::warn!(?error, "Errore lettura novità viste, badge nascosto");
+            false
+        }
+    }
+}
+
 async fn send_online_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
@@ -2038,7 +2133,7 @@ async fn send_online_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     // Notifica di avvio, mandata subito dopo il boot: niente attore
     // risolto a questo punto, il badge si aggiorna comunque alla prossima
     // apertura reale del menù.
-    .reply_markup(modules::oggetti::main_menu_keyboard(true, false))
+    .reply_markup(modules::oggetti::main_menu_keyboard(true, false, false))
     .await?;
     Ok(())
 }
@@ -2060,8 +2155,13 @@ async fn send_main_menu(
         }
     };
     let badge = badge_miglioramenti(pool, actor).await;
+    let badge_alimentazione = badge_alimentazione(pool, actor).await;
     bot.send_message(chat_id, "🏠 Gestionale Casa\n\nScegli una sezione.")
-        .reply_markup(modules::oggetti::main_menu_keyboard(is_admin, badge))
+        .reply_markup(modules::oggetti::main_menu_keyboard(
+            is_admin,
+            badge_alimentazione,
+            badge,
+        ))
         .await?;
     Ok(())
 }
