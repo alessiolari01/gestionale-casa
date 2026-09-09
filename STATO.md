@@ -1167,7 +1167,9 @@ scritte e testate in locale, non ancora provate su Telegram.
 - pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa, punto
   1 della sezione 6): `fmt`, `check --locked`,
   `clippy --all-targets --locked -- -D warnings`, `test --locked` —
-  **348 test** (341 prima delle tre correzioni sulla fusione al check/
+  **355 test** (348 prima del quarto giro di correzioni alla lista della
+  spesa — ordine stabile sui refresh, unità predefinita, rimozione voci —,
+  341 prima delle tre correzioni sulla fusione al check/
   eccesso/riordino, 338 prima delle prime tre correzioni del 9 settembre
   sulla lista della spesa — refresh automatico alla deselezione, "Aggiorna
   lista" condizionale, nessun limite di pagina —, 328 prima dei due
