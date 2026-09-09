@@ -11,9 +11,18 @@ vivo, ha portato tre ulteriori correzioni: la fusione anche quando si
 *spunta* una voce residua (non solo quando la si deseleziona), la
 segnalazione di un eccesso quando il fabbisogno reale scende sotto quanto
 già comprato, e un ordine della lista indipendente da `comprato` con un modo
-per riordinarla a piacere. Queste tre ultime correzioni sono scritte e
-testate in locale, **non ancora ricollaudate dal vivo**. Resta non ancora
-collaudato anche il profilo alimentare automatico
+per riordinarla a piacere — confermate dal vivo lo stesso giorno, con due
+difetti estetici trovati e corretti (etichetta dell'eccesso troncata,
+disallineamento nella schermata di riordino — quest'ultimo ha portato anche
+alla nuova convenzione **C15**, `docs/convenzioni-telegram.md`). Un quarto
+giro di collaudo (10 settembre 2026) ha trovato che un refresh qualunque —
+non solo quello scatenato dal deseleziona — rimescolava un ordine già
+sistemato a mano, e ha aggiunto due mancanze: l'unità di misura andava
+sempre scritta anche per un'aggiunta dal catalogo (ora usa quella
+predefinita dell'alimento/prodotto, sovrascrivibile), e non si poteva
+rimuovere né una voce manuale né un'aggiunta dal catalogo. Queste ultime
+correzioni sono scritte e testate in locale, **non ancora ricollaudate dal
+vivo**. Resta non ancora collaudato anche il profilo alimentare automatico
 (`docs/moduli/profili-e-porzioni.md`, stesso giro di feedback, non riguarda
 questo modulo direttamente).
 `src/modules/lista_spesa.rs`, raggiungibile da
@@ -84,11 +93,19 @@ alimento usa il nome così com'è (porta già la propria icona di categoria
 incorporata, es. "🌾 Pasta" — un `🥕` fisso aggiunto qui sopra duplicava
 l'icona, bug trovato da Alessio collaudando dal vivo e corretto lo stesso
 9 settembre), un prodotto usa `🏷️ {marca} {nome commerciale}`. Scelto un
-risultato, chiede
-quantità e unità (stesso input di `valida_quantita_manuale`, ma qui sempre
-richiesta: niente "➖ Senza quantità", perché la quantità serve a sommare).
-Se la ricerca non trova nulla, resta disponibile "📝 Voce libera" (il
-flusso testo-libero di sempre, invariato).
+risultato, chiede la quantità — sempre richiesta, niente "➖ Senza
+quantità", perché serve a sommare. Se la ricerca non trova nulla, resta
+disponibile "📝 Voce libera" (il flusso testo-libero di sempre, invariato).
+
+**Unità predefinita (10 settembre 2026)**: chiesto da Alessio dopo un
+collaudo dal vivo, per non dover riscrivere l'unità di un alimento già noto
+al catalogo. Se l'alimento ha un'unità predefinita (`unita_predefinita_id`)
+o si tratta di un prodotto (`unita_confezione_id`, sempre presente), basta
+scrivere il numero (es. "500") e si usa quella; scrivere comunque un'unità
+(es. "500 ml") la sovrascrive per quella singola aggiunta. Un alimento
+senza unità predefinita si comporta come la voce libera: l'unità va
+scritta. Dominio puro in `valida_quantita_con_default`, accanto a
+`valida_quantita_manuale` (invariata, resta quella della voce libera).
 
 **Due esiti diversi a seconda di cosa si sceglie** (dominio puro in
 `Identita`, terza variante `Prodotto(i64)` accanto ad `Alimento(i64)` e
@@ -125,8 +142,8 @@ motivo per cui un alimento compare in ricerca). Nessuna paginazione vera,
 un `LIMIT` come "top N" per ciascuna delle due ricerche (alimenti e
 prodotti), stesso approccio già in uso in `ricette.rs`.
 
-**Non implementato**: rimuovere un'aggiunta dal catalogo già inserita (né
-una voce manuale libera) — oggi non esiste per nessuna voce, non richiesto.
+La rimozione di un'aggiunta è descritta più sotto (§ Rimozione di voci
+manuali e aggiunte dal catalogo).
 
 ## Segna comprato
 
@@ -221,6 +238,39 @@ modalità dedicata dove ogni voce mostra `⬆️`/`⬇️` invece del checkbox �
 direzione, indipendentemente dal fatto che sia comprata o meno. "✅ Fine
 riordino" torna alla schermata normale.
 
+**Un refresh qualunque non deve rimescolare l'ordine** (trovato da Alessio
+il 10 settembre 2026, non solo nel caso specifico del deseleziona: capitava
+con *ogni* `aggiorna_lista`, perché le voci generate non comprate vengono
+sempre cancellate e re-inserite da zero). Corretto rileggendo
+l'`ordinamento` delle voci generate non comprate **prima** di cancellarle,
+e riassegnandolo alla stessa identità nel fresco appena calcolato: solo
+un'identità davvero nuova (mai vista tra le voci generate non comprate)
+prende un ordinamento nuovo, in coda. Un refresh che non cambia nulla di
+reale, quindi, non cambia nemmeno l'ordine — coerente con `serve_aggiornamento`.
+
+## Rimozione di voci manuali e aggiunte dal catalogo (10 settembre 2026)
+
+Chiesto da Alessio dopo un collaudo dal vivo: prima non si poteva
+rimuovere né una voce manuale né un'aggiunta dal catalogo, una volta
+inserite. Le righe `generato` pure-planner **non sono rimovibili**: le
+gestisce il planner (pianificare/rimuovere un pasto), non una rimozione
+manuale dalla lista.
+
+"🗑️ Rimuovi voci" (visibile solo se c'è qualcosa da rimuovere) apre una
+schermata dedicata con un pulsante per ogni voce manuale e ogni aggiunta
+dal catalogo di questa lista (`voci_rimovibili`), comprate o no: il
+congelamento protegge la *quantità* di una voce comprata, non la sua
+esistenza, quindi anche una voce manuale già comprata resta rimovibile.
+
+- **Voce manuale**: `rimuovi_voce_manuale` la cancella per sempre — non ha
+  nulla che la rigeneri.
+- **Aggiunta dal catalogo**: `rimuovi_aggiunta_catalogo` cancella la riga
+  in `liste_spesa_aggiunte_catalogo`, poi la lista si aggiorna subito
+  (stesso trattamento di quando si aggiunge). La riga `generato`
+  eventualmente già in lista non sparisce da sola: il refresh la ricalcola
+  secondo il fabbisogno rimasto — torna al solo fabbisogno del planner se
+  ce n'è ancora, sparisce del tutto se non ne resta nessuno.
+
 ## Schermate
 
 **Principale** — intervallo, conteggio comprate/totale, avviso generale se
@@ -230,7 +280,8 @@ esplicita a C6 (`docs/convenzioni-telegram.md`), l'unica lista del bot che
 mostra tutto insieme, perché l'utente deve vedere l'intera lista per
 decidere cosa prendere prima e cosa dopo. `🔄 Aggiorna lista` (solo se
 serve davvero, vedi sopra), `➕ Aggiungi voce manuale`, `↕️ Riordina lista`
-(con più di una voce), `🗓️ Cambia intervallo`.
+(con più di una voce), `🗑️ Rimuovi voci` (solo se c'è qualcosa da
+rimuovere), `🗓️ Cambia intervallo`.
 
 **Riordina lista** — ogni voce come `⬆️ | etichetta | ⬇️`, **sempre tre
 pulsanti nello stesso ordine**: prima le frecce assenti alle estremità
@@ -239,6 +290,11 @@ da Alessio dal vivo. Alle estremità la freccia resta al suo posto ma non fa
 nulla (`lista_spesa:noop`), stesso trattamento del contatore di pagina non
 premibile altrove nel bot. `✅ Fine riordino` per tornare alla schermata
 principale.
+
+**Rimuovi voci** — un pulsante `🗑️` per ogni voce manuale e aggiunta dal
+catalogo, tocco = rimozione immediata (nessuna conferma, come il resto
+delle azioni rapide di questa lista); `⬅️ Indietro` per tornare alla
+schermata principale.
 
 **Aggiungi voce manuale** — input ibrido in due passi: descrizione libera
 (testo), poi quantità+unità scritte a mano (es. "500 g") oppure `➖ Senza

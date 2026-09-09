@@ -295,6 +295,47 @@ pub fn valida_quantita_manuale(testo: &str) -> Result<(f64, String), VoceManuale
     Ok((quantita, unita.to_string()))
 }
 
+/// Come `valida_quantita_manuale`, ma per un'aggiunta dal catalogo: se
+/// l'unità non viene scritta usa `unita_default` (quella dell'alimento o
+/// del prodotto scelto) invece di richiederla sempre -- chiesto da Alessio
+/// dopo un collaudo dal vivo, per non dover riscrivere l'unità di un
+/// alimento già noto al catalogo. Scrivere comunque un'unità la
+/// sovrascrive. Senza un'unità predefinita (alimento senza
+/// `unita_predefinita_id`), si comporta come `valida_quantita_manuale`:
+/// la chiede.
+pub fn valida_quantita_con_default(
+    testo: &str,
+    unita_default: Option<&str>,
+) -> Result<(f64, String), VoceManualeError> {
+    let testo = testo.trim();
+    let mut parti = testo.splitn(2, char::is_whitespace);
+    let numero = parti.next().unwrap_or_default().trim();
+    let unita_scritta = parti.next().unwrap_or_default().trim();
+
+    if numero.is_empty() {
+        return Err(VoceManualeError::QuantitaFormatoNonValido);
+    }
+    let quantita: f64 = numero
+        .replace(',', ".")
+        .parse()
+        .map_err(|_| VoceManualeError::QuantitaFormatoNonValido)?;
+    if !quantita.is_finite() || quantita <= 0.0 {
+        return Err(VoceManualeError::QuantitaNonPositiva);
+    }
+
+    let unita = if unita_scritta.is_empty() {
+        unita_default
+            .ok_or(VoceManualeError::UnitaMancante)?
+            .to_string()
+    } else {
+        unita_scritta.to_string()
+    };
+    if unita.chars().count() > UNITA_MAX_CARATTERI {
+        return Err(VoceManualeError::UnitaTroppoLunga);
+    }
+    Ok((quantita, unita))
+}
+
 /// Formatta una quantità per la UI: interi senza decimali, il resto con al
 /// più due cifre senza zeri superflui (`500` invece di `500.00`, `133.33`
 /// invece di `133.330000000001`).
@@ -593,6 +634,42 @@ mod domain_tests {
         assert_eq!(
             valida_quantita_manuale("-3 g"),
             Err(VoceManualeError::QuantitaNonPositiva)
+        );
+    }
+
+    #[test]
+    fn quantita_con_default_usa_l_unita_predefinita_se_non_scritta() {
+        assert_eq!(
+            valida_quantita_con_default("500", Some("g")),
+            Ok((500.0, "g".to_string()))
+        );
+        assert_eq!(
+            valida_quantita_con_default("1,5", Some("kg")),
+            Ok((1.5, "kg".to_string()))
+        );
+    }
+
+    #[test]
+    fn quantita_con_default_si_puo_sovrascrivere() {
+        // Scrivere comunque un'unità la sovrascrive, anche se ne esiste
+        // una predefinita per l'alimento scelto.
+        assert_eq!(
+            valida_quantita_con_default("500 ml", Some("g")),
+            Ok((500.0, "ml".to_string()))
+        );
+    }
+
+    #[test]
+    fn quantita_con_default_senza_predefinita_richiede_l_unita() {
+        // Un alimento senza `unita_predefinita_id` si comporta come la
+        // voce libera: l'unità va scritta.
+        assert_eq!(
+            valida_quantita_con_default("500", None),
+            Err(VoceManualeError::UnitaMancante)
+        );
+        assert_eq!(
+            valida_quantita_con_default("500 g", None),
+            Ok((500.0, "g".to_string()))
         );
     }
 
@@ -1390,35 +1467,15 @@ async fn cerca_nel_catalogo(
 /// della ricerca -- usata dopo la scelta di un risultato (il pulsante porta
 /// solo l'id per restare sotto il limite di `callback_data`, il nome va
 /// riletto per mostrare la conferma e salvare lo snapshot).
-async fn alimento_visibile_per_id(pool: &SqlitePool, id: i64) -> anyhow::Result<Option<String>> {
-    let actor = crate::identity::current_actor();
-    let Some(user_id) = actor.utente_id else {
-        return Ok(None);
-    };
-    let visibilita = clausola_visibilita_alimento("a", actor.view_all);
-    let secondo_bind = if actor.view_all {
-        user_id
-    } else {
-        actor.spazio_id
-    };
-    sqlx::query_scalar(&format!(
-        "SELECT a.nome FROM alimenti a \
-         WHERE a.id = ? AND a.archiviato = 0 AND ({visibilita})"
-    ))
-    .bind(id)
-    .bind(user_id)
-    .bind(secondo_bind)
-    .fetch_optional(pool)
-    .await
-    .context("Impossibile rileggere l'alimento scelto")
-}
-
-/// Come `alimento_visibile_per_id`, per un prodotto commerciale: la
-/// visibilità è quella del suo alimento generico.
-async fn prodotto_visibile_per_id(
+/// Ritorna anche l'unità predefinita dell'alimento (`unita_predefinita_id`),
+/// se ne ha una: chiesta da Alessio dopo un collaudo dal vivo, per non
+/// dover riscrivere l'unità ogni volta che si aggiunge un alimento già
+/// noto al catalogo -- resta comunque sovrascrivibile al momento
+/// dell'inserimento (vedi `valida_quantita_con_default`).
+async fn alimento_visibile_per_id(
     pool: &SqlitePool,
     id: i64,
-) -> anyhow::Result<Option<(String, String)>> {
+) -> anyhow::Result<Option<(String, Option<String>)>> {
     let actor = crate::identity::current_actor();
     let Some(user_id) = actor.utente_id else {
         return Ok(None);
@@ -1430,8 +1487,41 @@ async fn prodotto_visibile_per_id(
         actor.spazio_id
     };
     sqlx::query_as(&format!(
-        "SELECT p.marca, p.nome_commerciale FROM prodotti_alimentari p \
+        "SELECT a.nome, u.simbolo FROM alimenti a \
+         LEFT JOIN unita_misura u ON u.id = a.unita_predefinita_id \
+         WHERE a.id = ? AND a.archiviato = 0 AND ({visibilita})"
+    ))
+    .bind(id)
+    .bind(user_id)
+    .bind(secondo_bind)
+    .fetch_optional(pool)
+    .await
+    .context("Impossibile rileggere l'alimento scelto")
+}
+
+/// Come `alimento_visibile_per_id`, per un prodotto commerciale: la
+/// visibilità è quella del suo alimento generico, l'unità predefinita è
+/// quella della confezione (`unita_confezione_id`, sempre presente per un
+/// prodotto -- a differenza di quella, opzionale, di un alimento generico).
+async fn prodotto_visibile_per_id(
+    pool: &SqlitePool,
+    id: i64,
+) -> anyhow::Result<Option<(String, String, String)>> {
+    let actor = crate::identity::current_actor();
+    let Some(user_id) = actor.utente_id else {
+        return Ok(None);
+    };
+    let visibilita = clausola_visibilita_alimento("a", actor.view_all);
+    let secondo_bind = if actor.view_all {
+        user_id
+    } else {
+        actor.spazio_id
+    };
+    sqlx::query_as(&format!(
+        "SELECT p.marca, p.nome_commerciale, u.simbolo \
+         FROM prodotti_alimentari p \
          JOIN alimenti a ON a.id = p.alimento_id \
+         JOIN unita_misura u ON u.id = p.unita_confezione_id \
          WHERE p.id = ? AND p.attivo = 1 AND a.archiviato = 0 AND ({visibilita})"
     ))
     .bind(id)
@@ -1478,6 +1568,102 @@ pub async fn aggiungi_da_catalogo(
     .context("Impossibile registrare l'aggiunta dal catalogo")?
     .last_insert_rowid();
     Ok(id)
+}
+
+/// Una voce manuale o un'aggiunta dal catalogo, per la schermata
+/// "🗑️ Rimuovi voci" (chiesto da Alessio dopo un collaudo dal vivo: prima
+/// non si poteva rimuovere né l'una né l'altra). Le righe `generato`
+/// pure-planner non compaiono mai qui: sono gestite dal planner stesso, non
+/// da una rimozione manuale.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VoceRimovibile {
+    pub id: i64,
+    pub origine: OrigineRimovibile,
+    pub descrizione: String,
+    pub quantita: Option<f64>,
+    pub unita_simbolo: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrigineRimovibile {
+    Manuale,
+    Catalogo,
+}
+
+/// Voci manuali e aggiunte dal catalogo di questa lista, insieme, pronte
+/// per la schermata di rimozione.
+pub async fn voci_rimovibili(
+    pool: &SqlitePool,
+    lista_id: i64,
+) -> anyhow::Result<Vec<VoceRimovibile>> {
+    let manuali: Vec<(i64, String, Option<f64>, Option<String>)> = sqlx::query_as(
+        "SELECT id, descrizione, quantita, unita_simbolo FROM liste_spesa_voci \
+         WHERE lista_id = ? AND origine = 'manuale' ORDER BY ordinamento, id",
+    )
+    .bind(lista_id)
+    .fetch_all(pool)
+    .await
+    .context("Impossibile leggere le voci manuali")?;
+    let catalogo: Vec<(i64, String, f64, String)> = sqlx::query_as(
+        "SELECT id, descrizione_snapshot, quantita, unita_simbolo \
+         FROM liste_spesa_aggiunte_catalogo WHERE lista_id = ? ORDER BY id",
+    )
+    .bind(lista_id)
+    .fetch_all(pool)
+    .await
+    .context("Impossibile leggere le aggiunte dal catalogo")?;
+
+    let mut voci: Vec<VoceRimovibile> = manuali
+        .into_iter()
+        .map(
+            |(id, descrizione, quantita, unita_simbolo)| VoceRimovibile {
+                id,
+                origine: OrigineRimovibile::Manuale,
+                descrizione,
+                quantita,
+                unita_simbolo,
+            },
+        )
+        .collect();
+    voci.extend(
+        catalogo.into_iter().map(
+            |(id, descrizione, quantita, unita_simbolo)| VoceRimovibile {
+                id,
+                origine: OrigineRimovibile::Catalogo,
+                descrizione,
+                quantita: Some(quantita),
+                unita_simbolo: Some(unita_simbolo),
+            },
+        ),
+    );
+    Ok(voci)
+}
+
+/// Rimuove una voce manuale (testo libero) per sempre. A differenza di una
+/// voce `generato`, non ha nulla che la rigeneri: la cancellazione è
+/// definitiva, indipendentemente dal fatto che sia comprata o meno (il
+/// congelamento protegge la *quantità* di una voce comprata, non
+/// l'esistenza della riga).
+pub async fn rimuovi_voce_manuale(pool: &SqlitePool, voce_id: i64) -> anyhow::Result<()> {
+    sqlx::query("DELETE FROM liste_spesa_voci WHERE id = ? AND origine = 'manuale'")
+        .bind(voce_id)
+        .execute(pool)
+        .await
+        .context("Impossibile rimuovere la voce manuale")?;
+    Ok(())
+}
+
+/// Rimuove un'aggiunta dal catalogo: smette di contribuire ai refresh
+/// successivi. Non tocca da sola la riga `generato` già in lista (che un
+/// refresh esplicito potrebbe ridurre o far sparire, secondo il fabbisogno
+/// rimasto) -- il chiamante decide se richiamare `aggiorna_lista` subito.
+pub async fn rimuovi_aggiunta_catalogo(pool: &SqlitePool, aggiunta_id: i64) -> anyhow::Result<()> {
+    sqlx::query("DELETE FROM liste_spesa_aggiunte_catalogo WHERE id = ?")
+        .bind(aggiunta_id)
+        .execute(pool)
+        .await
+        .context("Impossibile rimuovere l'aggiunta dal catalogo")?;
+    Ok(())
 }
 
 /// Aggiunte dal catalogo di questa lista, convertite nella stessa forma
@@ -1531,6 +1717,11 @@ type RigaVoceGenerataGrezza = (
     Option<f64>,
     Option<String>,
 );
+
+/// Riga grezza per rileggere l'ordinamento di una voce generata non
+/// comprata prima di un refresh: alimento, prodotto, descrizione, unità,
+/// ordinamento -- vedi `aggiorna_lista`.
+type RigaOrdinePrecedenteGrezza = (Option<i64>, Option<i64>, String, Option<String>, i64);
 
 async fn voci_generate_comprate(
     pool: &SqlitePool,
@@ -1756,6 +1947,22 @@ pub async fn aggiorna_lista(pool: &SqlitePool, lista: &ListaSpesa) -> anyhow::Re
         .begin()
         .await
         .context("Impossibile aprire la transazione")?;
+    // L'ordine (deciso dall'utente con "↕️ Riordina lista") non deve mai
+    // cambiare per effetto di un refresh -- deciso con Alessio dopo averlo
+    // visto dal vivo: deselezionare una voce (che richiama `aggiorna_lista`
+    // da sola, vedi `toggle_comprato`) rimescolava tutte le voci generate
+    // non comprate. Si rilegge l'ordinamento di ciascuna PRIMA di
+    // cancellare, e lo si riassegna alla stessa identità nel fresco appena
+    // calcolato; solo un'identità davvero nuova (mai vista prima nelle
+    // voci generate non comprate) prende un ordinamento nuovo, in coda.
+    let precedenti: Vec<RigaOrdinePrecedenteGrezza> = sqlx::query_as(
+        "SELECT alimento_id, prodotto_alimentare_id, descrizione, unita_simbolo, ordinamento \
+         FROM liste_spesa_voci WHERE lista_id = ? AND origine = 'generato' AND comprato = 0",
+    )
+    .bind(lista.id)
+    .fetch_all(&mut *tx)
+    .await
+    .context("Impossibile rileggere l'ordine precedente")?;
     sqlx::query(
         "DELETE FROM liste_spesa_voci \
          WHERE lista_id = ? AND origine = 'generato' AND comprato = 0",
@@ -1764,17 +1971,34 @@ pub async fn aggiorna_lista(pool: &SqlitePool, lista: &ListaSpesa) -> anyhow::Re
     .execute(&mut *tx)
     .await
     .context("Impossibile ripulire le voci generate")?;
-    // Le voci rigenerate vanno in coda all'ordine esistente (voci comprate
-    // o manuali, che il refresh non tocca) -- non si inseriscono in mezzo a
-    // un ordine che l'utente ha già sistemato a mano con `sposta_voce`.
-    let ordinamento_base: i64 = sqlx::query_scalar(
+    // Le voci davvero nuove vanno in coda all'ordine esistente (voci
+    // comprate o manuali, che il refresh non tocca) -- non si inseriscono
+    // in mezzo a un ordine che l'utente ha già sistemato a mano.
+    let mut prossimo_ordinamento: i64 = sqlx::query_scalar(
         "SELECT COALESCE(MAX(ordinamento), 0) FROM liste_spesa_voci WHERE lista_id = ?",
     )
     .bind(lista.id)
     .fetch_one(&mut *tx)
     .await
     .context("Impossibile leggere l'ordinamento massimo")?;
-    for (indice, voce) in voci.iter().enumerate() {
+    for voce in &voci {
+        let ordinamento = precedenti
+            .iter()
+            .find(|(alimento_id, prodotto_id, nome, unita_simbolo, _)| {
+                unita_simbolo.as_deref() == Some(voce.unita_simbolo.as_str())
+                    && identita_voce(&VoceGenerata {
+                        alimento_id: *alimento_id,
+                        prodotto_id: *prodotto_id,
+                        nome: nome.clone(),
+                        quantita: 0.0,
+                        unita_simbolo: voce.unita_simbolo.clone(),
+                    }) == identita_voce(voce)
+            })
+            .map(|(_, _, _, _, ordinamento)| *ordinamento)
+            .unwrap_or_else(|| {
+                prossimo_ordinamento += 1;
+                prossimo_ordinamento
+            });
         sqlx::query(
             "INSERT INTO liste_spesa_voci \
              (lista_id, origine, alimento_id, prodotto_alimentare_id, descrizione, \
@@ -1787,7 +2011,7 @@ pub async fn aggiorna_lista(pool: &SqlitePool, lista: &ListaSpesa) -> anyhow::Re
         .bind(&voce.nome)
         .bind(voce.quantita)
         .bind(&voce.unita_simbolo)
-        .bind(ordinamento_base + indice as i64 + 1)
+        .bind(ordinamento)
         .execute(&mut *tx)
         .await
         .context("Impossibile inserire una voce generata")?;
@@ -2557,6 +2781,242 @@ mod db_tests {
     }
 
     #[tokio::test]
+    async fn un_refresh_non_rimescola_un_ordine_gia_sistemato_a_mano() {
+        // Trovato da Alessio dal vivo: qualunque `aggiorna_lista` (manuale
+        // o scatenato da sola dal deseleziona, vedi `toggle_comprato`)
+        // riportava le voci generate non comprate all'ordine di
+        // ricalcolo, perdendo un ordine già sistemato con "↕️ Riordina
+        // lista" -- non solo nel caso specifico del deseleziona.
+        let pool = test_pool().await;
+        let user_id = create_user(&pool, "Alessio").await;
+        let space_id = create_space(&pool, "Casa").await;
+        add_membership(&pool, space_id, user_id).await;
+
+        crate::identity::with_actor(actor(user_id, space_id, "Alessio"), async {
+            let lista = trova_o_crea_lista_attiva(&pool).await.expect("lista");
+            cambia_intervallo(&pool, lista.id, "2026-09-01", "2026-09-07")
+                .await
+                .expect("intervallo");
+            let lista = trova_lista_attiva(&pool).await.unwrap().unwrap();
+            let planner_id =
+                create_planner(&pool, user_id, space_id, "2026-09-01", "2026-09-07").await;
+            create_meal_with_ingredient(
+                &pool,
+                planner_id,
+                "2026-09-02",
+                "pianificato",
+                None,
+                None,
+                Some(100),
+                "Farina",
+                "g",
+                Some(200.0),
+            )
+            .await;
+            create_meal_with_ingredient(
+                &pool,
+                planner_id,
+                "2026-09-03",
+                "pianificato",
+                None,
+                None,
+                Some(101),
+                "Zucchero",
+                "g",
+                Some(100.0),
+            )
+            .await;
+            aggiorna_lista(&pool, &lista).await.expect("primo refresh");
+            let voci = carica_voci(&pool, lista.id).await.expect("ordine iniziale");
+            assert_eq!(voci.len(), 2);
+            let seconda_id = voci[1].id;
+
+            // L'utente inverte l'ordine a mano.
+            sposta_voce(&pool, lista.id, seconda_id, Direzione::Su)
+                .await
+                .expect("sposta su");
+            let voci = carica_voci(&pool, lista.id)
+                .await
+                .expect("ordine invertito");
+            assert_eq!(
+                voci.iter()
+                    .map(|v| v.descrizione.clone())
+                    .collect::<Vec<_>>(),
+                vec!["Zucchero".to_string(), "Farina".to_string()]
+            );
+
+            // Un secondo refresh cancella e reinserisce le righe generate
+            // (nuovi id), senza che nulla sia cambiato nel planner: non
+            // deve comunque riportare l'ordine a quello di ricalcolo.
+            aggiorna_lista(&pool, &lista)
+                .await
+                .expect("secondo refresh, nessun cambiamento reale");
+            let voci = carica_voci(&pool, lista.id)
+                .await
+                .expect("ordine dopo il secondo refresh");
+            assert_eq!(
+                voci.iter()
+                    .map(|v| v.descrizione.clone())
+                    .collect::<Vec<_>>(),
+                vec!["Zucchero".to_string(), "Farina".to_string()],
+                "l'ordine sistemato a mano deve sopravvivere a un refresh che non cambia nulla"
+            );
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rimuovi_voce_manuale_la_elimina_anche_se_comprata() {
+        let pool = test_pool().await;
+        let user_id = create_user(&pool, "Alessio").await;
+        let space_id = create_space(&pool, "Casa").await;
+        add_membership(&pool, space_id, user_id).await;
+
+        crate::identity::with_actor(actor(user_id, space_id, "Alessio"), async {
+            let lista = trova_o_crea_lista_attiva(&pool).await.expect("lista");
+            let voce_id = aggiungi_voce_manuale(&pool, lista.id, "Detersivo", None, None)
+                .await
+                .expect("manuale");
+            imposta_comprato(&pool, voce_id, true)
+                .await
+                .expect("segna comprata");
+
+            rimuovi_voce_manuale(&pool, voce_id)
+                .await
+                .expect("rimozione");
+
+            let voci = carica_voci(&pool, lista.id).await.expect("voci");
+            assert!(voci.is_empty());
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rimuovi_aggiunta_catalogo_fa_tornare_la_riga_al_solo_fabbisogno_del_planner() {
+        let pool = test_pool().await;
+        let user_id = create_user(&pool, "Alessio").await;
+        let space_id = create_space(&pool, "Casa").await;
+        add_membership(&pool, space_id, user_id).await;
+        let alimento_pasta = create_alimento_globale(&pool, "Pasta").await;
+
+        crate::identity::with_actor(actor(user_id, space_id, "Alessio"), async {
+            let lista = trova_o_crea_lista_attiva(&pool).await.expect("lista");
+            cambia_intervallo(&pool, lista.id, "2026-09-01", "2026-09-07")
+                .await
+                .expect("intervallo");
+            let lista = trova_lista_attiva(&pool).await.unwrap().unwrap();
+            let planner_id =
+                create_planner(&pool, user_id, space_id, "2026-09-01", "2026-09-07").await;
+            create_meal_with_ingredient(
+                &pool,
+                planner_id,
+                "2026-09-02",
+                "pianificato",
+                None,
+                None,
+                Some(alimento_pasta),
+                "Pasta",
+                "g",
+                Some(200.0),
+            )
+            .await;
+            let aggiunta_id = aggiungi_da_catalogo(
+                &pool,
+                lista.id,
+                IdentitaCatalogo::Alimento(alimento_pasta),
+                "Pasta",
+                50.0,
+                "g",
+            )
+            .await
+            .expect("aggiunta catalogo");
+            aggiorna_lista(&pool, &lista).await.expect("refresh");
+            let voci = carica_voci(&pool, lista.id)
+                .await
+                .expect("voci con l'aggiunta");
+            assert_eq!(voci[0].quantita, Some(250.0));
+
+            rimuovi_aggiunta_catalogo(&pool, aggiunta_id)
+                .await
+                .expect("rimozione");
+            aggiorna_lista(&pool, &lista)
+                .await
+                .expect("refresh dopo la rimozione");
+
+            let voci = carica_voci(&pool, lista.id)
+                .await
+                .expect("voci dopo la rimozione");
+            assert_eq!(voci.len(), 1);
+            assert_eq!(
+                voci[0].quantita,
+                Some(200.0),
+                "resta solo il fabbisogno del planner"
+            );
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn voci_rimovibili_include_manuali_e_catalogo_non_le_righe_del_planner() {
+        let pool = test_pool().await;
+        let user_id = create_user(&pool, "Alessio").await;
+        let space_id = create_space(&pool, "Casa").await;
+        add_membership(&pool, space_id, user_id).await;
+        let alimento_pasta = create_alimento_globale(&pool, "Pasta").await;
+
+        crate::identity::with_actor(actor(user_id, space_id, "Alessio"), async {
+            let lista = trova_o_crea_lista_attiva(&pool).await.expect("lista");
+            cambia_intervallo(&pool, lista.id, "2026-09-01", "2026-09-07")
+                .await
+                .expect("intervallo");
+            let lista = trova_lista_attiva(&pool).await.unwrap().unwrap();
+            let planner_id =
+                create_planner(&pool, user_id, space_id, "2026-09-01", "2026-09-07").await;
+            create_meal_with_ingredient(
+                &pool,
+                planner_id,
+                "2026-09-02",
+                "pianificato",
+                None,
+                None,
+                Some(alimento_pasta),
+                "Pasta",
+                "g",
+                Some(200.0),
+            )
+            .await;
+            aggiungi_voce_manuale(&pool, lista.id, "Detersivo", None, None)
+                .await
+                .expect("manuale");
+            aggiungi_da_catalogo(
+                &pool,
+                lista.id,
+                IdentitaCatalogo::Alimento(alimento_pasta),
+                "Pasta",
+                50.0,
+                "g",
+            )
+            .await
+            .expect("aggiunta catalogo");
+            aggiorna_lista(&pool, &lista).await.expect("refresh");
+
+            let rimovibili = voci_rimovibili(&pool, lista.id).await.expect("rimovibili");
+            assert_eq!(
+                rimovibili.len(),
+                2,
+                "solo manuale + aggiunta, non la riga del planner"
+            );
+            assert!(rimovibili
+                .iter()
+                .any(|v| v.origine == OrigineRimovibile::Manuale && v.descrizione == "Detersivo"));
+            assert!(rimovibili
+                .iter()
+                .any(|v| v.origine == OrigineRimovibile::Catalogo && v.descrizione == "Pasta"));
+        })
+        .await;
+    }
+
+    #[tokio::test]
     async fn eccessi_comprati_segnala_un_pasto_tolto_dal_planner() {
         let pool = test_pool().await;
         let user_id = create_user(&pool, "Alessio").await;
@@ -2942,6 +3402,7 @@ enum ListaSpesaConversationState {
     AwaitingQuantitaCatalogo {
         identita: IdentitaCatalogo,
         descrizione: String,
+        unita_default: Option<String>,
     },
 }
 
@@ -3096,8 +3557,13 @@ fn testo_scelta_query_catalogo() -> &'static str {
     "🔎 Cerca nel catalogo\n\nScrivi il nome di un alimento (es. \"pasta\") o di un prodotto commerciale (es. \"de cecco\")."
 }
 
-fn testo_scelta_quantita_catalogo(descrizione: &str) -> String {
-    format!("➕ {descrizione}\n\nScrivi quantità e unità (es. \"500 g\").")
+fn testo_scelta_quantita_catalogo(descrizione: &str, unita_default: Option<&str>) -> String {
+    match unita_default {
+        Some(unita) => format!(
+            "➕ {descrizione}\n\nScrivi solo la quantità (es. \"500\") -- uso l'unità predefinita \"{unita}\", oppure scrivi anche l'unità (es. \"500 ml\") per usarne un'altra."
+        ),
+        None => format!("➕ {descrizione}\n\nScrivi quantità e unità (es. \"500 g\")."),
+    }
 }
 
 fn risultati_catalogo_keyboard(risultati: &[RisultatoCatalogo]) -> InlineKeyboardMarkup {
@@ -3277,7 +3743,8 @@ pub async fn handle_message(
         ListaSpesaConversationState::AwaitingQuantitaCatalogo {
             identita,
             descrizione,
-        } => match valida_quantita_manuale(text) {
+            unita_default,
+        } => match valida_quantita_con_default(text, unita_default.as_deref()) {
             Ok((quantita, unita)) => {
                 sessions.clear_chat(chat_id);
                 salva_voce_catalogo(
@@ -3419,6 +3886,70 @@ pub async fn handle_callback(
         muovi_e_mostra_riordino(bot, chat_id, pool, voce_id, Direzione::Giu).await?;
         return Ok(true);
     }
+    if data == "lista_spesa:remove" {
+        show_lista_rimuovi(bot, chat_id, pool, None).await?;
+        return Ok(true);
+    }
+    if let Some(raw_id) = data.strip_prefix("lista_spesa:remove:manuale:") {
+        let Some(voce_id) = raw_id.parse::<i64>().ok().filter(|value| *value > 0) else {
+            invalid(bot, chat_id).await?;
+            return Ok(true);
+        };
+        match rimuovi_voce_manuale(pool, voce_id).await {
+            Ok(()) => {
+                show_lista_rimuovi(bot, chat_id, pool, Some("✅ Voce rimossa.")).await?;
+            }
+            Err(errore) => {
+                tracing::warn!(?errore, voce_id, "Rimozione voce manuale fallita");
+                show_lista_rimuovi(
+                    bot,
+                    chat_id,
+                    pool,
+                    Some("⚠️ Non riesco a rimuovere la voce."),
+                )
+                .await?;
+            }
+        }
+        return Ok(true);
+    }
+    if let Some(raw_id) = data.strip_prefix("lista_spesa:remove:catalogo:") {
+        let Some(aggiunta_id) = raw_id.parse::<i64>().ok().filter(|value| *value > 0) else {
+            invalid(bot, chat_id).await?;
+            return Ok(true);
+        };
+        match rimuovi_aggiunta_catalogo(pool, aggiunta_id).await {
+            Ok(()) => {
+                // L'aggiunta non è più una fonte per il fresco: si
+                // ricalcola subito, così una riga generata dal catalogo si
+                // riduce o sparisce senza dover premere "🔄 Aggiorna
+                // lista" a mano -- stesso trattamento già riservato a
+                // un'aggiunta appena inserita (`salva_voce_catalogo`).
+                let esito_refresh = match trova_o_crea_lista_attiva(pool).await {
+                    Ok(lista) => aggiorna_lista(pool, &lista).await,
+                    Err(errore) => Err(errore),
+                };
+                if let Err(errore) = esito_refresh {
+                    tracing::warn!(
+                        ?errore,
+                        aggiunta_id,
+                        "Aggiornamento lista dopo rimozione aggiunta catalogo fallito"
+                    );
+                }
+                show_lista_rimuovi(bot, chat_id, pool, Some("✅ Voce rimossa.")).await?;
+            }
+            Err(errore) => {
+                tracing::warn!(?errore, aggiunta_id, "Rimozione aggiunta catalogo fallita");
+                show_lista_rimuovi(
+                    bot,
+                    chat_id,
+                    pool,
+                    Some("⚠️ Non riesco a rimuovere la voce."),
+                )
+                .await?;
+            }
+        }
+        return Ok(true);
+    }
     if let Some(raw_id) = data.strip_prefix("lista_spesa:toggle:") {
         let Some(voce_id) = raw_id.parse::<i64>().ok().filter(|value| *value > 0) else {
             invalid(bot, chat_id).await?;
@@ -3497,17 +4028,21 @@ pub async fn handle_callback(
             return Ok(true);
         };
         match alimento_visibile_per_id(pool, id).await {
-            Ok(Some(nome)) => {
+            Ok(Some((nome, unita_default))) => {
                 sessions.set(
                     chat_id.0,
                     ListaSpesaConversationState::AwaitingQuantitaCatalogo {
                         identita: IdentitaCatalogo::Alimento(id),
                         descrizione: nome.clone(),
+                        unita_default: unita_default.clone(),
                     },
                 );
-                bot.send_message(chat_id, testo_scelta_quantita_catalogo(&nome))
-                    .reply_markup(annulla_keyboard())
-                    .await?;
+                bot.send_message(
+                    chat_id,
+                    testo_scelta_quantita_catalogo(&nome, unita_default.as_deref()),
+                )
+                .reply_markup(annulla_keyboard())
+                .await?;
             }
             Ok(None) => {
                 invalid(bot, chat_id).await?;
@@ -3525,18 +4060,22 @@ pub async fn handle_callback(
             return Ok(true);
         };
         match prodotto_visibile_per_id(pool, id).await {
-            Ok(Some((marca, nome_commerciale))) => {
+            Ok(Some((marca, nome_commerciale, unita_default))) => {
                 let descrizione = format!("{marca} {nome_commerciale}");
                 sessions.set(
                     chat_id.0,
                     ListaSpesaConversationState::AwaitingQuantitaCatalogo {
                         identita: IdentitaCatalogo::Prodotto(id),
                         descrizione: descrizione.clone(),
+                        unita_default: Some(unita_default.clone()),
                     },
                 );
-                bot.send_message(chat_id, testo_scelta_quantita_catalogo(&descrizione))
-                    .reply_markup(annulla_keyboard())
-                    .await?;
+                bot.send_message(
+                    chat_id,
+                    testo_scelta_quantita_catalogo(&descrizione, Some(&unita_default)),
+                )
+                .reply_markup(annulla_keyboard())
+                .await?;
             }
             Ok(None) => {
                 invalid(bot, chat_id).await?;
@@ -3835,6 +4374,71 @@ async fn muovi_e_mostra_riordino(
     show_lista_riordina(bot, chat_id, pool, None).await
 }
 
+/// Etichetta di una voce rimovibile: `🗑️ descrizione · quantità unità`, o
+/// senza quantità per una voce manuale libera che non ne ha (ammesso, vedi
+/// `aggiungi_voce_manuale`).
+fn etichetta_rimovibile(voce: &VoceRimovibile) -> String {
+    let quantita = match (voce.quantita, &voce.unita_simbolo) {
+        (Some(valore), Some(unita)) => format!(" · {} {unita}", formatta_quantita(valore)),
+        _ => String::new(),
+    };
+    format!("🗑️ {}{quantita}", liste::tronca(&voce.descrizione, 40))
+}
+
+/// Modalità dedicata per rimuovere una voce manuale o un'aggiunta dal
+/// catalogo (chiesto da Alessio dopo un collaudo dal vivo: prima non era
+/// possibile rimuovere né l'una né l'altra). Le righe `generato`
+/// pure-planner non compaiono: le gestisce il planner, non una rimozione
+/// manuale.
+async fn show_lista_rimuovi(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    notice: Option<&str>,
+) -> ResponseResult<()> {
+    let lista = match trova_o_crea_lista_attiva(pool).await {
+        Ok(lista) => lista,
+        Err(errore) => {
+            tracing::warn!(?errore, "Impossibile aprire la lista della spesa");
+            bot.send_message(chat_id, "⚠️ Non riesco ad aprire la lista della spesa.")
+                .reply_markup(nav_markup("food:menu"))
+                .await?;
+            return Ok(());
+        }
+    };
+    let voci = voci_rimovibili(pool, lista.id).await.unwrap_or_default();
+
+    let mut testo = String::new();
+    if let Some(notice) = notice {
+        testo.push_str(notice);
+        testo.push_str("\n\n");
+    }
+    testo.push_str("🗑️ Rimuovi voci\n\nSolo le voci aggiunte a mano o dal catalogo: quelle generate dai pasti pianificati le gestisce il planner.");
+    if voci.is_empty() {
+        testo.push_str("\n\nNessuna voce da rimuovere.");
+    }
+
+    let mut rows: Vec<Vec<InlineKeyboardButton>> = voci
+        .iter()
+        .map(|voce| {
+            let prefisso = match voce.origine {
+                OrigineRimovibile::Manuale => "manuale",
+                OrigineRimovibile::Catalogo => "catalogo",
+            };
+            vec![button(
+                etichetta_rimovibile(voce),
+                format!("lista_spesa:remove:{prefisso}:{}", voce.id),
+            )]
+        })
+        .collect();
+    rows.push(vec![button("⬅️ Indietro", "lista_spesa:menu")]);
+
+    bot.send_message(chat_id, testo)
+        .reply_markup(InlineKeyboardMarkup::new(rows))
+        .await?;
+    Ok(())
+}
+
 /// Mostra la lista intera, senza paginazione (eccezione esplicita a C6,
 /// deciso con Alessio dopo un collaudo dal vivo): a differenza di ogni
 /// altra lista del bot, qui l'utente deve vedere tutte le voci insieme per
@@ -3879,6 +4483,13 @@ async fn show_lista(
         .unwrap_or_else(|errore| {
             tracing::warn!(?errore, "Verifica eccessi lista spesa fallita");
             Vec::new()
+        });
+    let ci_sono_voci_rimovibili = voci_rimovibili(pool, lista.id)
+        .await
+        .map(|voci| !voci.is_empty())
+        .unwrap_or_else(|errore| {
+            tracing::warn!(?errore, "Verifica voci rimovibili fallita");
+            false
         });
 
     let tutorial = tutorial_da_mostrare(pool).await;
@@ -3952,6 +4563,9 @@ async fn show_lista(
     rows.push(vec![button("➕ Aggiungi voce manuale", "lista_spesa:add")]);
     if voci.len() > 1 {
         rows.push(vec![button("↕️ Riordina lista", "lista_spesa:reorder")]);
+    }
+    if ci_sono_voci_rimovibili {
+        rows.push(vec![button("🗑️ Rimuovi voci", "lista_spesa:remove")]);
     }
     rows.push(vec![button(
         "🗓️ Cambia intervallo",

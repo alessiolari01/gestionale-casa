@@ -114,6 +114,34 @@ tutorial alla prima vera visita.
 **Non collaudato dal vivo**: scritto in questo worktree isolato, senza
 accesso a Telegram né al database reale -- vedi `STATO.md`.
 
+<!-- CHANGELOG_LISTA_SPESA_ORDINE_UNITA_RIMOZIONE_20260910 -->
+# 10/09/2026 — Lista della spesa: ordine stabile sui refresh, unità predefinita, rimozione voci
+
+Quarto giro di collaudo dal vivo di Alessio.
+
+Un `aggiorna_lista` qualunque (non solo quello scatenato dal deseleziona)
+rimescolava un ordine già sistemato a mano con "↕️ Riordina lista": ogni
+refresh cancella e re-inserisce le voci generate non comprate,
+assegnando prima un ordinamento sempre nuovo, in coda. Corretto
+rileggendo l'ordinamento di ogni voce prima di cancellarla e
+riassegnandolo alla stessa identità nel fresco ricalcolato: solo
+un'identità davvero nuova prende un ordinamento nuovo.
+
+Aggiungere un alimento o un prodotto dal catalogo richiedeva sempre di
+scrivere anche l'unità di misura. Ora basta il numero: si usa l'unità
+predefinita dell'alimento o del prodotto scelto, sovrascrivibile
+scrivendola comunque. La voce libera continua a richiedere sempre
+l'unità, non avendo un catalogo da cui prenderla.
+
+Non si poteva rimuovere né una voce manuale né un'aggiunta dal
+catalogo. Nuova schermata "🗑️ Rimuovi voci": rimuove una voce manuale
+per sempre (anche se già comprata), o un'aggiunta dal catalogo
+(la lista si ricalcola subito secondo il fabbisogno rimasto). Le righe
+generate dal solo planner restano escluse, le gestisce il planner.
+
+7 nuovi test, 355 totali (348 prima). Scritte e testate in locale, non
+ancora ricollaudate dal vivo.
+
 <!-- CHANGELOG_CONVENZIONE_C15_ETICHETTE_A_CAPO_20260909 -->
 # 09/09/2026 — Nuova convenzione C15: le parti aggiunte a un'etichetta vanno a capo
 

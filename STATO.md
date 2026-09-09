@@ -1113,6 +1113,50 @@ Telegram lo va a capo da solo, nessun rischio, lasciati invariati. La
 quantità di una voce della lista della spesa resta sulla stessa riga del
 nome: è sempre presente e breve, non la parte che causava il taglio.
 
+**Quarto giro di collaudo dal vivo (10 settembre 2026)**: un bug reale e
+due mancanze.
+
+1. **Un refresh qualunque rimescolava un ordine già sistemato a mano**,
+   non solo quello scatenato dal deseleziona come sembrava dal collaudo
+   precedente: `aggiorna_lista` cancella e re-inserisce sempre da zero le
+   voci generate non comprate, e prima assegnava un `ordinamento` nuovo a
+   ognuna, sempre in coda. Corretto rileggendo l'`ordinamento` di ogni
+   voce generata non comprata *prima* di cancellarle, e riassegnandolo
+   alla stessa identità nel fresco ricalcolato: solo un'identità
+   **davvero nuova** prende un ordinamento nuovo. Un refresh senza
+   cambiamenti reali (`serve_aggiornamento` direbbe falso) ora non
+   sposta più nulla.
+2. **L'unità di misura andava sempre scritta anche per un'aggiunta dal
+   catalogo**, mentre l'alimento/prodotto scelto spesso ha già un'unità
+   naturale. Nuova `valida_quantita_con_default`: se scrivi solo il
+   numero, usa l'unità predefinita dell'alimento (`unita_predefinita_id`,
+   opzionale) o del prodotto (`unita_confezione_id`, sempre presente);
+   scrivere comunque un'unità la sovrascrive. Un alimento senza unità
+   predefinita richiede comunque di scriverla, come la voce libera
+   (`valida_quantita_manuale`, invariata).
+3. **Non si poteva rimuovere né una voce manuale né un'aggiunta dal
+   catalogo.** Nuova schermata "🗑️ Rimuovi voci" (visibile solo se c'è
+   qualcosa da rimuovere): un pulsante per ogni voce manuale
+   (`rimuovi_voce_manuale`, cancellazione diretta, anche se comprata — il
+   congelamento protegge la quantità di una voce comprata, non la sua
+   esistenza) e ogni aggiunta dal catalogo (`rimuovi_aggiunta_catalogo`,
+   cancella la riga in `liste_spesa_aggiunte_catalogo` e rilancia subito
+   `aggiorna_lista`, che ricalcola la riga `generato` collegata secondo il
+   fabbisogno rimasto). Le righe `generato` pure-planner restano escluse:
+   le gestisce il planner.
+
+7 nuovi test in `lista_spesa.rs` (ordine che sopravvive a un refresh senza
+cambiamenti reali, tre sulla quantità con unità predefinita, rimozione
+voce manuale anche comprata, rimozione aggiunta catalogo che fa tornare la
+riga al solo fabbisogno del planner, `voci_rimovibili` che esclude le
+righe del planner), per un totale di **355 (348 prima)**. Nessuna
+migration nuova. Pipeline `fmt`, `check --locked`,
+`clippy --all-targets --locked -- -D warnings`, `test --locked` verde in
+locale.
+
+**Non ancora ricollaudate dal vivo**: anche queste tre correzioni sono
+scritte e testate in locale, non ancora provate su Telegram.
+
 ## 3. Stato tecnico verificato
 
 - **48 migration** nel repository, tutte **applicate** al database reale
