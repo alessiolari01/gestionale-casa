@@ -1107,6 +1107,26 @@ src/modules/novita.rs               registro delle novità e badge "🆕" propag
     `docs/previsto/invio-miglioramenti-a-claude.md` — **attenzione**,
     quel documento la cita con l'id vecchio "#41", ora cambiato dal
     reset, cercarla per testo se serve).
+
+    **Recuperati il 9 settembre 2026 anche i miglioramenti `Fatto · da
+    verificare`** dello stesso backup pre-reset, mancati al primo giro
+    (quello aveva riguardato solo i `da_fare`). Nel backup ce n'erano
+    cinque: quattro sono i collaudi con un secondo account già elencati
+    al punto 6 di questa stessa sezione (invito accettato, notifica al
+    creatore, cambio ruolo, rimozione) — reinseriti come miglioramenti
+    veri (id nuovi, contenuto e data di creazione originali preservati),
+    così il pannello admin li mostra di nuovo in `Fatto · da verificare`
+    invece che solo in questo documento. Il quinto (la proposta di
+    rendere le notifiche di invito temporanee e navigabili) **non è
+    stato ripristinato**: è già implementato per davvero
+    (`docs/condivisione.md`, `src/modules/spazi_membri.rs`, il messaggio
+    "🔔 Hai una nuova notifica" citato nella proposta originale esiste
+    già in codice) — la parte ancora da verificare è esattamente coperta
+    dai quattro collaudi con secondo account, non da una voce a parte.
+    Aggiunto anche un sesto collaudo pendente, per il profilo alimentare
+    automatico scritto il 9 settembre (sezione 2quater): non verificabile
+    sull'account dell'amministratore principale, che esiste da prima di
+    questa modifica, serve un account appena approvato.
 11. **Multipiattaforma: il bot viene finito prima della web app, deciso
     l'8 settembre 2026.** Discusso con Alessio se e come estendere il
     progetto oltre Telegram (web app, poi Play Store/App Store/Windows/

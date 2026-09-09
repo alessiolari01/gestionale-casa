@@ -2,6 +2,27 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_RIPRISTINO_MIGLIORAMENTI_VERIFICA_20260909 -->
+# 09/09/2026 — Recuperati dal backup pre-reset anche i miglioramenti "Fatto · da verificare"
+
+Il recupero dell'8 settembre (vedi voce sotto) aveva riportato solo i
+miglioramenti `da_fare` persi nel reset dell'account S9, non quelli già
+`fatto` ma non ancora verificati. Dal backup
+`gestionale_PRE_RESET_20260908_021825.db` sono stati reinseriti nel
+database reale (non una migration: un INSERT diretto, con backup
+preventivo del database live) i quattro collaudi che richiedono un
+secondo account Telegram — già elencati in prosa al punto 6 della
+sezione 6 di `STATO.md`, ora di nuovo veri miglioramenti nel pannello
+admin — con id nuovi ma contenuto e data di creazione originali. Un
+quinto miglioramento dello stesso backup (rendere le notifiche di invito
+temporanee e navigabili) non è stato ripristinato perché già
+implementato per davvero, verificato leggendo `docs/condivisione.md` e
+`src/modules/spazi_membri.rs`. Aggiunto anche un sesto collaudo pendente
+per il profilo alimentare automatico al bootstrap (vedi la voce
+dell'8-9 settembre sulla lista della spesa): non verificabile
+sull'account dell'amministratore principale, che esiste da prima della
+modifica.
+
 <!-- CHANGELOG_MULTIPIATTAFORMA_20260908 -->
 # 08/09/2026 — Deciso: il bot viene finito prima della web app
 
