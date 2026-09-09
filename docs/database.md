@@ -208,15 +208,29 @@ manuali (testo libero, per un prodotto commerciale non modellato).
 | `quantita` / `unita_simbolo` | REAL / TEXT | nullable solo per `origine = 'manuale'` |
 | `comprato` | INTEGER | flag per riga intera, non quantità parziale |
 | `comprato_il` | TEXT | valorizzato quando `comprato = 1` |
+| `ordinamento` | INTEGER | posizione nella lista (9 settembre 2026); indipendente da `comprato`, si sposta solo con "↕️ Riordina lista" |
 
 Una volta `comprato = 1` un trigger a database (`trg_lista_spesa_voce_comprata_immutabile`)
-impedisce di modificare gli altri campi (inclusa `prodotto_alimentare_id`)
-— solo il toggle di `comprato` stesso resta permesso, stesso principio del
-congelamento di `planner_pasti`. Il refresh esplicito (`🔄 Aggiorna lista`)
-tocca solo le voci `origine = 'generato' AND comprato = 0`: le cancella e
-re-inserisce da zero il risultato fresco dell'aggregazione (planner più
-aggiunte dal catalogo, vedi sotto), senza mai toccare una voce comprata o
-una voce manuale.
+impedisce di modificare gli altri campi (inclusa `prodotto_alimentare_id`,
+esclusi `comprato` e `ordinamento`) — solo il toggle di `comprato` stesso
+resta permesso dal codice applicativo, stesso principio del congelamento di
+`planner_pasti`. Il refresh esplicito (`🔄 Aggiorna lista`) tocca solo le
+voci `origine = 'generato' AND comprato = 0`: le cancella e re-inserisce da
+zero il risultato fresco dell'aggregazione (planner più aggiunte dal
+catalogo, vedi sotto), senza mai toccare una voce comprata o una voce
+manuale.
+
+**Fusione delle voci comprate frammentate (9 settembre 2026)**: spuntare
+una voce già comprata più di una volta per lo stesso alimento (dopo che un
+pasto aggiunto in seguito ha creato una riga residua per la differenza,
+vedi `sottrai_gia_comprato`) fonderebbe due righe comprate distinte per
+sempre, senza intervento. `fondi_comprate_se_serve` lo evita: passa la
+voce appena spuntata da `comprato = 0` a `1` due volte, con
+l'aggiornamento della quantità in mezzo (l'unico modo per cambiare
+`quantita` mentre l'altra riga resta `comprato = 1`, dato il trigger sopra)
+dentro un'unica transazione, poi elimina la riga fusa. Lo stesso principio
+vale al contrario quando si deseleziona una voce: `aggiorna_lista` gira di
+nuovo da solo (vedi `docs/moduli/lista-spesa.md`).
 
 ### `liste_spesa_aggiunte_catalogo` (9 settembre 2026)
 Aggiunte dal catalogo per "➕ Aggiungi voce manuale → 🔎 Cerca nel

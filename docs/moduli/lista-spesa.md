@@ -4,10 +4,16 @@
 prima versione (aggregazione dal planner, voci manuali libere, comprato
 congelato).** Il collaudo dal vivo della ricerca nel catalogo (9 settembre
 2026) ha trovato e fatto correggere un'icona duplicata (§ Aggiunta dal
-catalogo) e tre altri punti: il refresh automatico alla deselezione, il
-bottone "🔄 Aggiorna lista" condizionale, e l'assenza di paginazione — le tre
-correzioni sono scritte e testate in locale, **non ancora ricollaudate dal
-vivo**. Resta non ancora collaudato anche il profilo alimentare automatico
+catalogo). Un secondo giro di collaudo lo stesso giorno, dopo che le prime
+tre correzioni (refresh automatico alla deselezione, bottone "🔄 Aggiorna
+lista" condizionale, assenza di paginazione) erano già state confermate dal
+vivo, ha portato tre ulteriori correzioni: la fusione anche quando si
+*spunta* una voce residua (non solo quando la si deseleziona), la
+segnalazione di un eccesso quando il fabbisogno reale scende sotto quanto
+già comprato, e un ordine della lista indipendente da `comprato` con un modo
+per riordinarla a piacere. Queste tre ultime correzioni sono scritte e
+testate in locale, **non ancora ricollaudate dal vivo**. Resta non ancora
+collaudato anche il profilo alimentare automatico
 (`docs/moduli/profili-e-porzioni.md`, stesso giro di feedback, non riguarda
 questo modulo direttamente).
 `src/modules/lista_spesa.rs`, raggiungibile da
@@ -130,16 +136,46 @@ database impedisce di modificare quantità/unità/descrizione/origine — solo
 il toggle (tornare a `comprato = 0`) resta permesso, stesso principio del
 congelamento di `planner_pasti`.
 
-**Caso eccezionale in cui il ricalcolo scatta da solo** (deciso con Alessio
-il 9 settembre 2026, dopo averlo visto dal vivo): togliere la spunta a una
-voce `generato` la rimette disponibile al refresh, ma se nel frattempo un
-altro pasto aveva già prodotto una riga nuova per la differenza (vedi
-sotto), restavano due righe frammentate dello stesso alimento finché non si
-premeva "🔄 Aggiorna lista" a mano — visto con "Pasta · 50 g" due volte
-invece di "Pasta · 100 g". `toggle_comprato` ora richiama `aggiorna_lista`
-subito dopo aver tolto la spunta, ma **solo** quando la voce è `generato`:
-una voce manuale non ha nulla con cui fondersi e non viene mai toccata da
-un refresh, nemmeno indiretto.
+**Due casi eccezionali in cui il ricalcolo scatta da solo**, entrambi
+decisi con Alessio il 9 settembre 2026 dopo averli visti dal vivo, entrambi
+**solo** per le voci `generato` (una voce manuale non ha nulla con cui
+fondersi e non viene mai toccata da un refresh, nemmeno indiretto):
+
+- **deselezionare**: togliere la spunta a una voce `generato` la rimette
+  disponibile al refresh, ma se nel frattempo un altro pasto aveva già
+  prodotto una riga nuova per la differenza (vedi sotto), restavano due
+  righe frammentate dello stesso alimento finché non si premeva "🔄
+  Aggiorna lista" a mano — visto con "Pasta · 50 g" due volte invece di
+  "Pasta · 100 g". `toggle_comprato` richiama `aggiorna_lista` subito dopo
+  aver tolto la spunta;
+- **selezionare**: spuntare proprio quella riga residua (invece di
+  deselezionare l'altra) lasciava lo stesso problema al contrario — due
+  righe comprate separate per sempre, dato che `aggiorna_lista` non tocca
+  mai le voci comprate. `fondi_comprate_se_serve` le fonde in una sola:
+  cerca un'altra voce `generato` già comprata con la stessa identità e
+  unità, somma le quantità nella voce appena spuntata ed elimina l'altra.
+  Il trigger di congelamento impedisce di cambiare `quantita` mentre
+  `comprato = 1`, quindi la funzione passa da `comprato = 0` a `1` due
+  volte con l'aggiornamento della quantità in mezzo (l'unico modo per
+  cambiarla restando dentro la regola, dato che il toggle stesso resta
+  sempre permesso), dentro un'unica transazione.
+
+## Eccesso quando il fabbisogno scende sotto il comprato
+
+Una voce comprata resta **sempre** congelata — nessuna correzione
+automatica della quantità, per lo stesso principio del congelamento. Ma se
+il fabbisogno reale scende dopo l'acquisto (un pasto tolto dal planner, una
+ricetta ridotta), l'utente deve poterlo sapere: `eccessi_comprati` confronta
+il fabbisogno grezzo (`fresche_grezze`, *prima* di sottrarre il comprato,
+condivisa con `calcola_fresche`) con quanto è già segnato comprato per
+quell'identità; se il comprato supera il fabbisogno, la differenza è
+l'eccesso. `calcola_eccessi` è dominio puro, testato senza database.
+
+La lista lo mostra su ogni voce coinvolta (`· ⚠️ 150 g in eccesso` accanto
+al pulsante) più un avviso generale in testa alla schermata quando c'è
+almeno un eccesso — non un'azione da compiere, solo un'informazione: sta
+all'utente decidere cosa farne (usarlo comunque, tenerlo per un pasto
+futuro...).
 
 ## Aggiornamento esplicito, mai automatico
 
@@ -162,15 +198,40 @@ già in lista. Se coincidono, "🔄 Aggiorna lista" non compare — e il testo
 "Nessuna voce nella lista" cambia di conseguenza quando non c'è nulla da
 generare (nessun pasto pianificato, nessuna aggiunta dal catalogo).
 
+## Ordine indipendente da comprato, e riordino manuale
+
+Prima l'ordine dipendeva da `comprato ASC`: spuntare una voce la faceva
+saltare in fondo alla lista, sotto le voci ancora da comprare — visto da
+Alessio dal vivo e non voluto. Dal 9 settembre 2026 `carica_voci` ordina
+per `ordinamento ASC, id ASC`, una colonna indipendente dallo stato
+comprato: spuntare o deselezionare una voce non le cambia più posizione.
+
+Una nuova voce (generata da un refresh, manuale, o dal catalogo) prende
+sempre il prossimo `ordinamento` disponibile — in coda, mai in mezzo a un
+ordine che l'utente ha già sistemato a mano. Le righe rigenerate a ogni
+refresh finiscono anch'esse in coda: solo le voci comprate o manuali, che
+il refresh non tocca, mantengono una posizione stabile nel tempo.
+
+**"↕️ Riordina lista"** (visibile solo con più di una voce) apre una
+modalità dedicata dove ogni voce mostra `⬆️`/`⬇️` invece del checkbox —
+`sposta_voce` scambia l'`ordinamento` con la voce vicina in quella
+direzione, indipendentemente dal fatto che sia comprata o meno. "✅ Fine
+riordino" torna alla schermata normale.
+
 ## Schermate
 
-**Principale** — intervallo, conteggio comprate/totale, **tutte** le voci
-come pulsanti `✅`/`☐` (toggle al tocco), **senza paginazione**: eccezione
+**Principale** — intervallo, conteggio comprate/totale, avviso generale se
+c'è un eccesso, **tutte** le voci come pulsanti `✅`/`☐` (toggle al tocco,
+con l'eventuale eccesso sul pulsante), **senza paginazione**: eccezione
 esplicita a C6 (`docs/convenzioni-telegram.md`), l'unica lista del bot che
 mostra tutto insieme, perché l'utente deve vedere l'intera lista per
 decidere cosa prendere prima e cosa dopo. `🔄 Aggiorna lista` (solo se
-serve davvero, vedi sopra), `➕ Aggiungi voce manuale`, `🗓️ Cambia
-intervallo`.
+serve davvero, vedi sopra), `➕ Aggiungi voce manuale`, `↕️ Riordina lista`
+(con più di una voce), `🗓️ Cambia intervallo`.
+
+**Riordina lista** — ogni voce come `⬆️ | etichetta | ⬇️` (le frecce
+mancano alle estremità), `✅ Fine riordino` per tornare alla schermata
+principale.
 
 **Aggiungi voce manuale** — input ibrido in due passi: descrizione libera
 (testo), poi quantità+unità scritte a mano (es. "500 g") oppure `➖ Senza
@@ -185,7 +246,7 @@ bloccati).
 
 ```text
 liste_spesa                       intervallo, proprietario, spazio
-liste_spesa_voci                  voci generate o manuali, comprato/comprato_il
+liste_spesa_voci                  voci generate o manuali, comprato/comprato_il, ordinamento
 liste_spesa_aggiunte_catalogo     aggiunte dal catalogo, vive attraverso ogni refresh
 ```
 

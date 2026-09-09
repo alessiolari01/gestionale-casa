@@ -114,6 +114,36 @@ tutorial alla prima vera visita.
 **Non collaudato dal vivo**: scritto in questo worktree isolato, senza
 accesso a Telegram né al database reale -- vedi `STATO.md`.
 
+<!-- CHANGELOG_LISTA_SPESA_FUSIONE_ECCESSO_RIORDINO_20260909 -->
+# 09/09/2026 — Lista della spesa: fusione al check, eccesso segnalato, riordino manuale
+
+Terzo giro di correzioni dallo stesso collaudo dal vivo di Alessio, dopo
+che le prime tre erano già confermate funzionanti.
+
+**La fusione mancava spuntando invece di deselezionando**: se si spuntava
+la riga residua (invece di togliere la spunta a quella già comprata),
+restavano due righe comprate separate per sempre — `aggiorna_lista` non
+tocca mai le voci comprate. Nuova `fondi_comprate_se_serve`: cerca un'altra
+voce `generato` già comprata con la stessa identità e unità e la fonde,
+passando da `comprato = 0` a `1` due volte con l'aggiornamento della
+quantità in mezzo (unico modo per cambiarla restando dentro il trigger di
+congelamento) dentro un'unica transazione.
+
+**Eccesso segnalato quando il fabbisogno scende sotto il comprato**: una
+voce comprata resta sempre congelata, ma se un pasto viene tolto dal
+planner o una ricetta ridotta, l'utente deve poterlo sapere. Nuova
+`calcola_eccessi` (dominio puro) confronta il fabbisogno grezzo con quanto
+è già comprato; la differenza, se positiva, compare su ogni voce coinvolta
+e in un avviso generale — pura informazione, nessuna correzione automatica.
+
+**Ordine indipendente da comprato, e riordino manuale**: spuntare una voce
+non la fa più saltare in fondo alla lista (nuova colonna `ordinamento`,
+indipendente da `comprato`). Nuova modalità "↕️ Riordina lista" con frecce
+su/giù per sistemare l'ordine a piacere.
+
+7 nuovi test, 348 totali (341 prima); una migration in più, 48 totali (47
+prima). Scritte e testate in locale, non ancora ricollaudate dal vivo.
+
 <!-- CHANGELOG_LISTA_SPESA_TRE_CORREZIONI_20260909 -->
 # 09/09/2026 — Lista della spesa: refresh automatico, bottone condizionale, niente paginazione
 

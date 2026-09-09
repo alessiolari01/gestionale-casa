@@ -742,6 +742,66 @@ mod domain_tests {
         assert_eq!(voci.len(), 1);
         assert_eq!(voci[0].quantita, 750.0);
     }
+
+    #[test]
+    fn eccesso_quando_il_comprato_supera_il_fabbisogno_sceso() {
+        // Un pasto tolto dal planner (o una ricetta ridotta) fa scendere il
+        // fabbisogno reale sotto quanto già segnato comprato: l'eccesso è
+        // la differenza, mai una correzione automatica della voce comprata.
+        let fresche_grezze = vec![VoceGenerata {
+            alimento_id: Some(1),
+            prodotto_id: None,
+            nome: "Farina".to_string(),
+            quantita: 200.0,
+            unita_simbolo: "g".to_string(),
+        }];
+        let gia_comprato = vec![VoceGenerata {
+            alimento_id: Some(1),
+            prodotto_id: None,
+            nome: "Farina".to_string(),
+            quantita: 350.0,
+            unita_simbolo: "g".to_string(),
+        }];
+        let eccessi = calcola_eccessi(&fresche_grezze, &gia_comprato);
+        assert_eq!(eccessi.len(), 1);
+        assert_eq!(eccessi[0].nome, "Farina");
+        assert_eq!(eccessi[0].quantita_eccesso, 150.0);
+    }
+
+    #[test]
+    fn nessun_eccesso_quando_il_fabbisogno_copre_ancora_il_comprato() {
+        let fresche_grezze = vec![VoceGenerata {
+            alimento_id: Some(1),
+            prodotto_id: None,
+            nome: "Farina".to_string(),
+            quantita: 400.0,
+            unita_simbolo: "g".to_string(),
+        }];
+        let gia_comprato = vec![VoceGenerata {
+            alimento_id: Some(1),
+            prodotto_id: None,
+            nome: "Farina".to_string(),
+            quantita: 350.0,
+            unita_simbolo: "g".to_string(),
+        }];
+        assert!(calcola_eccessi(&fresche_grezze, &gia_comprato).is_empty());
+    }
+
+    #[test]
+    fn nessun_eccesso_quando_il_fabbisogno_e_sparito_del_tutto() {
+        // Il pasto è stato tolto del tutto dal planner: nessuna riga fresca
+        // per quella identità, tutto il comprato è in eccesso.
+        let gia_comprato = vec![VoceGenerata {
+            alimento_id: Some(1),
+            prodotto_id: None,
+            nome: "Farina".to_string(),
+            quantita: 200.0,
+            unita_simbolo: "g".to_string(),
+        }];
+        let eccessi = calcola_eccessi(&[], &gia_comprato);
+        assert_eq!(eccessi.len(), 1);
+        assert_eq!(eccessi[0].quantita_eccesso, 200.0);
+    }
 }
 
 // ===========================================================================
@@ -768,6 +828,8 @@ pub struct VoceListaSpesa {
     pub quantita: Option<f64>,
     pub unita_simbolo: Option<String>,
     pub comprato: i64,
+    #[allow(dead_code)]
+    pub ordinamento: i64,
 }
 
 async fn trova_per_id(pool: &SqlitePool, id: i64) -> anyhow::Result<Option<ListaSpesa>> {
@@ -852,16 +914,87 @@ pub async fn cambia_intervallo(
     Ok(())
 }
 
+/// Ordine indipendente dallo stato comprato (deciso con Alessio il 9
+/// settembre 2026, dopo averlo visto dal vivo): prima l'ordine dipendeva da
+/// `comprato ASC`, quindi spuntare una voce la faceva saltare in fondo alla
+/// lista -- ora `ordinamento` è la sola chiave, e spuntare/deselezionare
+/// non sposta più nulla. Vedi anche `sposta_voce`.
 pub async fn carica_voci(pool: &SqlitePool, lista_id: i64) -> anyhow::Result<Vec<VoceListaSpesa>> {
     sqlx::query_as(
-        "SELECT id, origine, alimento_id, descrizione, quantita, unita_simbolo, comprato \
+        "SELECT id, origine, alimento_id, descrizione, quantita, unita_simbolo, comprato, \
+                ordinamento \
          FROM liste_spesa_voci WHERE lista_id = ? \
-         ORDER BY comprato ASC, origine DESC, descrizione COLLATE NOCASE, id",
+         ORDER BY ordinamento ASC, id ASC",
     )
     .bind(lista_id)
     .fetch_all(pool)
     .await
     .context("Impossibile leggere le voci della lista")
+}
+
+/// Il prossimo valore di `ordinamento` per una nuova voce di questa lista:
+/// in coda a tutte le altre, così una voce appena creata non si inserisce
+/// arbitrariamente in mezzo a un ordine che l'utente ha già sistemato a
+/// mano con `sposta_voce`.
+async fn prossimo_ordinamento(pool: &SqlitePool, lista_id: i64) -> anyhow::Result<i64> {
+    let massimo: Option<i64> =
+        sqlx::query_scalar("SELECT MAX(ordinamento) FROM liste_spesa_voci WHERE lista_id = ?")
+            .bind(lista_id)
+            .fetch_one(pool)
+            .await
+            .context("Impossibile leggere l'ordinamento massimo")?;
+    Ok(massimo.unwrap_or(0) + 1)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direzione {
+    Su,
+    Giu,
+}
+
+/// Sposta una voce di una posizione su/giù nell'ordine visibile, scambiando
+/// `ordinamento` con la voce vicina in quella direzione -- indipendente da
+/// `comprato`, coerente con l'ordine unico di `carica_voci`. Non fa nulla
+/// (senza errore) se la voce è già all'estremità.
+pub async fn sposta_voce(
+    pool: &SqlitePool,
+    lista_id: i64,
+    voce_id: i64,
+    direzione: Direzione,
+) -> anyhow::Result<()> {
+    let voci = carica_voci(pool, lista_id).await?;
+    let Some(posizione) = voci.iter().position(|voce| voce.id == voce_id) else {
+        return Ok(());
+    };
+    let vicina = match direzione {
+        Direzione::Su => posizione.checked_sub(1),
+        Direzione::Giu => posizione.checked_add(1).filter(|&i| i < voci.len()),
+    };
+    let Some(vicina) = vicina else {
+        return Ok(());
+    };
+    let (voce, voce_vicina) = (&voci[posizione], &voci[vicina]);
+
+    let mut tx = pool
+        .begin()
+        .await
+        .context("Impossibile aprire la transazione")?;
+    sqlx::query("UPDATE liste_spesa_voci SET ordinamento = ? WHERE id = ?")
+        .bind(voce_vicina.ordinamento)
+        .bind(voce.id)
+        .execute(&mut *tx)
+        .await
+        .context("Impossibile spostare la voce")?;
+    sqlx::query("UPDATE liste_spesa_voci SET ordinamento = ? WHERE id = ?")
+        .bind(voce.ordinamento)
+        .bind(voce_vicina.id)
+        .execute(&mut *tx)
+        .await
+        .context("Impossibile spostare la voce vicina")?;
+    tx.commit()
+        .await
+        .context("Impossibile salvare il nuovo ordine")?;
+    Ok(())
 }
 
 /// Aggiunge una voce manuale: descrizione obbligatoria, quantità/unità
@@ -874,14 +1007,17 @@ pub async fn aggiungi_voce_manuale(
     quantita: Option<f64>,
     unita_simbolo: Option<&str>,
 ) -> anyhow::Result<i64> {
+    let ordinamento = prossimo_ordinamento(pool, lista_id).await?;
     let id = sqlx::query(
-        "INSERT INTO liste_spesa_voci (lista_id, origine, descrizione, quantita, unita_simbolo) \
-         VALUES (?, 'manuale', ?, ?, ?)",
+        "INSERT INTO liste_spesa_voci \
+         (lista_id, origine, descrizione, quantita, unita_simbolo, ordinamento) \
+         VALUES (?, 'manuale', ?, ?, ?, ?)",
     )
     .bind(lista_id)
     .bind(descrizione)
     .bind(quantita)
     .bind(unita_simbolo)
+    .bind(ordinamento)
     .execute(pool)
     .await
     .context("Impossibile aggiungere la voce")?
@@ -928,19 +1064,129 @@ async fn toggle_comprato(pool: &SqlitePool, voce_id: i64) -> anyhow::Result<()> 
     let nuovo_comprato = comprato == 0;
     imposta_comprato(pool, voce_id, nuovo_comprato).await?;
 
-    // Caso eccezionale in cui l'aggiornamento scatta da solo, deciso con
-    // Alessio dopo un collaudo dal vivo: togliere la spunta a una voce
-    // generata la rende di nuovo disponibile al refresh (`aggiorna_lista`
-    // non tocca mai le voci comprate), ma se nel frattempo un altro pasto
-    // ha già prodotto una riga nuova per la differenza (vedi
-    // `sottrai_gia_comprato`), senza un ricalcolo l'utente vede due righe
-    // frammentate dello stesso alimento finché non preme "Aggiorna lista"
-    // a mano. Qui si rifonde subito, senza aspettare.
-    if !nuovo_comprato && origine == "generato" {
-        if let Some(lista) = trova_per_id(pool, lista_id).await? {
-            aggiorna_lista(pool, &lista).await?;
+    // Due casi eccezionali in cui il ricalcolo scatta da solo, entrambi
+    // decisi con Alessio dopo un collaudo dal vivo -- solo per le voci
+    // 'generato': una voce manuale non ha nulla con cui fondersi e non
+    // viene mai toccata da un refresh, nemmeno indiretto.
+    if origine == "generato" {
+        if nuovo_comprato {
+            // Spuntare una voce residua (creata da `sottrai_gia_comprato`
+            // per la sola differenza, mentre un'altra riga dello stesso
+            // alimento era già comprata) non deve lasciare due righe
+            // comprate separate per sempre: si fondono in una sola.
+            fondi_comprate_se_serve(pool, lista_id, voce_id).await?;
+        } else {
+            // Togliere la spunta la rende di nuovo disponibile al refresh
+            // (`aggiorna_lista` non tocca mai le voci comprate), ma se nel
+            // frattempo un altro pasto ha già prodotto una riga nuova per
+            // la differenza, senza un ricalcolo l'utente vede due righe
+            // frammentate finché non preme "Aggiorna lista" a mano. Qui si
+            // rifonde subito, senza aspettare.
+            if let Some(lista) = trova_per_id(pool, lista_id).await? {
+                aggiorna_lista(pool, &lista).await?;
+            }
         }
     }
+    Ok(())
+}
+
+/// Se un'altra voce `generato` già comprata condivide la stessa identità
+/// (alimento, prodotto, o nome se nessuno dei due è disponibile) e la
+/// stessa unità di `voce_id`, le fonde in una sola: somma le quantità nella
+/// voce appena spuntata ed elimina l'altra. Il trigger di congelamento
+/// impedisce di cambiare la quantità di una riga con `comprato = 1`, quindi
+/// si passa da un giro comprato→0→1 (solo il toggle stesso, mai gli altri
+/// campi, resta permesso mentre `comprato = 1`) dentro un'unica
+/// transazione, cosa che nessun percorso normale dell'utente può fare.
+type RigaFusioneGrezza = (Option<i64>, Option<i64>, String, f64, String);
+type CandidatoFusioneGrezzo = (i64, Option<i64>, Option<i64>, String, f64);
+
+async fn fondi_comprate_se_serve(
+    pool: &SqlitePool,
+    lista_id: i64,
+    voce_id: i64,
+) -> anyhow::Result<()> {
+    let riga: Option<RigaFusioneGrezza> = sqlx::query_as(
+        "SELECT alimento_id, prodotto_alimentare_id, descrizione, quantita, unita_simbolo \
+         FROM liste_spesa_voci WHERE id = ? AND origine = 'generato' AND comprato = 1",
+    )
+    .bind(voce_id)
+    .fetch_optional(pool)
+    .await
+    .context("Impossibile rileggere la voce appena comprata")?;
+    let Some((alimento_id, prodotto_id, nome, quantita, unita_simbolo)) = riga else {
+        return Ok(());
+    };
+    let identita = identita_voce(&VoceGenerata {
+        alimento_id,
+        prodotto_id,
+        nome: nome.clone(),
+        quantita,
+        unita_simbolo: unita_simbolo.clone(),
+    });
+
+    let candidate: Vec<CandidatoFusioneGrezzo> = sqlx::query_as(
+        "SELECT id, alimento_id, prodotto_alimentare_id, descrizione, quantita \
+         FROM liste_spesa_voci \
+         WHERE lista_id = ? AND origine = 'generato' AND comprato = 1 \
+           AND id <> ? AND unita_simbolo = ?",
+    )
+    .bind(lista_id)
+    .bind(voce_id)
+    .bind(&unita_simbolo)
+    .fetch_all(pool)
+    .await
+    .context("Impossibile cercare un'altra voce comprata da fondere")?;
+
+    let Some((altro_id, _, _, _, quantita_altro)) =
+        candidate.into_iter().find(|(_, aid, pid, nome_altro, _)| {
+            identita_voce(&VoceGenerata {
+                alimento_id: *aid,
+                prodotto_id: *pid,
+                nome: nome_altro.clone(),
+                quantita: 0.0,
+                unita_simbolo: unita_simbolo.clone(),
+            }) == identita
+        })
+    else {
+        return Ok(());
+    };
+
+    let totale = arrotonda(quantita + quantita_altro);
+    let mut tx = pool
+        .begin()
+        .await
+        .context("Impossibile aprire la transazione")?;
+    sqlx::query("UPDATE liste_spesa_voci SET comprato = 0, comprato_il = NULL WHERE id = ?")
+        .bind(voce_id)
+        .execute(&mut *tx)
+        .await
+        .context("Impossibile preparare la fusione")?;
+    sqlx::query(
+        "UPDATE liste_spesa_voci SET quantita = ?, \
+         aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?",
+    )
+    .bind(totale)
+    .bind(voce_id)
+    .execute(&mut *tx)
+    .await
+    .context("Impossibile sommare la quantità fusa")?;
+    sqlx::query(
+        "UPDATE liste_spesa_voci SET comprato = 1, \
+         comprato_il = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?",
+    )
+    .bind(voce_id)
+    .execute(&mut *tx)
+    .await
+    .context("Impossibile completare la fusione")?;
+    sqlx::query("DELETE FROM liste_spesa_voci WHERE id = ?")
+        .bind(altro_id)
+        .execute(&mut *tx)
+        .await
+        .context("Impossibile eliminare la voce fusa")?;
+    tx.commit()
+        .await
+        .context("Impossibile salvare la fusione")?;
     Ok(())
 }
 
@@ -1397,12 +1643,11 @@ async fn carica_mappa_unita(pool: &SqlitePool) -> anyhow::Result<HashMap<String,
         .collect())
 }
 
-/// Calcola il fresco dell'aggregazione (planner + aggiunte dal catalogo,
-/// meno quanto già coperto da voci comprate) senza scrivere nulla --
-/// condiviso da `aggiorna_lista` (che lo scrive per davvero) e da
-/// `serve_aggiornamento` (che lo confronta soltanto con quanto già in
-/// lista, per decidere se mostrare "🔄 Aggiorna lista").
-async fn calcola_fresche(
+/// Il fresco dell'aggregazione (planner + aggiunte dal catalogo), *prima*
+/// di sottrarre quanto già comprato -- condiviso da `calcola_fresche` (che
+/// sottrae) e da `eccessi_comprati` (che confronta il fabbisogno grezzo con
+/// quanto è già segnato comprato, per trovare un eccesso).
+async fn fresche_grezze(
     pool: &SqlitePool,
     lista: &ListaSpesa,
 ) -> anyhow::Result<Vec<VoceGenerata>> {
@@ -1413,12 +1658,77 @@ async fn calcola_fresche(
     // nel suo bucket di identità separato (`identita_riga`).
     righe.extend(righe_da_aggiunte_catalogo(pool, lista.id).await?);
     let mappa_unita = carica_mappa_unita(pool).await?;
-    let fresche = aggrega_ingredienti(&righe, |simbolo| mappa_unita.get(simbolo).copied());
+    Ok(aggrega_ingredienti(&righe, |simbolo| {
+        mappa_unita.get(simbolo).copied()
+    }))
+}
+
+/// Calcola il fresco dell'aggregazione, meno quanto già coperto da voci
+/// comprate, senza scrivere nulla -- condiviso da `aggiorna_lista` (che lo
+/// scrive per davvero) e da `serve_aggiornamento` (che lo confronta
+/// soltanto con quanto già in lista, per decidere se mostrare "🔄 Aggiorna
+/// lista").
+async fn calcola_fresche(
+    pool: &SqlitePool,
+    lista: &ListaSpesa,
+) -> anyhow::Result<Vec<VoceGenerata>> {
+    let fresche = fresche_grezze(pool, lista).await?;
     // Le voci già comprate restano intoccate (mai cancellate da chi scrive
     // questo risultato): si sottrae quello che coprono già dal fresco, così
     // non si duplica mai una quantità già segnata come acquistata.
     let gia_comprato = voci_generate_comprate(pool, lista.id).await?;
     Ok(sottrai_gia_comprato(fresche, &gia_comprato))
+}
+
+/// Una voce già segnata comprata la cui quantità supera ormai il fabbisogno
+/// reale (un pasto rimosso dal planner, una ricetta ridotta...): non viene
+/// mai corretta da sola (una voce comprata resta sempre congelata), ma
+/// viene segnalata così l'utente sa di aver già preso più del necessario.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Eccesso {
+    pub nome: String,
+    pub unita_simbolo: String,
+    pub quantita_eccesso: f64,
+}
+
+/// Confronta il fabbisogno grezzo (prima di sottrarre il comprato) con
+/// quanto è già segnato comprato: se per un'identità il comprato supera il
+/// fabbisogno reale, quella è la quantità in eccesso. Dominio puro,
+/// testabile senza database.
+pub fn calcola_eccessi(
+    fresche_grezze: &[VoceGenerata],
+    gia_comprato: &[VoceGenerata],
+) -> Vec<Eccesso> {
+    gia_comprato
+        .iter()
+        .filter_map(|comprata| {
+            let identita = identita_voce(comprata);
+            let richiesto: f64 = fresche_grezze
+                .iter()
+                .filter(|voce| {
+                    identita_voce(voce) == identita && voce.unita_simbolo == comprata.unita_simbolo
+                })
+                .map(|voce| voce.quantita)
+                .sum();
+            let eccesso = arrotonda(comprata.quantita - richiesto);
+            (eccesso > 0.0).then_some(Eccesso {
+                nome: comprata.nome.clone(),
+                unita_simbolo: comprata.unita_simbolo.clone(),
+                quantita_eccesso: eccesso,
+            })
+        })
+        .collect()
+}
+
+/// Gli eccessi di questa lista, calcolati sullo stato reale del database --
+/// vedi `calcola_eccessi` per la logica.
+pub async fn eccessi_comprati(
+    pool: &SqlitePool,
+    lista: &ListaSpesa,
+) -> anyhow::Result<Vec<Eccesso>> {
+    let fresche = fresche_grezze(pool, lista).await?;
+    let gia_comprato = voci_generate_comprate(pool, lista.id).await?;
+    Ok(calcola_eccessi(&fresche, &gia_comprato))
 }
 
 /// Vero se un "🔄 Aggiorna lista" cambierebbe davvero il risultato --
@@ -1454,12 +1764,22 @@ pub async fn aggiorna_lista(pool: &SqlitePool, lista: &ListaSpesa) -> anyhow::Re
     .execute(&mut *tx)
     .await
     .context("Impossibile ripulire le voci generate")?;
-    for voce in &voci {
+    // Le voci rigenerate vanno in coda all'ordine esistente (voci comprate
+    // o manuali, che il refresh non tocca) -- non si inseriscono in mezzo a
+    // un ordine che l'utente ha già sistemato a mano con `sposta_voce`.
+    let ordinamento_base: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(MAX(ordinamento), 0) FROM liste_spesa_voci WHERE lista_id = ?",
+    )
+    .bind(lista.id)
+    .fetch_one(&mut *tx)
+    .await
+    .context("Impossibile leggere l'ordinamento massimo")?;
+    for (indice, voce) in voci.iter().enumerate() {
         sqlx::query(
             "INSERT INTO liste_spesa_voci \
              (lista_id, origine, alimento_id, prodotto_alimentare_id, descrizione, \
-              quantita, unita_simbolo) \
-             VALUES (?, 'generato', ?, ?, ?, ?, ?)",
+              quantita, unita_simbolo, ordinamento) \
+             VALUES (?, 'generato', ?, ?, ?, ?, ?, ?)",
         )
         .bind(lista.id)
         .bind(voce.alimento_id)
@@ -1467,6 +1787,7 @@ pub async fn aggiorna_lista(pool: &SqlitePool, lista: &ListaSpesa) -> anyhow::Re
         .bind(&voce.nome)
         .bind(voce.quantita)
         .bind(&voce.unita_simbolo)
+        .bind(ordinamento_base + indice as i64 + 1)
         .execute(&mut *tx)
         .await
         .context("Impossibile inserire una voce generata")?;
@@ -2073,6 +2394,217 @@ mod db_tests {
             let voci = carica_voci(&pool, lista.id).await.expect("voci");
             assert_eq!(voci.len(), 1);
             assert_eq!(voci[0].comprato, 0);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn spuntare_una_voce_residua_la_fonde_con_quella_gia_comprata() {
+        // Secondo scenario reale segnalato da Alessio: dopo che un secondo
+        // pasto crea una riga residua (150 g) accanto a quella già
+        // comprata (200 g), spuntare anche la residua non deve lasciare
+        // due righe "Farina" comprate separate per sempre -- si fondono in
+        // una sola da 350 g.
+        let pool = test_pool().await;
+        let user_id = create_user(&pool, "Alessio").await;
+        let space_id = create_space(&pool, "Casa").await;
+        add_membership(&pool, space_id, user_id).await;
+
+        crate::identity::with_actor(actor(user_id, space_id, "Alessio"), async {
+            let lista = trova_o_crea_lista_attiva(&pool).await.expect("lista");
+            cambia_intervallo(&pool, lista.id, "2026-09-01", "2026-09-07")
+                .await
+                .expect("intervallo");
+            let lista = trova_lista_attiva(&pool).await.unwrap().unwrap();
+            let planner_id =
+                create_planner(&pool, user_id, space_id, "2026-09-01", "2026-09-07").await;
+            create_meal_with_ingredient(
+                &pool,
+                planner_id,
+                "2026-09-02",
+                "pianificato",
+                None,
+                None,
+                Some(100),
+                "Farina",
+                "g",
+                Some(200.0),
+            )
+            .await;
+            aggiorna_lista(&pool, &lista).await.expect("primo refresh");
+            let voci = carica_voci(&pool, lista.id).await.expect("voci");
+            let comprata_id = voci[0].id;
+            imposta_comprato(&pool, comprata_id, true)
+                .await
+                .expect("segna comprata");
+
+            create_meal_with_ingredient(
+                &pool,
+                planner_id,
+                "2026-09-05",
+                "pianificato",
+                None,
+                None,
+                Some(100),
+                "Farina",
+                "g",
+                Some(150.0),
+            )
+            .await;
+            aggiorna_lista(&pool, &lista)
+                .await
+                .expect("secondo refresh, crea la riga residua");
+            let voci = carica_voci(&pool, lista.id)
+                .await
+                .expect("voci frammentate");
+            assert_eq!(voci.len(), 2);
+            let residua_id = voci.iter().find(|v| v.id != comprata_id).unwrap().id;
+
+            toggle_comprato(&pool, residua_id)
+                .await
+                .expect("spunta la residua e fonde");
+
+            let voci = carica_voci(&pool, lista.id).await.expect("voci fuse");
+            assert_eq!(voci.len(), 1, "le due righe comprate tornano una sola");
+            assert_eq!(voci[0].quantita, Some(350.0));
+            assert_eq!(voci[0].comprato, 1);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn voci_manuali_comprate_non_si_fondono_mai() {
+        let pool = test_pool().await;
+        let user_id = create_user(&pool, "Alessio").await;
+        let space_id = create_space(&pool, "Casa").await;
+        add_membership(&pool, space_id, user_id).await;
+
+        crate::identity::with_actor(actor(user_id, space_id, "Alessio"), async {
+            let lista = trova_o_crea_lista_attiva(&pool).await.expect("lista");
+            let prima_id = aggiungi_voce_manuale(&pool, lista.id, "Sale", Some(1.0), Some("kg"))
+                .await
+                .expect("prima voce manuale");
+            let seconda_id = aggiungi_voce_manuale(&pool, lista.id, "Sale", Some(1.0), Some("kg"))
+                .await
+                .expect("seconda voce manuale");
+
+            imposta_comprato(&pool, prima_id, true)
+                .await
+                .expect("segna comprata");
+            toggle_comprato(&pool, seconda_id)
+                .await
+                .expect("spunta la seconda, nessuna fusione");
+
+            let voci = carica_voci(&pool, lista.id).await.expect("voci");
+            assert_eq!(voci.len(), 2, "due voci manuali restano sempre separate");
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn sposta_voce_scambia_con_la_vicina_e_ignora_lo_stato_comprato() {
+        let pool = test_pool().await;
+        let user_id = create_user(&pool, "Alessio").await;
+        let space_id = create_space(&pool, "Casa").await;
+        add_membership(&pool, space_id, user_id).await;
+
+        crate::identity::with_actor(actor(user_id, space_id, "Alessio"), async {
+            let lista = trova_o_crea_lista_attiva(&pool).await.expect("lista");
+            let primo = aggiungi_voce_manuale(&pool, lista.id, "Uno", None, None)
+                .await
+                .expect("uno");
+            let secondo = aggiungi_voce_manuale(&pool, lista.id, "Due", None, None)
+                .await
+                .expect("due");
+            let terzo = aggiungi_voce_manuale(&pool, lista.id, "Tre", None, None)
+                .await
+                .expect("tre");
+            // Spuntare "Uno" non deve più farlo saltare in fondo (deciso
+            // con Alessio il 9 settembre 2026).
+            imposta_comprato(&pool, primo, true)
+                .await
+                .expect("segna comprato");
+
+            let voci = carica_voci(&pool, lista.id).await.expect("ordine iniziale");
+            assert_eq!(
+                voci.iter().map(|v| v.id).collect::<Vec<_>>(),
+                vec![primo, secondo, terzo],
+                "l'ordine resta quello di inserimento, comprato o no"
+            );
+
+            sposta_voce(&pool, lista.id, secondo, Direzione::Su)
+                .await
+                .expect("sposta su");
+            let voci = carica_voci(&pool, lista.id)
+                .await
+                .expect("dopo lo spostamento");
+            assert_eq!(
+                voci.iter().map(|v| v.id).collect::<Vec<_>>(),
+                vec![secondo, primo, terzo]
+            );
+
+            // La prima voce non può salire oltre la cima: nessun errore, nessun effetto.
+            sposta_voce(&pool, lista.id, secondo, Direzione::Su)
+                .await
+                .expect("già in cima, nessun effetto");
+            let voci = carica_voci(&pool, lista.id).await.expect("invariata");
+            assert_eq!(
+                voci.iter().map(|v| v.id).collect::<Vec<_>>(),
+                vec![secondo, primo, terzo]
+            );
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn eccessi_comprati_segnala_un_pasto_tolto_dal_planner() {
+        let pool = test_pool().await;
+        let user_id = create_user(&pool, "Alessio").await;
+        let space_id = create_space(&pool, "Casa").await;
+        add_membership(&pool, space_id, user_id).await;
+
+        crate::identity::with_actor(actor(user_id, space_id, "Alessio"), async {
+            let lista = trova_o_crea_lista_attiva(&pool).await.expect("lista");
+            cambia_intervallo(&pool, lista.id, "2026-09-01", "2026-09-07")
+                .await
+                .expect("intervallo");
+            let lista = trova_lista_attiva(&pool).await.unwrap().unwrap();
+            let planner_id =
+                create_planner(&pool, user_id, space_id, "2026-09-01", "2026-09-07").await;
+            let pasto_id = create_meal_with_ingredient(
+                &pool,
+                planner_id,
+                "2026-09-02",
+                "pianificato",
+                None,
+                None,
+                Some(100),
+                "Farina",
+                "g",
+                Some(200.0),
+            )
+            .await;
+            aggiorna_lista(&pool, &lista).await.expect("refresh");
+            let voci = carica_voci(&pool, lista.id).await.expect("voci");
+            imposta_comprato(&pool, voci[0].id, true)
+                .await
+                .expect("segna comprata");
+
+            let eccessi = eccessi_comprati(&pool, &lista).await.expect("eccessi");
+            assert!(eccessi.is_empty(), "il fabbisogno copre ancora il comprato");
+
+            // Il pasto viene tolto del tutto dal planner (il pomodoro
+            // usato dalla ricetta non serve più).
+            sqlx::query("DELETE FROM planner_pasti WHERE id = ?")
+                .bind(pasto_id)
+                .execute(&pool)
+                .await
+                .expect("rimuovi il pasto");
+
+            let eccessi = eccessi_comprati(&pool, &lista).await.expect("eccessi");
+            assert_eq!(eccessi.len(), 1);
+            assert_eq!(eccessi[0].nome, "Farina");
+            assert_eq!(eccessi[0].quantita_eccesso, 200.0);
         })
         .await;
     }
@@ -2867,6 +3399,26 @@ pub async fn handle_callback(
         show_lista(bot, chat_id, pool, None).await?;
         return Ok(true);
     }
+    if data == "lista_spesa:reorder" {
+        show_lista_riordina(bot, chat_id, pool, None).await?;
+        return Ok(true);
+    }
+    if let Some(raw_id) = data.strip_prefix("lista_spesa:reorder:up:") {
+        let Some(voce_id) = raw_id.parse::<i64>().ok().filter(|value| *value > 0) else {
+            invalid(bot, chat_id).await?;
+            return Ok(true);
+        };
+        muovi_e_mostra_riordino(bot, chat_id, pool, voce_id, Direzione::Su).await?;
+        return Ok(true);
+    }
+    if let Some(raw_id) = data.strip_prefix("lista_spesa:reorder:down:") {
+        let Some(voce_id) = raw_id.parse::<i64>().ok().filter(|value| *value > 0) else {
+            invalid(bot, chat_id).await?;
+            return Ok(true);
+        };
+        muovi_e_mostra_riordino(bot, chat_id, pool, voce_id, Direzione::Giu).await?;
+        return Ok(true);
+    }
     if let Some(raw_id) = data.strip_prefix("lista_spesa:toggle:") {
         let Some(voce_id) = raw_id.parse::<i64>().ok().filter(|value| *value > 0) else {
             invalid(bot, chat_id).await?;
@@ -3174,6 +3726,111 @@ async fn mostra_calendario_fine(
     Ok(())
 }
 
+/// Riga di una voce in modalità riordino: freccia su (assente sulla prima
+/// voce), l'etichetta (non premibile, `lista_spesa:noop`), freccia giù
+/// (assente sull'ultima).
+fn riordina_row(
+    voce: &VoceListaSpesa,
+    posizione: usize,
+    totale: usize,
+) -> Vec<InlineKeyboardButton> {
+    let mut riga = Vec::new();
+    if posizione > 0 {
+        riga.push(button("⬆️", format!("lista_spesa:reorder:up:{}", voce.id)));
+    }
+    riga.push(button(
+        liste::tronca(&voce.descrizione, 30),
+        "lista_spesa:noop",
+    ));
+    if posizione + 1 < totale {
+        riga.push(button(
+            "⬇️",
+            format!("lista_spesa:reorder:down:{}", voce.id),
+        ));
+    }
+    riga
+}
+
+/// Modalità dedicata per riordinare la lista a piacere (deciso con Alessio
+/// il 9 settembre 2026, dopo aver visto dal vivo che spuntare una voce la
+/// faceva saltare in fondo): fuori da questa modalità l'ordine è ora
+/// sempre lo stesso, indipendente da `comprato` (`carica_voci`); qui ogni
+/// voce si sposta su o giù con `sposta_voce`, indipendentemente dal fatto
+/// che sia comprata o meno.
+async fn show_lista_riordina(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    notice: Option<&str>,
+) -> ResponseResult<()> {
+    let lista = match trova_o_crea_lista_attiva(pool).await {
+        Ok(lista) => lista,
+        Err(errore) => {
+            tracing::warn!(?errore, "Impossibile aprire la lista della spesa");
+            bot.send_message(chat_id, "⚠️ Non riesco ad aprire la lista della spesa.")
+                .reply_markup(nav_markup("food:menu"))
+                .await?;
+            return Ok(());
+        }
+    };
+    let voci = carica_voci(pool, lista.id).await.unwrap_or_default();
+
+    let mut testo = String::new();
+    if let Some(notice) = notice {
+        testo.push_str(notice);
+        testo.push_str("\n\n");
+    }
+    testo.push_str("↕️ Riordina lista\n\nSposta le voci su o giù con le frecce.");
+
+    let totale = voci.len();
+    let mut rows: Vec<Vec<InlineKeyboardButton>> = voci
+        .iter()
+        .enumerate()
+        .map(|(indice, voce)| riordina_row(voce, indice, totale))
+        .collect();
+    rows.push(vec![button("✅ Fine riordino", "lista_spesa:menu")]);
+
+    bot.send_message(chat_id, testo)
+        .reply_markup(InlineKeyboardMarkup::new(rows))
+        .await?;
+    Ok(())
+}
+
+async fn muovi_e_mostra_riordino(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    voce_id: i64,
+    direzione: Direzione,
+) -> ResponseResult<()> {
+    let lista = match trova_o_crea_lista_attiva(pool).await {
+        Ok(lista) => lista,
+        Err(errore) => {
+            tracing::warn!(?errore, "Impossibile aprire la lista della spesa");
+            show_lista_riordina(
+                bot,
+                chat_id,
+                pool,
+                Some("⚠️ Non riesco a spostare la voce."),
+            )
+            .await?;
+            return Ok(());
+        }
+    };
+    if let Err(errore) = sposta_voce(pool, lista.id, voce_id, direzione).await {
+        tracing::warn!(?errore, voce_id, "Spostamento voce lista spesa fallito");
+        show_lista_riordina(
+            bot,
+            chat_id,
+            pool,
+            Some("⚠️ Non riesco a spostare la voce."),
+        )
+        .await?;
+        return Ok(());
+    }
+    show_lista_riordina(bot, chat_id, pool, None).await
+}
+
 /// Mostra la lista intera, senza paginazione (eccezione esplicita a C6,
 /// deciso con Alessio dopo un collaudo dal vivo): a differenza di ogni
 /// altra lista del bot, qui l'utente deve vedere tutte le voci insieme per
@@ -3208,6 +3865,17 @@ async fn show_lista(
             tracing::warn!(?errore, "Verifica aggiornamento lista spesa fallita");
             true
         });
+    // Una voce già comprata resta sempre congelata (mai corretta da sola),
+    // ma se il fabbisogno reale è sceso sotto quanto già segnato -- un
+    // pasto tolto dal planner, una ricetta ridotta -- l'utente deve saperlo
+    // (deciso con Alessio il 9 settembre 2026): ogni voce coinvolta lo
+    // mostra sul proprio pulsante.
+    let eccessi = eccessi_comprati(pool, &lista)
+        .await
+        .unwrap_or_else(|errore| {
+            tracing::warn!(?errore, "Verifica eccessi lista spesa fallita");
+            Vec::new()
+        });
 
     let tutorial = tutorial_da_mostrare(pool).await;
 
@@ -3238,6 +3906,9 @@ async fn show_lista(
     } else {
         testo.push_str(&format!("\n{comprate}/{totale} comprate\n"));
     }
+    if !eccessi.is_empty() {
+        testo.push_str("\n⚠️ Hai già segnato più di quanto serve ora (vedi i pulsanti sotto).\n");
+    }
 
     let mut rows: Vec<Vec<InlineKeyboardButton>> = Vec::new();
     for voce in &voci {
@@ -3246,8 +3917,24 @@ async fn show_lista(
             (Some(valore), Some(unita)) => format!(" · {} {unita}", formatta_quantita(valore)),
             _ => String::new(),
         };
+        let eccesso = eccessi
+            .iter()
+            .find(|eccesso| {
+                Some(&eccesso.unita_simbolo) == voce.unita_simbolo.as_ref()
+                    && eccesso.nome.trim().to_lowercase() == voce.descrizione.trim().to_lowercase()
+            })
+            .map(|eccesso| {
+                format!(
+                    " · ⚠️ {} in eccesso",
+                    formatta_quantita(eccesso.quantita_eccesso)
+                )
+            })
+            .unwrap_or_default();
         rows.push(vec![button(
-            format!("{icona} {}{quantita}", liste::tronca(&voce.descrizione, 40)),
+            format!(
+                "{icona} {}{quantita}{eccesso}",
+                liste::tronca(&voce.descrizione, 40)
+            ),
             format!("lista_spesa:toggle:{}", voce.id),
         )]);
     }
@@ -3255,6 +3942,9 @@ async fn show_lista(
         rows.push(vec![button("🔄 Aggiorna lista", "lista_spesa:refresh")]);
     }
     rows.push(vec![button("➕ Aggiungi voce manuale", "lista_spesa:add")]);
+    if voci.len() > 1 {
+        rows.push(vec![button("↕️ Riordina lista", "lista_spesa:reorder")]);
+    }
     rows.push(vec![button(
         "🗓️ Cambia intervallo",
         "lista_spesa:range:start",

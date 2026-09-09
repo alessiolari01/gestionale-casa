@@ -1028,23 +1028,76 @@ locale.
 **Non ancora ricollaudate dal vivo**: queste tre correzioni sono scritte
 e testate in locale, non ancora provate su Telegram.
 
+**Secondo giro di collaudo dello stesso giorno, dopo che le tre correzioni
+sopra erano già confermate dal vivo**: Alessio ha trovato tre punti in più.
+
+1. **La fusione mancava nel verso opposto**: spuntare la riga residua
+   (invece di deselezionare quella già comprata) lasciava due righe
+   comprate separate per sempre, perché `aggiorna_lista` non tocca mai le
+   voci comprate. Nuova `fondi_comprate_se_serve`, richiamata da
+   `toggle_comprato` quando si spunta (non solo quando si deseleziona):
+   cerca un'altra voce `generato` già comprata con la stessa identità e
+   unità e le fonde, sommando la quantità nella voce appena spuntata ed
+   eliminando l'altra. Il trigger di congelamento non permette di
+   cambiare `quantita` mentre `comprato = 1`: la funzione passa da
+   `comprato = 0` a `1` due volte con l'aggiornamento della quantità in
+   mezzo, dentro un'unica transazione — l'unico modo per farlo restando
+   dentro la regola (il toggle stesso resta sempre permesso).
+2. **Segnalare l'eccesso**: se il fabbisogno reale scende sotto quanto già
+   comprato (un pasto tolto dal planner, una ricetta ridotta), prima non
+   c'era modo di saperlo — la voce comprata resta sempre congelata, giusto
+   così, ma l'utente deve poterlo sapere. Nuova `calcola_eccessi` (dominio
+   puro) confronta il fabbisogno grezzo — *prima* di sottrarre il
+   comprato, funzione condivisa `fresche_grezze` estratta da
+   `calcola_fresche` — con quanto è già segnato comprato; la differenza,
+   se positiva, è l'eccesso. Mostrato su ogni voce coinvolta (`· ⚠️ 150 g
+   in eccesso`) più un avviso generale in testa alla schermata — pura
+   informazione, nessuna correzione automatica della voce comprata.
+3. **Ordine indipendente da comprato, e riordino manuale**: prima l'ordine
+   dipendeva da `comprato ASC`, quindi spuntare una voce la faceva saltare
+   in fondo alla lista — non voluto. Nuova colonna `ordinamento` su
+   `liste_spesa_voci` (migration
+   `migrations/20260909180000_lista_spesa_ordinamento.sql`, additiva, le
+   righe esistenti mantengono l'ordine che avevano per `id`): `carica_voci`
+   ordina per `ordinamento ASC, id ASC`, indipendente da `comprato`. Una
+   voce nuova prende sempre il prossimo `ordinamento` disponibile, in coda
+   — mai in mezzo a un ordine sistemato a mano. Nuova modalità dedicata
+   "↕️ Riordina lista" (visibile solo con più di una voce): ogni voce
+   mostra `⬆️`/`⬇️` invece del checkbox, `sposta_voce` scambia
+   `ordinamento` con la voce vicina in quella direzione.
+
+7 nuovi test in `lista_spesa.rs` (fusione al check, isolamento delle voci
+manuali dalla fusione, spostamento su/giù, tre sul dominio puro degli
+eccessi, un eccesso rilevato per davvero dopo aver tolto un pasto dal
+planner), per un totale di **348 (341 prima)**, migration **48 (47
+prima)**. Pipeline `fmt`, `check --locked`,
+`clippy --all-targets --locked -- -D warnings`, `test --locked` verde in
+locale.
+
+**Non ancora ricollaudate dal vivo**: anche queste tre correzioni sono
+scritte e testate in locale, non ancora provate su Telegram.
+
 ## 3. Stato tecnico verificato
 
-- **47 migration** nel repository, tutte **applicate** al database reale
-  dell'S9 (`migrations/20260908150000_lista_spesa.sql` e
-  `migrations/20260908160000_lista_spesa_aggiunte_catalogo.sql`, il 9
-  settembre 2026, verificato leggendo `applied_migrations=47` nel log di
-  avvio del bot dopo il deploy — non dedotto);
+- **48 migration** nel repository. Le **47 precedenti** sono **applicate**
+  al database reale dell'S9, verificato leggendo `applied_migrations=47`
+  nel log di avvio del bot dopo il deploy del secondo giro di correzioni (9
+  settembre 2026) — non dedotto. L'ultima
+  (`migrations/20260909180000_lista_spesa_ordinamento.sql`, il riordino
+  manuale) non è ancora stata applicata a un database reale al momento di
+  scrivere questo paragrafo — scritta insieme al terzo giro di correzioni
+  della lista della spesa, non ancora deployato;
 - pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa, punto
   1 della sezione 6): `fmt`, `check --locked`,
   `clippy --all-targets --locked -- -D warnings`, `test --locked` —
-  **341 test** (338 prima delle tre correzioni del 9 settembre sulla lista
-  della spesa — refresh automatico alla deselezione, "Aggiorna lista"
-  condizionale, nessun limite di pagina —, 328 prima dei due feedback
-  sulla lista della spesa, 303 prima della lista della spesa dell'8
-  settembre, 300 prima dell'audit annulla, 297 prima dell'allegato video,
-  289 prima del badge "🆕", 280 prima del sotto-step 5c, 279 prima del
-  sotto-step 5a, 270 prima del sotto-step 3/5 della distribuzione, 248
+  **348 test** (341 prima delle tre correzioni sulla fusione al check/
+  eccesso/riordino, 338 prima delle prime tre correzioni del 9 settembre
+  sulla lista della spesa — refresh automatico alla deselezione, "Aggiorna
+  lista" condizionale, nessun limite di pagina —, 328 prima dei due
+  feedback sulla lista della spesa, 303 prima della lista della spesa
+  dell'8 settembre, 300 prima dell'audit annulla, 297 prima dell'allegato
+  video, 289 prima del badge "🆕", 280 prima del sotto-step 5c, 279 prima
+  del sotto-step 5a, 270 prima del sotto-step 3/5 della distribuzione, 248
   prima del 2 settembre: e' il numero da confrontare dopo ogni
   aggiornamento dell'S9);
 - CI su GitHub Actions **verde** dalla run #42, la prima dello Step 7.
