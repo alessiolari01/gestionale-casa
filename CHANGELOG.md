@@ -114,6 +114,14 @@ tutorial alla prima vera visita.
 **Non collaudato dal vivo**: scritto in questo worktree isolato, senza
 accesso a Telegram né al database reale -- vedi `STATO.md`.
 
+<!-- CHANGELOG_LISTA_SPESA_ICONA_CATALOGO_20260909 -->
+# 09/09/2026 — Lista della spesa: tolta l'icona duplicata nella ricerca del catalogo
+
+Bug trovato da Alessio collaudando dal vivo "🔎 Cerca nel catalogo":
+ogni risultato mostrava un'icona 🥕 in più, perché il nome
+dell'alimento porta già la propria icona di categoria incorporata nel
+testo. Corretto usando il nome così com'è.
+
 <!-- CHANGELOG_MULTIPIATTAFORMA_20260908 -->
 # 08/09/2026 — Deciso: il bot viene finito prima della web app
 

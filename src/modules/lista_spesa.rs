@@ -1013,7 +1013,12 @@ impl RisultatoCatalogo {
 
     fn etichetta(&self) -> String {
         match self {
-            Self::Alimento { nome, .. } => format!("🥕 {nome}"),
+            // Il nome dell'alimento porta già la sua icona di categoria
+            // incorporata (es. "🌾 Pasta", "🏷️ Pasta sfoglia" -- vedi
+            // `migrations/20260825014500_catalogo_alimenti_base.sql"):
+            // aggiungerne una fissa qui sopra ("🥕") duplicava l'icona su
+            // ogni risultato, notato da Alessio collaudando dal vivo.
+            Self::Alimento { nome, .. } => nome.clone(),
             Self::Prodotto {
                 marca,
                 nome_commerciale,

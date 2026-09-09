@@ -978,6 +978,17 @@ sono quelli che l'hanno trovato.
 un worktree isolato, senza accesso a Telegram né al database reale
 dell'S9. Nessuna migration applicata a un database reale.
 
+**Collaudo dal vivo iniziato il 9 settembre 2026, bug reale trovato**:
+Alessio ha aperto "🔎 Cerca nel catalogo" e visto ogni risultato con
+un'icona 🥕 duplicata (es. "🥕🌾 Pasta", "🥕🏷️ Pasta sfoglia").
+Causa: `RisultatoCatalogo::etichetta()` anteponeva un `🥕` fisso a ogni
+alimento, ma `alimenti.nome` porta già la propria icona di categoria
+incorporata nel testo (`migrations/20260825014500_catalogo_alimenti_base.sql`,
+es. `'🌾 Pasta'`, `'🏷️ Pasta sfoglia'`) — l'icona fissa la duplicava
+sempre. Corretto usando il nome così com'è, senza prefisso aggiuntivo;
+l'icona `🏷️` di un prodotto commerciale specifico (marca +
+nome_commerciale, senza icona di categoria propria) non è toccata.
+
 ## 3. Stato tecnico verificato
 
 - **47 migration** nel repository (`migrations/20260908150000_lista_spesa.sql`
