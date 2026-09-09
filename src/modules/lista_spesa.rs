@@ -3726,29 +3726,33 @@ async fn mostra_calendario_fine(
     Ok(())
 }
 
-/// Riga di una voce in modalità riordino: freccia su (assente sulla prima
-/// voce), l'etichetta (non premibile, `lista_spesa:noop`), freccia giù
-/// (assente sull'ultima).
+/// Riga di una voce in modalità riordino: sempre tre pulsanti nello stesso
+/// ordine (freccia su, etichetta, freccia giù), mai due o uno -- prima le
+/// frecce assenti alle estremità spostavano l'etichetta di colonna riga per
+/// riga, un disallineamento visto da Alessio dal vivo. Alle estremità la
+/// freccia resta premibile ma non fa nulla (`lista_spesa:noop`), stesso
+/// trattamento già riservato al contatore di pagina non premibile altrove
+/// nel bot.
 fn riordina_row(
     voce: &VoceListaSpesa,
     posizione: usize,
     totale: usize,
 ) -> Vec<InlineKeyboardButton> {
-    let mut riga = Vec::new();
-    if posizione > 0 {
-        riga.push(button("⬆️", format!("lista_spesa:reorder:up:{}", voce.id)));
-    }
-    riga.push(button(
-        liste::tronca(&voce.descrizione, 30),
-        "lista_spesa:noop",
-    ));
-    if posizione + 1 < totale {
-        riga.push(button(
-            "⬇️",
-            format!("lista_spesa:reorder:down:{}", voce.id),
-        ));
-    }
-    riga
+    let callback_su = if posizione > 0 {
+        format!("lista_spesa:reorder:up:{}", voce.id)
+    } else {
+        "lista_spesa:noop".to_string()
+    };
+    let callback_giu = if posizione + 1 < totale {
+        format!("lista_spesa:reorder:down:{}", voce.id)
+    } else {
+        "lista_spesa:noop".to_string()
+    };
+    vec![
+        button("⬆️", callback_su),
+        button(liste::tronca(&voce.descrizione, 30), "lista_spesa:noop"),
+        button("⬇️", callback_giu),
+    ]
 }
 
 /// Modalità dedicata per riordinare la lista a piacere (deciso con Alessio
@@ -3924,8 +3928,12 @@ async fn show_lista(
                     && eccesso.nome.trim().to_lowercase() == voce.descrizione.trim().to_lowercase()
             })
             .map(|eccesso| {
+                // A capo, non " · ": su una riga sola Telegram tronca il
+                // testo con "…" invece di andare a capo da solo (visto da
+                // Alessio dal vivo con "125 in ecc…") -- un "\n" fa
+                // occupare al pulsante una riga in più invece di tagliare.
                 format!(
-                    " · ⚠️ {} in eccesso",
+                    "\n⚠️ {} in eccesso",
                     formatta_quantita(eccesso.quantita_eccesso)
                 )
             })

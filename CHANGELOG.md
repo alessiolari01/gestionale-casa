@@ -114,6 +114,26 @@ tutorial alla prima vera visita.
 **Non collaudato dal vivo**: scritto in questo worktree isolato, senza
 accesso a Telegram né al database reale -- vedi `STATO.md`.
 
+<!-- CHANGELOG_LISTA_SPESA_ESTETICA_RIORDINO_ECCESSO_20260909 -->
+# 09/09/2026 — Lista della spesa: due correzioni estetiche su eccesso e riordino
+
+Trovate da Alessio collaudando dal vivo l'eccesso segnalato e il riordino
+manuale (appena deployati), entrambi confermati funzionanti nella
+sostanza.
+
+L'etichetta dell'eccesso veniva troncata da Telegram con "…" su un nome
+lungo: corretto anteponendo un "a capo" invece di " · ", così il pulsante
+occupa una riga in più invece di tagliare il testo.
+
+La schermata "↕️ Riordina lista" disallineava le etichette perché la
+freccia assente alle estremità (nessun ⬆️ sulla prima voce, nessun ⬇️
+sull'ultima) spostava l'etichetta di colonna riga per riga. Corretto
+rendendo la riga sempre di tre pulsanti nello stesso ordine: alle
+estremità la freccia resta al suo posto ma non fa nulla.
+
+Nessun nuovo test (solo formattazione/struttura della tastiera), 348
+totali invariati.
+
 <!-- CHANGELOG_LISTA_SPESA_FUSIONE_ECCESSO_RIORDINO_20260909 -->
 # 09/09/2026 — Lista della spesa: fusione al check, eccesso segnalato, riordino manuale
 

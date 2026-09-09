@@ -1074,8 +1074,29 @@ prima)**. Pipeline `fmt`, `check --locked`,
 `clippy --all-targets --locked -- -D warnings`, `test --locked` verde in
 locale.
 
-**Non ancora ricollaudate dal vivo**: anche queste tre correzioni sono
-scritte e testate in locale, non ancora provate su Telegram.
+**Collaudate dal vivo lo stesso giorno**: eccesso segnalato e riordino
+manuale funzionano (Alessio ha visto l'avviso di eccesso su più voci dopo
+aver ridotto l'intervallo della lista, e ha spostato voci con "↕️ Riordina
+lista"). Due difetti estetici trovati dal vivo, non a tavolino:
+
+1. **L'etichetta dell'eccesso veniva troncata**: su una voce con nome
+   lungo, Telegram tagliava il testo con "…" invece di andare a capo da
+   solo (visto con "125 in ecc…"). Corretto anteponendo un `\n` invece di
+   " · " prima di "⚠️ ... in eccesso": il pulsante ora occupa una riga in
+   più invece di tagliare il testo.
+2. **La schermata di riordino disallineava le etichette**: `riordina_row`
+   ometteva la freccia assente alle estremità (nessun `⬆️` sulla prima
+   voce, nessun `⬇️` sull'ultima), quindi l'etichetta cambiava colonna riga
+   per riga a seconda di quali frecce c'erano. Corretto rendendo la riga
+   **sempre** di tre pulsanti nello stesso ordine: alle estremità la
+   freccia resta al suo posto ma diventa un no-op (`lista_spesa:noop`),
+   stesso trattamento già riservato al contatore di pagina non premibile
+   altrove nel bot.
+
+Nessun nuovo test (modifiche solo di formattazione/struttura della
+tastiera, non di logica): **348 test** invariati. Pipeline `fmt`,
+`check --locked`, `clippy --all-targets --locked -- -D warnings`,
+`test --locked` verde in locale.
 
 ## 3. Stato tecnico verificato
 

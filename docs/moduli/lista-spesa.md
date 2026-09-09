@@ -171,11 +171,14 @@ condivisa con `calcola_fresche`) con quanto è già segnato comprato per
 quell'identità; se il comprato supera il fabbisogno, la differenza è
 l'eccesso. `calcola_eccessi` è dominio puro, testato senza database.
 
-La lista lo mostra su ogni voce coinvolta (`· ⚠️ 150 g in eccesso` accanto
-al pulsante) più un avviso generale in testa alla schermata quando c'è
-almeno un eccesso — non un'azione da compiere, solo un'informazione: sta
-all'utente decidere cosa farne (usarlo comunque, tenerlo per un pasto
-futuro...).
+La lista lo mostra su ogni voce coinvolta, su una riga a parte dentro lo
+stesso pulsante (`⚠️ 150 g in eccesso` **a capo**, non accodato con " · ":
+su una riga sola Telegram tronca il testo con "…" invece di andare a capo
+da solo, visto da Alessio dal vivo — un "\n" fa occupare al pulsante una
+riga in più invece di tagliare) più un avviso generale in testa alla
+schermata quando c'è almeno un eccesso — non un'azione da compiere, solo
+un'informazione: sta all'utente decidere cosa farne (usarlo comunque,
+tenerlo per un pasto futuro...).
 
 ## Aggiornamento esplicito, mai automatico
 
@@ -229,8 +232,12 @@ decidere cosa prendere prima e cosa dopo. `🔄 Aggiorna lista` (solo se
 serve davvero, vedi sopra), `➕ Aggiungi voce manuale`, `↕️ Riordina lista`
 (con più di una voce), `🗓️ Cambia intervallo`.
 
-**Riordina lista** — ogni voce come `⬆️ | etichetta | ⬇️` (le frecce
-mancano alle estremità), `✅ Fine riordino` per tornare alla schermata
+**Riordina lista** — ogni voce come `⬆️ | etichetta | ⬇️`, **sempre tre
+pulsanti nello stesso ordine**: prima le frecce assenti alle estremità
+spostavano l'etichetta di colonna riga per riga, un disallineamento visto
+da Alessio dal vivo. Alle estremità la freccia resta al suo posto ma non fa
+nulla (`lista_spesa:noop`), stesso trattamento del contatore di pagina non
+premibile altrove nel bot. `✅ Fine riordino` per tornare alla schermata
 principale.
 
 **Aggiungi voce manuale** — input ibrido in due passi: descrizione libera
