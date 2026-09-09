@@ -74,6 +74,11 @@ pub struct InfoUnita {
 #[derive(Debug, Clone, PartialEq)]
 pub struct RigaIngrediente {
     pub alimento_id: Option<i64>,
+    /// Prodotto commerciale specifico (es. "Pasta De Cecco"), se la riga
+    /// viene da un'aggiunta dal catalogo su un prodotto e non su un
+    /// alimento generico -- vedi `Identita::Prodotto`. `None` per tutte le
+    /// righe del planner e per le aggiunte su un alimento generico.
+    pub prodotto_id: Option<i64>,
     pub nome: String,
     pub unita_simbolo: String,
     pub quantita: f64,
@@ -83,33 +88,41 @@ pub struct RigaIngrediente {
 #[derive(Debug, Clone, PartialEq)]
 pub struct VoceGenerata {
     pub alimento_id: Option<i64>,
+    pub prodotto_id: Option<i64>,
     pub nome: String,
     pub quantita: f64,
     pub unita_simbolo: String,
 }
 
-/// Identità di aggregazione: l'alimento del catalogo se presente, altrimenti
-/// il nome normalizzato -- due righe con lo stesso `alimento_id` restano
+/// Identità di aggregazione: il prodotto commerciale specifico se presente
+/// (mai fuso con l'alimento generico sottostante, anche a parità di
+/// `alimento_id` -- decisione esplicita presa con Alessio per non
+/// confondere "mi serve della pasta" con "voglio comprare proprio quella
+/// marca"), altrimenti l'alimento del catalogo se presente, altrimenti il
+/// nome normalizzato -- due righe con lo stesso `alimento_id` restano
 /// insieme anche se il nome congelato differisce (rinominato nel frattempo),
-/// due righe senza `alimento_id` si aggregano per nome uguale a meno di
-/// maiuscole/spazi.
+/// due righe senza `alimento_id` né `prodotto_id` si aggregano per nome
+/// uguale a meno di maiuscole/spazi.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Identita {
+    Prodotto(i64),
     Alimento(i64),
     Nome(String),
 }
 
 fn identita_riga(riga: &RigaIngrediente) -> Identita {
-    match riga.alimento_id {
-        Some(id) => Identita::Alimento(id),
-        None => Identita::Nome(riga.nome.trim().to_lowercase()),
+    match (riga.prodotto_id, riga.alimento_id) {
+        (Some(id), _) => Identita::Prodotto(id),
+        (None, Some(id)) => Identita::Alimento(id),
+        (None, None) => Identita::Nome(riga.nome.trim().to_lowercase()),
     }
 }
 
 fn identita_voce(voce: &VoceGenerata) -> Identita {
-    match voce.alimento_id {
-        Some(id) => Identita::Alimento(id),
-        None => Identita::Nome(voce.nome.trim().to_lowercase()),
+    match (voce.prodotto_id, voce.alimento_id) {
+        (Some(id), _) => Identita::Prodotto(id),
+        (None, Some(id)) => Identita::Alimento(id),
+        (None, None) => Identita::Nome(voce.nome.trim().to_lowercase()),
     }
 }
 
@@ -161,6 +174,7 @@ pub fn aggrega_ingredienti(
         } else {
             risultato.push(VoceGenerata {
                 alimento_id: riga.alimento_id,
+                prodotto_id: riga.prodotto_id,
                 nome: riga.nome.clone(),
                 quantita: quantita_out,
                 unita_simbolo: unita_out,
@@ -338,12 +352,14 @@ mod domain_tests {
         let righe = vec![
             RigaIngrediente {
                 alimento_id: Some(1),
+                prodotto_id: None,
                 nome: "Farina".to_string(),
                 unita_simbolo: "g".to_string(),
                 quantita: 200.0,
             },
             RigaIngrediente {
                 alimento_id: Some(1),
+                prodotto_id: None,
                 nome: "Farina".to_string(),
                 unita_simbolo: "kg".to_string(),
                 quantita: 0.3,
@@ -360,12 +376,14 @@ mod domain_tests {
         let righe = vec![
             RigaIngrediente {
                 alimento_id: Some(1),
+                prodotto_id: None,
                 nome: "Farina".to_string(),
                 unita_simbolo: "g".to_string(),
                 quantita: 100.0,
             },
             RigaIngrediente {
                 alimento_id: Some(2),
+                prodotto_id: None,
                 nome: "Latte".to_string(),
                 unita_simbolo: "ml".to_string(),
                 quantita: 200.0,
@@ -380,12 +398,14 @@ mod domain_tests {
         let righe = vec![
             RigaIngrediente {
                 alimento_id: Some(3),
+                prodotto_id: None,
                 nome: "Yogurt".to_string(),
                 unita_simbolo: "confezione".to_string(),
                 quantita: 2.0,
             },
             RigaIngrediente {
                 alimento_id: Some(3),
+                prodotto_id: None,
                 nome: "Yogurt".to_string(),
                 unita_simbolo: "confezione".to_string(),
                 quantita: 1.0,
@@ -410,12 +430,14 @@ mod domain_tests {
         let righe = vec![
             RigaIngrediente {
                 alimento_id: Some(4),
+                prodotto_id: None,
                 nome: "Uova".to_string(),
                 unita_simbolo: "pz".to_string(),
                 quantita: 2.0,
             },
             RigaIngrediente {
                 alimento_id: Some(4),
+                prodotto_id: None,
                 nome: "Uova".to_string(),
                 unita_simbolo: "pz".to_string(),
                 quantita: 4.0,
@@ -431,12 +453,14 @@ mod domain_tests {
         let righe = vec![
             RigaIngrediente {
                 alimento_id: Some(5),
+                prodotto_id: None,
                 nome: "Sale".to_string(),
                 unita_simbolo: "cucchiaio".to_string(),
                 quantita: 1.0,
             },
             RigaIngrediente {
                 alimento_id: Some(5),
+                prodotto_id: None,
                 nome: "Sale".to_string(),
                 unita_simbolo: "cucchiaino".to_string(),
                 quantita: 1.0,
@@ -451,18 +475,21 @@ mod domain_tests {
         let righe = vec![
             RigaIngrediente {
                 alimento_id: Some(6),
+                prodotto_id: None,
                 nome: "Zero".to_string(),
                 unita_simbolo: "g".to_string(),
                 quantita: 0.0,
             },
             RigaIngrediente {
                 alimento_id: Some(6),
+                prodotto_id: None,
                 nome: "Negativo".to_string(),
                 unita_simbolo: "g".to_string(),
                 quantita: -5.0,
             },
             RigaIngrediente {
                 alimento_id: Some(6),
+                prodotto_id: None,
                 nome: "NonFinito".to_string(),
                 unita_simbolo: "g".to_string(),
                 quantita: f64::NAN,
@@ -477,12 +504,14 @@ mod domain_tests {
         let righe = vec![
             RigaIngrediente {
                 alimento_id: None,
+                prodotto_id: None,
                 nome: "Pane".to_string(),
                 unita_simbolo: "g".to_string(),
                 quantita: 100.0,
             },
             RigaIngrediente {
                 alimento_id: None,
+                prodotto_id: None,
                 nome: "  pane  ".to_string(),
                 unita_simbolo: "g".to_string(),
                 quantita: 50.0,
@@ -498,12 +527,14 @@ mod domain_tests {
         let righe = vec![
             RigaIngrediente {
                 alimento_id: Some(7),
+                prodotto_id: None,
                 nome: "Passata".to_string(),
                 unita_simbolo: "g".to_string(),
                 quantita: 200.0,
             },
             RigaIngrediente {
                 alimento_id: Some(7),
+                prodotto_id: None,
                 nome: "Passata di pomodoro".to_string(),
                 unita_simbolo: "g".to_string(),
                 quantita: 300.0,
@@ -576,12 +607,14 @@ mod domain_tests {
     fn sottrai_gia_comprato_lascia_solo_la_differenza() {
         let fresche = vec![VoceGenerata {
             alimento_id: Some(1),
+            prodotto_id: None,
             nome: "Farina".to_string(),
             quantita: 350.0,
             unita_simbolo: "g".to_string(),
         }];
         let gia_comprato = vec![VoceGenerata {
             alimento_id: Some(1),
+            prodotto_id: None,
             nome: "Farina".to_string(),
             quantita: 200.0,
             unita_simbolo: "g".to_string(),
@@ -595,12 +628,14 @@ mod domain_tests {
     fn sottrai_gia_comprato_toglie_la_voce_se_gia_coperta_del_tutto() {
         let fresche = vec![VoceGenerata {
             alimento_id: Some(1),
+            prodotto_id: None,
             nome: "Farina".to_string(),
             quantita: 200.0,
             unita_simbolo: "g".to_string(),
         }];
         let gia_comprato = vec![VoceGenerata {
             alimento_id: Some(1),
+            prodotto_id: None,
             nome: "Farina".to_string(),
             quantita: 300.0,
             unita_simbolo: "g".to_string(),
@@ -612,12 +647,14 @@ mod domain_tests {
     fn sottrai_gia_comprato_ignora_unita_diverse() {
         let fresche = vec![VoceGenerata {
             alimento_id: Some(2),
+            prodotto_id: None,
             nome: "Latte".to_string(),
             quantita: 500.0,
             unita_simbolo: "ml".to_string(),
         }];
         let gia_comprato = vec![VoceGenerata {
             alimento_id: Some(2),
+            prodotto_id: None,
             nome: "Latte".to_string(),
             quantita: 1.0,
             unita_simbolo: "l".to_string(),
@@ -625,6 +662,85 @@ mod domain_tests {
         let residuo = sottrai_gia_comprato(fresche, &gia_comprato);
         assert_eq!(residuo.len(), 1);
         assert_eq!(residuo[0].quantita, 500.0);
+    }
+
+    #[test]
+    fn prodotto_specifico_non_si_fonde_con_l_alimento_generico_anche_a_parita_di_alimento() {
+        // Miglioramento richiesto da Alessio dopo il primo collaudo dal vivo:
+        // 200 g di "Pasta" (alimento generico, dal planner) e 500 g di
+        // "Pasta De Cecco" (prodotto specifico, alimento_id sottostante
+        // uguale) devono restare due righe distinte, mai una sola voce.
+        let righe = vec![
+            RigaIngrediente {
+                alimento_id: Some(1),
+                prodotto_id: None,
+                nome: "Pasta".to_string(),
+                unita_simbolo: "g".to_string(),
+                quantita: 200.0,
+            },
+            RigaIngrediente {
+                alimento_id: Some(1),
+                prodotto_id: Some(50),
+                nome: "Pasta De Cecco".to_string(),
+                unita_simbolo: "g".to_string(),
+                quantita: 500.0,
+            },
+        ];
+        let voci = aggrega_ingredienti(&righe, unita_standard);
+        assert_eq!(voci.len(), 2);
+        let generico = voci.iter().find(|v| v.prodotto_id.is_none()).unwrap();
+        assert_eq!(generico.quantita, 200.0);
+        let specifico = voci.iter().find(|v| v.prodotto_id == Some(50)).unwrap();
+        assert_eq!(specifico.quantita, 500.0);
+    }
+
+    #[test]
+    fn alimento_generico_aggiunto_a_mano_si_somma_al_fabbisogno_del_planner() {
+        // L'esempio esatto di Alessio: 200 g di pasta dal planner + 50 g
+        // aggiunti a mano sullo stesso alimento generico devono dare 250 g
+        // in un'unica riga, non due.
+        let righe = vec![
+            RigaIngrediente {
+                alimento_id: Some(1),
+                prodotto_id: None,
+                nome: "Pasta".to_string(),
+                unita_simbolo: "g".to_string(),
+                quantita: 200.0,
+            },
+            RigaIngrediente {
+                alimento_id: Some(1),
+                prodotto_id: None,
+                nome: "Pasta".to_string(),
+                unita_simbolo: "g".to_string(),
+                quantita: 50.0,
+            },
+        ];
+        let voci = aggrega_ingredienti(&righe, unita_standard);
+        assert_eq!(voci.len(), 1);
+        assert_eq!(voci[0].quantita, 250.0);
+    }
+
+    #[test]
+    fn due_prodotti_specifici_uguali_si_sommano_tra_loro() {
+        let righe = vec![
+            RigaIngrediente {
+                alimento_id: Some(1),
+                prodotto_id: Some(50),
+                nome: "Pasta De Cecco".to_string(),
+                unita_simbolo: "g".to_string(),
+                quantita: 500.0,
+            },
+            RigaIngrediente {
+                alimento_id: Some(1),
+                prodotto_id: Some(50),
+                nome: "Pasta De Cecco".to_string(),
+                unita_simbolo: "g".to_string(),
+                quantita: 250.0,
+            },
+        ];
+        let voci = aggrega_ingredienti(&righe, unita_standard);
+        assert_eq!(voci.len(), 1);
+        assert_eq!(voci[0].quantita, 750.0);
     }
 }
 
@@ -852,6 +968,279 @@ async fn righe_da_aggregare(
         .map(
             |(alimento_id, nome, unita_simbolo, quantita)| RigaIngrediente {
                 alimento_id,
+                prodotto_id: None,
+                nome,
+                unita_simbolo,
+                quantita,
+            },
+        )
+        .collect())
+}
+
+/// Identità di un'aggiunta dal catalogo: un alimento generico (si somma al
+/// fabbisogno del planner sullo stesso alimento) o un prodotto commerciale
+/// specifico (resta sempre una riga separata, anche se collegato allo
+/// stesso alimento generico -- vedi `Identita::Prodotto`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IdentitaCatalogo {
+    Alimento(i64),
+    Prodotto(i64),
+}
+
+/// Un risultato di ricerca nel catalogo: un alimento generico o un prodotto
+/// commerciale specifico, con l'etichetta già pronta per il pulsante
+/// (icona distinta, C4) e la descrizione da salvare come snapshot.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RisultatoCatalogo {
+    Alimento {
+        id: i64,
+        nome: String,
+    },
+    Prodotto {
+        id: i64,
+        marca: String,
+        nome_commerciale: String,
+    },
+}
+
+impl RisultatoCatalogo {
+    fn identita(&self) -> IdentitaCatalogo {
+        match self {
+            Self::Alimento { id, .. } => IdentitaCatalogo::Alimento(*id),
+            Self::Prodotto { id, .. } => IdentitaCatalogo::Prodotto(*id),
+        }
+    }
+
+    fn etichetta(&self) -> String {
+        match self {
+            Self::Alimento { nome, .. } => format!("🥕 {nome}"),
+            Self::Prodotto {
+                marca,
+                nome_commerciale,
+                ..
+            } => format!("🏷️ {marca} {nome_commerciale}"),
+        }
+    }
+}
+
+fn normalizza_ricerca(valore: &str) -> String {
+    valore
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
+/// Clausola di visibilità comune a ogni ricerca nel catalogo: catalogo
+/// globale, di proprietà dell'utente corrente, o condiviso nello spazio
+/// visibile -- stesso schema di `ricette::search_food_choices`, non
+/// riusabile direttamente da qui perché quella funzione non restituisce
+/// anche i prodotti come risultati distinti (vedi la spiegazione nel
+/// commit che introduce questo modulo).
+fn clausola_visibilita_alimento(alias: &str, view_all: bool) -> String {
+    if view_all {
+        format!(
+            "{alias}.catalogo_globale = 1 OR {alias}.proprietario_utente_id = ? OR EXISTS (\
+                SELECT 1 FROM alimento_spazi asp JOIN membri_spazio ms ON ms.spazio_id = asp.spazio_id \
+                WHERE asp.alimento_id = {alias}.id AND ms.utente_id = ?)"
+        )
+    } else {
+        format!(
+            "{alias}.catalogo_globale = 1 OR {alias}.proprietario_utente_id = ? OR EXISTS (\
+                SELECT 1 FROM alimento_spazi asp WHERE asp.alimento_id = {alias}.id AND asp.spazio_id = ?)"
+        )
+    }
+}
+
+/// Cerca alimenti generici e prodotti commerciali nel catalogo per il
+/// flusso "➕ Aggiungi voce manuale" → "🔎 Cerca nel catalogo". Nessuna
+/// paginazione vera, un `LIMIT` per parte come "top N" -- stesso
+/// approccio di `ricette::search_food_choices`.
+async fn cerca_nel_catalogo(
+    pool: &SqlitePool,
+    query: &str,
+    limit: i64,
+) -> anyhow::Result<Vec<RisultatoCatalogo>> {
+    let actor = crate::identity::current_actor();
+    let user_id = actor.utente_id.context("Utente non disponibile")?;
+    let normalizzata = normalizza_ricerca(query);
+    let like = format!("%{normalizzata}%");
+    let visibilita = clausola_visibilita_alimento("a", actor.view_all);
+    let secondo_bind = if actor.view_all {
+        user_id
+    } else {
+        actor.spazio_id
+    };
+
+    let alimenti: Vec<(i64, String)> = sqlx::query_as(&format!(
+        "SELECT DISTINCT a.id, a.nome FROM alimenti a \
+         WHERE a.archiviato = 0 AND ({visibilita}) AND (\
+            a.nome_normalizzato LIKE ? \
+            OR EXISTS (SELECT 1 FROM alimento_alias aa WHERE aa.alimento_id = a.id AND aa.alias_normalizzato LIKE ?)\
+         ) ORDER BY CASE WHEN a.nome_normalizzato = ? THEN 0 ELSE 1 END, a.nome COLLATE NOCASE, a.id LIMIT ?"
+    ))
+    .bind(user_id)
+    .bind(secondo_bind)
+    .bind(&like)
+    .bind(&like)
+    .bind(&normalizzata)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .context("Impossibile cercare gli alimenti nel catalogo")?;
+
+    let prodotti: Vec<(i64, String, String)> = sqlx::query_as(&format!(
+        "SELECT DISTINCT p.id, p.marca, p.nome_commerciale \
+         FROM prodotti_alimentari p JOIN alimenti a ON a.id = p.alimento_id \
+         WHERE p.attivo = 1 AND a.archiviato = 0 AND ({visibilita}) AND (\
+            p.marca_normalizzata LIKE ? OR p.nome_commerciale_normalizzato LIKE ?\
+         ) ORDER BY p.marca COLLATE NOCASE, p.nome_commerciale COLLATE NOCASE, p.id LIMIT ?"
+    ))
+    .bind(user_id)
+    .bind(secondo_bind)
+    .bind(&like)
+    .bind(&like)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .context("Impossibile cercare i prodotti nel catalogo")?;
+
+    let mut risultati: Vec<RisultatoCatalogo> = alimenti
+        .into_iter()
+        .map(|(id, nome)| RisultatoCatalogo::Alimento { id, nome })
+        .collect();
+    risultati.extend(prodotti.into_iter().map(|(id, marca, nome_commerciale)| {
+        RisultatoCatalogo::Prodotto {
+            id,
+            marca,
+            nome_commerciale,
+        }
+    }));
+    Ok(risultati)
+}
+
+/// Rilegge il nome di un alimento per id, rispettando la stessa visibilità
+/// della ricerca -- usata dopo la scelta di un risultato (il pulsante porta
+/// solo l'id per restare sotto il limite di `callback_data`, il nome va
+/// riletto per mostrare la conferma e salvare lo snapshot).
+async fn alimento_visibile_per_id(pool: &SqlitePool, id: i64) -> anyhow::Result<Option<String>> {
+    let actor = crate::identity::current_actor();
+    let Some(user_id) = actor.utente_id else {
+        return Ok(None);
+    };
+    let visibilita = clausola_visibilita_alimento("a", actor.view_all);
+    let secondo_bind = if actor.view_all {
+        user_id
+    } else {
+        actor.spazio_id
+    };
+    sqlx::query_scalar(&format!(
+        "SELECT a.nome FROM alimenti a \
+         WHERE a.id = ? AND a.archiviato = 0 AND ({visibilita})"
+    ))
+    .bind(id)
+    .bind(user_id)
+    .bind(secondo_bind)
+    .fetch_optional(pool)
+    .await
+    .context("Impossibile rileggere l'alimento scelto")
+}
+
+/// Come `alimento_visibile_per_id`, per un prodotto commerciale: la
+/// visibilità è quella del suo alimento generico.
+async fn prodotto_visibile_per_id(
+    pool: &SqlitePool,
+    id: i64,
+) -> anyhow::Result<Option<(String, String)>> {
+    let actor = crate::identity::current_actor();
+    let Some(user_id) = actor.utente_id else {
+        return Ok(None);
+    };
+    let visibilita = clausola_visibilita_alimento("a", actor.view_all);
+    let secondo_bind = if actor.view_all {
+        user_id
+    } else {
+        actor.spazio_id
+    };
+    sqlx::query_as(&format!(
+        "SELECT p.marca, p.nome_commerciale FROM prodotti_alimentari p \
+         JOIN alimenti a ON a.id = p.alimento_id \
+         WHERE p.id = ? AND p.attivo = 1 AND a.archiviato = 0 AND ({visibilita})"
+    ))
+    .bind(id)
+    .bind(user_id)
+    .bind(secondo_bind)
+    .fetch_optional(pool)
+    .await
+    .context("Impossibile rileggere il prodotto scelto")
+}
+
+/// Registra un'aggiunta dal catalogo (alimento generico o prodotto
+/// commerciale specifico). A differenza di una voce manuale in
+/// `liste_spesa_voci`, questa non è mai uno snapshot: resta nella propria
+/// tabella e partecipa di nuovo ogni volta al ricalcolo di `aggiorna_lista`
+/// (vedi `righe_da_aggiunte_catalogo`), finché non viene coperta da una
+/// voce generata segnata comprata.
+pub async fn aggiungi_da_catalogo(
+    pool: &SqlitePool,
+    lista_id: i64,
+    identita: IdentitaCatalogo,
+    descrizione_snapshot: &str,
+    quantita: f64,
+    unita_simbolo: &str,
+) -> anyhow::Result<i64> {
+    let (tipo, alimento_id, prodotto_id): (&str, Option<i64>, Option<i64>) = match identita {
+        IdentitaCatalogo::Alimento(id) => ("alimento", Some(id), None),
+        IdentitaCatalogo::Prodotto(id) => ("prodotto", None, Some(id)),
+    };
+    let id = sqlx::query(
+        "INSERT INTO liste_spesa_aggiunte_catalogo \
+         (lista_id, tipo, alimento_id, prodotto_alimentare_id, descrizione_snapshot, \
+          quantita, unita_simbolo) \
+         VALUES (?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(lista_id)
+    .bind(tipo)
+    .bind(alimento_id)
+    .bind(prodotto_id)
+    .bind(descrizione_snapshot)
+    .bind(quantita)
+    .bind(unita_simbolo)
+    .execute(pool)
+    .await
+    .context("Impossibile registrare l'aggiunta dal catalogo")?
+    .last_insert_rowid();
+    Ok(id)
+}
+
+/// Aggiunte dal catalogo di questa lista, convertite nella stessa forma
+/// delle righe del planner così `aggiorna_lista` le aggrega insieme con la
+/// stessa logica di conversione unità -- restano "vive" attraverso ogni
+/// refresh, a differenza delle vecchie righe `generato` pure-planner.
+/// Riga grezza di `liste_spesa_aggiunte_catalogo`: alimento, prodotto,
+/// descrizione, quantità e unità.
+type RigaAggiuntaCatalogoGrezza = (Option<i64>, Option<i64>, String, f64, String);
+
+async fn righe_da_aggiunte_catalogo(
+    pool: &SqlitePool,
+    lista_id: i64,
+) -> anyhow::Result<Vec<RigaIngrediente>> {
+    let righe: Vec<RigaAggiuntaCatalogoGrezza> = sqlx::query_as(
+        "SELECT alimento_id, prodotto_alimentare_id, descrizione_snapshot, \
+                quantita, unita_simbolo \
+         FROM liste_spesa_aggiunte_catalogo WHERE lista_id = ?",
+    )
+    .bind(lista_id)
+    .fetch_all(pool)
+    .await
+    .context("Impossibile leggere le aggiunte dal catalogo")?;
+
+    Ok(righe
+        .into_iter()
+        .map(
+            |(alimento_id, prodotto_id, nome, quantita, unita_simbolo)| RigaIngrediente {
+                alimento_id,
+                prodotto_id,
                 nome,
                 unita_simbolo,
                 quantita,
@@ -864,17 +1253,24 @@ async fn righe_da_aggregare(
 /// nulle (per costruzione lo sono sempre, per una voce generata) --
 /// servono a `aggiorna_lista` per non duplicare ciò che è già stato
 /// acquistato quando ricalcola il fresco dell'aggregazione.
-/// Riga grezza di `liste_spesa_voci`: alimento, descrizione, quantità e
-/// unità -- opzionali solo perché la query li rilegge così com'è la
-/// colonna, non perché possano mancare davvero su una voce generata.
-type RigaVoceGenerataGrezza = (Option<i64>, String, Option<f64>, Option<String>);
+/// Riga grezza di `liste_spesa_voci`: alimento, prodotto, descrizione,
+/// quantità e unità -- opzionali solo perché la query li rilegge così come
+/// sono le colonne, non perché possano mancare davvero su una voce
+/// generata.
+type RigaVoceGenerataGrezza = (
+    Option<i64>,
+    Option<i64>,
+    String,
+    Option<f64>,
+    Option<String>,
+);
 
 async fn voci_generate_comprate(
     pool: &SqlitePool,
     lista_id: i64,
 ) -> anyhow::Result<Vec<VoceGenerata>> {
     let righe: Vec<RigaVoceGenerataGrezza> = sqlx::query_as(
-        "SELECT alimento_id, descrizione, quantita, unita_simbolo \
+        "SELECT alimento_id, prodotto_alimentare_id, descrizione, quantita, unita_simbolo \
          FROM liste_spesa_voci \
          WHERE lista_id = ? AND origine = 'generato' AND comprato = 1",
     )
@@ -885,14 +1281,17 @@ async fn voci_generate_comprate(
 
     Ok(righe
         .into_iter()
-        .filter_map(|(alimento_id, nome, quantita, unita_simbolo)| {
-            Some(VoceGenerata {
-                alimento_id,
-                nome,
-                quantita: quantita?,
-                unita_simbolo: unita_simbolo?,
-            })
-        })
+        .filter_map(
+            |(alimento_id, prodotto_id, nome, quantita, unita_simbolo)| {
+                Some(VoceGenerata {
+                    alimento_id,
+                    prodotto_id,
+                    nome,
+                    quantita: quantita?,
+                    unita_simbolo: unita_simbolo?,
+                })
+            },
+        )
         .collect())
 }
 
@@ -936,7 +1335,12 @@ async fn carica_mappa_unita(pool: &SqlitePool) -> anyhow::Result<HashMap<String,
 /// manuali) e le voci manuali non comprate restano congelate esattamente
 /// come sono. Ritorna il numero di voci generate dopo il refresh.
 pub async fn aggiorna_lista(pool: &SqlitePool, lista: &ListaSpesa) -> anyhow::Result<usize> {
-    let righe = righe_da_aggregare(pool, lista).await?;
+    let mut righe = righe_da_aggregare(pool, lista).await?;
+    // Le aggiunte dal catalogo non sono uno snapshot: partecipano di nuovo
+    // ogni volta al calcolo del fresco, insieme alle righe del planner --
+    // un alimento generico si somma davvero, un prodotto specifico resta
+    // nel suo bucket di identità separato (`identita_riga`).
+    righe.extend(righe_da_aggiunte_catalogo(pool, lista.id).await?);
     let mappa_unita = carica_mappa_unita(pool).await?;
     let fresche = aggrega_ingredienti(&righe, |simbolo| mappa_unita.get(simbolo).copied());
     // Le voci già comprate restano intoccate (mai cancellate qui sotto): si
@@ -960,11 +1364,13 @@ pub async fn aggiorna_lista(pool: &SqlitePool, lista: &ListaSpesa) -> anyhow::Re
     for voce in &voci {
         sqlx::query(
             "INSERT INTO liste_spesa_voci \
-             (lista_id, origine, alimento_id, descrizione, quantita, unita_simbolo) \
-             VALUES (?, 'generato', ?, ?, ?, ?)",
+             (lista_id, origine, alimento_id, prodotto_alimentare_id, descrizione, \
+              quantita, unita_simbolo) \
+             VALUES (?, 'generato', ?, ?, ?, ?, ?)",
         )
         .bind(lista.id)
         .bind(voce.alimento_id)
+        .bind(voce.prodotto_id)
         .bind(&voce.nome)
         .bind(voce.quantita)
         .bind(&voce.unita_simbolo)
@@ -1054,6 +1460,71 @@ mod db_tests {
         .execute(pool)
         .await
         .expect("membership");
+    }
+
+    async fn unita_id(pool: &SqlitePool, simbolo: &str) -> i64 {
+        sqlx::query_scalar("SELECT id FROM unita_misura WHERE simbolo = ?")
+            .bind(simbolo)
+            .fetch_one(pool)
+            .await
+            .expect("unità di misura")
+    }
+
+    /// Alimento generico di catalogo globale, come "Pasta" -- visibile a
+    /// chiunque, indipendentemente dallo spazio attivo.
+    /// Riusa l'alimento se il nome è già nel catalogo base seminato dalle
+    /// migration (es. "Pasta", "Farina") -- evita un conflitto con
+    /// `idx_alimenti_globali_nome` invece di forzare nomi di fantasia nei
+    /// test.
+    async fn create_alimento_globale(pool: &SqlitePool, nome: &str) -> i64 {
+        let normalizzato = nome.to_lowercase();
+        if let Some(id) = sqlx::query_scalar::<_, i64>(
+            "SELECT id FROM alimenti WHERE nome_normalizzato = ? AND spazio_id IS NULL",
+        )
+        .bind(&normalizzato)
+        .fetch_optional(pool)
+        .await
+        .expect("ricerca alimento esistente")
+        {
+            return id;
+        }
+        sqlx::query(
+            "INSERT INTO alimenti (nome, nome_normalizzato, catalogo_globale) \
+             VALUES (?, ?, 1)",
+        )
+        .bind(nome)
+        .bind(&normalizzato)
+        .execute(pool)
+        .await
+        .expect("alimento")
+        .last_insert_rowid()
+    }
+
+    /// Prodotto commerciale specifico collegato a un alimento generico,
+    /// come "Pasta De Cecco" collegato a "Pasta".
+    async fn create_prodotto(
+        pool: &SqlitePool,
+        alimento_id: i64,
+        marca: &str,
+        nome_commerciale: &str,
+    ) -> i64 {
+        let unita = unita_id(pool, "g").await;
+        sqlx::query(
+            "INSERT INTO prodotti_alimentari \
+             (alimento_id, marca, marca_normalizzata, nome_commerciale, \
+              nome_commerciale_normalizzato, quantita_confezione, unita_confezione_id) \
+             VALUES (?, ?, ?, ?, ?, 500, ?)",
+        )
+        .bind(alimento_id)
+        .bind(marca)
+        .bind(marca.to_lowercase())
+        .bind(nome_commerciale)
+        .bind(nome_commerciale.to_lowercase())
+        .bind(unita)
+        .execute(pool)
+        .await
+        .expect("prodotto")
+        .last_insert_rowid()
     }
 
     async fn create_planner(
@@ -1423,6 +1894,240 @@ mod db_tests {
         })
         .await;
     }
+
+    #[tokio::test]
+    async fn aggiunta_alimento_generico_si_somma_al_fabbisogno_del_planner() {
+        let pool = test_pool().await;
+        let user_id = create_user(&pool, "Alessio").await;
+        let space_id = create_space(&pool, "Casa").await;
+        add_membership(&pool, space_id, user_id).await;
+        let alimento_pasta = create_alimento_globale(&pool, "Pasta").await;
+
+        crate::identity::with_actor(actor(user_id, space_id, "Alessio"), async {
+            let lista = trova_o_crea_lista_attiva(&pool).await.expect("lista");
+            cambia_intervallo(&pool, lista.id, "2026-09-01", "2026-09-07")
+                .await
+                .expect("intervallo");
+            let lista = trova_lista_attiva(&pool).await.unwrap().unwrap();
+            let planner_id =
+                create_planner(&pool, user_id, space_id, "2026-09-01", "2026-09-07").await;
+            create_meal_with_ingredient(
+                &pool,
+                planner_id,
+                "2026-09-02",
+                "pianificato",
+                None,
+                None,
+                Some(alimento_pasta),
+                "Pasta",
+                "g",
+                Some(200.0),
+            )
+            .await;
+
+            aggiungi_da_catalogo(
+                &pool,
+                lista.id,
+                IdentitaCatalogo::Alimento(alimento_pasta),
+                "Pasta",
+                50.0,
+                "g",
+            )
+            .await
+            .expect("aggiunta catalogo");
+
+            // L'esempio esatto di Alessio: 200 g dal planner + 50 g
+            // aggiunti a mano sullo stesso alimento generico devono dare
+            // 250 g in un'unica riga, non due.
+            let numero = aggiorna_lista(&pool, &lista).await.expect("refresh");
+            assert_eq!(numero, 1);
+            let voci = carica_voci(&pool, lista.id).await.expect("voci");
+            assert_eq!(voci.len(), 1);
+            assert_eq!(voci[0].quantita, Some(250.0));
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn aggiunta_prodotto_specifico_resta_riga_separata_dal_planner() {
+        let pool = test_pool().await;
+        let user_id = create_user(&pool, "Alessio").await;
+        let space_id = create_space(&pool, "Casa").await;
+        add_membership(&pool, space_id, user_id).await;
+        let alimento_pasta = create_alimento_globale(&pool, "Pasta").await;
+        let prodotto_de_cecco = create_prodotto(&pool, alimento_pasta, "De Cecco", "Pasta").await;
+
+        crate::identity::with_actor(actor(user_id, space_id, "Alessio"), async {
+            let lista = trova_o_crea_lista_attiva(&pool).await.expect("lista");
+            cambia_intervallo(&pool, lista.id, "2026-09-01", "2026-09-07")
+                .await
+                .expect("intervallo");
+            let lista = trova_lista_attiva(&pool).await.unwrap().unwrap();
+            let planner_id =
+                create_planner(&pool, user_id, space_id, "2026-09-01", "2026-09-07").await;
+            create_meal_with_ingredient(
+                &pool,
+                planner_id,
+                "2026-09-02",
+                "pianificato",
+                None,
+                None,
+                Some(alimento_pasta),
+                "Pasta",
+                "g",
+                Some(200.0),
+            )
+            .await;
+
+            aggiungi_da_catalogo(
+                &pool,
+                lista.id,
+                IdentitaCatalogo::Prodotto(prodotto_de_cecco),
+                "De Cecco Pasta",
+                500.0,
+                "g",
+            )
+            .await
+            .expect("aggiunta catalogo");
+
+            // Il prodotto specifico resta sempre una riga separata, anche
+            // se collegato allo stesso alimento generico richiesto dal
+            // planner -- mai un merge, decisione esplicita presa con
+            // Alessio.
+            let numero = aggiorna_lista(&pool, &lista).await.expect("refresh");
+            assert_eq!(numero, 2);
+            let voci = carica_voci(&pool, lista.id).await.expect("voci");
+            assert_eq!(voci.len(), 2);
+            let generico = voci.iter().find(|v| v.descrizione == "Pasta").unwrap();
+            assert_eq!(generico.quantita, Some(200.0));
+            let specifico = voci
+                .iter()
+                .find(|v| v.descrizione == "De Cecco Pasta")
+                .unwrap();
+            assert_eq!(specifico.quantita, Some(500.0));
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn aggiunta_dal_catalogo_persiste_attraverso_un_secondo_refresh() {
+        let pool = test_pool().await;
+        let user_id = create_user(&pool, "Alessio").await;
+        let space_id = create_space(&pool, "Casa").await;
+        add_membership(&pool, space_id, user_id).await;
+        let alimento_pasta = create_alimento_globale(&pool, "Pasta").await;
+
+        crate::identity::with_actor(actor(user_id, space_id, "Alessio"), async {
+            let lista = trova_o_crea_lista_attiva(&pool).await.expect("lista");
+
+            aggiungi_da_catalogo(
+                &pool,
+                lista.id,
+                IdentitaCatalogo::Alimento(alimento_pasta),
+                "Pasta",
+                50.0,
+                "g",
+            )
+            .await
+            .expect("aggiunta catalogo");
+
+            // A differenza delle righe 'generato' pure-planner, un'aggiunta
+            // dal catalogo non e' uno snapshot: partecipa di nuovo a ogni
+            // refresh, anche senza alcun pasto pianificato nel mezzo.
+            aggiorna_lista(&pool, &lista).await.expect("primo refresh");
+            let voci = carica_voci(&pool, lista.id).await.expect("voci");
+            assert_eq!(voci.len(), 1);
+            assert_eq!(voci[0].quantita, Some(50.0));
+
+            aggiorna_lista(&pool, &lista)
+                .await
+                .expect("secondo refresh");
+            let voci = carica_voci(&pool, lista.id)
+                .await
+                .expect("voci dopo il secondo refresh");
+            assert_eq!(voci.len(), 1);
+            assert_eq!(voci[0].quantita, Some(50.0));
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn voce_comprata_da_prodotto_resta_congelata_anche_sulla_nuova_colonna() {
+        let pool = test_pool().await;
+        let user_id = create_user(&pool, "Alessio").await;
+        let space_id = create_space(&pool, "Casa").await;
+        add_membership(&pool, space_id, user_id).await;
+        let alimento_pasta = create_alimento_globale(&pool, "Pasta").await;
+        let prodotto_de_cecco = create_prodotto(&pool, alimento_pasta, "De Cecco", "Pasta").await;
+
+        crate::identity::with_actor(actor(user_id, space_id, "Alessio"), async {
+            let lista = trova_o_crea_lista_attiva(&pool).await.expect("lista");
+            aggiungi_da_catalogo(
+                &pool,
+                lista.id,
+                IdentitaCatalogo::Prodotto(prodotto_de_cecco),
+                "De Cecco Pasta",
+                500.0,
+                "g",
+            )
+            .await
+            .expect("aggiunta catalogo");
+            aggiorna_lista(&pool, &lista).await.expect("refresh");
+            let voci = carica_voci(&pool, lista.id).await.expect("voci");
+            let voce_id = voci[0].id;
+            imposta_comprato(&pool, voce_id, true)
+                .await
+                .expect("comprato");
+
+            let esito = sqlx::query(
+                "UPDATE liste_spesa_voci SET prodotto_alimentare_id = NULL WHERE id = ?",
+            )
+            .bind(voce_id)
+            .execute(&pool)
+            .await;
+            assert!(
+                esito.is_err(),
+                "il trigger deve bloccare anche la modifica di prodotto_alimentare_id"
+            );
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn ricerca_nel_catalogo_trova_alimenti_e_prodotti_distinti() {
+        let pool = test_pool().await;
+        let user_id = create_user(&pool, "Alessio").await;
+        let space_id = create_space(&pool, "Casa").await;
+        add_membership(&pool, space_id, user_id).await;
+        let alimento_pasta = create_alimento_globale(&pool, "Pasta").await;
+        create_prodotto(&pool, alimento_pasta, "De Cecco", "Pasta").await;
+        create_alimento_globale(&pool, "Passata di pomodoro").await;
+
+        crate::identity::with_actor(actor(user_id, space_id, "Alessio"), async {
+            let risultati = cerca_nel_catalogo(&pool, "pasta", 10)
+                .await
+                .expect("ricerca catalogo");
+            // Il catalogo base seminato dalle migration contiene anche
+            // "Pasta sfoglia", "Pasta brisée", "Pasta fillo": la ricerca
+            // trova tutti gli alimenti che contengono "pasta", non solo
+            // quello esatto -- qui basta verificare che l'alimento generico
+            // "Pasta" e il prodotto "De Cecco Pasta" siano entrambi tra i
+            // risultati, come tipi distinti.
+            let trova_alimento_esatto = risultati.iter().any(
+                |r| matches!(r, RisultatoCatalogo::Alimento { id, .. } if *id == alimento_pasta),
+            );
+            let prodotti: Vec<_> = risultati
+                .iter()
+                .filter(|r| matches!(r, RisultatoCatalogo::Prodotto { .. }))
+                .collect();
+            assert!(
+                trova_alimento_esatto,
+                "l'alimento generico Pasta deve essere tra i risultati"
+            );
+            assert_eq!(prodotti.len(), 1);
+        })
+        .await;
+    }
 }
 
 // ===========================================================================
@@ -1435,9 +2140,20 @@ pub struct ListaSpesaSessionStore {
 }
 
 #[derive(Debug, Clone)]
+// Il prefisso comune "Awaiting" descrive la natura di ogni stato (in attesa
+// di un input testuale) e va tenuto per coerenza con le altre mappe di
+// sessione del progetto -- non è un nome ripetuto per distrazione.
+#[allow(clippy::enum_variant_names)]
 enum ListaSpesaConversationState {
     AwaitingDescrizione,
-    AwaitingQuantita { descrizione: String },
+    AwaitingQuantita {
+        descrizione: String,
+    },
+    AwaitingCatalogoQuery,
+    AwaitingQuantitaCatalogo {
+        identita: IdentitaCatalogo,
+        descrizione: String,
+    },
 }
 
 impl ListaSpesaSessionStore {
@@ -1559,14 +2275,59 @@ fn quantita_keyboard() -> InlineKeyboardMarkup {
     ])
 }
 
+/// Scelta iniziale di "➕ Aggiungi voce manuale": cercare nel catalogo (si
+/// somma o resta separata a seconda dell'identità, vedi `IdentitaCatalogo`)
+/// oppure scrivere una voce libera (flusso testo-libero invariato).
+fn scelta_add_keyboard() -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![
+        vec![button("🔎 Cerca nel catalogo", "lista_spesa:add:catalogo")],
+        vec![button("📝 Voce libera", "lista_spesa:add:libera")],
+        vec![
+            button("❌ Annulla", "lista_spesa:add:cancel"),
+            button("🏠 Menù principale", "menu:main"),
+        ],
+    ])
+}
+
+fn testo_scelta_add() -> &'static str {
+    "➕ Aggiungi voce manuale\n\nCerca un alimento o un prodotto nel catalogo -- si somma a quanto già serve o resta una riga a parte a seconda di cosa scegli -- oppure scrivi una voce libera."
+}
+
 fn testo_scelta_descrizione() -> &'static str {
-    "➕ Aggiungi voce manuale\n\nScrivi la descrizione (es. \"Detersivo piatti\")."
+    "📝 Voce libera\n\nScrivi la descrizione (es. \"Detersivo piatti\")."
 }
 
 fn testo_scelta_quantita(descrizione: &str) -> String {
     format!(
         "➕ {descrizione}\n\nScrivi quantità e unità (es. \"500 g\"), oppure scegli senza quantità."
     )
+}
+
+fn testo_scelta_query_catalogo() -> &'static str {
+    "🔎 Cerca nel catalogo\n\nScrivi il nome di un alimento (es. \"pasta\") o di un prodotto commerciale (es. \"de cecco\")."
+}
+
+fn testo_scelta_quantita_catalogo(descrizione: &str) -> String {
+    format!("➕ {descrizione}\n\nScrivi quantità e unità (es. \"500 g\").")
+}
+
+fn risultati_catalogo_keyboard(risultati: &[RisultatoCatalogo]) -> InlineKeyboardMarkup {
+    let mut rows: Vec<Vec<InlineKeyboardButton>> = risultati
+        .iter()
+        .map(|risultato| {
+            let callback = match risultato.identita() {
+                IdentitaCatalogo::Alimento(id) => format!("lista_spesa:add:pick:alimento:{id}"),
+                IdentitaCatalogo::Prodotto(id) => format!("lista_spesa:add:pick:prodotto:{id}"),
+            };
+            vec![button(risultato.etichetta(), callback)]
+        })
+        .collect();
+    rows.push(vec![button("📝 Voce libera", "lista_spesa:add:libera")]);
+    rows.push(vec![
+        button("❌ Annulla", "lista_spesa:add:cancel"),
+        button("🏠 Menù principale", "menu:main"),
+    ]);
+    InlineKeyboardMarkup::new(rows)
 }
 
 async fn invalid(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
@@ -1691,6 +2452,62 @@ pub async fn handle_message(
                 }
             }
         }
+        ListaSpesaConversationState::AwaitingCatalogoQuery => {
+            let query = text.trim();
+            if query.is_empty() || query.chars().count() > DESCRIZIONE_MAX_CARATTERI {
+                bot.send_message(
+                    msg.chat.id,
+                    "⚠️ Scrivi un nome da cercare, non può essere vuoto.",
+                )
+                .reply_markup(annulla_keyboard())
+                .await?;
+                return Ok(true);
+            }
+            match cerca_nel_catalogo(pool, query, 10).await {
+                Ok(risultati) if risultati.is_empty() => {
+                    bot.send_message(
+                        msg.chat.id,
+                        format!("🔎 Nessun risultato per \"{query}\".\n\nProva un altro nome oppure passa a voce libera."),
+                    )
+                    .reply_markup(risultati_catalogo_keyboard(&[]))
+                    .await?;
+                }
+                Ok(risultati) => {
+                    bot.send_message(msg.chat.id, format!("🔎 Risultati per \"{query}\""))
+                        .reply_markup(risultati_catalogo_keyboard(&risultati))
+                        .await?;
+                }
+                Err(errore) => {
+                    tracing::warn!(?errore, "Ricerca nel catalogo fallita");
+                    bot.send_message(msg.chat.id, "⚠️ Non riesco a cercare nel catalogo.")
+                        .reply_markup(annulla_keyboard())
+                        .await?;
+                }
+            }
+        }
+        ListaSpesaConversationState::AwaitingQuantitaCatalogo {
+            identita,
+            descrizione,
+        } => match valida_quantita_manuale(text) {
+            Ok((quantita, unita)) => {
+                sessions.clear_chat(chat_id);
+                salva_voce_catalogo(
+                    bot,
+                    msg.chat.id,
+                    pool,
+                    identita,
+                    &descrizione,
+                    quantita,
+                    &unita,
+                )
+                .await?;
+            }
+            Err(errore) => {
+                bot.send_message(msg.chat.id, format!("⚠️ {errore}"))
+                    .reply_markup(annulla_keyboard())
+                    .await?;
+            }
+        },
     }
     Ok(true)
 }
@@ -1720,6 +2537,57 @@ async fn salva_voce_manuale(
         }
         Err(errore) => {
             tracing::warn!(?errore, "Impossibile salvare la voce manuale");
+            show_lista(bot, chat_id, pool, Some("⚠️ Non riesco a salvare la voce.")).await?;
+        }
+    }
+    Ok(())
+}
+
+/// Salva un'aggiunta dal catalogo (alimento generico o prodotto specifico)
+/// e aggiorna subito la lista, così l'utente vede immediatamente la somma
+/// con quanto già richiesto dal planner (per un alimento generico) o la
+/// nuova riga separata (per un prodotto specifico) -- senza dover premere
+/// "🔄 Aggiorna lista" a mano per vederlo.
+async fn salva_voce_catalogo(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    identita: IdentitaCatalogo,
+    descrizione: &str,
+    quantita: f64,
+    unita: &str,
+) -> ResponseResult<()> {
+    let lista = match trova_o_crea_lista_attiva(pool).await {
+        Ok(lista) => lista,
+        Err(errore) => {
+            tracing::warn!(
+                ?errore,
+                "Lista della spesa non disponibile per l'aggiunta dal catalogo"
+            );
+            show_lista(bot, chat_id, pool, Some("⚠️ Non riesco a salvare la voce.")).await?;
+            return Ok(());
+        }
+    };
+    match aggiungi_da_catalogo(pool, lista.id, identita, descrizione, quantita, unita).await {
+        Ok(_) => {
+            if let Err(errore) = aggiorna_lista(pool, &lista).await {
+                tracing::warn!(
+                    ?errore,
+                    "Aggiornamento lista dopo aggiunta catalogo fallito"
+                );
+                show_lista(
+                    bot,
+                    chat_id,
+                    pool,
+                    Some("✅ Voce aggiunta, ma non sono riuscito ad aggiornare subito la lista. Premi 🔄 Aggiorna lista."),
+                )
+                .await?;
+                return Ok(());
+            }
+            show_lista(bot, chat_id, pool, Some("✅ Voce aggiunta.")).await?;
+        }
+        Err(errore) => {
+            tracing::warn!(?errore, "Impossibile salvare l'aggiunta dal catalogo");
             show_lista(bot, chat_id, pool, Some("⚠️ Non riesco a salvare la voce.")).await?;
         }
     }
@@ -1796,10 +2664,84 @@ pub async fn handle_callback(
         return Ok(true);
     }
     if data == "lista_spesa:add" {
+        sessions.clear_chat(chat_id.0);
+        bot.send_message(chat_id, testo_scelta_add())
+            .reply_markup(scelta_add_keyboard())
+            .await?;
+        return Ok(true);
+    }
+    if data == "lista_spesa:add:libera" {
         sessions.set(chat_id.0, ListaSpesaConversationState::AwaitingDescrizione);
         bot.send_message(chat_id, testo_scelta_descrizione())
             .reply_markup(annulla_keyboard())
             .await?;
+        return Ok(true);
+    }
+    if data == "lista_spesa:add:catalogo" {
+        sessions.set(
+            chat_id.0,
+            ListaSpesaConversationState::AwaitingCatalogoQuery,
+        );
+        bot.send_message(chat_id, testo_scelta_query_catalogo())
+            .reply_markup(annulla_keyboard())
+            .await?;
+        return Ok(true);
+    }
+    if let Some(raw) = data.strip_prefix("lista_spesa:add:pick:alimento:") {
+        let Some(id) = raw.parse::<i64>().ok().filter(|value| *value > 0) else {
+            invalid(bot, chat_id).await?;
+            return Ok(true);
+        };
+        match alimento_visibile_per_id(pool, id).await {
+            Ok(Some(nome)) => {
+                sessions.set(
+                    chat_id.0,
+                    ListaSpesaConversationState::AwaitingQuantitaCatalogo {
+                        identita: IdentitaCatalogo::Alimento(id),
+                        descrizione: nome.clone(),
+                    },
+                );
+                bot.send_message(chat_id, testo_scelta_quantita_catalogo(&nome))
+                    .reply_markup(annulla_keyboard())
+                    .await?;
+            }
+            Ok(None) => {
+                invalid(bot, chat_id).await?;
+            }
+            Err(errore) => {
+                tracing::warn!(?errore, id, "Alimento del catalogo non rileggibile");
+                invalid(bot, chat_id).await?;
+            }
+        }
+        return Ok(true);
+    }
+    if let Some(raw) = data.strip_prefix("lista_spesa:add:pick:prodotto:") {
+        let Some(id) = raw.parse::<i64>().ok().filter(|value| *value > 0) else {
+            invalid(bot, chat_id).await?;
+            return Ok(true);
+        };
+        match prodotto_visibile_per_id(pool, id).await {
+            Ok(Some((marca, nome_commerciale))) => {
+                let descrizione = format!("{marca} {nome_commerciale}");
+                sessions.set(
+                    chat_id.0,
+                    ListaSpesaConversationState::AwaitingQuantitaCatalogo {
+                        identita: IdentitaCatalogo::Prodotto(id),
+                        descrizione: descrizione.clone(),
+                    },
+                );
+                bot.send_message(chat_id, testo_scelta_quantita_catalogo(&descrizione))
+                    .reply_markup(annulla_keyboard())
+                    .await?;
+            }
+            Ok(None) => {
+                invalid(bot, chat_id).await?;
+            }
+            Err(errore) => {
+                tracing::warn!(?errore, id, "Prodotto del catalogo non rileggibile");
+                invalid(bot, chat_id).await?;
+            }
+        }
         return Ok(true);
     }
     if data == "lista_spesa:add:cancel" {

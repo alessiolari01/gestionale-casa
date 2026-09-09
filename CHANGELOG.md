@@ -2,6 +2,68 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_LISTA_SPESA_FEEDBACK_20260909 -->
+# 09/09/2026 — Due feedback reali sulla lista della spesa (scritti, collaudo dal vivo da fare)
+
+Continuazione dello stesso lavoro dell'8 settembre (voce precedente): dopo il
+primo collaudo dal vivo di Alessio sulla lista della spesa, due miglioramenti
+richiesti come conseguenza diretta dell'uso reale.
+
+**1. Profilo alimentare automatico per ogni account.** Un utente nuovo non
+deve più andare manualmente su "👥 Profili alimentari" e collegare sé stesso
+prima di poter partecipare a pasti/planner: ogni account ha già il proprio
+profilo "sé stesso" fin dal bootstrap. `identity::provision_approved_telegram_account`
+chiama, nella stessa transazione con cui crea lo spazio iniziale, una nuova
+funzione `profili_alimentari::ensure_self_profile_in_tx(tx, user_id,
+display_name)` -- non riusa `create_profile` perché quella legge l'attore
+corrente via `identity::current_actor()` (durante il bootstrap è
+l'amministratore che approva, non il nuovo utente: riusarla avrebbe
+attribuito il profilo al gestore sbagliato). Idempotente: non fallisce né
+duplica se il profilo esiste già. Dettagli in
+`docs/moduli/profili-e-porzioni.md`.
+
+**2. Aggiunta manuale con ricerca nel catalogo, merge con l'aggregazione del
+planner.** "➕ Aggiungi voce manuale" offre ora la scelta fra "🔎 Cerca nel
+catalogo" (alimenti generici e prodotti commerciali specifici, come già fa
+`ricette::search_food_choices` ma con i prodotti restituiti come risultati
+distinti) e "📝 Voce libera" (il flusso testo-libero di sempre, invariato).
+Un **alimento generico** scelto dal catalogo (es. "Pasta") si **somma** al
+fabbisogno già calcolato dal planner sullo stesso alimento -- l'esempio di
+Alessio: 200 g dal planner + 50 g aggiunti a mano danno 250 g in un'unica
+riga. Un **prodotto commerciale specifico** (es. "Pasta De Cecco") resta
+sempre una riga **separata e distinta**, anche se collegato allo stesso
+alimento generico richiesto altrove -- decisione esplicita presa con
+Alessio per non confondere "mi serve della pasta" con "voglio comprare
+proprio quella marca". Dominio puro: l'enum `Identita` guadagna la variante
+`Prodotto(i64)`, che non si fonde mai con `Alimento` anche a parità di
+alimento sottostante.
+
+A differenza delle voci manuali libere e delle righe `generato`
+pure-planner (cancellate e rigenerate da zero a ogni refresh), le aggiunte
+dal catalogo non sono uno snapshot: vivono in una tabella propria
+(`liste_spesa_aggiunte_catalogo`, nuova migration
+`migrations/20260908160000_lista_spesa_aggiunte_catalogo.sql`, insieme a
+una colonna `prodotto_alimentare_id` su `liste_spesa_voci` e al trigger di
+congelamento esteso) e partecipano di nuovo ogni volta al ricalcolo di
+`🔄 Aggiorna lista`, finché non vengono coperte da una voce comprata (stesso
+congelamento di sempre). Salvata l'aggiunta, la lista si aggiorna subito in
+automatico, così la somma o la nuova riga compaiono senza dover premere il
+refresh a mano.
+
+Non implementato (non richiesto): rimuovere una voce o un'aggiunta già
+inserita, per nessuna delle vie esistenti.
+
+`novita::REGISTRO` non è stato esteso: è un'estensione della stessa
+funzionalità già registrata l'8 settembre (`lista_spesa`), non una
+schermata nuova da segnalare a parte.
+
+**Non collaudato dal vivo**: scritto in questo worktree isolato, senza
+accesso a Telegram né al database reale -- vedi `STATO.md`, sezione
+2quater. **Il resto della lista della spesa** (aggregazione dal planner,
+voci manuali libere, comprato congelato) **è stato collaudato dal vivo** da
+Alessio prima di chiedere questi due feedback: quella parte del
+funzionamento è confermata, queste due aggiunte no.
+
 <!-- CHANGELOG_LISTA_SPESA_20260908 -->
 # 08/09/2026 — Lista della spesa (scritta, collaudo dal vivo da fare)
 

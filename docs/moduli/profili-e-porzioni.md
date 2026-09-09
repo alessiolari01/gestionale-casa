@@ -85,3 +85,38 @@ La tabella `profilo_alimentare_spazi` rende un profilo visibile in uno o più sp
 Nel primo blocco operativo la condivisione è riservata al gestore del profilo e richiede diritto di scrittura nello spazio di destinazione. Eventuali collaboratori espliciti verranno aggiunti in un blocco successivo riusando il modello `permessi_risorsa` con controlli fail-closed dedicati.
 
 La migration non crea profili retroattivi: il popolamento avverrà dal wizard Telegram del blocco successivo.
+
+<!-- PROFILO_SE_STESSO_AUTOMATICO_2026_09 -->
+## Profilo "sé stesso" creato automaticamente al bootstrap (9 settembre 2026)
+
+Deciso con Alessio dopo il primo collaudo dal vivo della lista della spesa:
+un utente nuovo non deve più andare manualmente su "👥 Profili alimentari"
+e collegare sé stesso prima di poter partecipare a pasti/planner. Ogni
+account ha già il proprio profilo alimentare "sé stesso" fin dal momento in
+cui viene approvato.
+
+`identity::provision_approved_telegram_account` (bootstrap di un account
+appena approvato) chiama, nella stessa transazione con cui crea lo spazio
+iniziale (`ensure_initial_space`), una nuova funzione dedicata
+`profili_alimentari::ensure_self_profile_in_tx(tx, user_id, display_name)`:
+stesso INSERT in `profili_alimentari` di `create_profile(..., link_to_self:
+true)`, ma non la riusa. `create_profile` legge l'utente e registra lo
+storico tramite `identity::current_actor()`, che durante il bootstrap è
+l'amministratore che sta approvando la richiesta, non il nuovo utente --
+riusarla avrebbe attribuito il profilo al gestore sbagliato
+(`gestore_utente_id` sarebbe stato l'admin). La nuova funzione prende
+`user_id`/`display_name` espliciti e non tocca lo storico, stesso
+trattamento già riservato alla creazione dello spazio iniziale in
+`ensure_initial_space` (anch'essa silenziosa nello storico durante il
+bootstrap).
+
+Idempotente per costruzione: se il profilo collegato esiste già (non
+dovrebbe succedere nel percorso di bootstrap, dato che l'account è appena
+stato creato) non fallisce né duplica -- verificato con due test dedicati
+in `identity.rs`.
+
+La UI di "👥 Profili alimentari" non è cambiata: `has_linked_profile_for_current_user`
+già gestiva il caso "il profilo esiste già" (messaggio "🔗 Il tuo account è
+già collegato" e pulsante "👤 Me stesso" nascosto) per gli utenti creati
+prima di questa modifica; ora capita semplicemente sempre, dal primo
+momento.

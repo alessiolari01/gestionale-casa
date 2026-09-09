@@ -410,6 +410,8 @@ pub(crate) async fn provision_approved_telegram_account(
     .context("Impossibile collegare l'account Telegram approvato")?;
 
     ensure_initial_space(tx, user_id, display_name.trim()).await?;
+    crate::modules::profili_alimentari::ensure_self_profile_in_tx(tx, user_id, display_name.trim())
+        .await?;
     Ok(user_id)
 }
 
@@ -1332,6 +1334,83 @@ mod tests {
             .expect("actor vista singola");
         assert_eq!(single.spazio_id, family.id);
         assert!(!single.view_all);
+    }
+
+    #[tokio::test]
+    async fn bootstrap_crea_gia_il_profilo_alimentare_di_se_stesso() {
+        let pool = test_pool().await;
+        let mut tx = pool.begin().await.expect("transazione bootstrap");
+        let user_id = provision_approved_telegram_account(
+            &mut tx,
+            5001,
+            5001,
+            "Nuova Persona",
+            "Nuova",
+            Some("Persona"),
+            Some("nuova_persona"),
+        )
+        .await
+        .expect("bootstrap account approvato");
+        tx.commit().await.expect("commit bootstrap");
+
+        let profile: (i64, String) = sqlx::query_as(
+            "SELECT utente_collegato_id, nome FROM profili_alimentari WHERE gestore_utente_id = ?",
+        )
+        .bind(user_id)
+        .fetch_one(&pool)
+        .await
+        .expect("profilo di se stesso creato dal bootstrap");
+        assert_eq!(profile.0, user_id);
+        assert_eq!(profile.1, "Nuova Persona");
+
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM profili_alimentari WHERE gestore_utente_id = ?",
+        )
+        .bind(user_id)
+        .fetch_one(&pool)
+        .await
+        .expect("conteggio profili");
+        assert_eq!(count, 1);
+    }
+
+    #[tokio::test]
+    async fn bootstrap_non_duplica_il_profilo_se_gia_presente() {
+        let pool = test_pool().await;
+        let mut tx = pool.begin().await.expect("transazione bootstrap");
+        let user_id = provision_approved_telegram_account(
+            &mut tx,
+            5002,
+            5002,
+            "Altra Persona",
+            "Altra",
+            None,
+            None,
+        )
+        .await
+        .expect("bootstrap account approvato");
+        tx.commit().await.expect("commit bootstrap");
+
+        // Richiama direttamente la funzione idempotente come se il profilo
+        // fosse già presente (percorso difensivo, non dovrebbe accadere nel
+        // bootstrap reale visto che l'utente è appena stato creato).
+        let mut tx2 = pool.begin().await.expect("seconda transazione");
+        crate::modules::profili_alimentari::ensure_self_profile_in_tx(
+            &mut tx2,
+            user_id,
+            "Altra Persona",
+        )
+        .await
+        .expect("idempotente");
+        tx2.commit().await.expect("commit seconda transazione");
+
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM profili_alimentari WHERE gestore_utente_id = ?",
+        )
+        .bind(user_id)
+        .fetch_one(&pool)
+        .await
+        .expect("conteggio profili");
+        assert_eq!(count, 1);
     }
 
     #[tokio::test]

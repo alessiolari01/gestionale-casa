@@ -1,6 +1,12 @@
 # Lista della spesa
 
-**Scritta l'8 settembre 2026, collaudo dal vivo su Telegram da fare.**
+**Scritta l'8 settembre 2026, collaudo dal vivo su Telegram fatto per la
+prima versione (aggregazione dal planner, voci manuali libere, comprato
+congelato).** Due miglioramenti aggiunti il 9 settembre 2026 dopo quel primo
+collaudo, **non ancora collaudati dal vivo**: l'aggiunta dal catalogo (questo
+documento, sezione "Aggiunta dal catalogo") e il profilo alimentare
+automatico (`docs/moduli/profili-e-porzioni.md`, che non riguarda questo
+modulo direttamente ma lo stesso giro di feedback).
 `src/modules/lista_spesa.rs`, raggiungibile da
 `🍽️ Alimentazione → 🛒 Lista della spesa`.
 
@@ -52,9 +58,62 @@ ingrediente in unità di famiglie diverse resta separato.
 ## Voci generate e manuali
 
 Ogni voce (`liste_spesa_voci`) ha `origine` `generato` o `manuale`. Le
-manuali servono sia per alimenti del catalogo sia per testo libero (un
-prodotto commerciale non modellato, es. "Detersivo piatti"): descrizione
-obbligatoria, quantità e unità opzionali.
+manuali sono testo libero puro (nessun collegamento al catalogo, mai
+sommate a nient'altro): descrizione obbligatoria, quantità e unità
+opzionali. Da non confondere con le aggiunte dal catalogo (sezione
+seguente), che pur diventando anch'esse righe `generato` seguono un
+percorso e una tabella diversi.
+
+## Aggiunta dal catalogo (9 settembre 2026)
+
+Secondo miglioramento deciso con Alessio dopo il primo collaudo dal vivo:
+"➕ Aggiungi voce manuale" offre ora, prima del testo libero, la scelta
+"🔎 Cerca nel catalogo" — cerca sia alimenti generici (es. "Pasta") sia
+prodotti commerciali specifici (es. "Pasta De Cecco", tabella
+`prodotti_alimentari`), mostrando i risultati come pulsanti distinti
+(`🥕` per l'alimento, `🏷️` per il prodotto). Scelto un risultato, chiede
+quantità e unità (stesso input di `valida_quantita_manuale`, ma qui sempre
+richiesta: niente "➖ Senza quantità", perché la quantità serve a sommare).
+Se la ricerca non trova nulla, resta disponibile "📝 Voce libera" (il
+flusso testo-libero di sempre, invariato).
+
+**Due esiti diversi a seconda di cosa si sceglie** (dominio puro in
+`Identita`, terza variante `Prodotto(i64)` accanto ad `Alimento(i64)` e
+`Nome(String)`):
+
+- un **alimento generico** (es. "Pasta") si **somma** al fabbisogno già
+  calcolato dal planner per lo stesso alimento — l'esempio di Alessio: 200 g
+  di pasta per le ricette pianificate + 50 g aggiunti a mano danno 250 g in
+  un'unica riga, non due;
+- un **prodotto commerciale specifico** (es. "Pasta De Cecco") resta sempre
+  una **riga separata e distinta**, anche se collegato allo stesso alimento
+  generico richiesto altrove — mai un merge, per non confondere "mi serve
+  della pasta" con "voglio comprare proprio quella marca" (decisione
+  esplicita presa con Alessio).
+
+**Non sono uno snapshot**: a differenza delle righe `generato` pure-planner
+(cancellate e rigenerate da zero a ogni refresh), le aggiunte dal catalogo
+vivono nella propria tabella (`liste_spesa_aggiunte_catalogo`) e
+partecipano di nuovo ogni volta al calcolo di `🔄 Aggiorna lista`
+(`aggiorna_lista` unisce le righe del planner con quelle di questa tabella
+prima di aggregare) — restano "vive" attraverso ogni refresh, finché non
+vengono coperte da una voce comprata (stesso congelamento di sempre: una
+riga segnata comprata resta congelata, e se serve dell'altro compare una
+voce nuova per la differenza).
+
+Salvata l'aggiunta, la lista si aggiorna subito (chiamata automatica ad
+`aggiorna_lista`) così la somma o la nuova riga compaiono senza dover
+premere "🔄 Aggiorna lista" a mano.
+
+Ricerca in `cerca_nel_catalogo` (dedicata a questo modulo, stesso schema di
+visibilità di `ricette::search_food_choices` ma non riusata da lì: quella
+funzione non restituisce i prodotti come risultati distinti, solo come
+motivo per cui un alimento compare in ricerca). Nessuna paginazione vera,
+un `LIMIT` come "top N" per ciascuna delle due ricerche (alimenti e
+prodotti), stesso approccio già in uso in `ricette.rs`.
+
+**Non implementato**: rimuovere un'aggiunta dal catalogo già inserita (né
+una voce manuale libera) — oggi non esiste per nessuna voce, non richiesto.
 
 ## Segna comprato
 
@@ -94,8 +153,9 @@ bloccati).
 ## Tabelle
 
 ```text
-liste_spesa        intervallo, proprietario, spazio
-liste_spesa_voci   voci generate o manuali, comprato/comprato_il
+liste_spesa                       intervallo, proprietario, spazio
+liste_spesa_voci                  voci generate o manuali, comprato/comprato_il
+liste_spesa_aggiunte_catalogo     aggiunte dal catalogo, vive attraverso ogni refresh
 ```
 
 Vedi `docs/database.md` per i campi.

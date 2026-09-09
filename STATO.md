@@ -814,7 +814,7 @@ per la prossima volta: un'analisi video a campionamento sparso non
 sostituisce un collaudo dal vivo, soprattutto quando il campione è troppo
 rado per essere sicuri di cosa causa cosa.
 
-## 2quater. Lista della spesa — scritta l'8 settembre 2026, collaudo dal vivo da fare
+## 2quater. Lista della spesa — scritta l'8 settembre 2026, primo collaudo dal vivo fatto, due feedback aggiunti il 9
 
 Prossimo macro-step deciso lo stesso giorno (punto 9 della sezione 6),
 appoggiato sul planner alimentare già operativo: aggrega automaticamente gli
@@ -886,25 +886,115 @@ refresh sottrae dal fresco appena aggregato quanto già coperto da voci
 `generato` comprate con la stessa identità/unità, e scarta del tutto una
 voce se il residuo non è positivo.
 
-**Non collaudato dal vivo**: scritto in un worktree isolato, senza accesso a
-Telegram né al database reale dell'S9. Nessuna migration applicata a un
-database reale.
+**Primo giro di collaudo dal vivo fatto da Alessio**: aggregazione dal
+planner, voci manuali libere, comprato congelato — quella parte del
+funzionamento è confermata dall'uso reale su Telegram. Dallo stesso giro
+sono arrivati due feedback, implementati il 9 settembre come continuazione
+dello stesso lavoro (stessi commit, non un ramo nuovo) — **questi due non
+sono ancora stati ricollaudati dal vivo**.
+
+### Feedback 1 — profilo alimentare automatico per ogni account
+
+Un utente nuovo non deve più andare manualmente su "👥 Profili alimentari"
+e collegare sé stesso prima di poter partecipare a pasti/planner: ogni
+account ha già il proprio profilo "sé stesso" fin dal bootstrap.
+`identity::provision_approved_telegram_account` chiama, nella stessa
+transazione con cui crea lo spazio iniziale (`ensure_initial_space`), una
+nuova funzione `profili_alimentari::ensure_self_profile_in_tx(tx, user_id,
+display_name)`. Non riusa `create_profile(..., link_to_self: true)`: quella
+funzione legge l'utente e registra lo storico tramite
+`identity::current_actor()`, che durante il bootstrap è l'amministratore
+che sta approvando la richiesta, non il nuovo utente — riusarla avrebbe
+attribuito il profilo (`gestore_utente_id`) al gestore sbagliato. La nuova
+funzione prende `user_id`/`display_name` espliciti e non tocca lo storico,
+stesso trattamento già riservato a `ensure_initial_space` durante il
+bootstrap. Idempotente: se il profilo collegato esiste già non fallisce né
+duplica (verificato con un test dedicato che la richiama a mano su un
+utente già provvisto). La UI di "👥 Profili alimentari" non è cambiata:
+gestiva già il caso "profilo esistente" per gli account creati prima di
+questa modifica. Dettagli in `docs/moduli/profili-e-porzioni.md`.
+
+### Feedback 2 — aggiunta manuale con ricerca nel catalogo
+
+"➕ Aggiungi voce manuale" offre ora la scelta fra "🔎 Cerca nel catalogo"
+(alimenti generici e prodotti commerciali specifici da
+`prodotti_alimentari`) e "📝 Voce libera" (flusso testo-libero invariato).
+Un **alimento generico** scelto dal catalogo si **somma** al fabbisogno già
+calcolato dal planner sullo stesso alimento (l'esempio di Alessio: 200 g
+dal planner + 50 g a mano = 250 g in un'unica riga). Un **prodotto
+commerciale specifico** resta sempre una riga **separata e distinta**,
+anche se collegato allo stesso alimento generico richiesto altrove —
+decisione esplicita presa con Alessio per non confondere "mi serve della
+pasta" con "voglio comprare proprio quella marca".
+
+Dominio puro: `Identita` guadagna la variante `Prodotto(i64)` (mai fusa con
+`Alimento` a parità di alimento sottostante); `RigaIngrediente` e
+`VoceGenerata` guadagnano un campo `prodotto_id: Option<i64>`.
+
+A differenza delle voci manuali libere e delle righe `generato`
+pure-planner (cancellate e rigenerate da zero a ogni refresh), le aggiunte
+dal catalogo non sono uno snapshot: vivono in una tabella propria
+(`liste_spesa_aggiunte_catalogo`, migration
+`migrations/20260908160000_lista_spesa_aggiunte_catalogo.sql`, che aggiunge
+anche la colonna `prodotto_alimentare_id` a `liste_spesa_voci` e ricrea il
+trigger di congelamento per coprirla) e partecipano di nuovo ogni volta al
+ricalcolo di `aggiorna_lista`, finché non vengono coperte da una voce
+comprata (stesso congelamento di sempre). Salvata l'aggiunta, la lista si
+aggiorna subito in automatico (chiamata a `aggiorna_lista`), così l'utente
+vede la somma o la nuova riga senza dover premere "🔄 Aggiorna lista" a
+mano.
+
+Ricerca in `cerca_nel_catalogo` (dedicata al modulo, stesso schema di
+visibilità di `ricette::search_food_choices` ma non riusata da lì: quella
+funzione non restituisce i prodotti come risultati distinti). Nessuna
+paginazione vera, `LIMIT` come "top N", stesso approccio già in uso in
+`ricette.rs`. `novita::REGISTRO` non è stato esteso: è la stessa
+funzionalità già registrata l'8 settembre (`lista_spesa`), non una
+schermata nuova.
+
+**Non implementato (non richiesto)**: rimuovere una voce o un'aggiunta già
+inserita, per nessuna delle vie.
+
+13 nuovi test in `lista_spesa.rs` (7 sul dominio puro: identità `Prodotto`
+non fusa con `Alimento`, somma su alimento generico, somma fra prodotti
+uguali; 6 sulle funzioni database con `sqlite::memory:`: somma col planner,
+riga separata per prodotto, persistenza attraverso un secondo refresh,
+congelamento esteso alla nuova colonna, ricerca nel catalogo) e 2 nuovi
+test in `identity.rs` (bootstrap crea il profilo, bootstrap non duplica se
+già presente), per un totale di **338 (328 prima)**, migration **47 (46
+prima)**. Pipeline `fmt`, `check --locked`,
+`clippy --all-targets --locked -- -D warnings`, `test --locked` verde in
+locale, tutti i 338 test passano.
+
+Un bug reale trovato dai test, non a tavolino: la prima stesura di
+`aggrega_ingredienti` propagava sempre `prodotto_id: None` sulla riga
+generata (residuo di un inserimento automatico del campo durante il
+refactor), così due prodotti identici non si sarebbero mai sommati tra loro
+e un prodotto si sarebbe confuso con l'alimento generico in certi casi.
+Corretto propagando `riga.prodotto_id`; i due test sull'identità `Prodotto`
+sono quelli che l'hanno trovato.
+
+**Non collaudato dal vivo (i due feedback di questa sezione)**: scritti in
+un worktree isolato, senza accesso a Telegram né al database reale
+dell'S9. Nessuna migration applicata a un database reale.
 
 ## 3. Stato tecnico verificato
 
-- **46 migration** nel repository (`migrations/20260908150000_lista_spesa.sql`
-  aggiunta l'8 settembre 2026, non ancora applicata a nessun database
-  reale — scritta in un worktree isolato). Le **45 precedenti** erano
+- **47 migration** nel repository (`migrations/20260908150000_lista_spesa.sql`
+  dell'8 settembre 2026 e `migrations/20260908160000_lista_spesa_aggiunte_catalogo.sql`
+  del 9 settembre 2026, nessuna delle due ancora applicata a un database
+  reale — scritte in un worktree isolato). Le **45 precedenti** erano
   **applicate** al database reale dell'S9, verificato il 7 settembre 2026
   leggendo `_sqlx_migrations` via SSH (`applied_migrations=45`) — non
   dedotto, per la stessa ragione già scritta qui altre volte;
 - pipeline verde in locale (in questo worktree, non sull'S9): `fmt`,
   `check --locked`, `clippy --all-targets --locked -- -D warnings`,
-  `test --locked` — **328 test** (303 prima della lista della spesa, 300
-  prima dell'audit annulla, 297 prima dell'allegato video, 289 prima del
-  badge "🆕", 280 prima del sotto-step 5c, 279 prima del sotto-step 5a,
-  270 prima del sotto-step 3/5 della distribuzione, 248 prima del
-  2 settembre: e' il numero da confrontare dopo ogni
+  `test --locked` — **338 test** (328 prima dei due feedback sulla lista
+  della spesa del 9 settembre, 303 prima della lista della spesa dell'8
+  settembre, 300 prima dell'audit annulla, 297 prima dell'allegato video,
+  289 prima del badge "🆕", 280 prima del sotto-step 5c, 279 prima del
+  sotto-step 5a, 270 prima del sotto-step 3/5 della distribuzione, 248
+  prima del 2 settembre: e' il numero da confrontare dopo ogni
   aggiornamento dell'S9);
 - CI su GitHub Actions **verde** dalla run #42, la prima dello Step 7.
 
@@ -1133,8 +1223,15 @@ src/modules/novita.rs               registro delle novità e badge "🆕" propag
    scritta in `docs/roadmap.md` e appoggiata sul planner pasti già
    operativo. **Scritta lo stesso giorno** (`src/modules/lista_spesa.rs`,
    `migrations/20260908150000_lista_spesa.sql`, dettagli in sezione 2quater
-   qui sotto) — collaudo dal vivo su Telegram da fare, nessun collaudo
-   reale è stato possibile in questo worktree isolato.
+   qui sotto) — **primo collaudo dal vivo fatto da Alessio** (aggregazione
+   dal planner, voci manuali libere, comprato congelato: confermati). Dal
+   collaudo sono arrivati due feedback, implementati il 9 settembre come
+   continuazione dello stesso lavoro (profilo alimentare automatico,
+   aggiunta manuale con ricerca nel catalogo — migration
+   `migrations/20260908160000_lista_spesa_aggiunte_catalogo.sql`, dettagli
+   in sezione 2quater) — **questi due non sono ancora stati ricollaudati
+   dal vivo**, nessun collaudo reale è stato possibile in questo worktree
+   isolato.
 10. **Riconfigurazione dell'S9 con un account dedicato — fatta l'8
     settembre 2026.** Chiarito con Alessio prima di toccare nulla: resta
     lo stesso account Telegram amministratore, Termux/il progetto/le

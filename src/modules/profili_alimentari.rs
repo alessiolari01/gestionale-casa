@@ -805,6 +805,53 @@ async fn create_profile(pool: &SqlitePool, raw_name: &str, link_to_self: bool) -
     Ok(profile_id)
 }
 
+/// Crea il profilo alimentare "sé stesso" per un account appena approvato,
+/// dentro la transazione di bootstrap di `identity::provision_approved_telegram_account`.
+///
+/// Non riusa `create_profile`: quella funzione legge l'utente e registra lo
+/// storico tramite `identity::current_actor()`, che durante il bootstrap è
+/// l'amministratore che sta approvando, non il nuovo utente — userla
+/// attribuirebbe il profilo al gestore sbagliato. Questa funzione prende
+/// `user_id`/`display_name` espliciti e non tocca lo storico, stesso
+/// trattamento già riservato allo spazio iniziale in
+/// `identity::ensure_initial_space` (anch'essa silenziosa nello storico).
+///
+/// Idempotente: se il profilo collegato esiste già (non dovrebbe succedere
+/// nel percorso di bootstrap, dato che l'account è appena stato creato) non
+/// fallisce né duplica.
+pub(crate) async fn ensure_self_profile_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    user_id: i64,
+    display_name: &str,
+) -> Result<()> {
+    let already_linked: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM profili_alimentari WHERE utente_collegato_id = ? AND archiviato = 0)",
+    )
+    .bind(user_id)
+    .fetch_one(&mut **tx)
+    .await
+    .context("Impossibile verificare il profilo collegato durante il bootstrap")?;
+    if already_linked {
+        return Ok(());
+    }
+
+    let name = clean_name(display_name)?;
+    let normalized = normalize_name(&name);
+
+    sqlx::query(
+        "INSERT INTO profili_alimentari (gestore_utente_id, utente_collegato_id, nome, nome_normalizzato) VALUES (?, ?, ?, ?)",
+    )
+    .bind(user_id)
+    .bind(user_id)
+    .bind(&name)
+    .bind(&normalized)
+    .execute(&mut **tx)
+    .await
+    .context("Impossibile creare il profilo alimentare di bootstrap")?;
+
+    Ok(())
+}
+
 async fn rename_profile(pool: &SqlitePool, profile_id: i64, raw_name: &str) -> Result<bool> {
     let user_id = current_user_id()?;
     let new_name = clean_name(raw_name)?;

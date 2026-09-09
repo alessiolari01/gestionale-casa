@@ -203,18 +203,43 @@ manuali (testo libero, per un prodotto commerciale non modellato).
 | `lista_id` | INTEGER | riferimento a `liste_spesa(id)` |
 | `origine` | TEXT | `generato` o `manuale` |
 | `alimento_id` | INTEGER | nullable, riferimento a `alimenti(id)` |
-| `descrizione` | TEXT | nome alimento (generato) o testo libero (manuale) |
+| `prodotto_alimentare_id` | INTEGER | nullable, riferimento a `prodotti_alimentari(id)` (9 settembre 2026, aggiunte dal catalogo su un prodotto specifico) |
+| `descrizione` | TEXT | nome alimento/prodotto (generato) o testo libero (manuale) |
 | `quantita` / `unita_simbolo` | REAL / TEXT | nullable solo per `origine = 'manuale'` |
 | `comprato` | INTEGER | flag per riga intera, non quantità parziale |
 | `comprato_il` | TEXT | valorizzato quando `comprato = 1` |
 
 Una volta `comprato = 1` un trigger a database (`trg_lista_spesa_voce_comprata_immutabile`)
-impedisce di modificare gli altri campi — solo il toggle di `comprato`
-stesso resta permesso, stesso principio del congelamento di `planner_pasti`.
-Il refresh esplicito (`🔄 Aggiorna lista`) tocca solo le voci
-`origine = 'generato' AND comprato = 0`: le cancella e re-inserisce da zero
-il risultato fresco dell'aggregazione, senza mai toccare una voce comprata
-o una voce manuale.
+impedisce di modificare gli altri campi (inclusa `prodotto_alimentare_id`)
+— solo il toggle di `comprato` stesso resta permesso, stesso principio del
+congelamento di `planner_pasti`. Il refresh esplicito (`🔄 Aggiorna lista`)
+tocca solo le voci `origine = 'generato' AND comprato = 0`: le cancella e
+re-inserisce da zero il risultato fresco dell'aggregazione (planner più
+aggiunte dal catalogo, vedi sotto), senza mai toccare una voce comprata o
+una voce manuale.
+
+### `liste_spesa_aggiunte_catalogo` (9 settembre 2026)
+Aggiunte dal catalogo per "➕ Aggiungi voce manuale → 🔎 Cerca nel
+catalogo": a differenza delle righe `generato` di `liste_spesa_voci`, non
+sono uno snapshot — restano qui e partecipano di nuovo ogni volta al
+ricalcolo di `aggiorna_lista`, finché non vengono coperte da una voce
+comprata. Dettagli e motivazione della scelta di design in
+`docs/moduli/lista-spesa.md`, sezione "Aggiunta dal catalogo".
+
+| Campo | Tipo | Note |
+|---|---|---|
+| `lista_id` | INTEGER | riferimento a `liste_spesa(id)`, `ON DELETE CASCADE` |
+| `tipo` | TEXT | `alimento` (si somma al fabbisogno del planner) o `prodotto` (riga sempre separata) |
+| `alimento_id` | INTEGER | nullable, riferimento a `alimenti(id)`, valorizzato solo per `tipo = 'alimento'` |
+| `prodotto_alimentare_id` | INTEGER | nullable, riferimento a `prodotti_alimentari(id)`, valorizzato solo per `tipo = 'prodotto'` |
+| `descrizione_snapshot` | TEXT | nome al momento dell'aggiunta, resta leggibile anche se l'alimento/prodotto viene poi cancellato dal catalogo |
+| `quantita` / `unita_simbolo` | REAL / TEXT | sempre obbligatorie (a differenza delle voci manuali libere, qui la quantità serve a sommare) |
+
+Nessun CHECK che leghi `tipo` alla colonna non-NULL corrispondente:
+`alimento_id`/`prodotto_alimentare_id` sono `ON DELETE SET NULL`, e
+quell'`UPDATE` violerebbe un CHECK del genere quando la riga referenziata
+viene cancellata — stesso motivo per cui
+`planner_pasto_ingredienti_snapshot.alimento_id` non ha un vincolo simile.
 
 ## Cosa NON è in questo schema
 
