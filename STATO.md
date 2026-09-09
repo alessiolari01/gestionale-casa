@@ -1094,7 +1094,10 @@ lista"). Due difetti estetici trovati dal vivo, non a tavolino:
    altrove nel bot.
 
 Nessun nuovo test (modifiche solo di formattazione/struttura della
-tastiera, non di logica): **348 test** invariati. Pipeline `fmt`,
+tastiera, non di logica): 348 test invariati (vedi il conteggio corrente
+in sezione 3, non ripetuto qui in grassetto per non confondere il
+controllo automatico di `aggiorna-s9.sh`, che cerca il primo "**N
+test**" del documento). Pipeline `fmt`,
 `check --locked`, `clippy --all-targets --locked -- -D warnings`,
 `test --locked` verde in locale.
 
