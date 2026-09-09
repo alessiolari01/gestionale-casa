@@ -1218,7 +1218,11 @@ fn dynamic_filter_keyboard(
         }
         label.push_str(&truncate_chars(&option.label, 24));
         if let Some(subtitle) = option.subtitle.as_deref() {
-            label.push_str(" · ");
+            // A capo, non " · " (C15): concatenata sulla stessa riga,
+            // Telegram può troncare l'intera etichetta con "…" invece di
+            // andare a capo da solo -- lo stesso difetto trovato dal vivo
+            // sulla lista della spesa.
+            label.push('\n');
             label.push_str(&truncate_chars(&filter_subtitle_label(kind, subtitle), 16));
         }
         rows.push(vec![button(

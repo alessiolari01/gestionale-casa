@@ -114,6 +114,28 @@ tutorial alla prima vera visita.
 **Non collaudato dal vivo**: scritto in questo worktree isolato, senza
 accesso a Telegram né al database reale -- vedi `STATO.md`.
 
+<!-- CHANGELOG_CONVENZIONE_C15_ETICHETTE_A_CAPO_20260909 -->
+# 09/09/2026 — Nuova convenzione C15: le parti aggiunte a un'etichetta vanno a capo
+
+Alessio ha chiesto di rendere globale la correzione del taglio
+dell'etichetta dell'eccesso (voce precedente), non lasciarla specifica
+della lista della spesa.
+
+Nuova **C15** in `docs/convenzioni-telegram.md`: una parte opzionale o di
+lunghezza variabile aggiunta a un'etichetta di pulsante va sempre a capo,
+mai concatenata con " · ", perché Telegram non va a capo da solo su un
+pulsante troppo largo — taglia con "…".
+
+Cercato ogni altro punto del bot con lo stesso pattern di concatenazione:
+un solo caso analogo reale, il sottotitolo opzionale di un filtro
+dinamico in `src/modules/storico.rs` (`dynamic_filter_keyboard`),
+corretto allo stesso modo. Gli altri quattro punti trovati compongono
+testo di messaggio, non etichette di pulsante — nessun rischio, lasciati
+invariati.
+
+Nessun nuovo test (stesso tipo di modifica della voce precedente), 348
+totali invariati.
+
 <!-- CHANGELOG_LISTA_SPESA_ESTETICA_RIORDINO_ECCESSO_20260909 -->
 # 09/09/2026 — Lista della spesa: due correzioni estetiche su eccesso e riordino
 

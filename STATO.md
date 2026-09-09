@@ -1098,6 +1098,21 @@ tastiera, non di logica): **348 test** invariati. Pipeline `fmt`,
 `check --locked`, `clippy --all-targets --locked -- -D warnings`,
 `test --locked` verde in locale.
 
+**Diventata regola globale, non solo della lista della spesa** (chiesto da
+Alessio subito dopo): nuova **C15** in `docs/convenzioni-telegram.md` — una
+parte opzionale o di lunghezza variabile aggiunta a un'etichetta (un
+avviso, un sottotitolo) va sempre a capo, mai concatenata con " · ", perché
+Telegram non va a capo da solo su un pulsante troppo largo: taglia con "…".
+Cercato ogni altro punto del bot che concatena etichette di pulsanti con
+" · ": un solo caso analogo reale, `dynamic_filter_keyboard` in
+`src/modules/storico.rs` (etichetta di un filtro + sottotitolo opzionale),
+corretto allo stesso modo. Gli altri quattro punti trovati con lo stesso
+pattern (`planner_alimentare.rs`, due in `profili_alimentari.rs`,
+`ricette.rs`) compongono testo di messaggio, non etichette di pulsante —
+Telegram lo va a capo da solo, nessun rischio, lasciati invariati. La
+quantità di una voce della lista della spesa resta sulla stessa riga del
+nome: è sempre presente e breve, non la parte che causava il taglio.
+
 ## 3. Stato tecnico verificato
 
 - **48 migration** nel repository, tutte **applicate** al database reale

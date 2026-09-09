@@ -406,6 +406,30 @@ fino al menù principale se poi non si segna nessun pulsante nel mezzo.
 Il campo di testo resta accettato dove già c'è (orari, quantità): il calendario
 aggiunge una strada, non ne toglie una.
 
+### C15. Le parti aggiunte a un'etichetta vanno a capo, non concatenate
+
+Trovato da Alessio collaudando dal vivo la lista della spesa (9 settembre
+2026): un pulsante che unisce più parti sulla stessa riga con " · " (nome +
+quantità + un avviso opzionale, o un'etichetta + un sottotitolo opzionale)
+rischia di superare la larghezza che Telegram riserva a un pulsante. A quel
+punto **Telegram non va a capo da solo**: taglia l'intera etichetta con "…",
+qualunque parte sia stata tagliata — si era visto con "125 in ecc…" invece
+di "125 in eccesso".
+
+**Regola**: quando un'etichetta ha una parte opzionale o di lunghezza
+variabile aggiunta a un nome già presente (un avviso, un sottotitolo, un
+badge), quella parte va **a capo** (`\n` nel testo del pulsante, che
+Telegram interpreta come una riga in più, non come testo tagliato) invece
+di essere concatenata con " · " o uno spazio sulla stessa riga. Non serve
+calcolare una lunghezza massima esatta — è la stessa idea di C1: il testo
+non deve mai lasciare a Telegram la scelta di tagliare qualcosa.
+
+Applicata alla lista della spesa (`⚠️ ... in eccesso` su una riga propria
+dentro il pulsante di ogni voce) e allo Storico (il sottotitolo di un filtro
+dinamico, `dynamic_filter_keyboard`). La quantità di una voce della lista
+della spesa resta invece sulla stessa riga del nome: è sempre presente e
+breve (mai la causa del taglio osservato), non una parte opzionale.
+
 ### C10. Un verbo solo per ogni azione
 
 | azione | forma |
