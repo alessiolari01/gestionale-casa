@@ -989,19 +989,59 @@ sempre. Corretto usando il nome così com'è, senza prefisso aggiuntivo;
 l'icona `🏷️` di un prodotto commerciale specifico (marca +
 nome_commerciale, senza icona di categoria propria) non è toccata.
 
+**Tre correzioni in più, dallo stesso giro di collaudo dal vivo (9
+settembre 2026)**:
+
+1. **Refresh automatico nell'unico caso in cui deve scattare da solo**:
+   togliere la spunta a una voce `generato` la rimette disponibile al
+   prossimo refresh, ma se nel frattempo un altro pasto aveva già
+   prodotto una riga nuova per la differenza (`sottrai_gia_comprato`),
+   restavano due righe frammentate dello stesso alimento finché non si
+   premeva "🔄 Aggiorna lista" a mano — visto da Alessio con due volte
+   "Pasta · 50 g" invece di una "Pasta · 100 g". `toggle_comprato` ora
+   richiama `aggiorna_lista` subito dopo aver tolto la spunta, ma solo
+   quando la voce è `generato`: una voce manuale non ha nulla con cui
+   fondersi e non viene mai toccata da un refresh, nemmeno indiretto.
+2. **`🔄 Aggiorna lista` compare solo se cambierebbe davvero qualcosa**,
+   stesso principio già in uso per `🔄 Aggiorna planner` sulle ricette
+   cambiate. Nuova funzione pura di confronto `serve_aggiornamento`:
+   calcola il fresco dell'aggregazione (stessa logica di `aggiorna_lista`,
+   estratta in `calcola_fresche` e condivisa dalle due) e lo confronta con
+   le voci generate non ancora comprate già in lista — se coincidono, il
+   bottone non compare, e il testo "Nessuna voce nella lista" cambia di
+   conseguenza quando non c'è nulla da generare.
+3. **Nessun limite di cinque voci per pagina**, eccezione esplicita a C6:
+   la lista della spesa è l'unica lista del bot che mostra tutte le voci
+   su una sola schermata, perché l'utente deve vederle tutte insieme per
+   decidere cosa prendere prima e cosa dopo — spezzarla in pagine
+   negherebbe lo scopo della schermata. Il callback `lista_spesa:page:` e
+   la relativa riga di paginazione sono stati rimossi insieme alla
+   funzione `show_lista_pagina` (unita a `show_lista`).
+
+3 nuovi test in `lista_spesa.rs` (rifusione dopo la deselezione, nessun
+refresh su una voce manuale, `serve_aggiornamento` vero/falso secondo lo
+stato reale), per un totale di **341 (338 prima)**. Nessuna migration
+nuova. Pipeline `fmt`, `check --locked`,
+`clippy --all-targets --locked -- -D warnings`, `test --locked` verde in
+locale.
+
+**Non ancora ricollaudate dal vivo**: queste tre correzioni sono scritte
+e testate in locale, non ancora provate su Telegram.
+
 ## 3. Stato tecnico verificato
 
-- **47 migration** nel repository (`migrations/20260908150000_lista_spesa.sql`
-  dell'8 settembre 2026 e `migrations/20260908160000_lista_spesa_aggiunte_catalogo.sql`
-  del 9 settembre 2026, nessuna delle due ancora applicata a un database
-  reale — scritte in un worktree isolato). Le **45 precedenti** erano
-  **applicate** al database reale dell'S9, verificato il 7 settembre 2026
-  leggendo `_sqlx_migrations` via SSH (`applied_migrations=45`) — non
-  dedotto, per la stessa ragione già scritta qui altre volte;
-- pipeline verde in locale (in questo worktree, non sull'S9): `fmt`,
-  `check --locked`, `clippy --all-targets --locked -- -D warnings`,
-  `test --locked` — **338 test** (328 prima dei due feedback sulla lista
-  della spesa del 9 settembre, 303 prima della lista della spesa dell'8
+- **47 migration** nel repository, tutte **applicate** al database reale
+  dell'S9 (`migrations/20260908150000_lista_spesa.sql` e
+  `migrations/20260908160000_lista_spesa_aggiunte_catalogo.sql`, il 9
+  settembre 2026, verificato leggendo `applied_migrations=47` nel log di
+  avvio del bot dopo il deploy — non dedotto);
+- pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa, punto
+  1 della sezione 6): `fmt`, `check --locked`,
+  `clippy --all-targets --locked -- -D warnings`, `test --locked` —
+  **341 test** (338 prima delle tre correzioni del 9 settembre sulla lista
+  della spesa — refresh automatico alla deselezione, "Aggiorna lista"
+  condizionale, nessun limite di pagina —, 328 prima dei due feedback
+  sulla lista della spesa, 303 prima della lista della spesa dell'8
   settembre, 300 prima dell'audit annulla, 297 prima dell'allegato video,
   289 prima del badge "🆕", 280 prima del sotto-step 5c, 279 prima del
   sotto-step 5a, 270 prima del sotto-step 3/5 della distribuzione, 248

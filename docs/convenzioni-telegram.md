@@ -313,6 +313,13 @@ non potevano usarla e si sono tenuti la loro riga. **Una primitiva che non entra
 dove serve non unifica niente**, e il difetto si è visto solo aprendo il bot:
 lo Storico mostrava ancora `1 / 21` con le frecce nude.
 
+**Eccezione esplicita, decisa con Alessio il 9 settembre 2026**: la
+`🛒 Lista della spesa` mostra tutte le voci su una sola schermata, senza
+paginazione. Lì lo scopo della lista è vederla intera per decidere cosa
+prendere prima e cosa dopo al supermercato — spezzarla in pagine da
+cinque negherebbe proprio quello scopo. Nessun'altra lista del bot ha
+oggi questa eccezione.
+
 ### C7. Il conteggio sta sul pulsante
 
 `🟡 Da approvare · 0` invece di una riga di testo «Da approvare: 0» sopra un

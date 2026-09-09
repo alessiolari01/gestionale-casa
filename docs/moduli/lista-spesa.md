@@ -2,11 +2,14 @@
 
 **Scritta l'8 settembre 2026, collaudo dal vivo su Telegram fatto per la
 prima versione (aggregazione dal planner, voci manuali libere, comprato
-congelato).** Due miglioramenti aggiunti il 9 settembre 2026 dopo quel primo
-collaudo, **non ancora collaudati dal vivo**: l'aggiunta dal catalogo (questo
-documento, sezione "Aggiunta dal catalogo") e il profilo alimentare
-automatico (`docs/moduli/profili-e-porzioni.md`, che non riguarda questo
-modulo direttamente ma lo stesso giro di feedback).
+congelato).** Il collaudo dal vivo della ricerca nel catalogo (9 settembre
+2026) ha trovato e fatto correggere un'icona duplicata (§ Aggiunta dal
+catalogo) e tre altri punti: il refresh automatico alla deselezione, il
+bottone "🔄 Aggiorna lista" condizionale, e l'assenza di paginazione — le tre
+correzioni sono scritte e testate in locale, **non ancora ricollaudate dal
+vivo**. Resta non ancora collaudato anche il profilo alimentare automatico
+(`docs/moduli/profili-e-porzioni.md`, stesso giro di feedback, non riguarda
+questo modulo direttamente).
 `src/modules/lista_spesa.rs`, raggiungibile da
 `🍽️ Alimentazione → 🛒 Lista della spesa`.
 
@@ -70,8 +73,12 @@ Secondo miglioramento deciso con Alessio dopo il primo collaudo dal vivo:
 "➕ Aggiungi voce manuale" offre ora, prima del testo libero, la scelta
 "🔎 Cerca nel catalogo" — cerca sia alimenti generici (es. "Pasta") sia
 prodotti commerciali specifici (es. "Pasta De Cecco", tabella
-`prodotti_alimentari`), mostrando i risultati come pulsanti distinti
-(`🥕` per l'alimento, `🏷️` per il prodotto). Scelto un risultato, chiede
+`prodotti_alimentari`), mostrando i risultati come pulsanti distinti: un
+alimento usa il nome così com'è (porta già la propria icona di categoria
+incorporata, es. "🌾 Pasta" — un `🥕` fisso aggiunto qui sopra duplicava
+l'icona, bug trovato da Alessio collaudando dal vivo e corretto lo stesso
+9 settembre), un prodotto usa `🏷️ {marca} {nome commerciale}`. Scelto un
+risultato, chiede
 quantità e unità (stesso input di `valida_quantita_manuale`, ma qui sempre
 richiesta: niente "➖ Senza quantità", perché la quantità serve a sommare).
 Se la ricerca non trova nulla, resta disponibile "📝 Voce libera" (il
@@ -123,6 +130,17 @@ database impedisce di modificare quantità/unità/descrizione/origine — solo
 il toggle (tornare a `comprato = 0`) resta permesso, stesso principio del
 congelamento di `planner_pasti`.
 
+**Caso eccezionale in cui il ricalcolo scatta da solo** (deciso con Alessio
+il 9 settembre 2026, dopo averlo visto dal vivo): togliere la spunta a una
+voce `generato` la rimette disponibile al refresh, ma se nel frattempo un
+altro pasto aveva già prodotto una riga nuova per la differenza (vedi
+sotto), restavano due righe frammentate dello stesso alimento finché non si
+premeva "🔄 Aggiorna lista" a mano — visto con "Pasta · 50 g" due volte
+invece di "Pasta · 100 g". `toggle_comprato` ora richiama `aggiorna_lista`
+subito dopo aver tolto la spunta, ma **solo** quando la voce è `generato`:
+una voce manuale non ha nulla con cui fondersi e non viene mai toccata da
+un refresh, nemmeno indiretto.
+
 ## Aggiornamento esplicito, mai automatico
 
 `🔄 Aggiorna lista` ricalcola **solo** le voci `origine = 'generato' AND
@@ -135,11 +153,24 @@ nuovo pasto pianificato che usa lo stesso ingrediente), compare una voce
 **nuova** non comprata per la sola differenza — non c'è merge con la vecchia
 riga comprata, per non alterare mai una quantità già segnata come acquistata.
 
+**Il bottone compare solo se serve davvero** (deciso con Alessio il 9
+settembre 2026, stesso principio già in uso per "🔄 Aggiorna planner" sulle
+ricette cambiate): `serve_aggiornamento` calcola il fresco dell'aggregazione
+con la stessa logica di `aggiorna_lista` (estratta in `calcola_fresche`,
+condivisa dalle due) e lo confronta con le voci generate non ancora comprate
+già in lista. Se coincidono, "🔄 Aggiorna lista" non compare — e il testo
+"Nessuna voce nella lista" cambia di conseguenza quando non c'è nulla da
+generare (nessun pasto pianificato, nessuna aggiunta dal catalogo).
+
 ## Schermate
 
-**Principale** — intervallo, conteggio comprate/totale, voci come pulsanti
-`✅`/`☐` (toggle al tocco), paginazione da `modules::liste`; `🔄 Aggiorna
-lista`, `➕ Aggiungi voce manuale`, `🗓️ Cambia intervallo`.
+**Principale** — intervallo, conteggio comprate/totale, **tutte** le voci
+come pulsanti `✅`/`☐` (toggle al tocco), **senza paginazione**: eccezione
+esplicita a C6 (`docs/convenzioni-telegram.md`), l'unica lista del bot che
+mostra tutto insieme, perché l'utente deve vedere l'intera lista per
+decidere cosa prendere prima e cosa dopo. `🔄 Aggiorna lista` (solo se
+serve davvero, vedi sopra), `➕ Aggiungi voce manuale`, `🗓️ Cambia
+intervallo`.
 
 **Aggiungi voce manuale** — input ibrido in due passi: descrizione libera
 (testo), poi quantità+unità scritte a mano (es. "500 g") oppure `➖ Senza

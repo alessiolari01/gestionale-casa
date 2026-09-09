@@ -114,6 +114,33 @@ tutorial alla prima vera visita.
 **Non collaudato dal vivo**: scritto in questo worktree isolato, senza
 accesso a Telegram né al database reale -- vedi `STATO.md`.
 
+<!-- CHANGELOG_LISTA_SPESA_TRE_CORREZIONI_20260909 -->
+# 09/09/2026 — Lista della spesa: refresh automatico, bottone condizionale, niente paginazione
+
+Tre correzioni dallo stesso collaudo dal vivo di Alessio.
+
+**Refresh automatico nel solo caso eccezionale**: togliere la spunta a
+una voce generata la rimette disponibile al refresh, ma se un altro
+pasto aveva già creato una riga nuova per la differenza restavano due
+righe frammentate dello stesso alimento finché non si premeva "🔄
+Aggiorna lista" a mano (visto con "Pasta · 50 g" due volte invece di
+"Pasta · 100 g"). `toggle_comprato` ora richiama `aggiorna_lista` subito
+dopo aver tolto la spunta, solo per le voci `generato` — una voce
+manuale non viene mai toccata da un refresh, nemmeno indiretto.
+
+**"🔄 Aggiorna lista" solo se cambierebbe davvero qualcosa**: nuova
+`serve_aggiornamento`, che confronta il fresco dell'aggregazione con le
+voci generate non ancora comprate già in lista senza eseguire il
+refresh — stesso principio già in uso per "🔄 Aggiorna planner".
+
+**Nessun limite di cinque voci per pagina**: eccezione esplicita a C6,
+l'unica lista del bot che mostra tutte le voci su una sola schermata,
+perché l'utente deve vederle tutte insieme per decidere l'ordine
+d'acquisto.
+
+3 nuovi test, 341 totali (338 prima). Scritte e testate in locale, non
+ancora ricollaudate dal vivo.
+
 <!-- CHANGELOG_LISTA_SPESA_ICONA_CATALOGO_20260909 -->
 # 09/09/2026 — Lista della spesa: tolta l'icona duplicata nella ricerca del catalogo
 

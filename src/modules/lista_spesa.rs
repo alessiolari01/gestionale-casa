@@ -918,14 +918,30 @@ pub async fn imposta_comprato(
 }
 
 async fn toggle_comprato(pool: &SqlitePool, voce_id: i64) -> anyhow::Result<()> {
-    let attuale: Option<i64> =
-        sqlx::query_scalar("SELECT comprato FROM liste_spesa_voci WHERE id = ?")
+    let attuale: Option<(i64, String, i64)> =
+        sqlx::query_as("SELECT comprato, origine, lista_id FROM liste_spesa_voci WHERE id = ?")
             .bind(voce_id)
             .fetch_optional(pool)
             .await
             .context("Impossibile leggere la voce")?;
-    let attuale = attuale.context("Voce non trovata")?;
-    imposta_comprato(pool, voce_id, attuale == 0).await
+    let (comprato, origine, lista_id) = attuale.context("Voce non trovata")?;
+    let nuovo_comprato = comprato == 0;
+    imposta_comprato(pool, voce_id, nuovo_comprato).await?;
+
+    // Caso eccezionale in cui l'aggiornamento scatta da solo, deciso con
+    // Alessio dopo un collaudo dal vivo: togliere la spunta a una voce
+    // generata la rende di nuovo disponibile al refresh (`aggiorna_lista`
+    // non tocca mai le voci comprate), ma se nel frattempo un altro pasto
+    // ha già prodotto una riga nuova per la differenza (vedi
+    // `sottrai_gia_comprato`), senza un ricalcolo l'utente vede due righe
+    // frammentate dello stesso alimento finché non preme "Aggiorna lista"
+    // a mano. Qui si rifonde subito, senza aspettare.
+    if !nuovo_comprato && origine == "generato" {
+        if let Some(lista) = trova_per_id(pool, lista_id).await? {
+            aggiorna_lista(pool, &lista).await?;
+        }
+    }
+    Ok(())
 }
 
 /// Righe di ingrediente pianificate nell'intervallo della lista, già
@@ -1300,6 +1316,53 @@ async fn voci_generate_comprate(
         .collect())
 }
 
+/// Voci `generato` non ancora comprate di questa lista -- servono a
+/// `serve_aggiornamento` per confrontare cosa c'è già in lista con cosa
+/// produrrebbe un refresh, senza doverlo eseguire per davvero.
+async fn voci_generate_non_comprate(
+    pool: &SqlitePool,
+    lista_id: i64,
+) -> anyhow::Result<Vec<VoceGenerata>> {
+    let righe: Vec<RigaVoceGenerataGrezza> = sqlx::query_as(
+        "SELECT alimento_id, prodotto_alimentare_id, descrizione, quantita, unita_simbolo \
+         FROM liste_spesa_voci \
+         WHERE lista_id = ? AND origine = 'generato' AND comprato = 0",
+    )
+    .bind(lista_id)
+    .fetch_all(pool)
+    .await
+    .context("Impossibile leggere le voci generate non comprate")?;
+
+    Ok(righe
+        .into_iter()
+        .filter_map(
+            |(alimento_id, prodotto_id, nome, quantita, unita_simbolo)| {
+                Some(VoceGenerata {
+                    alimento_id,
+                    prodotto_id,
+                    nome,
+                    quantita: quantita?,
+                    unita_simbolo: unita_simbolo?,
+                })
+            },
+        )
+        .collect())
+}
+
+/// Ordina un vettore di voci per un confronto stabile che non dipende
+/// dall'ordine di produzione -- non serve un `Ord` su `VoceGenerata`
+/// intero (la quantità è un `f64`), basta ordinare per identità e unità.
+fn ordina_per_confronto(voci: &mut [VoceGenerata]) {
+    voci.sort_by(|a, b| {
+        (a.alimento_id, a.prodotto_id, &a.nome, &a.unita_simbolo).cmp(&(
+            b.alimento_id,
+            b.prodotto_id,
+            &b.nome,
+            &b.unita_simbolo,
+        ))
+    });
+}
+
 /// Riga grezza di `unita_misura`: simbolo, famiglia (testo o assente), e il
 /// fattore base num/den quando la famiglia è presente.
 type RigaUnitaMisuraGrezza = (String, Option<String>, Option<i64>, Option<i64>);
@@ -1334,12 +1397,15 @@ async fn carica_mappa_unita(pool: &SqlitePool) -> anyhow::Result<HashMap<String,
         .collect())
 }
 
-/// Aggiornamento esplicito (mai automatico): ricalcola SOLO le voci
-/// `origine = 'generato' AND comprato = 0` -- le cancella e re-inserisce da
-/// zero il risultato fresco dell'aggregazione. Le voci comprate (generate o
-/// manuali) e le voci manuali non comprate restano congelate esattamente
-/// come sono. Ritorna il numero di voci generate dopo il refresh.
-pub async fn aggiorna_lista(pool: &SqlitePool, lista: &ListaSpesa) -> anyhow::Result<usize> {
+/// Calcola il fresco dell'aggregazione (planner + aggiunte dal catalogo,
+/// meno quanto già coperto da voci comprate) senza scrivere nulla --
+/// condiviso da `aggiorna_lista` (che lo scrive per davvero) e da
+/// `serve_aggiornamento` (che lo confronta soltanto con quanto già in
+/// lista, per decidere se mostrare "🔄 Aggiorna lista").
+async fn calcola_fresche(
+    pool: &SqlitePool,
+    lista: &ListaSpesa,
+) -> anyhow::Result<Vec<VoceGenerata>> {
     let mut righe = righe_da_aggregare(pool, lista).await?;
     // Le aggiunte dal catalogo non sono uno snapshot: partecipano di nuovo
     // ogni volta al calcolo del fresco, insieme alle righe del planner --
@@ -1348,11 +1414,33 @@ pub async fn aggiorna_lista(pool: &SqlitePool, lista: &ListaSpesa) -> anyhow::Re
     righe.extend(righe_da_aggiunte_catalogo(pool, lista.id).await?);
     let mappa_unita = carica_mappa_unita(pool).await?;
     let fresche = aggrega_ingredienti(&righe, |simbolo| mappa_unita.get(simbolo).copied());
-    // Le voci già comprate restano intoccate (mai cancellate qui sotto): si
-    // sottrae quello che coprono già dal fresco, così non si duplica mai
-    // una quantità già segnata come acquistata.
+    // Le voci già comprate restano intoccate (mai cancellate da chi scrive
+    // questo risultato): si sottrae quello che coprono già dal fresco, così
+    // non si duplica mai una quantità già segnata come acquistata.
     let gia_comprato = voci_generate_comprate(pool, lista.id).await?;
-    let voci = sottrai_gia_comprato(fresche, &gia_comprato);
+    Ok(sottrai_gia_comprato(fresche, &gia_comprato))
+}
+
+/// Vero se un "🔄 Aggiorna lista" cambierebbe davvero il risultato --
+/// confronta il fresco dell'aggregazione con le voci generate non ancora
+/// comprate già in lista, senza eseguire il refresh. Deciso con Alessio
+/// dopo un collaudo dal vivo in cui il bottone compariva sempre, anche a
+/// lista già aggiornata (stesso principio di "🔄 Aggiorna planner").
+pub async fn serve_aggiornamento(pool: &SqlitePool, lista: &ListaSpesa) -> anyhow::Result<bool> {
+    let mut fresche = calcola_fresche(pool, lista).await?;
+    let mut attuali = voci_generate_non_comprate(pool, lista.id).await?;
+    ordina_per_confronto(&mut fresche);
+    ordina_per_confronto(&mut attuali);
+    Ok(fresche != attuali)
+}
+
+/// Aggiornamento esplicito (mai automatico): ricalcola SOLO le voci
+/// `origine = 'generato' AND comprato = 0` -- le cancella e re-inserisce da
+/// zero il risultato fresco dell'aggregazione. Le voci comprate (generate o
+/// manuali) e le voci manuali non comprate restano congelate esattamente
+/// come sono. Ritorna il numero di voci generate dopo il refresh.
+pub async fn aggiorna_lista(pool: &SqlitePool, lista: &ListaSpesa) -> anyhow::Result<usize> {
+    let voci = calcola_fresche(pool, lista).await?;
 
     let mut tx = pool
         .begin()
@@ -1882,6 +1970,170 @@ mod db_tests {
                 .unwrap();
             assert_eq!(nuova_generata.origine, "generato");
             assert_eq!(nuova_generata.quantita, Some(150.0));
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn deselezionare_una_voce_generata_la_rifonde_subito_con_la_residua() {
+        // Scenario reale segnalato da Alessio: farina comprata (200 g),
+        // un secondo pasto crea una nuova riga residua (150 g) allo stesso
+        // refresh -- togliendo la spunta alla prima, le due righe devono
+        // tornare a essere una sola (350 g), senza dover premere
+        // "🔄 Aggiorna lista" a mano.
+        let pool = test_pool().await;
+        let user_id = create_user(&pool, "Alessio").await;
+        let space_id = create_space(&pool, "Casa").await;
+        add_membership(&pool, space_id, user_id).await;
+
+        crate::identity::with_actor(actor(user_id, space_id, "Alessio"), async {
+            let lista = trova_o_crea_lista_attiva(&pool).await.expect("lista");
+            cambia_intervallo(&pool, lista.id, "2026-09-01", "2026-09-07")
+                .await
+                .expect("intervallo");
+            let lista = trova_lista_attiva(&pool).await.unwrap().unwrap();
+            let planner_id =
+                create_planner(&pool, user_id, space_id, "2026-09-01", "2026-09-07").await;
+            create_meal_with_ingredient(
+                &pool,
+                planner_id,
+                "2026-09-02",
+                "pianificato",
+                None,
+                None,
+                Some(100),
+                "Farina",
+                "g",
+                Some(200.0),
+            )
+            .await;
+            aggiorna_lista(&pool, &lista).await.expect("primo refresh");
+            let voci = carica_voci(&pool, lista.id).await.expect("voci");
+            let comprata_id = voci[0].id;
+            imposta_comprato(&pool, comprata_id, true)
+                .await
+                .expect("segna comprata");
+
+            create_meal_with_ingredient(
+                &pool,
+                planner_id,
+                "2026-09-05",
+                "pianificato",
+                None,
+                None,
+                Some(100),
+                "Farina",
+                "g",
+                Some(150.0),
+            )
+            .await;
+            aggiorna_lista(&pool, &lista)
+                .await
+                .expect("secondo refresh, crea la riga residua");
+            let voci = carica_voci(&pool, lista.id)
+                .await
+                .expect("voci frammentate");
+            assert_eq!(voci.len(), 2, "prima di deselezionare restano due righe");
+
+            toggle_comprato(&pool, comprata_id)
+                .await
+                .expect("deseleziona e rifonde subito");
+
+            let voci = carica_voci(&pool, lista.id).await.expect("voci rifuse");
+            assert_eq!(voci.len(), 1, "le due righe tornano una sola");
+            assert_eq!(voci[0].quantita, Some(350.0));
+            assert_eq!(voci[0].comprato, 0);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn deselezionare_una_voce_manuale_non_scatena_un_refresh() {
+        // Il ricalcolo automatico è un'eccezione solo per le voci
+        // 'generato': una voce manuale non ha nulla con cui fondersi, e non
+        // deve mai essere toccata da un refresh, nemmeno indiretto.
+        let pool = test_pool().await;
+        let user_id = create_user(&pool, "Alessio").await;
+        let space_id = create_space(&pool, "Casa").await;
+        add_membership(&pool, space_id, user_id).await;
+
+        crate::identity::with_actor(actor(user_id, space_id, "Alessio"), async {
+            let lista = trova_o_crea_lista_attiva(&pool).await.expect("lista");
+            let manuale_id = aggiungi_voce_manuale(&pool, lista.id, "Detersivo", None, None)
+                .await
+                .expect("manuale");
+            imposta_comprato(&pool, manuale_id, true)
+                .await
+                .expect("segna comprata");
+
+            toggle_comprato(&pool, manuale_id)
+                .await
+                .expect("deseleziona voce manuale");
+
+            let voci = carica_voci(&pool, lista.id).await.expect("voci");
+            assert_eq!(voci.len(), 1);
+            assert_eq!(voci[0].comprato, 0);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn serve_aggiornamento_e_falso_subito_dopo_un_refresh() {
+        let pool = test_pool().await;
+        let user_id = create_user(&pool, "Alessio").await;
+        let space_id = create_space(&pool, "Casa").await;
+        add_membership(&pool, space_id, user_id).await;
+
+        crate::identity::with_actor(actor(user_id, space_id, "Alessio"), async {
+            let lista = trova_o_crea_lista_attiva(&pool).await.expect("lista");
+            cambia_intervallo(&pool, lista.id, "2026-09-01", "2026-09-07")
+                .await
+                .expect("intervallo");
+            let lista = trova_lista_attiva(&pool).await.unwrap().unwrap();
+            let planner_id =
+                create_planner(&pool, user_id, space_id, "2026-09-01", "2026-09-07").await;
+            create_meal_with_ingredient(
+                &pool,
+                planner_id,
+                "2026-09-02",
+                "pianificato",
+                None,
+                None,
+                Some(100),
+                "Farina",
+                "g",
+                Some(200.0),
+            )
+            .await;
+
+            assert!(
+                serve_aggiornamento(&pool, &lista).await.expect("verifica"),
+                "un pasto pianificato non ancora aggregato deve mostrare il bottone"
+            );
+
+            aggiorna_lista(&pool, &lista).await.expect("refresh");
+            assert!(
+                !serve_aggiornamento(&pool, &lista).await.expect("verifica"),
+                "subito dopo un refresh non c'è nulla di nuovo da aggiornare"
+            );
+
+            create_meal_with_ingredient(
+                &pool,
+                planner_id,
+                "2026-09-05",
+                "pianificato",
+                None,
+                None,
+                Some(100),
+                "Farina",
+                "g",
+                Some(50.0),
+            )
+            .await;
+            assert!(
+                serve_aggiornamento(&pool, &lista).await.expect("verifica"),
+                "un nuovo pasto pianificato rende di nuovo utile il refresh"
+            );
         })
         .await;
     }
@@ -2615,11 +2867,6 @@ pub async fn handle_callback(
         show_lista(bot, chat_id, pool, None).await?;
         return Ok(true);
     }
-    if let Some(raw) = data.strip_prefix("lista_spesa:page:") {
-        let pagina = raw.parse::<i64>().unwrap_or(0).max(0);
-        show_lista_pagina(bot, chat_id, pool, pagina, None).await?;
-        return Ok(true);
-    }
     if let Some(raw_id) = data.strip_prefix("lista_spesa:toggle:") {
         let Some(voce_id) = raw_id.parse::<i64>().ok().filter(|value| *value > 0) else {
             invalid(bot, chat_id).await?;
@@ -2927,20 +3174,15 @@ async fn mostra_calendario_fine(
     Ok(())
 }
 
+/// Mostra la lista intera, senza paginazione (eccezione esplicita a C6,
+/// deciso con Alessio dopo un collaudo dal vivo): a differenza di ogni
+/// altra lista del bot, qui l'utente deve vedere tutte le voci insieme per
+/// decidere cosa prendere prima e cosa dopo al supermercato -- spezzarla in
+/// pagine da cinque negherebbe proprio lo scopo della schermata.
 async fn show_lista(
     bot: &Bot,
     chat_id: ChatId,
     pool: &SqlitePool,
-    notice: Option<&str>,
-) -> ResponseResult<()> {
-    show_lista_pagina(bot, chat_id, pool, 0, notice).await
-}
-
-async fn show_lista_pagina(
-    bot: &Bot,
-    chat_id: ChatId,
-    pool: &SqlitePool,
-    pagina_richiesta: i64,
     notice: Option<&str>,
 ) -> ResponseResult<()> {
     let lista = match trova_o_crea_lista_attiva(pool).await {
@@ -2954,16 +3196,18 @@ async fn show_lista_pagina(
         }
     };
     let voci = carica_voci(pool, lista.id).await.unwrap_or_default();
-    let totale = voci.len() as i64;
-    let pagina = liste::pagina_valida(pagina_richiesta, totale);
-    let scarto = liste::scarto(pagina) as usize;
-    let fine_slice = (scarto + liste::VOCI_PER_PAGINA).min(voci.len());
-    let pagina_voci = if scarto < voci.len() {
-        &voci[scarto..fine_slice]
-    } else {
-        &[]
-    };
+    let totale = voci.len();
     let comprate = voci.iter().filter(|voce| voce.comprato != 0).count();
+    // Il bottone "🔄 Aggiorna lista" compare solo se premerlo cambierebbe
+    // davvero qualcosa (stesso principio di "🔄 Aggiorna planner" sulle
+    // ricette cambiate) -- deciso con Alessio dopo un collaudo dal vivo in
+    // cui il bottone c'era sempre, anche a lista già aggiornata.
+    let serve_refresh = serve_aggiornamento(pool, &lista)
+        .await
+        .unwrap_or_else(|errore| {
+            tracing::warn!(?errore, "Verifica aggiornamento lista spesa fallita");
+            true
+        });
 
     let tutorial = tutorial_da_mostrare(pool).await;
 
@@ -2982,15 +3226,21 @@ async fn show_lista_pagina(
         calendario::display_date(&lista.data_fine)
     ));
     if totale == 0 {
-        testo.push_str(
-            "\nNessuna voce nella lista.\nUsa 🔄 Aggiorna lista per generarla dai pasti pianificati, oppure aggiungine una manuale.\n",
-        );
+        if serve_refresh {
+            testo.push_str(
+                "\nNessuna voce nella lista.\nUsa 🔄 Aggiorna lista per generarla dai pasti pianificati, oppure aggiungine una manuale.\n",
+            );
+        } else {
+            testo.push_str(
+                "\nNessuna voce nella lista.\nAggiungine una manuale, oppure pianifica qualche pasto nel planner.\n",
+            );
+        }
     } else {
         testo.push_str(&format!("\n{comprate}/{totale} comprate\n"));
     }
 
     let mut rows: Vec<Vec<InlineKeyboardButton>> = Vec::new();
-    for voce in pagina_voci {
+    for voce in &voci {
         let icona = if voce.comprato != 0 { "✅" } else { "☐" };
         let quantita = match (voce.quantita, &voce.unita_simbolo) {
             (Some(valore), Some(unita)) => format!(" · {} {unita}", formatta_quantita(valore)),
@@ -3001,12 +3251,9 @@ async fn show_lista_pagina(
             format!("lista_spesa:toggle:{}", voce.id),
         )]);
     }
-    if let Some(riga) = liste::riga_paginazione_da_totale(pagina, totale, "lista_spesa:noop", |p| {
-        format!("lista_spesa:page:{p}")
-    }) {
-        rows.push(riga);
+    if serve_refresh {
+        rows.push(vec![button("🔄 Aggiorna lista", "lista_spesa:refresh")]);
     }
-    rows.push(vec![button("🔄 Aggiorna lista", "lista_spesa:refresh")]);
     rows.push(vec![button("➕ Aggiungi voce manuale", "lista_spesa:add")]);
     rows.push(vec![button(
         "🗓️ Cambia intervallo",
