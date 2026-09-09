@@ -1079,14 +1079,11 @@ scritte e testate in locale, non ancora provate su Telegram.
 
 ## 3. Stato tecnico verificato
 
-- **48 migration** nel repository. Le **47 precedenti** sono **applicate**
-  al database reale dell'S9, verificato leggendo `applied_migrations=47`
-  nel log di avvio del bot dopo il deploy del secondo giro di correzioni (9
-  settembre 2026) — non dedotto. L'ultima
-  (`migrations/20260909180000_lista_spesa_ordinamento.sql`, il riordino
-  manuale) non è ancora stata applicata a un database reale al momento di
-  scrivere questo paragrafo — scritta insieme al terzo giro di correzioni
-  della lista della spesa, non ancora deployato;
+- **48 migration** nel repository, tutte **applicate** al database reale
+  dell'S9 (l'ultima, `migrations/20260909180000_lista_spesa_ordinamento.sql`
+  per il riordino manuale, il 9 settembre 2026), verificato leggendo
+  `applied_migrations=48` nel log di avvio del bot dopo il deploy del terzo
+  giro di correzioni alla lista della spesa — non dedotto;
 - pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa, punto
   1 della sezione 6): `fmt`, `check --locked`,
   `clippy --all-targets --locked -- -D warnings`, `test --locked` —
