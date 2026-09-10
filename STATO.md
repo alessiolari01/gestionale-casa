@@ -1434,16 +1434,17 @@ avvio reale del bot, solo con la pipeline automatica.
 
 ## 3. Stato tecnico verificato
 
-- **49 migration** nel repository, tutte **applicate** al database reale
-  dell'S9 (l'ultima, `migrations/20260910120000_turni_e_routine.sql` per
-  Turni e routine, il 10 settembre 2026), verificato leggendo
-  `applied_migrations=49` nel log di avvio del bot dopo il deploy — non
-  dedotto;
+- **50 migration** nel repository, tutte **applicate** al database reale
+  dell'S9 (l'ultima, `migrations/20260911090000_turni_correzioni_collaudo.sql`
+  per le tredici correzioni ai turni, l'11 settembre 2026), verificato
+  leggendo `applied_migrations=50` nel log di avvio del bot dopo il
+  deploy — non dedotto;
 - pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa,
   punto 1 della sezione 6): `fmt`, `check --locked`,
   `clippy --all-targets --locked -- -D warnings`, `test --locked` —
-  **372 test** (355 prima di Turni e routine, 348 prima del quarto giro di
-  correzioni alla lista della
+  **385 test** (372 prima delle tredici correzioni ai turni e della
+  correzione C16 sulla nutrizione, 355 prima di Turni e routine, 348
+  prima del quarto giro di correzioni alla lista della
   spesa — ordine stabile sui refresh, unità predefinita, rimozione voci —,
   341 prima delle tre correzioni sulla fusione al check/
   eccesso/riordino, 338 prima delle prime tre correzioni del 9 settembre
