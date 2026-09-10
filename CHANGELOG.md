@@ -2,6 +2,16 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_C16_NUTRIZIONE_20260911 -->
+# 11/09/2026 — C16 anche su "Rimuovi valori" nutrizionali
+
+Ultima delle quattro ambiguità trovate dall'audit C16, decisa con
+Alessio: azzerare i valori nutrizionali di un prodotto è comunque una
+perdita di dati inseriti a mano, non recuperabile in un tocco solo —
+ora chiede conferma esplicita come gli altri cinque punti dell'audit.
+Le altre tre ambiguità restano come decise (reset porzioni senza
+conferma, tutorial allegato già conforme).
+
 <!-- CHANGELOG_TURNI_CORREZIONI_COLLAUDO_20260911 -->
 # 11/09/2026 — Turni e routine: tredici correzioni del primo collaudo dal vivo (scritte, collaudo da rifare)
 

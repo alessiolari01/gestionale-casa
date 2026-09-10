@@ -521,6 +521,18 @@ Trovato mancante, oltre al modulo Turni e routine appena scritto, in
 `lista_spesa.rs` (`🗑️ Rimuovi voci`, corretto nello stesso lavoro): un
 audit dei restanti moduli del bot è nella sezione 2sexies di `STATO.md`.
 
+Tre casi trovati dall'audit erano ambigui e sono stati decisi con Alessio
+il giorno dopo, non indovinati: azzerare i valori nutrizionali di un
+prodotto (`alimentazione.rs`) **rientra** in C16 (perde dati inseriti a
+mano, corretto); il "reset" di una porzione/override a un profilo
+(`porzioni_profili.rs`/`porzioni_ingredienti.rs`) **non rientra** (torna a
+un valore calcolato di default, non è una perdita — resta senza conferma);
+il tutorial guidato dell'allegato in Miglioramenti
+(`improve:tutorial:elimina:`) **è già conforme nella sostanza** (la scelta
+binaria "tieni/elimina" è già una conferma) e non è stato rinominato allo
+schema `ask`/`yes` per non rischiare di rompere un flusso già collaudato
+dal vivo.
+
 ---
 
 ## Parte 3 — Come si applica

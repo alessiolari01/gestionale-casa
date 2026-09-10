@@ -1416,6 +1416,18 @@ collaudo**:
   aperte: nessuna delle due letture (serve conferma / non serve) è stata
   scelta a caso.
 
+**Ambiguità del punto 9 decise con Alessio l'11 settembre 2026**: azzerare
+i valori nutrizionali di un prodotto (`alimentazione.rs`,
+`food:product:nutrition:remove:`) **rientra** in C16 — corretto con lo
+stesso schema `ask`/`yes` degli altri cinque punti dell'audit, nessun test
+nuovo (riusa `remove_product_nutrition` già esistente). Il "reset" di una
+porzione/override a un profilo (`porzioni_profili.rs`/
+`porzioni_ingredienti.rs`) **non rientra**: torna a un valore calcolato di
+default, non è una perdita di dati — lasciato invariato. Il tutorial
+guidato dell'allegato in Miglioramenti (`improve:tutorial:elimina:`) **è
+già conforme nella sostanza** — non toccato, per non rischiare di rompere
+un flusso già collaudato dal vivo.
+
 **Scritto, collaudo dal vivo su Telegram da fare**: nessun accesso a
 Telegram/S9 in questo worktree isolato — non è stato verificato con un
 avvio reale del bot, solo con la pipeline automatica.

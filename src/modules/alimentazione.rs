@@ -2642,9 +2642,37 @@ pub async fn handle_callback(
             }
             Ok(true)
         }
-        _ if data.starts_with("food:product:nutrition:remove:") => {
+        // C16 (`docs/convenzioni-telegram.md`): un'eliminazione definitiva
+        // chiede sempre conferma esplicita -- prima questo pulsante
+        // eseguiva subito, senza nessuna schermata "sei sicuro?"
+        // intermedia. Azzerare valori inseriti a mano è comunque una
+        // perdita di dati non recuperabile in un tocco solo.
+        _ if data.starts_with("food:product:nutrition:remove:ask:") => {
             let product_id = data
-                .strip_prefix("food:product:nutrition:remove:")
+                .strip_prefix("food:product:nutrition:remove:ask:")
+                .and_then(parse_positive_id);
+            if let Some(product_id) = product_id {
+                bot.send_message(
+                    chat_id,
+                    "⚠️ Rimuovere definitivamente i valori nutrizionali inseriti? Non si può recuperare.",
+                )
+                .reply_markup(InlineKeyboardMarkup::new(vec![
+                    vec![button(
+                        "🗑 Sì, rimuovi",
+                        format!("food:product:nutrition:remove:yes:{product_id}"),
+                    )],
+                    vec![button(
+                        "❌ Annulla",
+                        format!("food:product:nutrition:{product_id}"),
+                    )],
+                ]))
+                .await?;
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:product:nutrition:remove:yes:") => {
+            let product_id = data
+                .strip_prefix("food:product:nutrition:remove:yes:")
                 .and_then(parse_positive_id);
             if let Some(product_id) = product_id {
                 match remove_product_nutrition(pool, product_id).await {
@@ -7354,7 +7382,7 @@ fn product_nutrition_keyboard(
         if has_values {
             rows.push(vec![button(
                 "🧹 Rimuovi valori",
-                format!("food:product:nutrition:remove:{product_id}"),
+                format!("food:product:nutrition:remove:ask:{product_id}"),
             )]);
         }
     }
