@@ -430,6 +430,25 @@ dinamico, `dynamic_filter_keyboard`). La quantità di una voce della lista
 della spesa resta invece sulla stessa riga del nome: è sempre presente e
 breve (mai la causa del taglio osservato), non una parte opzionale.
 
+### C15. Le parti aggiunte a un'etichetta vanno a capo, mai accodate con "·"
+
+Deciso il 9 settembre 2026, scrivendo la lista della spesa: quando
+un'etichetta di pulsante ha già un contenuto (es. il nome di una voce) e
+serve aggiungere altre informazioni che la distinguono (quantità, stato,
+orario...), le parti aggiunte vanno **a capo con `\n`**, non accodate sulla
+stessa riga con `" · "`. Telegram tronca — senza avviso, con un puntino di
+sospensione muto — il testo di un pulsante che supera la larghezza
+disponibile su una riga sola: un'etichetta con troppe parti unite da `·`
+rischia di perdere silenziosamente l'ultima, quella che spesso è la più
+importante (l'orario, la situazione). Un pulsante multi-riga (Telegram
+supporta `\n` nell'etichetta) resta invece leggibile per intero.
+
+Vale solo per le etichette con **più di due parti aggiunte** al contenuto
+principale: un singolo `· totale` (C7) o `· oggi` (C9) resta su una riga,
+perché corto e già collaudato. Il limite si applica quando le parti si
+sommano (es. tipo pasto + orario + situazione + nota di preparazione, come
+nei pulsanti di `turni.rs`).
+
 ### C10. Un verbo solo per ogni azione
 
 | azione | forma |

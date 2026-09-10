@@ -1,6 +1,13 @@
 # Turni e routine
 
-**Stato: PREVISTO.**
+**Stato: PRIMA FETTA SCRITTA il 10 settembre 2026** (modello, pasti-modello,
+assegnazione a una data per un profilo con copia dei pasti, riferimento di
+sola lettura nella schermata "Giorno" del planner) — vedi
+`docs/moduli/turni-e-routine.md` per come è fatta e `STATO.md`, sezione
+2quinquies, per cosa è stato collaudato finora (non ancora dal vivo su
+Telegram). **Il resto di questo documento resta PREVISTO**: condivisione e
+copia di un modello, invio a un altro utente, reminder alla creazione (righe
+sotto) non sono ancora costruiti.
 
 ## Obiettivo
 
@@ -43,10 +50,12 @@ Per ogni pasto sono previsti:
 - situazione: casa / lavoro / fuori / saltato / altro;
 - preparazione anticipata sì/no;
 - anticipo o data/ora di preparazione;
-- reminder opzionale;
+- reminder opzionale (**non costruito in questa fetta**: l'infrastruttura
+  reminder non esiste ancora nel progetto, arriverà in un blocco
+  successivo);
 - note.
 
-## Reminder alla creazione
+## Reminder alla creazione — non costruito in questa fetta
 
 Quando si configura un turno il bot dovrebbe chiedere se impostare un reminder
 per la preparazione dei pasti che lo richiedono. Se esistono default utente,
@@ -54,7 +63,7 @@ vengono proposti ma restano modificabili.
 
 I canali Step 7 sono Telegram ed email. Niente SMS.
 
-## Condivisione e copia
+## Condivisione e copia — non costruita in questa fetta
 
 I modelli turno/routine sono candidati naturali per:
 
@@ -66,6 +75,10 @@ Le assegnazioni giornaliere restano riferite alla persona/profilo e non vengono
 condivise automaticamente solo perché il modello è condiviso.
 
 ## Relazione con il planner
+
+**Parzialmente costruita**: il planner mostra oggi solo un riferimento
+testuale di sola lettura (vedi `docs/moduli/turni-e-routine.md`), mai una
+precompilazione automatica — quella resta prevista, non ancora costruita.
 
 Il planner può usare la routine del giorno per precompilare:
 

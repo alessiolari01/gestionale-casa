@@ -4812,6 +4812,7 @@ async fn alimentation_menu_keyboard(pool: &SqlitePool) -> InlineKeyboardMarkup {
             crate::modules::novita::etichetta_con_badge("🛒 Lista della spesa", badge_lista_spesa),
             "lista_spesa:menu",
         )],
+        vec![button("📋 Turni e routine", "turni:menu")],
         // Deciso il 7 settembre 2026: anche se `⬅️ Indietro` porterebbe
         // esattamente dove porta `🏠 Menù principale`, resta comunque
         // visibile a sinistra -- Alessio si aspetta "indietro" sempre

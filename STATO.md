@@ -1160,17 +1160,133 @@ locale.
 **Non ancora ricollaudate dal vivo**: anche queste tre correzioni sono
 scritte e testate in locale, non ancora provate su Telegram.
 
+**Un'altra piccola correzione trovata dal vivo (10 settembre 2026)**: dopo
+l'ultima rimozione da "🗑️ Rimuovi voci", la schermata restava lì, ormai
+vuota — un vicolo cieco che richiedeva comunque "⬅️ Indietro" per uscirne.
+Nuova `mostra_dopo_rimozione`: se non resta più nulla da rimuovere dopo una
+rimozione riuscita, porta direttamente alla lista principale.
+
+## 2quinquies. Turni e routine — prima fetta scritta il 10 settembre 2026, collaudo dal vivo su Telegram da fare
+
+Prossimo blocco della sequenza Alimentazione dopo la lista della spesa
+(deciso con Alessio l'8 settembre 2026), con il design di dettaglio del 10
+settembre 2026. Specifica completa in `docs/previsto/turni-e-routine.md`
+(stato aggiornato: prima fetta scritta, il resto resta previsto);
+dettaglio del modulo in `docs/moduli/turni-e-routine.md`.
+
+**Dentro questa fetta**: un **modello** turno (`turno_modelli` +
+`turno_modello_pasti`, nuovo modulo `src/modules/turni.rs`) con nome
+scelto dall'utente e una lista di pasti-modello (tipo pasto — stesso
+vocabolario del planner, colazione/spuntino_mattina/pranzo/
+spuntino_pomeriggio/cena/altro —, orario opzionale HH:MM, situazione
+casa/lavoro/fuori/saltato/altro, preparazione anticipata con nota
+opzionale, nota libera). **Assegnare** un modello a una data per un
+profilo alimentare (`turno_assegnazioni` + `turno_assegnazione_pasti`)
+**copia** i pasti del modello in quel momento — stesso principio di
+snapshot già usato da planner e lista della spesa: modificare o rimuovere
+un pasto assegnato non tocca mai il modello, e rinominare/archiviare il
+modello dopo non cambia le assegnazioni già fatte (il nome resta uno
+snapshot, `modello_nome_snapshot`).
+
+Nuova sezione "📋 Turni e routine" raggiungibile da "🍽️ Alimentazione",
+con le schermate minime richieste: elenco modelli (paginato da
+`modules::liste` sopra la soglia) con crea/rinomina/archivia; dentro un
+modello l'elenco dei suoi pasti con l'aggiunta guidata (tipo da bottoni,
+poi orario libero HH:MM o salta, poi situazione da bottoni, poi
+preparazione sì/no con nota opzionale, poi nota libera opzionale) e la
+rimozione diretta di un pasto; assegnazione a una data (calendario da
+`modules::calendario`, scelta del profilo con la stessa visibilità già
+usata dal planner) con conferma esplicita se quel profilo ha già un turno
+in quel giorno (sostituzione, non fusione); una schermata "vedi/modifica
+assegnazione" che parte dal profilo, passa dal calendario (marcato con
+`•` sui giorni già assegnati) e arriva al singolo pasto assegnato, dove
+situazione/orario/preparazione/nota si modificano uno per volta senza
+mai toccare il modello.
+
+**Relazione col planner, solo lettura**: `planner_show_day` (schermata
+"Giorno" di `planner_alimentare.rs`) ora chiama
+`turni::info_giorno_per_planner`, che — se esiste un'assegnazione turno
+per quella data nello stesso spazio — antepone un blocco testuale con i
+pasti del turno il cui tipo **non ha ancora** un pasto vero pianificato
+per quel giorno (calcolato dal dominio puro `pasti_da_segnalare`, testato
+senza database). Nessun bottone, nessuna scrittura su `planner_pasti`:
+l'unica modifica a `planner_alimentare.rs` è queste sei righe nella
+funzione di visualizzazione, per non rischiare la logica già in
+produzione (segnalazione ricetta cambiata, congelamento a completamento,
+ecc.) che quel modulo gestisce da solo.
+
+**Scelte prese in autonomia**:
+
+- il modello/l'assegnazione appartengono allo spazio predefinito
+  dell'attore corrente (`identity::current_actor().spazio_id`, mai
+  nullo), esattamente come `planner_alimentari` e `liste_spesa` — nessuna
+  schermata per scegliere lo spazio, coerente con quei due moduli;
+- l'orario è validato con una piccola reimplementazione di
+  `spazi_membri::valid_time_strict` (quella funzione è privata al suo
+  modulo): duplicazione minima, stessa scelta già fatta per le icone dei
+  tipi pasto (`meal_emoji`, copiate da `planner_alimentare::MealType`,
+  anch'esse private lì);
+- rimuovere un pasto (dal modello o da un'assegnazione) è immediato,
+  senza un passo di conferma — stesso stile di `rimuovi_voce_manuale`
+  nella lista della spesa;
+- il blocco informativo nel planner è scoperto per **spazio**, non per
+  singolo profilo/partecipante del pasto pianificato: la schermata
+  "Giorno" del planner non ha oggi un concetto di "profilo corrente" (un
+  pasto può avere più partecipanti), quindi il confronto è fra i tipi
+  pasto già pianificati in quello spazio quel giorno e i pasti di
+  *qualunque* assegnazione turno dello stesso spazio in quella data — una
+  approssimazione dichiarata, non un'integrazione più profonda;
+- nessun badge "🆕" (`novita::REGISTRO`): lasciato fuori per restare nei
+  tempi di questa fetta, come esplicitamente concesso dalla richiesta.
+
+**Fuori scope, dichiarato in `docs/roadmap.md`**: condivisione di un
+modello nello spazio/copia indipendente/invio a un altro utente; reminder
+alla creazione (l'infrastruttura reminder — email, scheduler — non esiste
+ancora nel progetto); riordino dei pasti di un modello (solo aggiunta e
+rimozione in questa fetta).
+
+Nuova migration additiva `migrations/20260910120000_turni_e_routine.sql`
+(quattro tabelle: `turno_modelli`, `turno_modello_pasti`,
+`turno_assegnazioni`, `turno_assegnazione_pasti`), documentata in
+`docs/database.md` e `docs/moduli/turni-e-routine.md`. Nuova convenzione
+**C15** in `docs/convenzioni-telegram.md`: le parti aggiunte a
+un'etichetta con più di due elementi vanno a capo con `\n`, non accodate
+con "·", perché Telegram tronca senza avviso il testo di un pulsante
+troppo lungo su una riga sola — applicata alle etichette dei pasti (tipo,
+orario, situazione, preparazione) sia nel modello sia nell'assegnazione.
+
+17 nuovi test in `src/modules/turni.rs` (7 di dominio puro — validazione
+nome/nota/orario, andata e ritorno dei token di situazione, calcolo dei
+pasti ancora da segnalare — e 10 su `sqlite::memory:` — creazione/
+rinomina/archiviazione del modello, aggiunta/rimozione di un pasto
+modello, assegnazione che copia senza toccare il modello, snapshot del
+nome del modello che sopravvive a una rinomina successiva, disattivare la
+preparazione anticipata che azzera la nota, rimozione di un pasto
+assegnato che non tocca gli altri né il modello, il blocco per il planner
+che nasconde un pasto già pianificato per davvero), per un totale di
+**372 (355 prima)**. Una migration nuova (49 nel repository, 48 prima).
+Pipeline `fmt`, `check --locked`, `clippy --all-targets --locked -- -D
+warnings`, `test --locked` verde in locale.
+
+**Scritto, collaudo dal vivo su Telegram da fare**: nessun accesso a
+Telegram/S9 in questo worktree isolato — non è stato verificato con un
+avvio reale del bot, solo con la pipeline automatica.
+
 ## 3. Stato tecnico verificato
 
-- **48 migration** nel repository, tutte **applicate** al database reale
-  dell'S9 (l'ultima, `migrations/20260909180000_lista_spesa_ordinamento.sql`
+- **49 migration** nel repository (`migrations/20260910120000_turni_e_routine.sql`
+  è nuova e **non ancora applicata a nessun database reale** — scritta e
+  collaudata solo con `sqlite::memory:` in questo worktree isolato, senza
+  accesso all'S9). Le 48 precedenti restano **applicate** al database
+  reale dell'S9 (l'ultima di quelle, `migrations/20260909180000_lista_spesa_ordinamento.sql`
   per il riordino manuale, il 9 settembre 2026), verificato leggendo
   `applied_migrations=48` nel log di avvio del bot dopo il deploy del terzo
   giro di correzioni alla lista della spesa — non dedotto;
-- pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa, punto
-  1 della sezione 6): `fmt`, `check --locked`,
+- pipeline verde in locale su questo worktree (non ancora rieseguita
+  sull'S9, per la stessa ragione di isolamento): `fmt`, `check --locked`,
   `clippy --all-targets --locked -- -D warnings`, `test --locked` —
-  **355 test** (348 prima del quarto giro di correzioni alla lista della
+  **372 test** (355 prima di Turni e routine, 348 prima del quarto giro di
+  correzioni alla lista della
   spesa — ordine stabile sui refresh, unità predefinita, rimozione voci —,
   341 prima delle tre correzioni sulla fusione al check/
   eccesso/riordino, 338 prima delle prime tre correzioni del 9 settembre

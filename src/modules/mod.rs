@@ -31,5 +31,6 @@ pub mod profili_alimentari;
 pub mod ricette;
 pub mod spazi_membri;
 pub mod storico;
+pub mod turni;
 pub mod veicoli;
 pub mod vestiti;

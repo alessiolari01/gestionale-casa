@@ -294,7 +294,11 @@ principale.
 **Rimuovi voci** — un pulsante `🗑️` per ogni voce manuale e aggiunta dal
 catalogo, tocco = rimozione immediata (nessuna conferma, come il resto
 delle azioni rapide di questa lista); `⬅️ Indietro` per tornare alla
-schermata principale.
+schermata principale. Dopo l'ultima rimozione, se non resta più nulla da
+rimuovere, `mostra_dopo_rimozione` porta direttamente alla lista principale
+invece di ripresentare "🗑️ Rimuovi voci" ormai vuota (trovato da Alessio
+dal vivo il 10 settembre 2026: quella schermata vuota era un vicolo cieco
+che richiedeva comunque "⬅️ Indietro" per uscirne).
 
 **Aggiungi voce manuale** — input ibrido in due passi: descrizione libera
 (testo), poi quantità+unità scritte a mano (es. "500 g") oppure `➖ Senza

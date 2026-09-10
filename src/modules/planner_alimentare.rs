@@ -1080,6 +1080,16 @@ async fn planner_show_day(
         );
     }
 
+    // Turni e routine (10 settembre 2026): sola lettura, mai una scrittura
+    // automatica su `planner_pasti` -- vedi `modules::turni`. Un'assegnazione
+    // turno per questo giorno mostra solo un promemoria testuale dei pasti
+    // non ancora pianificati per davvero; l'utente pianifica come sempre.
+    if let Some(info_turno) = crate::modules::turni::info_giorno_per_planner(pool, date).await {
+        text.push('\n');
+        text.push('\n');
+        text.push_str(&info_turno);
+    }
+
     rows.push(vec![planner_button(
         "➕ Nuovo pasto",
         format!("planner:add:{date}"),

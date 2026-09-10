@@ -2,6 +2,77 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_LISTA_SPESA_RIMUOVI_VOCI_NAVIGAZIONE_20260910 -->
+# 10/09/2026 — Lista della spesa: dopo l'ultima rimozione torna alla lista
+
+Trovato da Alessio dal vivo: dopo aver rimosso l'ultima voce rimovibile,
+"🗑️ Rimuovi voci" restava aperta, ormai vuota — un vicolo cieco.
+`mostra_dopo_rimozione` ora porta direttamente alla lista principale
+quando non resta più nulla da rimuovere.
+
+<!-- CHANGELOG_TURNI_E_ROUTINE_PRIMA_FETTA_20260910 -->
+# 10/09/2026 — Turni e routine: prima fetta (scritta, collaudo dal vivo da fare)
+
+Prossimo blocco della sequenza Alimentazione dopo la lista della spesa
+(deciso con Alessio l'8 settembre 2026), con il design di dettaglio
+deciso lo stesso 10 settembre. Nuovo modulo `src/modules/turni.rs`,
+seguendo lo stesso schema di `lista_spesa.rs`: dominio puro testato senza
+database, funzioni database testate con `sqlite::memory:`, poi la UI
+Telegram, sezione `📋 Turni e routine` raggiungibile da `🍽️ Alimentazione`.
+
+**Modello vs assegnazione, stesso principio di snapshot del planner.** Un
+**modello** (es. "Chiusura") ha un nome e una lista di pasti-modello
+(tipo pasto — stesso vocabolario del planner —, orario opzionale HH:MM,
+situazione casa/lavoro/fuori/saltato/altro, preparazione anticipata con
+nota opzionale, nota libera). **Assegnare** un modello a una data per un
+profilo alimentare **copia** i suoi pasti in quel momento
+(`turno_assegnazioni`/`turno_assegnazione_pasti`): modificare o rimuovere
+un pasto assegnato non tocca mai il modello, e rinominare/archiviare il
+modello dopo non cambia le assegnazioni già fatte (`modello_nome_snapshot`
+resta congelato). Un'assegnazione è unica per profilo e data: assegnare di
+nuovo richiede una conferma esplicita di sostituzione, mai una fusione
+silenziosa.
+
+**Relazione col planner: solo un suggerimento testuale, mai una scrittura
+automatica.** Deciso esplicitamente con Alessio per non toccare la logica
+già in produzione del planner: la schermata "Giorno"
+(`planner_alimentare::planner_show_day`, sei righe aggiunte) mostra ora,
+se esiste un'assegnazione turno per quel giorno nello stesso spazio, un
+blocco di sola lettura con i pasti del turno il cui tipo non ha ancora un
+pasto vero pianificato per quella data (`turni::pasti_da_segnalare`,
+dominio puro testato senza database) — nessun bottone, nessuna riga
+scritta da sola in `planner_pasti`. Il confronto è per spazio, non per
+singolo profilo/partecipante: la schermata "Giorno" del planner non ha
+oggi un concetto di "profilo corrente" (un pasto può avere più
+partecipanti), e costruire quella distinzione avrebbe richiesto toccare
+la logica di segnalazione/congelamento già in produzione — dichiarato
+come approssimazione, non un'integrazione più profonda.
+
+Nuova migration additiva `migrations/20260910120000_turni_e_routine.sql`
+(`turno_modelli`, `turno_modello_pasti`, `turno_assegnazioni`,
+`turno_assegnazione_pasti`), documentata in `docs/database.md` e nel
+nuovo `docs/moduli/turni-e-routine.md`.
+
+Nuova convenzione **C15** in `docs/convenzioni-telegram.md`: le parti
+aggiunte a un'etichetta con più di due elementi vanno a capo con `\n`, non
+accodate con "·", perché Telegram tronca senza avviso il testo di un
+pulsante troppo lungo su una riga sola — applicata alle etichette dei
+pasti (tipo, orario, situazione, preparazione).
+
+**Fuori scope, dichiarato in `docs/roadmap.md` e
+`docs/previsto/turni-e-routine.md`**: condivisione/copia di un modello
+nello spazio, invio a un altro utente, reminder alla creazione
+(l'infrastruttura reminder non esiste ancora nel progetto), riordino dei
+pasti di un modello, badge "🆕" (`novita::REGISTRO`).
+
+17 nuovi test (7 di dominio puro, 10 su `sqlite::memory:`), per un totale
+di 372 (355 prima). Una migration nuova (49 nel repository, 48 prima).
+Pipeline `fmt`, `check --locked`, `clippy --all-targets --locked -- -D
+warnings`, `test --locked` verde in locale.
+
+**Non collaudato dal vivo**: scritto in questo worktree isolato, senza
+accesso a Telegram/S9 — nessuna migration applicata a un database reale.
+
 <!-- CHANGELOG_LISTA_SPESA_FEEDBACK_20260909 -->
 # 09/09/2026 — Due feedback reali sulla lista della spesa (scritti, collaudo dal vivo da fare)
 

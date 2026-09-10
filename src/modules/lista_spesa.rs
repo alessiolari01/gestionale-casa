@@ -3897,7 +3897,7 @@ pub async fn handle_callback(
         };
         match rimuovi_voce_manuale(pool, voce_id).await {
             Ok(()) => {
-                show_lista_rimuovi(bot, chat_id, pool, Some("✅ Voce rimossa.")).await?;
+                mostra_dopo_rimozione(bot, chat_id, pool, "✅ Voce rimossa.").await?;
             }
             Err(errore) => {
                 tracing::warn!(?errore, voce_id, "Rimozione voce manuale fallita");
@@ -3935,7 +3935,7 @@ pub async fn handle_callback(
                         "Aggiornamento lista dopo rimozione aggiunta catalogo fallito"
                     );
                 }
-                show_lista_rimuovi(bot, chat_id, pool, Some("✅ Voce rimossa.")).await?;
+                mostra_dopo_rimozione(bot, chat_id, pool, "✅ Voce rimossa.").await?;
             }
             Err(errore) => {
                 tracing::warn!(?errore, aggiunta_id, "Rimozione aggiunta catalogo fallita");
@@ -4390,6 +4390,36 @@ fn etichetta_rimovibile(voce: &VoceRimovibile) -> String {
 /// possibile rimuovere né l'una né l'altra). Le righe `generato`
 /// pure-planner non compaiono: le gestisce il planner, non una rimozione
 /// manuale.
+/// Dopo una rimozione riuscita: se non resta più nulla da rimuovere, va
+/// dritto alla lista principale invece di mostrare di nuovo "🗑️ Rimuovi
+/// voci" ormai vuota (chiesto da Alessio dopo un collaudo dal vivo — quella
+/// schermata vuota era un vicolo cieco che richiedeva comunque "⬅️
+/// Indietro" per uscirne).
+async fn mostra_dopo_rimozione(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    notice: &str,
+) -> ResponseResult<()> {
+    let lista = match trova_o_crea_lista_attiva(pool).await {
+        Ok(lista) => lista,
+        Err(errore) => {
+            tracing::warn!(?errore, "Impossibile aprire la lista della spesa");
+            show_lista_rimuovi(bot, chat_id, pool, Some(notice)).await?;
+            return Ok(());
+        }
+    };
+    let resta_qualcosa = voci_rimovibili(pool, lista.id)
+        .await
+        .map(|voci| !voci.is_empty())
+        .unwrap_or(true);
+    if resta_qualcosa {
+        show_lista_rimuovi(bot, chat_id, pool, Some(notice)).await
+    } else {
+        show_lista(bot, chat_id, pool, Some(notice)).await
+    }
+}
+
 async fn show_lista_rimuovi(
     bot: &Bot,
     chat_id: ChatId,

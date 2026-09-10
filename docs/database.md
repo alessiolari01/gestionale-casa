@@ -255,6 +255,64 @@ quell'`UPDATE` violerebbe un CHECK del genere quando la riga referenziata
 viene cancellata — stesso motivo per cui
 `planner_pasto_ingredienti_snapshot.alimento_id` non ha un vincolo simile.
 
+## Step 7.4bis: Turni e routine (prima fetta, 10 settembre 2026)
+
+Nuove tabelle di `migrations/20260910120000_turni_e_routine.sql`, dominio e
+scelte di design in `docs/moduli/turni-e-routine.md`.
+
+### `turno_modelli`
+Un modello (es. "Chiusura") descrive una giornata tipo con i suoi pasti di
+default. Stessa forma di visibilità di `planner_alimentari`/`liste_spesa`:
+appartiene allo spazio predefinito dell'attore che lo crea.
+
+| Campo | Tipo | Note |
+|---|---|---|
+| `proprietario_utente_id` | INTEGER | riferimento a `utenti(id)` |
+| `spazio_id` | INTEGER | nullable nello schema, in pratica sempre valorizzato con lo spazio predefinito dell'attore |
+| `nome` / `nome_normalizzato` | TEXT | nome scelto dall'utente |
+| `archiviato` | INTEGER | un modello archiviato non è più selezionabile, ma le assegnazioni già fatte restano (snapshot) |
+
+### `turno_modello_pasti`
+I pasti di default di un modello.
+
+| Campo | Tipo | Note |
+|---|---|---|
+| `modello_id` | INTEGER | riferimento a `turno_modelli(id)`, `ON DELETE CASCADE` |
+| `tipo_pasto` | TEXT | stesso vocabolario di `planner_pasti.tipo_pasto` |
+| `orario` | TEXT | opzionale, `HH:MM` |
+| `situazione` | TEXT | `casa` / `lavoro` / `fuori` / `saltato` / `altro` |
+| `preparazione_anticipata` | INTEGER | booleano |
+| `preparazione_note` | TEXT | opzionale, ammessa solo se `preparazione_anticipata = 1` (CHECK) |
+| `nota` | TEXT | libera, opzionale |
+| `ordinamento` | INTEGER | ordine di visualizzazione, in coda a ogni aggiunta |
+
+### `turno_assegnazioni`
+Un modello assegnato a una data per un profilo alimentare. **Copia** i
+pasti del modello al momento dell'assegnazione (mai un riferimento vivo):
+il nome del modello è congelato in `modello_nome_snapshot`, così
+rinominare/archiviare/cancellare il modello dopo non cambia le
+assegnazioni già fatte.
+
+| Campo | Tipo | Note |
+|---|---|---|
+| `modello_id` | INTEGER | nullable, `ON DELETE SET NULL` — l'assegnazione sopravvive alla cancellazione del modello |
+| `modello_nome_snapshot` | TEXT | nome del modello al momento dell'assegnazione |
+| `profilo_alimentare_id` | INTEGER | nullable, `ON DELETE SET NULL`, riferimento a `profili_alimentari(id)` |
+| `profilo_nome_snapshot` | TEXT | nome del profilo al momento dell'assegnazione |
+| `data` | TEXT | la data assegnata |
+
+Indice unico parziale su `(profilo_alimentare_id, data)` quando il profilo
+non è nullo: un solo turno assegnato per profilo e giorno. Assegnare di
+nuovo sullo stesso profilo/giorno richiede una sostituzione esplicita
+lato applicativo (l'utente conferma, poi la vecchia assegnazione viene
+eliminata e ricreata) — non una fusione.
+
+### `turno_assegnazione_pasti`
+I pasti copiati per una singola assegnazione: stessi campi di
+`turno_modello_pasti` (tranne `modello_id`, sostituito da
+`assegnazione_id`). Modificare o rimuovere una riga qui non tocca mai
+`turno_modello_pasti`.
+
 ## Cosa NON è in questo schema
 
 Ogni modulo avrà anche proprie tabelle non condivise: per esempio il
