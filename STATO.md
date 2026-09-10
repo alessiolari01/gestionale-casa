@@ -1274,16 +1274,13 @@ avvio reale del bot, solo con la pipeline automatica.
 
 ## 3. Stato tecnico verificato
 
-- **49 migration** nel repository (`migrations/20260910120000_turni_e_routine.sql`
-  è nuova e **non ancora applicata a nessun database reale** — scritta e
-  collaudata solo con `sqlite::memory:` in questo worktree isolato, senza
-  accesso all'S9). Le 48 precedenti restano **applicate** al database
-  reale dell'S9 (l'ultima di quelle, `migrations/20260909180000_lista_spesa_ordinamento.sql`
-  per il riordino manuale, il 9 settembre 2026), verificato leggendo
-  `applied_migrations=48` nel log di avvio del bot dopo il deploy del terzo
-  giro di correzioni alla lista della spesa — non dedotto;
-- pipeline verde in locale su questo worktree (non ancora rieseguita
-  sull'S9, per la stessa ragione di isolamento): `fmt`, `check --locked`,
+- **49 migration** nel repository, tutte **applicate** al database reale
+  dell'S9 (l'ultima, `migrations/20260910120000_turni_e_routine.sql` per
+  Turni e routine, il 10 settembre 2026), verificato leggendo
+  `applied_migrations=49` nel log di avvio del bot dopo il deploy — non
+  dedotto;
+- pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa,
+  punto 1 della sezione 6): `fmt`, `check --locked`,
   `clippy --all-targets --locked -- -D warnings`, `test --locked` —
   **372 test** (355 prima di Turni e routine, 348 prima del quarto giro di
   correzioni alla lista della
