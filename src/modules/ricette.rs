@@ -2081,7 +2081,35 @@ async fn handle_edit_callback(
         }
         return Ok(());
     }
-    if let Some(raw) = data.strip_prefix("recipe:edit:step:delete:") {
+    // C16 (`docs/convenzioni-telegram.md`): un'eliminazione definitiva
+    // chiede sempre conferma esplicita -- prima questo pulsante eseguiva
+    // subito, senza nessuna schermata "sei sicuro?" intermedia.
+    if let Some(raw) = data.strip_prefix("recipe:edit:step:del:ask:") {
+        if let Some((recipe_id, step_id)) = parse_two_positive_ids(raw) {
+            bot.send_message(
+                chat_id,
+                "⚠️ Eliminare definitivamente questo step? Gli eventuali allegati collegati vengono eliminati. Non si può recuperare.",
+            )
+            .reply_markup(InlineKeyboardMarkup::new(vec![
+                vec![button(
+                    "🗑 Sì, elimina",
+                    format!("recipe:edit:step:del:yes:{recipe_id}:{step_id}"),
+                )],
+                vec![
+                    button(
+                        "❌ Annulla",
+                        format!("recipe:edit:step:{recipe_id}:{step_id}"),
+                    ),
+                    button("🏠 Menù principale", "menu:main"),
+                ],
+            ]))
+            .await?;
+        } else {
+            show_invalid_action(bot, chat_id).await?;
+        }
+        return Ok(());
+    }
+    if let Some(raw) = data.strip_prefix("recipe:edit:step:del:yes:") {
         if let Some((recipe_id, step_id)) = parse_two_positive_ids(raw) {
             match delete_recipe_step(pool, recipe_id, step_id).await {
                 Ok(()) => {
@@ -2111,11 +2139,35 @@ async fn handle_edit_callback(
         }
         return Ok(());
     }
-    if let Some(raw) = data.strip_prefix("recipe:edit:md:") {
+    // C16: prima eseguiva subito, senza conferma -- elimina anche il file
+    // dell'allegato dal disco, non solo la riga a database.
+    if let Some(raw) = data.strip_prefix("recipe:edit:md:ask:") {
+        if let Some((recipe_id, media_id)) = parse_two_positive_ids(raw) {
+            bot.send_message(
+                chat_id,
+                "⚠️ Eliminare definitivamente questo allegato? Non si può recuperare.",
+            )
+            .reply_markup(InlineKeyboardMarkup::new(vec![
+                vec![button(
+                    "🗑 Sì, elimina",
+                    format!("recipe:edit:md:yes:{recipe_id}:{media_id}"),
+                )],
+                vec![
+                    button("❌ Annulla", format!("recipe:edit:steps:{recipe_id}")),
+                    button("🏠 Menù principale", "menu:main"),
+                ],
+            ]))
+            .await?;
+        } else {
+            show_invalid_action(bot, chat_id).await?;
+        }
+        return Ok(());
+    }
+    if let Some(raw) = data.strip_prefix("recipe:edit:md:yes:") {
         if let Some((recipe_id, media_id)) = parse_two_positive_ids(raw) {
             match delete_step_media(pool, recipe_id, media_id).await {
                 Ok(step_id) => {
-                    bot.send_message(chat_id, "✅ Allegato rimosso.").await?;
+                    bot.send_message(chat_id, "✅ Allegato eliminato.").await?;
                     show_step_manage(bot, chat_id, pool, recipe_id, step_id).await?;
                 }
                 Err(error) => {
@@ -3511,13 +3563,13 @@ async fn show_step_manage(
             ),
             button(
                 "🗑 Rimuovi",
-                format!("recipe:edit:md:{recipe_id}:{}", item.id),
+                format!("recipe:edit:md:ask:{recipe_id}:{}", item.id),
             ),
         ]);
     }
     rows.push(vec![button(
         "🗑 Elimina step",
-        format!("recipe:edit:step:delete:{recipe_id}:{step_id}"),
+        format!("recipe:edit:step:del:ask:{recipe_id}:{step_id}"),
     )]);
     rows.push(vec![
         button("⬅️ Indietro", format!("recipe:edit:steps:{recipe_id}")),
@@ -6737,9 +6789,12 @@ mod tests {
             format!("recipe:edit:ie:{id}:{id}"),
             format!("recipe:edit:im:{id}:{id}"),
             format!("recipe:edit:rev:{id}:{id}"),
-            format!("recipe:edit:md:{id}:{id}"),
+            format!("recipe:edit:md:ask:{id}:{id}"),
+            format!("recipe:edit:md:yes:{id}:{id}"),
             format!("recipe:edit:step:photo:{id}:{id}"),
             format!("recipe:edit:vis:toggle:{id}:{id}"),
+            format!("recipe:edit:step:del:ask:{id}:{id}"),
+            format!("recipe:edit:step:del:yes:{id}:{id}"),
         ];
         for callback in callbacks {
             assert!(

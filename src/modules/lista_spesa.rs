@@ -3508,6 +3508,27 @@ fn nav_markup(back: &str) -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![nav_row(back)])
 }
 
+/// Schermata "sei sicuro?" per un'eliminazione definitiva (nuova
+/// convenzione C16 di `docs/convenzioni-telegram.md`, punto 9 del collaudo
+/// dell'11 settembre 2026 sul modulo Turni e routine): prima
+/// `rimuovi_voce_manuale`/`rimuovi_aggiunta_catalogo` eseguivano subito al
+/// primo tocco, senza nessuna conferma intermedia.
+fn conferma_eliminazione_markup(
+    cosa: &str,
+    conferma_cb: &str,
+    annulla_cb: &str,
+) -> (String, InlineKeyboardMarkup) {
+    let testo = format!("⚠️ Eliminare {cosa} definitivamente? Non si può recuperare.");
+    let markup = InlineKeyboardMarkup::new(vec![
+        vec![button("✅ Sì, elimina", conferma_cb.to_string())],
+        vec![
+            button("❌ Annulla", annulla_cb.to_string()),
+            button("🏠 Menù principale", "menu:main"),
+        ],
+    ]);
+    (testo, markup)
+}
+
 fn annulla_keyboard() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![vec![
         button("❌ Annulla", "lista_spesa:add:cancel"),
@@ -3890,14 +3911,47 @@ pub async fn handle_callback(
         show_lista_rimuovi(bot, chat_id, pool, None).await?;
         return Ok(true);
     }
-    if let Some(raw_id) = data.strip_prefix("lista_spesa:remove:manuale:") {
+    // Punto 9 del collaudo dell'11 settembre 2026 / C16: conferma esplicita
+    // prima di un'eliminazione definitiva -- prima si eseguiva subito al
+    // primo tocco.
+    if let Some(raw_id) = data.strip_prefix("lista_spesa:remove:ask:manuale:") {
+        let Some(voce_id) = raw_id.parse::<i64>().ok().filter(|value| *value > 0) else {
+            invalid(bot, chat_id).await?;
+            return Ok(true);
+        };
+        let (testo, markup) = conferma_eliminazione_markup(
+            "questa voce",
+            &format!("lista_spesa:remove:yes:manuale:{voce_id}"),
+            "lista_spesa:remove",
+        );
+        bot.send_message(chat_id, testo)
+            .reply_markup(markup)
+            .await?;
+        return Ok(true);
+    }
+    if let Some(raw_id) = data.strip_prefix("lista_spesa:remove:ask:catalogo:") {
+        let Some(aggiunta_id) = raw_id.parse::<i64>().ok().filter(|value| *value > 0) else {
+            invalid(bot, chat_id).await?;
+            return Ok(true);
+        };
+        let (testo, markup) = conferma_eliminazione_markup(
+            "questa voce",
+            &format!("lista_spesa:remove:yes:catalogo:{aggiunta_id}"),
+            "lista_spesa:remove",
+        );
+        bot.send_message(chat_id, testo)
+            .reply_markup(markup)
+            .await?;
+        return Ok(true);
+    }
+    if let Some(raw_id) = data.strip_prefix("lista_spesa:remove:yes:manuale:") {
         let Some(voce_id) = raw_id.parse::<i64>().ok().filter(|value| *value > 0) else {
             invalid(bot, chat_id).await?;
             return Ok(true);
         };
         match rimuovi_voce_manuale(pool, voce_id).await {
             Ok(()) => {
-                mostra_dopo_rimozione(bot, chat_id, pool, "✅ Voce rimossa.").await?;
+                mostra_dopo_rimozione(bot, chat_id, pool, "✅ Voce eliminata.").await?;
             }
             Err(errore) => {
                 tracing::warn!(?errore, voce_id, "Rimozione voce manuale fallita");
@@ -3912,7 +3966,7 @@ pub async fn handle_callback(
         }
         return Ok(true);
     }
-    if let Some(raw_id) = data.strip_prefix("lista_spesa:remove:catalogo:") {
+    if let Some(raw_id) = data.strip_prefix("lista_spesa:remove:yes:catalogo:") {
         let Some(aggiunta_id) = raw_id.parse::<i64>().ok().filter(|value| *value > 0) else {
             invalid(bot, chat_id).await?;
             return Ok(true);
@@ -3935,7 +3989,7 @@ pub async fn handle_callback(
                         "Aggiornamento lista dopo rimozione aggiunta catalogo fallito"
                     );
                 }
-                mostra_dopo_rimozione(bot, chat_id, pool, "✅ Voce rimossa.").await?;
+                mostra_dopo_rimozione(bot, chat_id, pool, "✅ Voce eliminata.").await?;
             }
             Err(errore) => {
                 tracing::warn!(?errore, aggiunta_id, "Rimozione aggiunta catalogo fallita");
@@ -4457,7 +4511,7 @@ async fn show_lista_rimuovi(
             };
             vec![button(
                 etichetta_rimovibile(voce),
-                format!("lista_spesa:remove:{prefisso}:{}", voce.id),
+                format!("lista_spesa:remove:ask:{prefisso}:{}", voce.id),
             )]
         })
         .collect();

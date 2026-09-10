@@ -486,6 +486,41 @@ Prima quello che si usa tutti i giorni, poi il resto, in fondo gli strumenti.
 I moduli non ancora disponibili **non compaiono**: quando non ci sono, sparisce
 anche la riga che spiega cosa vuol dire «prossimamente».
 
+### C16. Un'eliminazione definitiva chiede sempre conferma esplicita
+
+Deciso l'11 settembre 2026, durante il primo collaudo dal vivo del modulo
+Turni e routine. Un'azione che elimina qualcosa **in modo definitivo e non
+recuperabile** (una riga senza nessun "archivio"/"cestino" da cui tornare
+indietro) richiede sempre una schermata "sei sicuro?" con conferma/annullamento
+esplicito **prima** di eseguirla — mai al primo tocco del pulsante.
+
+Schema unico, riusato ovunque:
+
+```text
+⚠️ Eliminare <cosa> definitivamente? Non si può recuperare.
+
+[ ✅ Sì, elimina ]
+[ ❌ Annulla | 🏠 Menù principale ]
+```
+
+In pratica: un pulsante che oggi esegue subito una `DELETE` diventa un
+pulsante che porta a questa schermata (callback `...:ask:ID`), e solo il
+bottone `✅ Sì, elimina` di quella schermata esegue davvero l'azione
+(callback `...:yes:ID`) — lo stesso schema a due passi già usato da
+`turni:mpasto:remove:ask:`/`:yes:` e `lista_spesa:remove:ask:`/`:yes:`.
+
+**Non si applica** a un'azione reversibile: archiviare un modello (`🗑
+Archivia` di `turni.rs`) non chiede questa conferma perché un modello
+archiviato si ripristina da una schermata dedicata (punto 8 del collaudo
+dell'11 settembre 2026, `🗄 Modelli archiviati`) — l'icona `🗑` sul
+pulsante descrive l'effetto immediato (sparisce dall'elenco), non implica
+automaticamente C16. La differenza che conta è "esiste ancora un modo per
+tornare indietro dall'interfaccia", non l'icona sul pulsante.
+
+Trovato mancante, oltre al modulo Turni e routine appena scritto, in
+`lista_spesa.rs` (`🗑️ Rimuovi voci`, corretto nello stesso lavoro): un
+audit dei restanti moduli del bot è nella sezione 2sexies di `STATO.md`.
+
 ---
 
 ## Parte 3 — Come si applica

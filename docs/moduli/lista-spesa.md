@@ -292,13 +292,17 @@ premibile altrove nel bot. `✅ Fine riordino` per tornare alla schermata
 principale.
 
 **Rimuovi voci** — un pulsante `🗑️` per ogni voce manuale e aggiunta dal
-catalogo, tocco = rimozione immediata (nessuna conferma, come il resto
-delle azioni rapide di questa lista); `⬅️ Indietro` per tornare alla
-schermata principale. Dopo l'ultima rimozione, se non resta più nulla da
-rimuovere, `mostra_dopo_rimozione` porta direttamente alla lista principale
-invece di ripresentare "🗑️ Rimuovi voci" ormai vuota (trovato da Alessio
-dal vivo il 10 settembre 2026: quella schermata vuota era un vicolo cieco
-che richiedeva comunque "⬅️ Indietro" per uscirne).
+catalogo. **Dall'11 settembre 2026** (nuova convenzione C16 di
+`docs/convenzioni-telegram.md`, punto 9 del collaudo dal vivo di Turni e
+routine): il tocco non elimina più subito, apre una schermata "⚠️
+Eliminare questa voce definitivamente? Non si può recuperare." con
+`✅ Sì, elimina` / `❌ Annulla` — prima l'eliminazione era immediata, senza
+nessuna conferma. `⬅️ Indietro` per tornare alla schermata principale.
+Dopo l'ultima rimozione, se non resta più nulla da rimuovere,
+`mostra_dopo_rimozione` porta direttamente alla lista principale invece di
+ripresentare "🗑️ Rimuovi voci" ormai vuota (trovato da Alessio dal vivo il
+10 settembre 2026: quella schermata vuota era un vicolo cieco che
+richiedeva comunque "⬅️ Indietro" per uscirne).
 
 **Aggiungi voce manuale** — input ibrido in due passi: descrizione libera
 (testo), poi quantità+unità scritte a mano (es. "500 g") oppure `➖ Senza

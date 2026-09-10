@@ -40,16 +40,51 @@ Il congelamento è imposto dal database con dei trigger, non solo dalla UI.
 **Settimana** — lunedì-domenica, un pulsante per giorno con il numero di pasti;
 oggi è marcato con `👉`; un giorno senza pasti non scrive «0 pasti», tace. Il
 testo del messaggio non ripete i giorni: dice cosa si mangia **oggi**, che i
-pulsanti non possono dire.
+pulsanti non possono dire. **Dall'11 settembre 2026** un giorno con almeno
+un'assegnazione turno (per qualunque profilo dello spazio, vedi
+`docs/moduli/turni-e-routine.md`) porta anche `🗓️` accanto al giorno —
+simbolo diverso da `•` del calendario mensile, per non confondere i due
+significati (C4).
 
 **`📅 Vai a una data`** — griglia del mese; i giorni che hanno già dei pasti
-portano un `•`. La settimana appartiene al mese in cui cade il giovedì, così
-aprendo il calendario oggi è sempre visibile.
+portano un `•`, quelli con un turno assegnato portano `◆` (entrambi insieme:
+`•◆`). La settimana appartiene al mese in cui cade il giovedì, così aprendo
+il calendario oggi è sempre visibile.
 
-**Giorno** — i pasti come pulsanti, e `➕ Nuovo pasto`.
+**Giorno** — i pasti come pulsanti, `➕ Nuovo pasto`, e — dall'11 settembre
+2026 — `📅 Assegna un turno a questo giorno`, che apre il flusso di
+assegnazione di `turni.rs` saltando la scelta della data (già nota): si
+sceglie solo il profilo e poi il modello, e si torna qui con il promemoria
+aggiornato.
 
-**Dettaglio** — ricetta, partecipanti, stato e quantità totali aggregate per
-alimento; le azioni disponibili dipendono dallo stato.
+**Dettaglio** — ricetta, partecipanti, stato, orario (se impostato) e
+quantità totali aggregate per alimento; le azioni disponibili dipendono
+dallo stato.
+
+## Orario del pasto (dall'11 settembre 2026)
+
+Ogni pasto vero del planner può avere un orario opzionale
+(`planner_pasti.orario`, stesso formato `HH:MM` e stesso CHECK già usato da
+`turno_modello_pasti.orario`). Si imposta in un passo dedicato fra la
+scelta dei profili partecipanti e il salvataggio (`▶️ Continua` sulla
+schermata dei profili, poi `🕐 Orario di <tipo>`), con un **default
+proposto ma mai imposto**:
+
+1. se quel giorno ha un'assegnazione turno con un orario per lo stesso tipo
+   di pasto e uno dei profili scelti, quello vince (`turni::orario_suggerito_da_turno`);
+2. altrimenti i default fissi per tipo (`turni::orario_default_per_tipo`):
+   colazione 07:00, spuntino mattina 10:30, pranzo 13:00, spuntino
+   pomeriggio 16:30, cena 20:00 — "altro" non ne ha nessuno, si scrive o si
+   salta come sempre.
+
+L'orario scritto a mano accetta anche una cifra sola per l'ora ("7:30"),
+normalizzata a due cifre — stessa validazione di `turni::valida_orario`,
+condivisa fra i due moduli invece di duplicata.
+
+**Incoerenza con la routine**: se il turno assegnato quel giorno segna
+"saltato" il tipo di pasto che si sta per pianificare, un avviso (non un
+blocco) chiede conferma prima di salvare — la pianificazione può sempre
+fare override della routine, vedi `docs/moduli/turni-e-routine.md`.
 
 ## La settimana si crea da sola
 
@@ -61,7 +96,7 @@ usa il bot — «creare un planner» sarebbe un passaggio che non decide niente.
 
 ```text
 planner_alimentari                  periodo, proprietario, spazio
-planner_pasti                       data, tipo, ricetta + snapshot, stato
+planner_pasti                       data, tipo, ricetta + snapshot, stato, orario (dall'11/9/2026)
 planner_pasto_profili               partecipanti + fattore porzione congelato
 planner_pasto_ingredienti_snapshot  quantità congelate per profilo/ingrediente
 ```

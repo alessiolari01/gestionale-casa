@@ -57,13 +57,17 @@ Prossimi blocchi funzionali, nell'ordine:
 1. **Porzioni e override** — quantità personali e override ingrediente — OPERATIVO;
 2. **Turni/routine** — prima fetta scritta il 10 settembre 2026
    (`src/modules/turni.rs`: modelli, pasti-modello, assegnazione a una
-   data per un profilo con copia dei pasti, riferimento di sola lettura
-   nella schermata "Giorno" del planner), collaudo dal vivo su Telegram
-   da fare: vedi `STATO.md` e `docs/moduli/turni-e-routine.md`. Restano
-   fuori da questa fetta, ancora da fare: condivisione/copia di un
-   modello nello spazio, invio a un altro utente, reminder alla
-   creazione (l'infrastruttura reminder non esiste ancora), riordino dei
-   pasti di un modello;
+   data con copia dei pasti, riferimento di sola lettura nella schermata
+   "Giorno" del planner), **tredici correzioni del primo collaudo dal
+   vivo scritte l'11 settembre 2026** (guida alla creazione, modello
+   legato a un profilo con copia per un altro profilo, modelli
+   archiviati con ripristino, "🔄 Aggiorna assegnazione", conferma prima
+   di ogni eliminazione definitiva, e altro — vedi `STATO.md` e
+   `docs/moduli/turni-e-routine.md`), collaudo dal vivo delle correzioni
+   su Telegram ancora da fare. Restano fuori, ancora da fare:
+   condivisione di un modello nello spazio senza copiarlo, invio a un
+   altro utente, reminder alla creazione (l'infrastruttura reminder non
+   esiste ancora), riordino manuale dei pasti di un modello;
 3. **Planner pasti** versionato — OPERATIVO;
 4. **Lista della spesa** aggregata — scritta l'8 settembre 2026
    (`src/modules/lista_spesa.rs`), collaudo dal vivo su Telegram da fare:

@@ -1272,6 +1272,154 @@ warnings`, `test --locked` verde in locale.
 Telegram/S9 in questo worktree isolato — non è stato verificato con un
 avvio reale del bot, solo con la pipeline automatica.
 
+## 2sexies. Turni e routine — tredici correzioni dell'11 settembre 2026, primo collaudo dal vivo di Alessio
+
+Alessio ha collaudato dal vivo su Telegram la prima fetta di Turni e
+routine (sezione precedente) e ha segnalato tredici correzioni, tutte
+discusse e decise con lui prima di scriverle. Dettaglio completo in
+`docs/moduli/turni-e-routine.md` (che elenca i tredici punti uno per uno)
+e `docs/database.md` (sezione "Step 7.4ter"). Nuova migration additiva
+`migrations/20260911090000_turni_correzioni_collaudo.sql` — la migration
+originale del 10 settembre, già applicata all'S9, non è mai stata
+toccata.
+
+**Fatti tutti e tredici i punti**:
+
+1. Ordine cronologico dei pasti per orario, senza orario in fondo.
+2. Un solo pasto per tipo, indice UNIQUE a database + messaggio leggibile.
+3. Assegnare un turno dalla schermata Giorno del planner.
+4. Orario del pasto vero del planner, con default proposto (mai imposto).
+5. Indicatore visivo (`🗓️`/`◆`) per i giorni con turno assegnato.
+6. Orario senza zero iniziale ("7:30"), validazione condivisa fra
+   `turni.rs` e `planner_alimentare.rs` invece di duplicata.
+7. Modifica di un pasto del modello uniformata a quella dell'assegnazione.
+8. Modelli archiviati con una schermata per ripristinarli.
+9. Conferma esplicita prima di ogni eliminazione definitiva — nuova
+   convenzione **C16**, vedi sotto per l'audit sul resto del bot.
+10. "🔄 Aggiorna assegnazione" quando il modello cambia dopo, stessa
+    logica di "🔄 Aggiorna planner".
+11. Default orari fissi per tipo di pasto (parte del punto 4).
+12. Guida obbligata alla creazione del modello (i 5 tipi fissi in ordine,
+    situazione prima di orario, "saltato" senza orario né preparazione) e
+    le due incoerenze turno↔planner (un avviso mai un blocco quando si
+    pianifica comunque un pasto "saltato"; una scelta esplicita quando si
+    assegna un modello che segna "saltato" un pasto già pianificato per
+    davvero).
+13. Il modello appartiene a un profilo, non l'assegnazione: nuove colonne
+    `turno_modelli.profilo_alimentare_id`/`profilo_nome_snapshot`, con
+    backfill dei modelli di test già esistenti sul database reale (es.
+    "Gelateria") al profilo "sé stesso" del proprietario. Nuovo
+    "📤 Copia per un altro profilo": copia indipendente, mai collegata
+    all'originale dopo la copia.
+
+**Scelte prese in autonomia**, oltre a quelle già scritte nel documento
+del modulo:
+
+- Il nome di un modello copiato per un altro profilo include il nome del
+  profilo di destinazione tra parentesi, per non violare l'indice UNIQUE
+  su `(spazio_id, nome_normalizzato)` già in produzione (un errore reale
+  trovato dai test: la prima versione teneva lo stesso nome esatto e il
+  test di copia falliva con l'errore grezzo del database).
+- Il giro guidato dei 5 tipi fissi (punto 12) riprende da solo anche
+  quando si preme `➕ Aggiungi pasto` su un modello esistente a cui
+  mancano ancora dei tipi fissi, non solo appena dopo la creazione: la
+  scelta del tipo sparisce dalla UI finché resta un tipo fisso mancante,
+  invece di offrire due percorsi diversi (creazione vs aggiunta
+  successiva) per la stessa cosa.
+- `turno_modelli.aggiornato_il` viene ora toccato da ogni
+  aggiunta/modifica/rimozione di un pasto del modello (`tocca_modello`),
+  non solo da rinomina/archiviazione come prima: è il segnale che il
+  punto 10 confronta con lo snapshot preso a ogni assegnazione.
+
+**Audit sistematico del punto 9 sul resto del bot**, con un agente di
+sola lettura dedicato (non ha modificato nulla): cercato in
+`src/modules/*.rs` ogni callback che esegue una `DELETE` (o un'azione
+permanente equivalente, es. eliminare un allegato dal disco) senza una
+schermata di conferma intermedia.
+
+*Moduli già a posto* (hanno già uno schema conferma/annulla a due passi):
+`ricette.rs` (eliminazione ricetta), `oggetti.rs`, `luoghi.rs` (casa e
+stanza), `contenitori.rs`, `spazi_membri.rs` (rimozione di un membro),
+`miglioramenti.rs` (eliminazione di un miglioramento ed eliminazione di
+tutti gli scartati), `planner_alimentare.rs` (eliminazione di un pasto).
+Zero punti di eliminazione trovati in `porzioni.rs`, `storico.rs`,
+`distribuzione.rs`, `collaudo.rs`, `novita.rs`, `foto.rs` (le sue funzioni
+di cancellazione file sono interne al flusso già confermato di
+`oggetti.rs`), `vestiti.rs`/`veicoli.rs` (moduli non ancora costruiti) e
+`profili_alimentari.rs` (usa archiviazione/soft-delete, non una `DELETE`
+vera su un profilo).
+
+*Cinque punti trovati e corretti allo stesso modo* (schermata "sei
+sicuro?" con `✅ Sì, elimina` / `❌ Annulla`, callback `...:ask:`/`...:yes:`):
+
+- `ricette.rs`: eliminazione di uno step del procedimento
+  (`recipe:edit:step:del:ask:`/`:yes:` — accorciato da "delete" a "del"
+  per restare sotto il limite di 64 byte di un callback Telegram con id
+  al valore massimo, verificato dal test già esistente
+  `callback_ricette_restano_sotto_il_limite_telegram`, esteso con i nuovi
+  callback) e del suo allegato (`recipe:edit:md:ask:`/`:yes:`, elimina
+  anche il file dal disco).
+- `spazi_membri.rs`: revoca di un invito
+  (`space-members:invite:revoke:ask:`/`:yes:`).
+- `miglioramenti.rs`: eliminazione di uno screenshot/video
+  (`improve:photo:delete:ask:`/`:yes:`, elimina anche il file dal disco) e
+  di un singolo miglioramento scartato
+  (`improve:delete_discarded:ask:`/`:yes:` — il "elimina tutti" aveva già
+  la conferma, il singolo no).
+
+*Lasciato non toccato perché ambiguo, da rivedere con Alessio* (non si è
+indovinato, come richiesto): `alimentazione.rs`
+(`food:product:nutrition:remove:`, azzera i valori nutrizionali di un
+prodotto in un solo tocco — non chiaro se vada trattato come
+un'eliminazione ai fini di C16 o come una normale modifica di un campo);
+`porzioni_profili.rs` e `porzioni_ingredienti.rs` (i "reset" del fattore
+di porzione o degli override di un ingrediente a un profilo cancellano
+righe a database, ma ripristinano un valore calcolato di default,
+recuperabile rifacendo la modifica — sembra più vicino a un normale
+`↩️` che a una perdita di dati, ma non è stato deciso con certezza);
+`miglioramenti.rs` (`improve:tutorial:elimina:`, la stessa funzione di
+eliminazione allegato usata dal tutorial guidato del punto 9 sopra, ma lì
+è già dentro una schermata "tieni/elimina" a scelta binaria subito dopo
+l'invio di prova — sembra già una conferma di fatto, solo con un nome di
+callback diverso dallo schema `ask`/`yes`, non modificato per non
+rischiare di rompere il tutorial guidato collaudato).
+
+**13 nuovi test, tutti in `src/modules/turni.rs`** (2 di dominio puro —
+orario senza zero iniziale, pasto saltato mai segnalato come mancante — e
+11 su `sqlite::memory:` — ordine cronologico, vincolo di unicità sul tipo
+pasto, modifica di un pasto del modello, archiviazione/ripristino, tipi
+fissi mancanti, creazione con profilo obbligatorio, copia per un altro
+profilo indipendente, assegnazione che eredita il profilo, "aggiorna
+assegnazione" e il suo confronto, conflitto turno "saltato"/pasto già
+pianificato), per un totale di **385 (372 prima)**. I cinque punti
+dell'audit corretti in `ricette.rs`/`spazi_membri.rs`/`miglioramenti.rs`
+non hanno test nuovi: riusano funzioni di eliminazione già testate,
+aggiungendo solo una schermata di conferma nella UI. Una migration nuova
+(50 nel repository, 49 prima). Pipeline `fmt`, `check --locked`,
+`clippy --all-targets --locked -- -D warnings`, `test --locked` verde in
+locale, tutti i 385 test passano.
+
+**Punti lasciati intenzionalmente più leggeri, da rivedere prima del
+collaudo**:
+
+- Il passo dell'orario del planner (punto 4) e l'indicatore dei giorni
+  con turno (punto 5) toccano `planner_alimentare.rs`, che non ha un
+  proprio modulo di test su `sqlite::memory:` (solo test di dominio puro,
+  già esistenti prima di questo lavoro): la nuova logica riusa funzioni di
+  `turni.rs` già testate lì (`valida_orario`, `orario_suggerito_da_turno`,
+  `turno_segna_saltato`, `giorni_con_assegnazione_spazio_tra`), ma il
+  nuovo passo UI in sé (schermata orario, avviso di incoerenza 1) non ha
+  un test automatico dedicato — stessa lacuna di collaudo di tutto il
+  resto della UI Telegram del progetto, che si verifica sempre a mano
+  sull'S9, mai scritta qui come se fosse verificata quando non lo è.
+- Le quattro ambiguità dell'audit del punto 9, elencate sopra, restano
+  aperte: nessuna delle due letture (serve conferma / non serve) è stata
+  scelta a caso.
+
+**Scritto, collaudo dal vivo su Telegram da fare**: nessun accesso a
+Telegram/S9 in questo worktree isolato — non è stato verificato con un
+avvio reale del bot, solo con la pipeline automatica.
+
 ## 3. Stato tecnico verificato
 
 - **49 migration** nel repository, tutte **applicate** al database reale

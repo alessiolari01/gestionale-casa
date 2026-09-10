@@ -1,13 +1,15 @@
 # Turni e routine
 
-**Stato: PRIMA FETTA SCRITTA il 10 settembre 2026** (modello, pasti-modello,
-assegnazione a una data per un profilo con copia dei pasti, riferimento di
-sola lettura nella schermata "Giorno" del planner) — vedi
-`docs/moduli/turni-e-routine.md` per come è fatta e `STATO.md`, sezione
-2quinquies, per cosa è stato collaudato finora (non ancora dal vivo su
-Telegram). **Il resto di questo documento resta PREVISTO**: condivisione e
-copia di un modello, invio a un altro utente, reminder alla creazione (righe
-sotto) non sono ancora costruiti.
+**Stato: PRIMA FETTA SCRITTA il 10 settembre 2026, TREDICI CORREZIONI
+SCRITTE l'11 settembre 2026** dopo il primo collaudo dal vivo — vedi
+`docs/moduli/turni-e-routine.md` per come è fatta e `STATO.md`, sezioni
+2quinquies e 2sexies, per cosa è stato collaudato finora (le correzioni
+dell'11 settembre non ancora dal vivo su Telegram). **La copia
+indipendente di un modello per un altro profilo è stata costruita**
+(punto 13 delle correzioni, `📤 Copia per un altro profilo`): **il resto
+di questo documento resta PREVISTO** — condivisione di un modello nello
+spazio senza copiarlo, invio a un altro utente, reminder alla creazione
+(righe sotto) non sono ancora costruiti.
 
 ## Obiettivo
 
@@ -63,13 +65,18 @@ vengono proposti ma restano modificabili.
 
 I canali Step 7 sono Telegram ed email. Niente SMS.
 
-## Condivisione e copia — non costruita in questa fetta
+## Condivisione e copia
 
-I modelli turno/routine sono candidati naturali per:
+**Copia indipendente: costruita l'11 settembre 2026** (`📤 Copia per un
+altro profilo`, `turni::copia_modello_per_profilo`): crea un nuovo
+modello con gli stessi pasti, intestato a un profilo diverso scelto tra
+quelli visibili nello spazio, senza nessun collegamento con l'originale
+dopo la copia.
 
-- condivisione nello stesso spazio;
-- copia indipendente;
-- invio di una copia ad un altro utente.
+**Restano non costruite**: condivisione dello stesso modello nello spazio
+(senza copiarlo — un modello oggi appartiene a un solo profilo, punto 13
+delle correzioni dell'11 settembre), invio di una copia a un altro utente
+al di fuori dello spazio corrente.
 
 Le assegnazioni giornaliere restano riferite alla persona/profilo e non vengono
 condivise automaticamente solo perché il modello è condiviso.

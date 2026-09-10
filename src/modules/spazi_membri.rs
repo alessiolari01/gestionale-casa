@@ -504,7 +504,28 @@ pub async fn handle_callback(
         show_invite_detail(bot, chat_id, pool, actor, invite_id).await?;
         return Ok(true);
     }
-    if let Some(invite_id) = parse_positive(data, "space-members:invite:revoke:") {
+    // C16 (`docs/convenzioni-telegram.md`): un'eliminazione definitiva
+    // chiede sempre conferma esplicita -- prima questo pulsante eseguiva
+    // subito, senza nessuna schermata "sei sicuro?" intermedia.
+    if let Some(invite_id) = parse_positive(data, "space-members:invite:revoke:ask:") {
+        bot.send_message(
+            chat_id,
+            "⚠️ Revocare ed eliminare definitivamente questo invito? Non si può recuperare.",
+        )
+        .reply_markup(InlineKeyboardMarkup::new(vec![
+            vec![InlineKeyboardButton::callback(
+                "🗑️ Sì, revoca".to_string(),
+                format!("space-members:invite:revoke:yes:{invite_id}"),
+            )],
+            nav_row(
+                "⬅️ Indietro",
+                &format!("space-members:invite:view:{invite_id}"),
+            ),
+        ]))
+        .await?;
+        return Ok(true);
+    }
+    if let Some(invite_id) = parse_positive(data, "space-members:invite:revoke:yes:") {
         match delete_manageable_invite(pool, actor, invite_id).await {
             Ok(()) => {
                 bot.send_message(chat_id, "❌ Invito revocato ed eliminato.")
@@ -1808,7 +1829,7 @@ fn invite_detail_keyboard(invite: &InviteRow, link: &str) -> InlineKeyboardMarku
     }
     rows.push(vec![InlineKeyboardButton::callback(
         "❌ Revoca invito".to_string(),
-        format!("space-members:invite:revoke:{}", invite.id),
+        format!("space-members:invite:revoke:ask:{}", invite.id),
     )]);
     rows.push(nav_row("⬅️ Inviti attivi", "space-members:invite:list"));
     InlineKeyboardMarkup::new(rows)

@@ -876,7 +876,42 @@ Descrivi cosa vorresti cambiare o migliorare. Puoi usare più messaggi; quando h
         return Ok(true);
     }
 
-    if let Some(raw) = data.strip_prefix("improve:photo:delete:") {
+    // C16 (`docs/convenzioni-telegram.md`): un'eliminazione definitiva
+    // chiede sempre conferma esplicita -- prima questo pulsante eseguiva
+    // subito, senza nessuna schermata "sei sicuro?" intermedia. Elimina
+    // anche il file dell'allegato dal disco, non solo la riga a database.
+    if let Some(raw) = data.strip_prefix("improve:photo:delete:ask:") {
+        let mut parts = raw.split(':');
+        let improvement_id = parts.next().and_then(|value| value.parse::<i64>().ok());
+        let attachment_id = parts.next().and_then(|value| value.parse::<i64>().ok());
+        if parts.next().is_none() {
+            if let (Some(improvement_id), Some(attachment_id)) = (improvement_id, attachment_id) {
+                bot.send_message(
+                    chat_id,
+                    "⚠️ Eliminare definitivamente questo allegato? Non si può recuperare.",
+                )
+                .reply_markup(InlineKeyboardMarkup::new(vec![
+                    vec![InlineKeyboardButton::callback(
+                        "🗑️ Sì, elimina".to_string(),
+                        format!("improve:photo:delete:yes:{improvement_id}:{attachment_id}"),
+                    )],
+                    vec![
+                        InlineKeyboardButton::callback(
+                            "❌ Annulla".to_string(),
+                            format!("improve:photos:{improvement_id}"),
+                        ),
+                        InlineKeyboardButton::callback(
+                            "🏠 Menù principale".to_string(),
+                            "menu:main".to_string(),
+                        ),
+                    ],
+                ]))
+                .await?;
+                return Ok(true);
+            }
+        }
+    }
+    if let Some(raw) = data.strip_prefix("improve:photo:delete:yes:") {
         let mut parts = raw.split(':');
         let improvement_id = parts.next().and_then(|value| value.parse::<i64>().ok());
         let attachment_id = parts.next().and_then(|value| value.parse::<i64>().ok());
@@ -1115,7 +1150,40 @@ Verranno rimossi definitivamente anche i relativi allegati. Questa operazione no
         return Ok(true);
     }
 
-    if let Some(id) = parse_id(data, "improve:delete_discarded:") {
+    // C16 (`docs/convenzioni-telegram.md`): un'eliminazione definitiva
+    // chiede sempre conferma esplicita -- prima questo pulsante eseguiva
+    // subito, senza nessuna schermata "sei sicuro?" intermedia (a
+    // differenza di "🗑️ Elimina tutti", che ce l'ha già poco sopra).
+    if let Some(id) = parse_id(data, "improve:delete_discarded:ask:") {
+        if !is_primary_admin(pool).await.unwrap_or(false) {
+            bot.send_message(chat_id, "⚠️ Comando non disponibile.")
+                .await?;
+        } else {
+            bot.send_message(
+                chat_id,
+                "⚠️ Eliminare definitivamente questo miglioramento scartato? Non si può recuperare.",
+            )
+            .reply_markup(InlineKeyboardMarkup::new(vec![
+                vec![InlineKeyboardButton::callback(
+                    "🗑️ Sì, elimina".to_string(),
+                    format!("improve:delete_discarded:yes:{id}"),
+                )],
+                vec![
+                    InlineKeyboardButton::callback(
+                        "❌ Annulla".to_string(),
+                        "improve:list:discarded:0".to_string(),
+                    ),
+                    InlineKeyboardButton::callback(
+                        "🏠 Menù principale".to_string(),
+                        "menu:main".to_string(),
+                    ),
+                ],
+            ]))
+            .await?;
+        }
+        return Ok(true);
+    }
+    if let Some(id) = parse_id(data, "improve:delete_discarded:yes:") {
         if !is_primary_admin(pool).await.unwrap_or(false) {
             bot.send_message(chat_id, "⚠️ Comando non disponibile.")
                 .await?;
@@ -2445,7 +2513,10 @@ async fn show_original_attachments(
                 .reply_markup(InlineKeyboardMarkup::new(vec![vec![
                     InlineKeyboardButton::callback(
                         elimina_etichetta.to_string(),
-                        format!("improve:photo:delete:{improvement_id}:{}", attachment.id),
+                        format!(
+                            "improve:photo:delete:ask:{improvement_id}:{}",
+                            attachment.id
+                        ),
                     ),
                 ]]))
                 .await?;
@@ -3818,7 +3889,7 @@ fn detail_keyboard(
             }
             "scartato" => rows.push(vec![InlineKeyboardButton::callback(
                 "🗑️ Elimina scartato".to_string(),
-                format!("improve:delete_discarded:{}", item.id),
+                format!("improve:delete_discarded:ask:{}", item.id),
             )]),
             _ => {}
         }

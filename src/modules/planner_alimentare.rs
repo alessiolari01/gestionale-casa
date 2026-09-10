@@ -280,6 +280,18 @@ struct PlannerDraft {
     meal_type: Option<MealType>,
     recipe_id: Option<i64>,
     selected_profiles: Vec<i64>,
+    // Punto 4/11 del collaudo dell'11 settembre 2026: orario del pasto
+    // vero, opzionale, con un default suggerito (mai imposto) calcolato al
+    // momento di entrare in questo passo -- vedi `planner_show_orario_step`.
+    orario: Option<String>,
+    // Punto 12, incoerenza 1: `true` quando l'utente ha già confermato di
+    // voler pianificare comunque un pasto che il turno assegnato segna
+    // "saltato" -- evita di richiedere la stessa conferma due volte.
+    ignora_avviso_turno: bool,
+    // `true` mentre si aspetta che l'utente scriva un orario a mano
+    // (punto 4): letto da `handle_message`, che non ha altrimenti nessuno
+    // stato testuale nel flusso del planner.
+    orario_in_attesa: bool,
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -363,6 +375,8 @@ struct PlannerMealDetail {
     skipped_at: Option<String>,
     recipe_snapshot_version: Option<String>,
     current_recipe_version: Option<String>,
+    // Punto 4 del collaudo dell'11 settembre 2026.
+    orario: Option<String>,
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -376,6 +390,7 @@ struct PlannerMealDetailRow {
     skipped_at: Option<String>,
     recipe_snapshot_version: Option<String>,
     current_recipe_version: Option<String>,
+    orario: Option<String>,
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -425,6 +440,33 @@ pub async fn handle_message(
     pool: &SqlitePool,
     text: &str,
 ) -> ResponseResult<bool> {
+    // Punto 4 del collaudo dell'11 settembre 2026: unico passo testuale del
+    // flusso planner, quindi controllato a parte invece che nel match sulla
+    // prima parola (che serve ai comandi `/planner`, `/annulla`).
+    if text.trim() != "/annulla" {
+        if let Some(mut draft) = planner_get_draft(msg.chat.id.0) {
+            if draft.orario_in_attesa {
+                return match crate::modules::turni::valida_orario(text) {
+                    Ok(orario) => {
+                        draft.orario = Some(orario);
+                        draft.orario_in_attesa = false;
+                        planner_set_draft(msg.chat.id.0, draft);
+                        planner_proceed_after_orario(bot, msg.chat.id, pool).await?;
+                        Ok(true)
+                    }
+                    Err(errore) => {
+                        bot.send_message(msg.chat.id, format!("⚠️ {errore}"))
+                            .reply_markup(InlineKeyboardMarkup::new(vec![
+                                vec![planner_button("➖ Nessun orario", "planner:orario:skip")],
+                                planner_global_nav("planner:profiles:0"),
+                            ]))
+                            .await?;
+                        Ok(true)
+                    }
+                };
+            }
+        }
+    }
     match text.split_whitespace().next().unwrap_or_default() {
         "/planner" | "/planner_alimentare" => {
             planner_clear_draft(msg.chat.id.0);
@@ -507,6 +549,9 @@ pub async fn handle_callback(
                 meal_type: None,
                 recipe_id: None,
                 selected_profiles: Vec::new(),
+                orario: None,
+                ignora_avviso_turno: false,
+                orario_in_attesa: false,
             },
         );
         planner_show_type_picker(bot, chat_id, date, None).await?;
@@ -673,7 +718,9 @@ pub async fn handle_callback(
         planner_show_profile_picker(bot, chat_id, pool, 0).await?;
         return Ok(true);
     }
-    if data == "planner:save" {
+    // Punto 4/11 del collaudo dell'11 settembre 2026: fra i profili e il
+    // salvataggio vero e proprio si inserisce il passo dell'orario.
+    if data == "planner:continue" {
         let Some(draft) = planner_get_draft(chat_id.0) else {
             planner_expired(bot, chat_id).await?;
             return Ok(true);
@@ -690,23 +737,59 @@ pub async fn handle_callback(
             .await?;
             return Ok(true);
         }
-        match planner_save_draft(pool, &draft).await {
-            Ok(_meal_id) => {
-                planner_clear_draft(chat_id.0);
-                let notice = if draft.meal_id.is_some() {
-                    "✅ Pasto aggiornato."
-                } else {
-                    "✅ Pasto aggiunto al Planner."
-                };
-                planner_show_day(bot, chat_id, pool, &draft.date, Some(notice)).await?;
-            }
-            Err(error) => {
-                tracing::warn!(?error, "Salvataggio Planner fallito");
-                bot.send_message(chat_id, format!("⚠️ {error}"))
-                    .reply_markup(planner_nav_markup("planner:menu"))
-                    .await?;
-            }
-        }
+        planner_show_orario_step(bot, chat_id, pool).await?;
+        return Ok(true);
+    }
+    if let Some(valore) = data.strip_prefix("planner:orario:usa:") {
+        let Some(mut draft) = planner_get_draft(chat_id.0) else {
+            planner_expired(bot, chat_id).await?;
+            return Ok(true);
+        };
+        draft.orario = crate::modules::turni::valida_orario(valore).ok();
+        planner_set_draft(chat_id.0, draft);
+        planner_proceed_after_orario(bot, chat_id, pool).await?;
+        return Ok(true);
+    }
+    if data == "planner:orario:skip" {
+        let Some(mut draft) = planner_get_draft(chat_id.0) else {
+            planner_expired(bot, chat_id).await?;
+            return Ok(true);
+        };
+        draft.orario = None;
+        planner_set_draft(chat_id.0, draft);
+        planner_proceed_after_orario(bot, chat_id, pool).await?;
+        return Ok(true);
+    }
+    if data == "planner:orario:write" {
+        let Some(mut draft) = planner_get_draft(chat_id.0) else {
+            planner_expired(bot, chat_id).await?;
+            return Ok(true);
+        };
+        draft.orario_in_attesa = true;
+        planner_set_draft(chat_id.0, draft);
+        bot.send_message(
+            chat_id,
+            "✏️ Scrivi l'orario nel formato HH:MM (va bene anche solo 7:30).",
+        )
+        .reply_markup(InlineKeyboardMarkup::new(vec![
+            vec![planner_button("➖ Nessun orario", "planner:orario:skip")],
+            planner_global_nav("planner:profiles:0"),
+        ]))
+        .await?;
+        return Ok(true);
+    }
+    if data == "planner:save:force" {
+        let Some(mut draft) = planner_get_draft(chat_id.0) else {
+            planner_expired(bot, chat_id).await?;
+            return Ok(true);
+        };
+        draft.ignora_avviso_turno = true;
+        planner_set_draft(chat_id.0, draft);
+        planner_commit_save(bot, chat_id, pool).await?;
+        return Ok(true);
+    }
+    if data == "planner:save" {
+        planner_commit_save(bot, chat_id, pool).await?;
         return Ok(true);
     }
     if data == "planner:cancel" {
@@ -835,6 +918,14 @@ async fn planner_show_week(
     let mut settimana_da_aggiornare = false;
     let mut settimana_vuota = true;
     let mut pasti_di_oggi: Option<String> = None;
+    // Punto 5 del collaudo dell'11 settembre 2026: un'icona per i giorni
+    // che hanno almeno un'assegnazione turno per qualunque profilo dello
+    // spazio -- simbolo diverso da quello del calendario mensile (C4: un
+    // simbolo, un significato diverso per ognuno dei due significati).
+    let giorni_con_turno =
+        crate::modules::turni::giorni_con_assegnazione_spazio_tra(pool, week_start, &week_end)
+            .await
+            .unwrap_or_default();
 
     // Convenzione C1: il testo non ripete i pulsanti. Prima ogni giorno veniva
     // elencato sopra e poi ricompariva identico come pulsante; qui i pulsanti
@@ -876,7 +967,7 @@ async fn planner_show_week(
         // vedono a colpo d'occhio.
         rows.push(vec![planner_button(
             format!(
-                "{}{} {}{}{}",
+                "{}{} {}{}{}{}",
                 if e_oggi { "👉 " } else { "" },
                 calendario::weekday_short(&date),
                 calendario::display_day_month(&date),
@@ -885,7 +976,12 @@ async fn planner_show_week(
                 } else {
                     format!(" · {count} {}", if count == 1 { "pasto" } else { "pasti" })
                 },
-                if da_aggiornare { " 🔄" } else { "" }
+                if da_aggiornare { " 🔄" } else { "" },
+                if giorni_con_turno.contains(&date) {
+                    " 🗓️"
+                } else {
+                    ""
+                }
             ),
             format!("planner:day:{date}"),
         )]);
@@ -942,10 +1038,36 @@ async fn planner_show_calendar(
     let conteggi = planner_month_counts(pool, year, month)
         .await
         .unwrap_or_default();
+    // Punto 5: simbolo diverso da "•" (pasti pianificati) per non
+    // confondere i due significati (C4) -- "◆" per un turno assegnato,
+    // "•◆" quando in quel giorno ci sono entrambi.
+    let giorni_con_turno = match calendario::month_start(year, month) {
+        Some(inizio) => {
+            let fine = calendario::shift_date(
+                &inizio,
+                i64::from(calendario::days_in_month(year, month)) - 1,
+            )
+            .unwrap_or_else(|| inizio.clone());
+            crate::modules::turni::giorni_con_assegnazione_spazio_tra(pool, &inizio, &fine)
+                .await
+                .unwrap_or_default()
+        }
+        None => Default::default(),
+    };
 
-    let giorno = |data: &str| calendario::Giorno {
-        stato: calendario::GiornoStato::Libero,
-        marcatore: conteggi.contains(data).then_some("•"),
+    let giorno = |data: &str| {
+        let ha_pasti = conteggi.contains(data);
+        let ha_turno = giorni_con_turno.contains(data);
+        let marcatore = match (ha_pasti, ha_turno) {
+            (true, true) => Some("•◆"),
+            (true, false) => Some("•"),
+            (false, true) => Some("◆"),
+            (false, false) => None,
+        };
+        calendario::Giorno {
+            stato: calendario::GiornoStato::Libero,
+            marcatore,
+        }
     };
     let callback_giorno = |data: &str| format!("planner:day:{data}");
     let callback_mese = |anno: i32, mese: u32| format!("planner:cal:{anno:04}-{mese:02}");
@@ -971,8 +1093,14 @@ async fn planner_show_calendar(
     // Il mese e l'anno sono già scritti nell'intestazione della griglia: qui
     // resta solo la legenda del marcatore, e solo se c'è qualcosa da spiegare.
     let mut text = "📅 Vai a una data".to_string();
-    if !conteggi.is_empty() {
+    if !conteggi.is_empty() && !giorni_con_turno.is_empty() {
+        text.push_str(
+            "\n\nI giorni con • hanno già dei pasti, quelli con ◆ hanno un turno assegnato.",
+        );
+    } else if !conteggi.is_empty() {
         text.push_str("\n\nI giorni con • hanno già dei pasti.");
+    } else if !giorni_con_turno.is_empty() {
+        text.push_str("\n\nI giorni con ◆ hanno un turno assegnato.");
     }
 
     bot.send_message(chat_id, text)
@@ -1094,6 +1222,12 @@ async fn planner_show_day(
         "➕ Nuovo pasto",
         format!("planner:add:{date}"),
     )]);
+    // Punto 3 del collaudo dell'11 settembre 2026: assegnare un turno
+    // senza dover riscegliere la data, già nota in questa schermata.
+    rows.push(vec![planner_button(
+        "📅 Assegna un turno a questo giorno",
+        format!("turni:assignhere:{date}"),
+    )]);
     let week = calendario::week_start_for_date(date).unwrap_or_else(|| date.to_string());
     rows.push(planner_global_nav(&format!("planner:week:{week}")));
 
@@ -1101,6 +1235,21 @@ async fn planner_show_day(
         .reply_markup(InlineKeyboardMarkup::new(rows))
         .await?;
     Ok(())
+}
+
+/// Punto d'ingresso pubblico su `planner_show_day`, usata da `turni.rs`
+/// (punto 3 del collaudo dell'11 settembre 2026) per tornare qui con il
+/// promemoria aggiornato subito dopo un'assegnazione fatta dal
+/// collegamento diretto della schermata "Giorno" -- senza duplicare la
+/// schermata in un secondo modulo.
+pub async fn planner_show_day_pub(
+    bot: &PlannerBot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    date: &str,
+    notice: Option<&str>,
+) -> ResponseResult<()> {
+    planner_show_day(bot, chat_id, pool, date, notice).await
 }
 
 async fn planner_show_type_picker(
@@ -1218,7 +1367,7 @@ async fn planner_show_profile_picker(
     rows.push(planner_pagination("planner:profiles", page, pages));
     rows.push(vec![planner_button(
         format!(
-            "✅ Salva pasto · {} profil{}",
+            "▶️ Continua · {} profil{}",
             draft.selected_profiles.len(),
             if draft.selected_profiles.len() == 1 {
                 "o"
@@ -1226,7 +1375,7 @@ async fn planner_show_profile_picker(
                 "i"
             }
         ),
-        "planner:save",
+        "planner:continue",
     )]);
     rows.push(planner_global_nav("planner:recipes:0"));
 
@@ -1241,6 +1390,144 @@ async fn planner_show_profile_picker(
     )
     .reply_markup(InlineKeyboardMarkup::new(rows))
     .await?;
+    Ok(())
+}
+
+/// Passo dell'orario (punto 4/11 del collaudo dell'11 settembre 2026): un
+/// default automatico, mai imposto -- prima il turno assegnato quel
+/// giorno per uno dei profili scelti, altrimenti i default fissi per
+/// tipo di pasto ("altro" non ne ha nessuno).
+async fn planner_show_orario_step(
+    bot: &PlannerBot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+) -> ResponseResult<()> {
+    let Some(draft) = planner_get_draft(chat_id.0) else {
+        planner_expired(bot, chat_id).await?;
+        return Ok(());
+    };
+    let Some(tipo) = draft.meal_type else {
+        return planner_expired(bot, chat_id).await;
+    };
+    let suggerito = crate::modules::turni::orario_suggerito_da_turno(
+        pool,
+        &draft.date,
+        tipo.token(),
+        &draft.selected_profiles,
+    )
+    .await
+    .or_else(|| crate::modules::turni::orario_default_per_tipo(tipo).map(str::to_string));
+
+    let mut rows = Vec::new();
+    if let Some(valore) = &suggerito {
+        rows.push(vec![planner_button(
+            format!("✅ Usa {valore}"),
+            format!("planner:orario:usa:{valore}"),
+        )]);
+    }
+    rows.push(vec![planner_button(
+        "✏️ Scrivi orario",
+        "planner:orario:write",
+    )]);
+    rows.push(vec![planner_button(
+        "➖ Nessun orario",
+        "planner:orario:skip",
+    )]);
+    rows.push(planner_global_nav("planner:profiles:0"));
+
+    let mut testo = format!("🕐 Orario di {}\n\n", tipo.label());
+    let corpo = match &suggerito {
+        Some(valore) => format!("Suggerito: {valore} (puoi cambiarlo o toglierlo)."),
+        None => "Nessun orario suggerito per questo tipo di pasto: scrivilo o lascialo vuoto."
+            .to_string(),
+    };
+    testo.push_str(&corpo);
+    bot.send_message(chat_id, testo)
+        .reply_markup(InlineKeyboardMarkup::new(rows))
+        .await?;
+    Ok(())
+}
+
+/// Dopo aver deciso l'orario, verifica l'incoerenza 1 del punto 12: il
+/// turno assegnato oggi segna questo tipo di pasto come "saltato" per uno
+/// dei profili scelti. Un avviso, mai un blocco -- la pianificazione può
+/// sempre fare override della routine.
+async fn planner_proceed_after_orario(
+    bot: &PlannerBot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+) -> ResponseResult<()> {
+    let Some(draft) = planner_get_draft(chat_id.0) else {
+        planner_expired(bot, chat_id).await?;
+        return Ok(());
+    };
+    let Some(tipo) = draft.meal_type else {
+        return planner_expired(bot, chat_id).await;
+    };
+    if !draft.ignora_avviso_turno
+        && crate::modules::turni::turno_segna_saltato(
+            pool,
+            &draft.date,
+            tipo.token(),
+            &draft.selected_profiles,
+        )
+        .await
+    {
+        bot.send_message(
+            chat_id,
+            format!(
+                "ℹ️ Il turno assegnato oggi non prevede {} per questo profilo.\n\nVuoi pianificarlo comunque?",
+                tipo.label()
+            ),
+        )
+        .reply_markup(InlineKeyboardMarkup::new(vec![
+            vec![planner_button("✅ Sì, pianifica comunque", "planner:save:force")],
+            planner_global_nav("planner:profiles:0"),
+        ]))
+        .await?;
+        return Ok(());
+    }
+    planner_commit_save(bot, chat_id, pool).await
+}
+
+/// Salvataggio effettivo del pasto -- estratto dal vecchio "planner:save"
+/// perché ora ci si arriva anche da "planner:save:force" (punto 12).
+async fn planner_commit_save(
+    bot: &PlannerBot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+) -> ResponseResult<()> {
+    let Some(draft) = planner_get_draft(chat_id.0) else {
+        planner_expired(bot, chat_id).await?;
+        return Ok(());
+    };
+    if draft.meal_type.is_none() || draft.recipe_id.is_none() || draft.selected_profiles.is_empty()
+    {
+        bot.send_message(
+            chat_id,
+            "⚠️ Scegli tipo di pasto, ricetta e almeno un profilo partecipante.",
+        )
+        .reply_markup(planner_nav_markup("planner:menu"))
+        .await?;
+        return Ok(());
+    }
+    match planner_save_draft(pool, &draft).await {
+        Ok(_meal_id) => {
+            planner_clear_draft(chat_id.0);
+            let notice = if draft.meal_id.is_some() {
+                "✅ Pasto aggiornato."
+            } else {
+                "✅ Pasto aggiunto al Planner."
+            };
+            planner_show_day(bot, chat_id, pool, &draft.date, Some(notice)).await?;
+        }
+        Err(error) => {
+            tracing::warn!(?error, "Salvataggio Planner fallito");
+            bot.send_message(chat_id, format!("⚠️ {error}"))
+                .reply_markup(planner_nav_markup("planner:menu"))
+                .await?;
+        }
+    }
     Ok(())
 }
 
@@ -1314,6 +1601,11 @@ async fn planner_show_meal_detail(
             "○ pianificato"
         }
     );
+
+    // Punto 4 del collaudo dell'11 settembre 2026.
+    if let Some(orario) = &meal.orario {
+        text.push_str(&format!("\n🕐 {orario}"));
+    }
 
     if changed {
         text.push_str(
@@ -1864,7 +2156,7 @@ async fn planner_save_draft(pool: &SqlitePool, draft: &PlannerDraft) -> anyhow::
         sqlx::query(
             "UPDATE planner_pasti SET tipo_pasto = ?, ricetta_id = ?, \
              ricetta_nome_snapshot = ?, ricetta_porzione_base_snapshot = ?, \
-             ricetta_aggiornato_il_snapshot = ?, \
+             ricetta_aggiornato_il_snapshot = ?, orario = ?, \
              aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ','now') \
              WHERE id = ? AND stato = 'pianificato'",
         )
@@ -1873,6 +2165,7 @@ async fn planner_save_draft(pool: &SqlitePool, draft: &PlannerDraft) -> anyhow::
         .bind(&recipe.name)
         .bind(recipe.servings)
         .bind(&recipe.updated_at)
+        .bind(&draft.orario)
         .bind(meal_id)
         .execute(&mut *tx)
         .await
@@ -1882,8 +2175,8 @@ async fn planner_save_draft(pool: &SqlitePool, draft: &PlannerDraft) -> anyhow::
         sqlx::query(
             "INSERT INTO planner_pasti \
              (planner_id, data_pasto, tipo_pasto, ricetta_id, ricetta_nome_snapshot, \
-              ricetta_porzione_base_snapshot, ricetta_aggiornato_il_snapshot) \
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
+              ricetta_porzione_base_snapshot, ricetta_aggiornato_il_snapshot, orario) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(planner_id)
         .bind(&draft.date)
@@ -1892,6 +2185,7 @@ async fn planner_save_draft(pool: &SqlitePool, draft: &PlannerDraft) -> anyhow::
         .bind(&recipe.name)
         .bind(recipe.servings)
         .bind(&recipe.updated_at)
+        .bind(&draft.orario)
         .execute(&mut *tx)
         .await
         .context("Impossibile creare il pasto")?
@@ -2059,6 +2353,12 @@ async fn planner_load_edit_draft(
         meal_type: MealType::from_token(&meal.meal_type),
         recipe_id: meal.recipe_id,
         selected_profiles,
+        orario: meal.orario,
+        // In modifica non si ripete l'avviso di incoerenza 1: era già stato
+        // accettato (o non c'era) alla creazione, e qui il tipo di pasto
+        // può anche non cambiare affatto.
+        ignora_avviso_turno: true,
+        orario_in_attesa: false,
     }))
 }
 
@@ -2070,7 +2370,7 @@ async fn planner_load_meal_detail(
     let user_id = actor.utente_id.context("Utente non disponibile")?;
 
     let row: Option<PlannerMealDetailRow> = sqlx::query_as(
-        "SELECT pp.id, pp.data_pasto AS date, pp.tipo_pasto AS meal_type, pp.ricetta_id AS recipe_id,                 pp.ricetta_nome_snapshot AS recipe_name, pp.stato AS state, pp.saltato_il AS skipped_at,                 pp.ricetta_aggiornato_il_snapshot AS recipe_snapshot_version,                 (SELECT r.aggiornato_il FROM ricette r WHERE r.id = pp.ricetta_id) AS current_recipe_version          FROM planner_pasti pp          JOIN planner_alimentari p ON p.id = pp.planner_id          WHERE pp.id = ?            AND p.spazio_id = ?            AND p.archiviato = 0            AND EXISTS (                SELECT 1 FROM membri_spazio ms                WHERE ms.spazio_id = p.spazio_id AND ms.utente_id = ?            )",
+        "SELECT pp.id, pp.data_pasto AS date, pp.tipo_pasto AS meal_type, pp.ricetta_id AS recipe_id,                 pp.ricetta_nome_snapshot AS recipe_name, pp.stato AS state, pp.saltato_il AS skipped_at,                 pp.ricetta_aggiornato_il_snapshot AS recipe_snapshot_version,                 (SELECT r.aggiornato_il FROM ricette r WHERE r.id = pp.ricetta_id) AS current_recipe_version,                 pp.orario AS orario          FROM planner_pasti pp          JOIN planner_alimentari p ON p.id = pp.planner_id          WHERE pp.id = ?            AND p.spazio_id = ?            AND p.archiviato = 0            AND EXISTS (                SELECT 1 FROM membri_spazio ms                WHERE ms.spazio_id = p.spazio_id AND ms.utente_id = ?            )",
     )
     .bind(meal_id)
     .bind(actor.spazio_id)
@@ -2089,6 +2389,7 @@ async fn planner_load_meal_detail(
         skipped_at: row.skipped_at,
         recipe_snapshot_version: row.recipe_snapshot_version,
         current_recipe_version: row.current_recipe_version,
+        orario: row.orario,
     }))
 }
 

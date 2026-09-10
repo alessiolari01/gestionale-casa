@@ -313,6 +313,68 @@ I pasti copiati per una singola assegnazione: stessi campi di
 `assegnazione_id`). Modificare o rimuovere una riga qui non tocca mai
 `turno_modello_pasti`.
 
+## Step 7.4ter: correzioni del collaudo dal vivo di Turni e routine (11 settembre 2026)
+
+Migration additiva `migrations/20260911090000_turni_correzioni_collaudo.sql`
+(la `20260910120000_turni_e_routine.sql` originale, già applicata al
+database reale, non viene mai modificata). Tredici correzioni decise con
+Alessio dopo il primo collaudo dal vivo su Telegram; qui solo i cambi allo
+schema, il resto in `docs/moduli/turni-e-routine.md`.
+
+**Un solo pasto per tipo (punto 2)**: due indici UNIQUE, la garanzia vera
+dietro "un solo pasto per tipo" che il flusso guidato rispetta già per
+conto suo.
+
+| Indice | Colonne |
+|---|---|
+| `idx_turno_modello_pasti_tipo_unico` | `turno_modello_pasti (modello_id, tipo_pasto)` |
+| `idx_turno_assegnazione_pasti_tipo_unico` | `turno_assegnazione_pasti (assegnazione_id, tipo_pasto)` |
+
+Violare l'indice restituisce un errore di database (`sqlx::Error`,
+`is_unique_violation()`); `turni::e_violazione_unicita` lo riconosce e lo
+traduce in un messaggio comprensibile (`TipoPastoGiaPresente`) invece di
+propagare l'errore grezzo.
+
+**`turno_modelli.profilo_alimentare_id` (punto 13)**: il profilo si sposta
+dal livello assegnazione al livello modello — ogni modello appartiene a un
+solo profilo fin dalla creazione, l'assegnazione lo eredita.
+
+| Campo aggiunto | Tipo | Note |
+|---|---|---|
+| `profilo_alimentare_id` | INTEGER | nullable, `ON DELETE SET NULL`, riferimento a `profili_alimentari(id)` |
+| `profilo_nome_snapshot` | TEXT | nome del profilo al momento della creazione/dell'ultima modifica del profilo del modello |
+
+Nullable a livello di schema (non a livello applicativo: `turni::crea_modello`
+richiede sempre un profilo per un modello nuovo) per via del **backfill**
+dei modelli di test già esistenti sul database reale al momento della
+scrittura di questa migration (es. "Gelateria", creato da Alessio durante
+il collaudo): la migration li assegna al profilo "sé stesso" del
+proprietario (`profili_alimentari` dove `utente_collegato_id` coincide col
+proprietario del modello); se un proprietario non ne ha uno, la colonna
+resta `NULL` invece di far fallire la migration — quel modello compare
+nell'interfaccia con un avviso e un pulsante per impostare il profilo a
+mano (`turni:model:setprofile:`).
+
+**`planner_pasti.orario` (punto 4/11)**: stesso formato e stesso CHECK già
+usato da `turno_modello_pasti.orario`/`turno_assegnazione_pasti.orario` —
+opzionale, `HH:MM`. Il default proposto in UI (dal turno assegnato quel
+giorno, altrimenti dai default fissi per tipo di pasto) è calcolato in
+Rust (`turni::orario_suggerito_da_turno`, `turni::orario_default_per_tipo`)
+e non è mai scritto qui: solo l'orario scelto o confermato dall'utente
+finisce nella colonna.
+
+**`turno_assegnazioni.modello_aggiornato_il_snapshot` (punto 10)**: TEXT
+nullable, snapshot di `turno_modelli.aggiornato_il` al momento
+dell'assegnazione (o dell'ultimo "🔄 Aggiorna assegnazione"). Confrontato
+con il valore attuale del modello dice se proporre l'aggiornamento — stesso
+principio di `planner_pasti.ricetta_aggiornato_il_snapshot` per "🔄
+Aggiorna planner". `turno_modelli.aggiornato_il` viene ora toccato anche
+da ogni aggiunta/modifica/rimozione di un pasto del modello (`tocca_modello`
+in `src/modules/turni.rs`), non solo da rinomina/archiviazione come prima.
+`NULL` per le assegnazioni già esistenti create prima di questa colonna:
+senza uno snapshot con cui confrontare, per loro l'aggiornamento
+semplicemente non viene mai proposto, mai un falso positivo.
+
 ## Cosa NON è in questo schema
 
 Ogni modulo avrà anche proprie tabelle non condivise: per esempio il

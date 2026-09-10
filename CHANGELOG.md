@@ -2,6 +2,67 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_TURNI_CORREZIONI_COLLAUDO_20260911 -->
+# 11/09/2026 — Turni e routine: tredici correzioni del primo collaudo dal vivo (scritte, collaudo da rifare)
+
+Alessio ha collaudato dal vivo su Telegram la prima fetta di Turni e
+routine (10 settembre) e ha segnalato tredici correzioni, tutte discusse e
+decise con lui. Nuova migration additiva
+`migrations/20260911090000_turni_correzioni_collaudo.sql` (la
+`20260910120000_turni_e_routine.sql` originale, già applicata sull'S9, non
+viene mai toccata). Dettagli completi in `docs/moduli/turni-e-routine.md`
+e `docs/database.md`.
+
+**Punti più rilevanti**:
+
+- **Il modello appartiene a un profilo, non l'assegnazione** (punto 13):
+  `turno_modelli.profilo_alimentare_id`/`profilo_nome_snapshot`, con
+  backfill dei modelli di test già esistenti sul database reale (es.
+  "Gelateria") al profilo "sé stesso" del proprietario. L'assegnazione
+  eredita il profilo dal modello, non lo si sceglie più a parte. Nuovo
+  `📤 Copia per un altro profilo`: copia indipendente, non collegata
+  all'originale dopo la copia.
+- **Guida obbligata alla creazione del modello** (punto 12): un nuovo
+  modello (o uno a cui mancano ancora dei pasti fissi) guida l'utente
+  attraverso i 5 tipi fissi in ordine, situazione prima di orario — un
+  pasto "saltato" non richiede né orario né preparazione. Due incoerenze
+  turno↔planner gestite esplicitamente: pianificare per davvero un pasto
+  che il turno segna "saltato" mostra un avviso (mai un blocco);
+  assegnare un modello che segna "saltato" un pasto già pianificato per
+  davvero fa scegliere se tenerlo o eliminarlo.
+- **Un solo pasto per tipo** (punto 2): indici UNIQUE veri a database su
+  modello e assegnazione, con un messaggio comprensibile al posto
+  dell'errore grezzo.
+- **Ordine cronologico** (punto 1): i pasti si elencano per orario
+  crescente, i senza orario in fondo.
+- **Modelli archiviati con ripristino** (punto 8): prima un modello
+  archiviato spariva per sempre nei fatti.
+- **"🔄 Aggiorna assegnazione"** (punto 10): stessa logica di "🔄
+  Aggiorna planner", applicata quando il modello cambia dopo
+  un'assegnazione già fatta (mai per il passato).
+- **Orario del pasto vero del planner** (punto 4/11): nuovo campo
+  `planner_pasti.orario`, con un default proposto (dal turno assegnato o
+  dai default fissi per tipo) e mai imposto. L'orario scritto a mano ora
+  accetta anche "7:30" oltre a "07:30" (punto 6), validazione condivisa
+  fra `turni.rs` e `planner_alimentare.rs`.
+- **Un'eliminazione definitiva chiede sempre conferma esplicita** (punto
+  9): nuova convenzione **C16**. Corretto in `turni.rs` (rimozione di un
+  pasto da modello o assegnazione, oggi apre lo stesso menù di modifica
+  del pasto assegnato — punto 7) e in `lista_spesa.rs`
+  (`rimuovi_voce_manuale`/`rimuovi_aggiunta_catalogo`, prima eseguite al
+  primo tocco). Audit sistematico del resto del bot: altri cinque punti
+  trovati e corretti allo stesso modo in `ricette.rs` (eliminazione di uno
+  step e di un suo allegato), `spazi_membri.rs` (revoca di un invito) e
+  `miglioramenti.rs` (eliminazione di uno screenshot/video e di un
+  miglioramento scartato). Dettagli e punti lasciati per una revisione
+  umana in `STATO.md`, sezione 2sexies.
+- **Indicatore visivo per i giorni con turno assegnato** (punto 5): `🗓️`
+  nella settimana del planner, `◆` (diverso da `•`) nel calendario
+  mensile.
+
+Non ancora collaudato dal vivo su Telegram/S9: scritto in un worktree
+isolato, solo pipeline automatica in locale.
+
 <!-- CHANGELOG_LISTA_SPESA_RIMUOVI_VOCI_NAVIGAZIONE_20260910 -->
 # 10/09/2026 — Lista della spesa: dopo l'ultima rimozione torna alla lista
 
