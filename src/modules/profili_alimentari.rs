@@ -312,7 +312,7 @@ pub async fn handle_callback(
         }
         "foodprof:new" => {
             sessions.clear_chat(chat_id.0);
-            send_new_profile_menu(bot, chat_id, pool).await?;
+            send_new_profile_menu(bot, chat_id, pool, sessions).await?;
             Ok(true)
         }
         "foodprof:new:self" => {
@@ -333,13 +333,7 @@ pub async fn handle_callback(
             Ok(true)
         }
         "foodprof:new:other" => {
-            sessions.set(chat_id.0, ProfileConversationState::NewPersonName);
-            bot.send_message(
-                chat_id,
-                "➕ Persona senza account\n\nScrivi il nome del profilo.\nEsempio: Giulia\n\nIl profilo nasce privato. Potrai condividerlo negli spazi dal suo dettaglio.",
-            )
-            .reply_markup(cancel_new_profile_keyboard())
-            .await?;
+            send_new_person_prompt(bot, chat_id, sessions).await?;
             Ok(true)
         }
         "foodprof:list" => {
@@ -519,19 +513,47 @@ async fn send_invalid_profile_action(bot: &Bot, chat_id: ChatId) -> ResponseResu
     Ok(())
 }
 
+/// Punto F (secondo collaudo, 12 settembre 2026): quando l'utente ha già
+/// un profilo "sé stesso" collegato, l'unico bottone reale rimasto in
+/// questa schermata sarebbe "➕ Persona senza account" (oltre a
+/// Indietro/Menù principale, che non fanno avanzare nulla) -- si salta
+/// direttamente al passo successivo invece di mostrare una schermata con
+/// un solo bottone vero da premere. Quando invece non ha ancora un
+/// profilo "sé stesso", la scelta resta con le due opzioni vere.
 async fn send_new_profile_menu(
     bot: &Bot,
     chat_id: ChatId,
     pool: &SqlitePool,
+    sessions: &ProfileSessionStore,
 ) -> ResponseResult<()> {
     let has_self = has_linked_profile_for_current_user(pool)
         .await
         .unwrap_or(false);
+    if has_self {
+        return send_new_person_prompt(bot, chat_id, sessions).await;
+    }
     bot.send_message(
         chat_id,
         "➕ Nuovo profilo alimentare\n\nScegli chi rappresenta il profilo.\n\nUn account può essere collegato a un solo profilo alimentare attivo.",
     )
     .reply_markup(new_profile_keyboard(has_self))
+    .await?;
+    Ok(())
+}
+
+/// Richiesta del nome per "➕ Persona senza account" -- stesso testo sia
+/// che ci si arrivi dalla scelta esplicita, sia che la si salti (punto F).
+async fn send_new_person_prompt(
+    bot: &Bot,
+    chat_id: ChatId,
+    sessions: &ProfileSessionStore,
+) -> ResponseResult<()> {
+    sessions.set(chat_id.0, ProfileConversationState::NewPersonName);
+    bot.send_message(
+        chat_id,
+        "➕ Persona senza account\n\nScrivi il nome del profilo.\nEsempio: Giorgia\n\nIl profilo nasce privato. Potrai condividerlo negli spazi dal suo dettaglio.",
+    )
+    .reply_markup(cancel_new_profile_keyboard())
     .await?;
     Ok(())
 }

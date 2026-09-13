@@ -3,11 +3,12 @@
 **Prima fetta scritta il 10 settembre 2026** (design di dettaglio deciso lo
 stesso giorno), `src/modules/turni.rs`, raggiungibile da `🍽️ Alimentazione →
 📋 Turni e routine`. **Tredici correzioni scritte l'11 settembre 2026** dopo
-il primo collaudo dal vivo su Telegram di Alessio, tutte discusse con lui
-prima di scriverle — dettagliate sezione per sezione più sotto. **Le
-correzioni stesse non sono ancora state collaudate dal vivo**: scritte in un
-worktree isolato senza accesso a Telegram/S9, solo pipeline automatica in
-locale.
+il primo collaudo dal vivo su Telegram di Alessio, e **dieci ulteriori
+correzioni scritte il 12 settembre 2026** dopo un secondo giro di collaudo
+dal vivo — entrambe tutte discusse con lui prima di scriverle, dettagliate
+sezione per sezione più sotto. **Le correzioni del secondo giro non sono
+ancora state collaudate dal vivo**: scritte in un worktree isolato senza
+accesso a Telegram/S9, solo pipeline automatica in locale.
 
 Specifica completa (comprese le parti non ancora costruite) in
 `docs/previsto/turni-e-routine.md`.
@@ -85,10 +86,17 @@ che ha ancora dei tipi fissi mancanti (non serve aver creato il modello lì
 per lì): la scelta del tipo sparisce dalla UI finché ne manca uno fisso,
 e ricompare (limitata ad "altro") solo quando i 5 sono già tutti presenti.
 
-**🗄 Modelli archiviati (punto 8)** — elenco dei modelli con
-`archiviato = 1`, ognuno con un pulsante `♻️ Ripristina` che lo riporta
-selezionabile. Prima di questa correzione un modello archiviato spariva
-per sempre nei fatti: non c'era nessuna schermata per rivederlo.
+**🗄 Modelli archiviati (punto 8, esteso il 12 settembre 2026 — punto D)** —
+elenco dei modelli con `archiviato = 1`, ognuno con `♻️ Ripristina` e
+`🗑 Elimina definitivamente`, più `🗑️ Elimina tutti` per l'intera lista
+quando non è vuota. Prima del punto 8 un modello archiviato spariva per
+sempre nei fatti: non c'era nessuna schermata per rivederlo. Le due nuove
+azioni sono permanenti e applicano C16 (schermata "sei sicuro?"): la
+cascata su `turno_modello_pasti` è `ON DELETE CASCADE`, mentre le
+assegnazioni già fatte con quel modello restano (`turno_assegnazioni.
+modello_id` è `ON DELETE SET NULL`) con il nome congelato in
+`modello_nome_snapshot` — lo stesso principio già usato per rinomina e
+archiviazione.
 
 **📤 Copia per un altro profilo (punto 13)** — crea un nuovo modello
 indipendente con gli stessi pasti, intestato a un profilo diverso scelto
@@ -121,7 +129,11 @@ una data futura), compare `🔄 Aggiorna assegnazione` (punto 10): dichiara
 cosa cambierebbe (pasti aggiunti/rimossi/modificati,
 `turni::confronta_pasti_modello_assegnazione`) prima di ricopiare i pasti
 attuali del modello, sostituendo qualunque modifica fatta finora
-sull'assegnazione stessa.
+sull'assegnazione stessa. Dal 12 settembre 2026 (punto E) c'è anche
+`🗑 Elimina assegnazione`, che elimina tutti i suoi pasti insieme (cascata
+`ON DELETE CASCADE` su `turno_assegnazione_pasti`) con conferma esplicita
+(C16); dopo l'eliminazione si torna alla scelta profilo di questa stessa
+sezione, non al menù Turni generale.
 
 **Assegnare un turno dalla schermata Giorno del planner (punto 3)** — un
 pulsante `📅 Assegna un turno a questo giorno` in `planner_show_day` apre
@@ -130,6 +142,29 @@ si sceglie il profilo, poi uno dei suoi modelli, e l'assegnazione avviene
 subito su quella data. Dopo l'assegnazione si torna alla schermata Giorno
 del planner con il promemoria aggiornato, non al dettaglio dell'assegnazione
 di `turni.rs`.
+
+**Dopo un'assegnazione completata, senza tornare dal planner (punto H, 12
+settembre 2026)** — `esegui_assegnazione` (percorso diretto e percorso
+dopo un conflitto risolto, `turni:assign:conflict:keep:`/
+`:conflict:delete:yes:`) mostrava il dettaglio dell'assegnazione appena
+creata anche quando l'utente non l'aveva chiesto. Ora torna al dettaglio
+del **modello** di partenza quando non si arriva dal planner (che invece
+continua a tornare alla schermata Giorno, invariato): il dettaglio
+dell'assegnazione resta raggiungibile solo esplicitamente, da "📅
+Vedi/modifica assegnazione".
+
+**"🔄 Aggiorna assegnazione" anche nella schermata Giorno del planner
+(punto I, 12 settembre 2026)** — prima il blocco informativo del turno lì
+era solo testo, senza bottoni. Ora, per ciascuna assegnazione di quel
+giorno (di uno o più profili dello spazio) con un aggiornamento
+disponibile dal modello (stesso controllo di
+`assegnazione_ha_aggiornamento_disponibile`), compare un bottone `🔄
+Aggiorna {profilo}` — con il nome per distinguerli quando ce n'è più di
+uno. Porta alla stessa schermata di conferma di "📅 Vedi/modifica
+assegnazione"; dopo la conferma torna alla schermata Giorno del planner
+(non al menù Turni), passando `data` nel callback
+(`turni:assign:refresh:ask:{id}:planner:{data}`) esattamente come
+`turni:assign:conflict:keep:` fa già per lo stesso scopo.
 
 ## Relazione col planner: solo un suggerimento, mai una scrittura automatica
 
@@ -206,6 +241,55 @@ richiede.
     "Il concetto che regge tutto" sopra; nuove colonne
     `turno_modelli.profilo_alimentare_id`/`profilo_nome_snapshot`, con
     backfill dei modelli storici al profilo "sé stesso" del proprietario.
+
+## Le dieci correzioni del secondo collaudo dal vivo (12 settembre 2026), in sintesi
+
+1. **Tre bug identici di ordine dei callback**: in `turni:model:copy:`,
+   `turni:assignhere:` e `turni:model:setprofile:`, un controllo generico
+   era scritto e verificato **prima** dei suoi corrispondenti più
+   specifici (`...:pick:`/`...:do:`/`...:profile:`) nello stesso `if let`
+   a catena — siccome le stringhe specifiche iniziano comunque per il
+   prefisso generico, quest'ultimo le intercettava sempre per primo.
+   Corretto spostando i tre controlli generici in fondo (stesso schema già
+   corretto altrove nel file, es. `turni:mpasto:sit:set:` prima di
+   `turni:mpasto:sit:`). Per "📤 Copia per un altro profilo" lo
+   smistamento è stato estratto in un'unica funzione pura testabile
+   (`parse_model_copy_callback`, con l'enum `ModelCopyCallback`), così
+   l'ordine giusto non dipende più da come sono disposti gli `if let`.
+2. **"❌ Annulla" dalla scelta tipo pasto con solo "Altro"** tornava
+   all'elenco generale dei modelli invece che al modello di partenza:
+   `avvia_prossimo_pasto`, nel ramo che offre solo "🍴 Altro", non salva
+   un draft (nessun tipo ancora scelto), e il gestore generico di
+   `turni:pasto:add:cancel` dipende dal draft per sapere a quale modello
+   tornare. Corretto passando `modello_id` direttamente nel callback di
+   *questa* schermata (`turni:pasto:add:cancel:{modello_id}`, nuovo
+   parametro `cancel_callback` di `tipo_pasto_keyboard`), con un gestore
+   nuovo che non dipende dal draft — gli altri punti in cui
+   `turni:pasto:add:cancel` (senza id) è già usato correttamente restano
+   invariati.
+3. **Icona "Archivia" uniformata a 📦** in tutto il bot: `ricette.rs`
+   (prima `🗄`) e `turni.rs` (prima `🗑`, la più fuorviante) allineati a
+   `profili_alimentari.rs`/`miglioramenti.rs`, che la usavano già.
+4. **Eliminazione definitiva nei "🗄 Modelli archiviati"** — vedi
+   "🗄 Modelli archiviati" sopra.
+5. **"🗑 Elimina assegnazione"** — vedi "📅 Vedi/modifica assegnazione"
+   sopra.
+6. **Salta la scelta profilo quando è ridondante**, in
+   `profili_alimentari.rs`: se l'utente ha già un profilo "sé stesso"
+   collegato, `foodprof:new` salta direttamente alla richiesta del nome
+   di "➕ Persona senza account" (`send_new_person_prompt`, estratta da
+   `send_new_profile_menu`) invece di mostrare una schermata con un solo
+   bottone reale. Quando non ha ancora un profilo "sé stesso", la
+   schermata di scelta resta con le due opzioni vere.
+7. **Correzione testo**: "Esempio: Giulia" → "Esempio: Giorgia" nella
+   richiesta del nome di un nuovo profilo (`profili_alimentari.rs`).
+8. **Navigazione dopo un'assegnazione completata** — vedi "Dopo
+   un'assegnazione completata, senza tornare dal planner" sopra.
+9. **"🔄 Aggiorna assegnazione" nella schermata Giorno del planner** —
+   vedi sopra, stessa sezione del punto precedente.
+10. **Documentata, non costruita**: l'idea di sincronizzazione opzionale
+    con diritto di veto del proprietario per le entità copiabili — vedi
+    `docs/previsto/turni-e-routine.md`.
 
 ## Tabelle
 

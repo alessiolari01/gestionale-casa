@@ -453,6 +453,48 @@ mod domain_tests {
         assert!(blocco.contains("12:00"));
         assert!(blocco.contains("da preparare prima"));
     }
+
+    // Punto A (secondo collaudo, 12 settembre 2026): tre bug identici di
+    // ordine dei callback -- un prefisso generico (`turni:model:copy:`)
+    // scritto prima dei suoi corrispondenti più specifici
+    // (`turni:model:copy:pick:`/`:do:`) nello stesso `if let` a catena, che
+    // quindi intercettava sempre anche le forme specifiche. Qui si
+    // verifica direttamente la funzione di smistamento usata da
+    // `handle_callback`, senza bisogno di un `Bot` vero.
+    #[test]
+    fn parse_model_copy_riconosce_pick_prima_del_generico() {
+        // Prima della correzione, questa stringa sarebbe stata
+        // intercettata dal ramo generico: "pick:5:0" non si legge come
+        // i64, quindi `unwrap_or(0)` avrebbe restituito modello_id = 0
+        // invece del vero id 5, e la pagina (0) sarebbe stata persa del
+        // tutto (interpretata come parte dell'id).
+        assert_eq!(
+            parse_model_copy_callback("turni:model:copy:pick:5:0"),
+            Some(ModelCopyCallback::Pick {
+                modello_id: 5,
+                page: 0
+            })
+        );
+    }
+
+    #[test]
+    fn parse_model_copy_riconosce_do_prima_del_generico() {
+        assert_eq!(
+            parse_model_copy_callback("turni:model:copy:do:5:9"),
+            Some(ModelCopyCallback::Do {
+                modello_id: 5,
+                profilo_id: 9
+            })
+        );
+    }
+
+    #[test]
+    fn parse_model_copy_riconosce_ancora_la_forma_generica() {
+        assert_eq!(
+            parse_model_copy_callback("turni:model:copy:5"),
+            Some(ModelCopyCallback::Start { modello_id: 5 })
+        );
+    }
 }
 
 // ===========================================================================
@@ -771,6 +813,37 @@ pub async fn ripristina_modello(pool: &SqlitePool, id: i64) -> anyhow::Result<()
     .await
     .context("Impossibile ripristinare il modello turno")?;
     Ok(())
+}
+
+/// Elimina un modello archiviato **per sempre** (secondo collaudo dal vivo,
+/// 12 settembre 2026, punto D). La cascata su `turno_modello_pasti` è
+/// `ON DELETE CASCADE` (migration `20260910120000_turni_e_routine.sql`);
+/// le assegnazioni già fatte con questo modello restano (`modello_id` è
+/// `ON DELETE SET NULL`), con `modello_nome_snapshot` che mantiene il nome
+/// leggibile -- lo stesso principio già usato quando un modello viene solo
+/// rinominato o archiviato. Applica C16 dal chiamante (schermata "sei
+/// sicuro?"): questa funzione esegue e basta.
+pub async fn elimina_modello_definitivamente(pool: &SqlitePool, id: i64) -> anyhow::Result<()> {
+    sqlx::query("DELETE FROM turno_modelli WHERE id = ? AND archiviato = 1")
+        .bind(id)
+        .execute(pool)
+        .await
+        .context("Impossibile eliminare il modello turno")?;
+    Ok(())
+}
+
+/// Come `elimina_modello_definitivamente`, ma su tutti i modelli archiviati
+/// dello spazio corrente in un colpo solo ("🗑️ Elimina tutti", stesso stile
+/// di `miglioramenti::delete_all_discarded_improvements`). Restituisce
+/// quanti ne ha eliminati, per il messaggio di conferma.
+pub async fn elimina_tutti_modelli_archiviati(pool: &SqlitePool) -> anyhow::Result<u64> {
+    let actor = crate::identity::current_actor();
+    let esito = sqlx::query("DELETE FROM turno_modelli WHERE archiviato = 1 AND spazio_id = ?")
+        .bind(actor.spazio_id)
+        .execute(pool)
+        .await
+        .context("Impossibile eliminare i modelli archiviati")?;
+    Ok(esito.rows_affected())
 }
 
 /// Aggiorna `turno_modelli.aggiornato_il` quando cambia uno dei suoi
@@ -1839,6 +1912,37 @@ pub async fn info_giorno_per_planner(pool: &SqlitePool, data: &str) -> Option<St
     formatta_blocco_routine(&mancanti)
 }
 
+/// Punto I (secondo collaudo, 12 settembre 2026): le assegnazioni turno di
+/// quel giorno (spazio dell'attore corrente) che hanno un aggiornamento
+/// disponibile dal modello -- stesso controllo già usato da
+/// `assegnazione_ha_aggiornamento_disponibile` per "📅 Vedi/modifica
+/// assegnazione". Restituisce id e nome profilo, per un bottone "🔄
+/// Aggiorna {profilo}" ciascuna nella schermata Giorno del planner (più
+/// profili possono avere un'assegnazione aggiornabile lo stesso giorno).
+pub async fn assegnazioni_aggiornabili_del_giorno(
+    pool: &SqlitePool,
+    data: &str,
+) -> Vec<(i64, String)> {
+    let actor = crate::identity::current_actor();
+    let righe: Vec<AssegnazioneRow> = sqlx::query_as(&format!(
+        "SELECT {COLONNE_ASSEGNAZIONE} FROM turno_assegnazioni \
+         WHERE date(data) = date(?1) AND spazio_id = ?2"
+    ))
+    .bind(data)
+    .bind(actor.spazio_id)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+
+    let mut risultato = Vec::new();
+    for assegnazione in righe {
+        if assegnazione_ha_aggiornamento_disponibile(pool, &assegnazione).await {
+            risultato.push((assegnazione.id, assegnazione.profilo_nome_snapshot));
+        }
+    }
+    risultato
+}
+
 // ===========================================================================
 // UI Telegram.
 // ===========================================================================
@@ -2045,6 +2149,55 @@ fn parse_id_and_rest(rest: &str) -> Option<(i64, &str)> {
     Some((a, b))
 }
 
+/// Punto A (secondo collaudo): le tre forme del callback "📤 Copia per un
+/// altro profilo" -- `Start` è quella generica (`turni:model:copy:ID`),
+/// `Pick`/`Do` sono le due specifiche (`turni:model:copy:pick:...`/
+/// `turni:model:copy:do:...`), che condividono lo stesso prefisso
+/// letterale di `Start` e per questo vanno riconosciute **prima** di essa.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ModelCopyCallback {
+    Start { modello_id: i64 },
+    Pick { modello_id: i64, page: i64 },
+    Do { modello_id: i64, profilo_id: i64 },
+}
+
+/// Unica funzione che smista `turni:model:copy:*`: controlla le forme
+/// specifiche prima di quella generica, cosi' l'ordine giusto e' garantito
+/// a prescindere da come la si chiama (e testabile da sola, senza un Bot).
+fn parse_model_copy_callback(data: &str) -> Option<ModelCopyCallback> {
+    if let Some(rest) = data.strip_prefix("turni:model:copy:pick:") {
+        let (modello_id, page) = parse_ids2(rest)?;
+        return Some(ModelCopyCallback::Pick { modello_id, page });
+    }
+    if let Some(rest) = data.strip_prefix("turni:model:copy:do:") {
+        let (modello_id, profilo_id) = parse_ids2(rest)?;
+        return Some(ModelCopyCallback::Do {
+            modello_id,
+            profilo_id,
+        });
+    }
+    if let Some(rest) = data.strip_prefix("turni:model:copy:") {
+        // Stesso comportamento di ripiego già usato dagli altri bottoni
+        // "bare" del file (es. `turni:model:archive:`): un id malformato
+        // diventa 0 invece di far cadere il callback nel vuoto.
+        let modello_id: i64 = rest.parse().unwrap_or(0);
+        return Some(ModelCopyCallback::Start { modello_id });
+    }
+    None
+}
+
+/// Punto I: `turni:assign:refresh:ask:`/`:yes:` portano solo l'id
+/// dell'assegnazione quando si arriva da "📅 Vedi/modifica assegnazione",
+/// oppure `id:planner:data` quando si arriva dalla schermata Giorno del
+/// planner -- stesso principio di `turni:assign:conflict:keep:`, che porta
+/// già `modello_id:data:planner` per lo stesso motivo.
+fn parse_refresh_target(rest: &str) -> (i64, Option<&str>) {
+    match rest.split_once(":planner:") {
+        Some((id_parte, data_planner)) => (id_parte.parse().unwrap_or(0), Some(data_planner)),
+        None => (rest.parse().unwrap_or(0), None),
+    }
+}
+
 // --- Schermate: elenco modelli --------------------------------------------
 
 async fn show_menu(
@@ -2171,7 +2324,7 @@ async fn show_model_detail(
         format!("turni:model:rename:{modello_id}"),
     )]);
     rows.push(vec![button(
-        "🗑 Archivia",
+        "📦 Archivia",
         format!("turni:model:archive:{modello_id}"),
     )]);
     rows.push(nav_row("turni:menu"));
@@ -2217,17 +2370,32 @@ async fn show_archived(
 
     let mut rows: Vec<Vec<InlineKeyboardButton>> = modelli
         .iter()
-        .map(|modello| {
-            vec![button(
-                format!("♻️ {}", modello.nome),
-                format!("turni:archived:restore:{}", modello.id),
-            )]
+        .flat_map(|modello| {
+            [
+                vec![button(
+                    format!("♻️ {}", modello.nome),
+                    format!("turni:archived:restore:{}", modello.id),
+                )],
+                vec![button(
+                    "🗑 Elimina definitivamente",
+                    format!("turni:archived:delete:ask:{}", modello.id),
+                )],
+            ]
         })
         .collect();
     if let Some(riga) = liste::riga_paginazione(page, pagine, "turni:noop", |p| {
         format!("turni:archived:page:{p}")
     }) {
         rows.push(riga);
+    }
+    // Punto D (secondo collaudo): eliminazione definitiva di tutti i
+    // modelli archiviati in un colpo solo, solo se ce n'è almeno uno --
+    // stesso stile di "🗑️ Elimina tutti" dei miglioramenti scartati.
+    if totale > 0 {
+        rows.push(vec![button(
+            "🗑️ Elimina tutti",
+            "turni:archived:delete_all:ask",
+        )]);
     }
     rows.push(nav_row("turni:menu"));
 
@@ -2238,7 +2406,7 @@ async fn show_archived(
     if totale == 0 {
         testo.push_str("\n\nNessun modello archiviato.");
     } else {
-        testo.push_str("\n\nTocca un modello per ripristinarlo.");
+        testo.push_str("\n\nTocca un modello per ripristinarlo, oppure eliminalo definitivamente.");
     }
 
     bot.send_message(chat_id, testo)
@@ -2250,6 +2418,7 @@ async fn show_archived(
 fn tipo_pasto_keyboard(
     tipi_disponibili: &[MealType],
     callback_di: impl Fn(MealType) -> String,
+    cancel_callback: impl Into<String>,
 ) -> InlineKeyboardMarkup {
     let mut rows: Vec<Vec<InlineKeyboardButton>> = tipi_disponibili
         .chunks(2)
@@ -2265,7 +2434,7 @@ fn tipo_pasto_keyboard(
                 .collect()
         })
         .collect();
-    rows.push(vec![button("❌ Annulla", "turni:pasto:add:cancel")]);
+    rows.push(vec![button("❌ Annulla", cancel_callback.into())]);
     InlineKeyboardMarkup::new(rows)
 }
 
@@ -2306,9 +2475,11 @@ async fn avvia_prossimo_pasto(
         .unwrap_or(true)
     {
         bot.send_message(chat_id, "➕ Aggiungi pasto\n\nScegli il tipo di pasto.")
-            .reply_markup(tipo_pasto_keyboard(&[MealType::Other], |tipo| {
-                format!("turni:pasto:add:tipo:{modello_id}:{}", tipo.token())
-            }))
+            .reply_markup(tipo_pasto_keyboard(
+                &[MealType::Other],
+                |tipo| format!("turni:pasto:add:tipo:{modello_id}:{}", tipo.token()),
+                format!("turni:pasto:add:cancel:{modello_id}"),
+            ))
             .await?;
         Ok(())
     } else {
@@ -2547,6 +2718,33 @@ async fn show_profile_picker(
     Ok(())
 }
 
+/// Punto d'ingresso di "📅 Vedi/modifica assegnazione": scelta del
+/// profilo. Estratta in una funzione a parte (12 settembre 2026, punto E)
+/// perché ora ci si torna anche dopo aver eliminato un'assegnazione, non
+/// solo dal pulsante del menù -- con un messaggio di conferma da mostrare.
+async fn show_vedi_start(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    notice: Option<&str>,
+) -> ResponseResult<()> {
+    let mut titolo = notice
+        .map(|value| format!("{value}\n\n"))
+        .unwrap_or_default();
+    titolo.push_str("📅 Vedi/modifica assegnazione\n\nScegli il profilo.");
+    show_profile_picker(
+        bot,
+        chat_id,
+        pool,
+        0,
+        &titolo,
+        |profilo_id| format!("turni:vedi:profile:{profilo_id}"),
+        |page| format!("turni:vedi:pick:{page}"),
+        "turni:menu",
+    )
+    .await
+}
+
 /// Elenco dei modelli di un profilo, per il collegamento diretto dalla
 /// schermata "Giorno" del planner (punto 3): scelto il profilo, restano
 /// solo i suoi modelli, e scegliendone uno l'assegnazione avviene subito
@@ -2662,7 +2860,7 @@ async fn esegui_assegnazione(
     torna_al_planner: bool,
 ) -> ResponseResult<()> {
     match assegna_modello(pool, modello_id, data).await {
-        Ok(assegnazione_id) => {
+        Ok(_assegnazione_id) => {
             if torna_al_planner {
                 return crate::modules::planner_alimentare::planner_show_day_pub(
                     bot,
@@ -2673,11 +2871,16 @@ async fn esegui_assegnazione(
                 )
                 .await;
             }
-            show_assignment_detail(
+            // Punto H (secondo collaudo): dopo un'assegnazione completata
+            // (percorso diretto o dopo un conflitto risolto) si torna al
+            // modello di partenza, non a un dettaglio dell'assegnazione mai
+            // richiesto -- quella schermata resta raggiungibile solo da
+            // "📅 Vedi/modifica assegnazione", esplicitamente.
+            show_model_detail(
                 bot,
                 chat_id,
                 pool,
-                assegnazione_id,
+                modello_id,
                 Some(notice.unwrap_or("✅ Turno assegnato.")),
             )
             .await
@@ -2821,6 +3024,12 @@ async fn show_assignment_detail(
             format!("turni:assign:refresh:ask:{assegnazione_id}"),
         )]);
     }
+    // Punto E (secondo collaudo): elimina tutta l'assegnazione, non un
+    // pasto alla volta.
+    rows.push(vec![button(
+        "🗑 Elimina assegnazione",
+        format!("turni:assegnazione:delete:ask:{assegnazione_id}"),
+    )]);
     rows.push(nav_row("turni:menu"));
 
     let mut testo = notice
@@ -2846,11 +3055,18 @@ async fn show_assignment_detail(
 
 /// Schermata "🔄 Aggiorna assegnazione" (punto 10): dichiara cosa cambia
 /// prima di applicare, stesso stile di "🔄 Aggiorna planner".
+///
+/// `torna_al_planner_data` (punto I, secondo collaudo): quando questa
+/// conferma è raggiunta dalla schermata Giorno del planner invece che da
+/// "📅 Vedi/modifica assegnazione", sia l'Annulla sia la conferma devono
+/// tornare lì -- stesso principio del `torna_al_planner` già usato da
+/// `esegui_assegnazione`.
 async fn show_refresh_assegnazione_confirmation(
     bot: &Bot,
     chat_id: ChatId,
     pool: &SqlitePool,
     assegnazione_id: i64,
+    torna_al_planner_data: Option<&str>,
 ) -> ResponseResult<()> {
     let Some(assegnazione) = trova_assegnazione(pool, assegnazione_id)
         .await
@@ -2891,13 +3107,20 @@ async fn show_refresh_assegnazione_confirmation(
          Ogni modifica fatta finora su questa assegnazione (situazione, orario, note) viene sostituita dai valori attuali del modello.",
         assegnazione.modello_nome_snapshot
     );
+    let (callback_conferma, callback_annulla) = match torna_al_planner_data {
+        Some(data_planner) => (
+            format!("turni:assign:refresh:yes:{assegnazione_id}:planner:{data_planner}"),
+            format!("planner:day:{data_planner}"),
+        ),
+        None => (
+            format!("turni:assign:refresh:yes:{assegnazione_id}"),
+            format!("turni:assegnazione:{assegnazione_id}"),
+        ),
+    };
     bot.send_message(chat_id, testo)
         .reply_markup(InlineKeyboardMarkup::new(vec![
-            vec![button(
-                "✅ Sì, aggiorna",
-                format!("turni:assign:refresh:yes:{assegnazione_id}"),
-            )],
-            nav_row(&format!("turni:assegnazione:{assegnazione_id}")),
+            vec![button("✅ Sì, aggiorna", callback_conferma)],
+            nav_row(&callback_annulla),
         ]))
         .await?;
     Ok(())
@@ -3460,21 +3683,6 @@ pub async fn handle_callback(
         show_menu(bot, chat_id, pool, 0, None).await?;
         return Ok(true);
     }
-    if let Some(rest) = data.strip_prefix("turni:model:setprofile:") {
-        let modello_id: i64 = rest.parse().unwrap_or(0);
-        show_profile_picker(
-            bot,
-            chat_id,
-            pool,
-            0,
-            "⚠️ Imposta profilo\n\nScegli il profilo di questo modello.",
-            move |profilo_id| format!("turni:model:setprofile:do:{modello_id}:{profilo_id}"),
-            move |page| format!("turni:model:setprofile:pick:{modello_id}:{page}"),
-            &format!("turni:model:{modello_id}"),
-        )
-        .await?;
-        return Ok(true);
-    }
     if let Some(rest) = data.strip_prefix("turni:model:setprofile:pick:") {
         if let Some((modello_id, page)) = parse_ids2(rest) {
             show_profile_picker(
@@ -3509,42 +3717,47 @@ pub async fn handle_callback(
         }
         return Ok(true);
     }
-    if let Some(rest) = data.strip_prefix("turni:model:copy:") {
+    if let Some(rest) = data.strip_prefix("turni:model:setprofile:") {
         let modello_id: i64 = rest.parse().unwrap_or(0);
         show_profile_picker(
             bot,
             chat_id,
             pool,
             0,
-            "📤 Copia per un altro profilo\n\nScegli il profilo di destinazione.",
-            move |profilo_id| format!("turni:model:copy:do:{modello_id}:{profilo_id}"),
-            move |page| format!("turni:model:copy:pick:{modello_id}:{page}"),
+            "⚠️ Imposta profilo\n\nScegli il profilo di questo modello.",
+            move |profilo_id| format!("turni:model:setprofile:do:{modello_id}:{profilo_id}"),
+            move |page| format!("turni:model:setprofile:pick:{modello_id}:{page}"),
             &format!("turni:model:{modello_id}"),
         )
         .await?;
         return Ok(true);
     }
-    if let Some(rest) = data.strip_prefix("turni:model:copy:pick:") {
-        if let Some((modello_id, page)) = parse_ids2(rest) {
-            show_profile_picker(
-                bot,
-                chat_id,
-                pool,
-                page,
-                "📤 Copia per un altro profilo\n\nScegli il profilo di destinazione.",
-                move |profilo_id| format!("turni:model:copy:do:{modello_id}:{profilo_id}"),
-                move |p| format!("turni:model:copy:pick:{modello_id}:{p}"),
-                &format!("turni:model:{modello_id}"),
-            )
-            .await?;
-        } else {
-            invalid(bot, chat_id).await?;
-        }
-        return Ok(true);
-    }
-    if let Some(rest) = data.strip_prefix("turni:model:copy:do:") {
-        if let Some((modello_id, profilo_id)) = parse_ids2(rest) {
-            match copia_modello_per_profilo(pool, modello_id, profilo_id).await {
+    // Punto A (secondo collaudo, 12 settembre 2026): le tre varianti di
+    // "📤 Copia per un altro profilo" sono ora smistate da un'unica
+    // funzione pura (`parse_model_copy_callback`, testata separatamente)
+    // che controlla le forme specifiche (`pick:`/`do:`) prima di quella
+    // generica -- prima erano tre `if let` indipendenti nell'ordine
+    // sbagliato (generico prima), e il generico intercettava sempre anche
+    // le stringhe più specifiche perché ne è un prefisso letterale.
+    if let Some(route) = parse_model_copy_callback(data) {
+        match route {
+            ModelCopyCallback::Pick { modello_id, page } => {
+                show_profile_picker(
+                    bot,
+                    chat_id,
+                    pool,
+                    page,
+                    "📤 Copia per un altro profilo\n\nScegli il profilo di destinazione.",
+                    move |profilo_id| format!("turni:model:copy:do:{modello_id}:{profilo_id}"),
+                    move |p| format!("turni:model:copy:pick:{modello_id}:{p}"),
+                    &format!("turni:model:{modello_id}"),
+                )
+                .await?;
+            }
+            ModelCopyCallback::Do {
+                modello_id,
+                profilo_id,
+            } => match copia_modello_per_profilo(pool, modello_id, profilo_id).await {
                 Ok(nuovo_id) => {
                     show_model_detail(
                         bot,
@@ -3565,9 +3778,20 @@ pub async fn handle_callback(
                         .reply_markup(nav_markup(&format!("turni:model:{modello_id}")))
                         .await?;
                 }
+            },
+            ModelCopyCallback::Start { modello_id } => {
+                show_profile_picker(
+                    bot,
+                    chat_id,
+                    pool,
+                    0,
+                    "📤 Copia per un altro profilo\n\nScegli il profilo di destinazione.",
+                    move |profilo_id| format!("turni:model:copy:do:{modello_id}:{profilo_id}"),
+                    move |page| format!("turni:model:copy:pick:{modello_id}:{page}"),
+                    &format!("turni:model:{modello_id}"),
+                )
+                .await?;
             }
-        } else {
-            invalid(bot, chat_id).await?;
         }
         return Ok(true);
     }
@@ -3584,6 +3808,69 @@ pub async fn handle_callback(
         let modello_id: i64 = rest.parse().unwrap_or(0);
         let _ = ripristina_modello(pool, modello_id).await;
         show_archived(bot, chat_id, pool, 0, Some("✅ Modello ripristinato.")).await?;
+        return Ok(true);
+    }
+    // Punto D (secondo collaudo, C16): eliminazione definitiva di un
+    // singolo modello archiviato, con conferma esplicita.
+    if let Some(rest) = data.strip_prefix("turni:archived:delete:ask:") {
+        let modello_id: i64 = rest.parse().unwrap_or(0);
+        let (testo, markup) = conferma_eliminazione_markup(
+            "questo modello archiviato",
+            &format!("turni:archived:delete:yes:{modello_id}"),
+            "turni:archived",
+        );
+        bot.send_message(chat_id, testo)
+            .reply_markup(markup)
+            .await?;
+        return Ok(true);
+    }
+    if let Some(rest) = data.strip_prefix("turni:archived:delete:yes:") {
+        let modello_id: i64 = rest.parse().unwrap_or(0);
+        let _ = elimina_modello_definitivamente(pool, modello_id).await;
+        show_archived(
+            bot,
+            chat_id,
+            pool,
+            0,
+            Some("🗑 Modello eliminato definitivamente."),
+        )
+        .await?;
+        return Ok(true);
+    }
+    if data == "turni:archived:delete_all:ask" {
+        let (testo, markup) = conferma_eliminazione_markup(
+            "tutti i modelli archiviati",
+            "turni:archived:delete_all:yes",
+            "turni:archived",
+        );
+        bot.send_message(chat_id, testo)
+            .reply_markup(markup)
+            .await?;
+        return Ok(true);
+    }
+    if data == "turni:archived:delete_all:yes" {
+        match elimina_tutti_modelli_archiviati(pool).await {
+            Ok(count) => {
+                show_archived(
+                    bot,
+                    chat_id,
+                    pool,
+                    0,
+                    Some(&format!("🗑 Eliminati {count} modelli archiviati.")),
+                )
+                .await?;
+            }
+            Err(_) => {
+                show_archived(
+                    bot,
+                    chat_id,
+                    pool,
+                    0,
+                    Some("⚠️ Non sono riuscito a eliminare i modelli archiviati."),
+                )
+                .await?;
+            }
+        }
         return Ok(true);
     }
     if let Some(rest) = data.strip_prefix("turni:model:rename:cancel:") {
@@ -3642,26 +3929,6 @@ pub async fn handle_callback(
     }
     // Punto 3: collegamento diretto dalla schermata "Giorno" del planner --
     // la data è già nota, si sceglie solo il profilo e poi il modello.
-    if let Some(data_pianificata) = data.strip_prefix("turni:assignhere:") {
-        if !calendario::valid_date(data_pianificata) {
-            invalid(bot, chat_id).await?;
-            return Ok(true);
-        }
-        let data_pianificata = data_pianificata.to_string();
-        let per_closure = data_pianificata.clone();
-        show_profile_picker(
-            bot,
-            chat_id,
-            pool,
-            0,
-            "📅 Assegna un turno a questo giorno\n\nScegli il profilo.",
-            move |profilo_id| format!("turni:assignhere:profile:{profilo_id}:{per_closure}"),
-            |_| "turni:noop".to_string(),
-            &format!("planner:day:{data_pianificata}"),
-        )
-        .await?;
-        return Ok(true);
-    }
     if let Some(rest) = data.strip_prefix("turni:assignhere:profile:") {
         if let Some((profilo_id, data_pianificata)) = parse_id_and_rest(rest) {
             show_assignhere_model_picker(bot, chat_id, pool, profilo_id, data_pianificata, 0)
@@ -3710,6 +3977,26 @@ pub async fn handle_callback(
         } else {
             invalid(bot, chat_id).await?;
         }
+        return Ok(true);
+    }
+    if let Some(data_pianificata) = data.strip_prefix("turni:assignhere:") {
+        if !calendario::valid_date(data_pianificata) {
+            invalid(bot, chat_id).await?;
+            return Ok(true);
+        }
+        let data_pianificata = data_pianificata.to_string();
+        let per_closure = data_pianificata.clone();
+        show_profile_picker(
+            bot,
+            chat_id,
+            pool,
+            0,
+            "📅 Assegna un turno a questo giorno\n\nScegli il profilo.",
+            move |profilo_id| format!("turni:assignhere:profile:{profilo_id}:{per_closure}"),
+            |_| "turni:noop".to_string(),
+            &format!("planner:day:{data_pianificata}"),
+        )
+        .await?;
         return Ok(true);
     }
     if let Some(rest) = data.strip_prefix("turni:assign:conflict:keep:") {
@@ -3995,6 +4282,18 @@ pub async fn handle_callback(
         }
         return Ok(true);
     }
+    // Punto B (secondo collaudo): la schermata "scegli tipo" con solo
+    // "🍴 Altro" non salva un draft (nessun tipo ancora scelto), quindi
+    // l'Annulla di *questa* schermata porta il modello direttamente nel
+    // callback invece di dipendere dal draft -- che qui non esiste ancora.
+    if let Some(rest) = data.strip_prefix("turni:pasto:add:cancel:") {
+        let modello_id: i64 = rest.parse().unwrap_or(0);
+        sessions.clear_chat(chat_id.0);
+        draft_clear(chat_id.0);
+        bot.annulla_e_avvisa(chat_id.0, "❌ Aggiunta annullata.");
+        show_model_detail(bot, chat_id, pool, modello_id, None).await?;
+        return Ok(true);
+    }
     if let Some(rest) = data.strip_prefix("turni:pasto:add:") {
         let modello_id: i64 = rest.parse().unwrap_or(0);
         avvia_prossimo_pasto(bot, chat_id, pool, modello_id).await?;
@@ -4202,17 +4501,7 @@ pub async fn handle_callback(
     }
 
     if data == "turni:vedi" {
-        show_profile_picker(
-            bot,
-            chat_id,
-            pool,
-            0,
-            "📅 Vedi/modifica assegnazione\n\nScegli il profilo.",
-            |profilo_id| format!("turni:vedi:profile:{profilo_id}"),
-            |page| format!("turni:vedi:pick:{page}"),
-            "turni:menu",
-        )
-        .await?;
+        show_vedi_start(bot, chat_id, pool, None).await?;
         return Ok(true);
     }
     if let Some(rest) = data.strip_prefix("turni:vedi:pick:") {
@@ -4283,28 +4572,72 @@ pub async fn handle_callback(
         return Ok(true);
     }
 
+    // Punto E (secondo collaudo, C16): elimina tutta l'assegnazione (tutti
+    // i suoi pasti insieme), non un pasto alla volta -- va prima del
+    // prefisso generico "turni:assegnazione:" qui sotto, altrimenti lo
+    // intercetterebbe come se fosse un id (stesso errore dei punti A).
+    if let Some(rest) = data.strip_prefix("turni:assegnazione:delete:ask:") {
+        let assegnazione_id: i64 = rest.parse().unwrap_or(0);
+        let (testo, markup) = conferma_eliminazione_markup(
+            "questa assegnazione (tutti i suoi pasti)",
+            &format!("turni:assegnazione:delete:yes:{assegnazione_id}"),
+            &format!("turni:assegnazione:{assegnazione_id}"),
+        );
+        bot.send_message(chat_id, testo)
+            .reply_markup(markup)
+            .await?;
+        return Ok(true);
+    }
+    if let Some(rest) = data.strip_prefix("turni:assegnazione:delete:yes:") {
+        let assegnazione_id: i64 = rest.parse().unwrap_or(0);
+        let _ = elimina_assegnazione(pool, assegnazione_id).await;
+        show_vedi_start(bot, chat_id, pool, Some("🗑 Assegnazione eliminata.")).await?;
+        return Ok(true);
+    }
     if let Some(rest) = data.strip_prefix("turni:assegnazione:") {
         let assegnazione_id: i64 = rest.parse().unwrap_or(0);
         show_assignment_detail(bot, chat_id, pool, assegnazione_id, None).await?;
         return Ok(true);
     }
     if let Some(rest) = data.strip_prefix("turni:assign:refresh:ask:") {
-        let assegnazione_id: i64 = rest.parse().unwrap_or(0);
-        show_refresh_assegnazione_confirmation(bot, chat_id, pool, assegnazione_id).await?;
+        let (assegnazione_id, torna_al_planner_data) = parse_refresh_target(rest);
+        show_refresh_assegnazione_confirmation(
+            bot,
+            chat_id,
+            pool,
+            assegnazione_id,
+            torna_al_planner_data,
+        )
+        .await?;
         return Ok(true);
     }
     if let Some(rest) = data.strip_prefix("turni:assign:refresh:yes:") {
-        let assegnazione_id: i64 = rest.parse().unwrap_or(0);
+        let (assegnazione_id, torna_al_planner_data) = parse_refresh_target(rest);
         match aggiorna_assegnazione(pool, assegnazione_id).await {
             Ok(()) => {
-                show_assignment_detail(
-                    bot,
-                    chat_id,
-                    pool,
-                    assegnazione_id,
-                    Some("🔄 Assegnazione aggiornata dal modello."),
-                )
-                .await?;
+                // Punto I: tornata dalla schermata Giorno del planner, ci
+                // si torna con il promemoria aggiornato -- mai al
+                // dettaglio dell'assegnazione che l'utente non ha chiesto
+                // di vedere (stesso principio del punto H).
+                if let Some(data_planner) = torna_al_planner_data {
+                    crate::modules::planner_alimentare::planner_show_day_pub(
+                        bot,
+                        chat_id,
+                        pool,
+                        data_planner,
+                        Some("🔄 Assegnazione aggiornata dal modello."),
+                    )
+                    .await?;
+                } else {
+                    show_assignment_detail(
+                        bot,
+                        chat_id,
+                        pool,
+                        assegnazione_id,
+                        Some("🔄 Assegnazione aggiornata dal modello."),
+                    )
+                    .await?;
+                }
             }
             Err(_) => {
                 bot.send_message(
@@ -5279,6 +5612,76 @@ mod db_tests {
                 .unwrap()
                 .is_empty());
             assert_eq!(lista_pasti_modello(&pool, copia_id).await.unwrap().len(), 1);
+        })
+        .await;
+    }
+
+    /// Punto A (secondo collaudo, 12 settembre 2026): riproduce il bug per
+    /// davvero, non solo la funzione di dominio -- simula la sequenza
+    /// completa di callback che l'utente produce premendo i bottoni
+    /// ("📤 Copia per un altro profilo" → sceglie il profilo → conferma),
+    /// passando ciascuna stringa dalla vera funzione di smistamento di
+    /// `handle_callback` (`parse_model_copy_callback`), esattamente come
+    /// farebbe il bot, e verifica che la copia venga creata per davvero nel
+    /// database. Prima della correzione, la seconda stringa
+    /// ("turni:model:copy:pick:...") sarebbe stata interpretata dal ramo
+    /// generico come modello_id malformato (0), quindi questo test avrebbe
+    /// fallito già sul primo passo, prima ancora di arrivare alla copia.
+    #[tokio::test]
+    async fn sequenza_copia_dal_bottone_produce_una_copia_vera() {
+        let pool = test_pool().await;
+        let (user_id, space_id) = setup(&pool).await;
+        let profilo_a = create_profilo(&pool, user_id, "Alessio").await;
+        let profilo_b = create_profilo(&pool, user_id, "Giorgia").await;
+
+        crate::identity::with_actor(actor(user_id, space_id, "Alessio"), async {
+            let modello_id = crea_modello(&pool, "Chiusura", profilo_a)
+                .await
+                .expect("creato");
+
+            // Passo 1: tocco "📤 Copia per un altro profilo" sul modello.
+            let callback_avvio = format!("turni:model:copy:{modello_id}");
+            let route_avvio =
+                parse_model_copy_callback(&callback_avvio).expect("callback di avvio valido");
+            assert_eq!(route_avvio, ModelCopyCallback::Start { modello_id });
+
+            // Passo 2: cambia pagina nella scelta del profilo (il caso che
+            // il bug rompeva: veniva letto dal ramo generico, non da
+            // "pick:").
+            let callback_pagina = format!("turni:model:copy:pick:{modello_id}:0");
+            let route_pagina =
+                parse_model_copy_callback(&callback_pagina).expect("callback di pagina valido");
+            assert_eq!(
+                route_pagina,
+                ModelCopyCallback::Pick {
+                    modello_id,
+                    page: 0
+                }
+            );
+
+            // Passo 3: sceglie davvero il profilo di destinazione -- esegue
+            // la copia vera, come farebbe il gestore del callback "do:".
+            let callback_conferma = format!("turni:model:copy:do:{modello_id}:{profilo_b}");
+            let route_conferma =
+                parse_model_copy_callback(&callback_conferma).expect("callback di conferma valido");
+            let ModelCopyCallback::Do {
+                modello_id: modello_da_copiare,
+                profilo_id: profilo_destinazione,
+            } = route_conferma
+            else {
+                panic!("il callback di conferma deve risolversi nella variante Do");
+            };
+            let copia_id =
+                copia_modello_per_profilo(&pool, modello_da_copiare, profilo_destinazione)
+                    .await
+                    .expect("copia creata per davvero");
+
+            let copia = trova_modello(&pool, copia_id)
+                .await
+                .unwrap()
+                .expect("la copia esiste per davvero nel database");
+            assert_eq!(copia.profilo_alimentare_id, Some(profilo_b));
+            assert_ne!(copia_id, modello_id);
         })
         .await;
     }

@@ -1218,6 +1218,20 @@ async fn planner_show_day(
         text.push_str(&info_turno);
     }
 
+    // Punto I (secondo collaudo, 12 settembre 2026): un bottone "🔄
+    // Aggiorna {profilo}" per ciascuna assegnazione turno di questo
+    // giorno che ha un aggiornamento disponibile dal modello -- stesso
+    // controllo già usato da "📅 Vedi/modifica assegnazione", ma prima non
+    // c'era nessun bottone qui, solo il blocco testuale sopra.
+    for (assegnazione_id, profilo_nome) in
+        crate::modules::turni::assegnazioni_aggiornabili_del_giorno(pool, date).await
+    {
+        rows.push(vec![planner_button(
+            format!("🔄 Aggiorna {profilo_nome}"),
+            format!("turni:assign:refresh:ask:{assegnazione_id}:planner:{date}"),
+        )]);
+    }
+
     rows.push(vec![planner_button(
         "➕ Nuovo pasto",
         format!("planner:add:{date}"),

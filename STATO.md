@@ -1432,18 +1432,138 @@ un flusso già collaudato dal vivo.
 Telegram/S9 in questo worktree isolato — non è stato verificato con un
 avvio reale del bot, solo con la pipeline automatica.
 
+## 2septies. Turni e routine — dieci correzioni del secondo collaudo dal vivo (12 settembre 2026)
+
+Alessio ha fatto un secondo giro di collaudo dal vivo su Telegram delle
+tredici correzioni della sezione precedente e ha segnalato dieci ulteriori
+correzioni, tutte discusse e decise con lui prima di scriverle. Dettaglio
+completo in `docs/moduli/turni-e-routine.md` (che elenca i dieci punti uno
+per uno). **Nessuna migration nuova**: tutti i punti lavorano su dati e
+schema già esistenti (verificato, non assunto: la cascata `ON DELETE
+CASCADE` su `turno_modello_pasti` e `turno_assegnazione_pasti`, e `ON
+DELETE SET NULL` su `turno_assegnazioni.modello_id`, erano già nella
+migration del 10 settembre, mai toccata).
+
+**Fatti tutti e dieci i punti**:
+
+1. Tre bug identici di ordine dei callback (`turni:model:copy:`,
+   `turni:assignhere:`, `turni:model:setprofile:`): un controllo generico
+   scritto prima dei suoi corrispondenti più specifici nello stesso `if
+   let` a catena lo faceva sempre intercettare per primo, perché le
+   stringhe specifiche iniziano comunque per il suo stesso prefisso —
+   sintomo osservato da Alessio: un pulsante sembrava "non fare nulla" (in
+   realtà ricaricava la stessa schermata agganciata a un id di ripiego,
+   `0`), e tornando indietro compariva "⚠️ Pulsante non valido o non più
+   disponibile.". Corretti spostando i tre controlli generici dopo le
+   varianti specifiche. Ricontrollato l'intero file per lo stesso schema:
+   nessun altro punto trovato (i punti `apasto`/`mpasto` già segnalati
+   come verificati la volta scorsa restano corretti).
+2. "❌ Annulla" dalla scelta tipo pasto con solo "🍴 Altro" tornava
+   all'elenco generale dei modelli invece che al modello di partenza,
+   perché quella schermata non salva un draft e il gestore generico
+   dell'annullamento dipende dal draft per sapere dove tornare. Corretto
+   passando l'id del modello direttamente nel callback di quella
+   schermata specifica.
+3. Icona "Archivia" uniformata a 📦 in tutto il bot (`ricette.rs` e
+   `turni.rs` allineati a `profili_alimentari.rs`/`miglioramenti.rs`).
+4. Eliminazione definitiva (C16) nei "🗄 Modelli archiviati": un modello
+   alla volta o tutti insieme.
+5. "🗑 Elimina assegnazione" (C16) nel dettaglio di una singola
+   assegnazione.
+6. In `profili_alimentari.rs`, "➕ Nuovo profilo" salta la schermata di
+   scelta quando l'unico bottone reale rimasto sarebbe "➕ Persona senza
+   account" (l'utente ha già un profilo "sé stesso").
+7. Correzione testo: "Esempio: Giulia" → "Esempio: Giorgia".
+8. Dopo un'assegnazione completata senza tornare dal planner,
+   `esegui_assegnazione` mostra ora il dettaglio del modello invece di un
+   dettaglio dell'assegnazione mai richiesto.
+9. "🔄 Aggiorna assegnazione" anche nella schermata Giorno del planner,
+   un bottone per ciascuna assegnazione del giorno con un aggiornamento
+   disponibile.
+10. Documentata (non costruita) l'idea di sincronizzazione opzionale con
+    diritto di veto del proprietario per le entità copiabili — vedi
+    `docs/previsto/turni-e-routine.md` per il perché del rinvio.
+
+**Un punto del collaudo non testabile da Alessio da solo**: il punto 32
+della guida di collaudo (conferma C16 prima di revocare un invito in
+`spazi_membri.rs`) richiede un secondo account Telegram per essere
+verificato dal vivo (bisogna vedere l'invito sparire dal punto di vista
+dell'invitato). Non essendo testabile in queste condizioni, inserito
+direttamente sul database reale dell'S9 via SSH un miglioramento (id 11,
+stato "fatto", esito di verifica non ancora impostato) con lo stesso
+schema "Fatto · da verificare" già usato in questo file per gli altri
+punti implementati ma non ancora ricollaudati dal vivo — non un bug, solo
+un promemoria che resta in coda finché Alessio non avrà modo di
+verificarlo con un secondo account.
+
+**Scelte prese in autonomia**:
+
+- Per "📤 Copia per un altro profilo" (punto 1), lo smistamento dei tre
+  callback è stato estratto in un'unica funzione pura
+  (`parse_model_copy_callback`, con l'enum `ModelCopyCallback`) invece di
+  limitarsi a riordinare i tre `if let` come per gli altri due bug dello
+  stesso punto: essendo questo il caso esplicitamente richiesto per il
+  test di regressione end-to-end, centralizzare lo smistamento in una
+  funzione testabile da sola (senza un `Bot` vero) garantisce l'ordine
+  giusto a prescindere da come viene poi richiamata, invece di affidarsi
+  di nuovo solo alla disciplina di scrittura.
+- Il test di regressione del punto 1 (`sequenza_copia_dal_bottone_
+  produce_una_copia_vera`) simula la sequenza di tre callback che
+  l'utente produce premendo i bottoni (avvio → cambio pagina → conferma),
+  passandole alla vera funzione di smistamento e poi eseguendo la copia
+  per davvero su `sqlite::memory:` — non solo la funzione di dominio
+  `copia_modello_per_profilo`, già testata a parte. Gli altri due bug
+  dello stesso punto (`turni:assignhere:`, `turni:model:setprofile:`)
+  sono stati corretti con lo stesso riordino ma non hanno un test di
+  regressione dedicato: nessuna funzione di dominio nuova da testare (il
+  bug era solo nell'ordine dei rami), e testare `handle_callback` per
+  intero richiederebbe un `Bot` teloxide reale (nessuna libreria di mock
+  HTTP nel progetto) — stessa lacuna di collaudo automatico della UI
+  Telegram già segnalata più volte in questo file.
+- Per il punto 9 (bottone "🔄 Aggiorna assegnazione" nella schermata
+  Giorno del planner), il ritorno alla schermata giusta dopo la conferma
+  usa lo stesso principio già in uso per `torna_al_planner`
+  (`esegui_assegnazione`, punto 3 delle tredici correzioni) e per
+  `turni:assign:conflict:keep:` (che porta già `modello_id:data:planner`
+  nello stesso callback): qui il callback porta `id:planner:data`,
+  interpretato da una nuova funzione pura `parse_refresh_target`.
+
+**4 nuovi test, tutti in `src/modules/turni.rs`** (3 di dominio puro sulla
+funzione di smistamento `parse_model_copy_callback` — riconosce `pick`,
+`do` e la forma generica, verificando che le prime due non vengano mai
+intercettate dalla terza — e 1 su `sqlite::memory:` che simula la
+sequenza completa di callback di "📤 Copia per un altro profilo" e
+verifica che la copia venga creata per davvero), per un totale di **389
+(385 prima)**. Nessuna migration nuova (50 nel repository, invariate). I
+restanti nove punti non hanno test nuovi: riusano funzioni di dominio già
+testate (punti 4, 5, 8, 9) o sono correzioni di solo testo/ordine UI senza
+nuova logica di dominio (punti 2, 3, 6, 7); il punto 10 è solo
+documentazione. Pipeline `fmt`, `check --locked`,
+`clippy --all-targets --locked -- -D warnings`, `test --locked` verde in
+locale su questo worktree.
+
+**Scritto, collaudo dal vivo su Telegram da fare**: nessun accesso a
+Telegram/S9 in questo worktree isolato — non è stato verificato con un
+avvio reale del bot, solo con la pipeline automatica. **Non dichiarato
+"collaudato dal vivo"**: questo è esplicitamente un secondo giro di
+correzioni scritte a tavolino sulla base del collaudo di Alessio, non
+ancora riverificate da lui sul bot vero.
+
 ## 3. Stato tecnico verificato
 
 - **50 migration** nel repository, tutte **applicate** al database reale
   dell'S9 (l'ultima, `migrations/20260911090000_turni_correzioni_collaudo.sql`
   per le tredici correzioni ai turni, l'11 settembre 2026), verificato
   leggendo `applied_migrations=50` nel log di avvio del bot dopo il
-  deploy — non dedotto;
-- pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa,
-  punto 1 della sezione 6): `fmt`, `check --locked`,
-  `clippy --all-targets --locked -- -D warnings`, `test --locked` —
-  **385 test** (372 prima delle tredici correzioni ai turni e della
-  correzione C16 sulla nutrizione, 355 prima di Turni e routine, 348
+  deploy — non dedotto. **Nessuna migration nuova** per il secondo giro di
+  correzioni del 12 settembre 2026 (sezione 2septies): tutti e dieci i
+  punti lavorano su dati e schema già esistenti;
+- pipeline verde in locale, su questo worktree isolato (`fmt`,
+  `check --locked`, `clippy --all-targets --locked -- -D warnings`,
+  `test --locked`) — **389 test** (385 prima del secondo giro di
+  correzioni ai turni del 12 settembre 2026, 372 prima delle tredici
+  correzioni ai turni e della correzione C16 sulla nutrizione, 355 prima
+  di Turni e routine, 348
   prima del quarto giro di correzioni alla lista della
   spesa — ordine stabile sui refresh, unità predefinita, rimozione voci —,
   341 prima delle tre correzioni sulla fusione al check/

@@ -2476,7 +2476,7 @@ async fn handle_edit_callback(
         if ensure_recipe_owner_ui(bot, chat_id, pool, recipe_id).await? {
             bot.send_message(chat_id, "⚠️ Archiviare questa ricetta? Non comparirà più negli elenchi normali, ma i dati restano nel database.")
                 .reply_markup(InlineKeyboardMarkup::new(vec![
-                    vec![button("🗄 Archivia", format!("recipe:edit:archive:yes:{recipe_id}"))],
+                    vec![button("📦 Archivia", format!("recipe:edit:archive:yes:{recipe_id}"))],
                     vec![button("❌ Annulla", format!("recipe:detail:{recipe_id}")), button("🏠 Menù principale", "menu:main")],
                 ]))
                 .await?;
@@ -2806,7 +2806,7 @@ async fn show_recipe_detail(
     }
     if owner {
         keyboard.push(vec![button(
-            "🗄 Archivia",
+            "📦 Archivia",
             format!("recipe:edit:archive:ask:{recipe_id}"),
         )]);
     }
@@ -3336,7 +3336,10 @@ async fn show_edit_menu(
     }
     if recipe.owner_user_id == Some(user_id) {
         rows.push(vec![
-            button("🗄 Archivia", format!("recipe:edit:archive:ask:{recipe_id}")),
+            button(
+                "📦 Archivia",
+                format!("recipe:edit:archive:ask:{recipe_id}"),
+            ),
             button("🗑 Elimina", format!("recipe:edit:delete:ask:{recipe_id}")),
         ]);
     }

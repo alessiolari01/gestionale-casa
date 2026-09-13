@@ -96,3 +96,54 @@ Il planner può usare la routine del giorno per precompilare:
 
 La routine suggerisce: la pianificazione della singola data può sempre fare
 override.
+
+## Sincronizzazione con diritto di veto del proprietario — idea proposta, non decisa di costruirla ora
+
+Proposta di Alessio discussa con l'agente il 12 settembre 2026, durante il
+secondo giro di collaudo dal vivo di Turni e routine: un meccanismo di
+sincronizzazione **opzionale**, con un "diritto di veto" del proprietario,
+per le entità "copiabili" del bot — oggi solo i modelli turno
+(`📤 Copia per un altro profilo`, costruita l'11 settembre 2026 come copia
+indipendente, deliberatamente scollegata dopo la copia), in futuro forse
+altro (una ricetta? un profilo alimentare?).
+
+**L'idea, in sintesi**: se un'entità copiabile viene condivisa tra due
+account, il proprietario decide se sincronizzarla con la copia (invece di
+lasciarla indipendente per sempre come oggi); se entrambe le parti sono
+d'accordo, le due copie restano sincronizzate; i permessi di modifica
+restano di default solo al proprietario, delegabili con consenso esplicito
+dell'altra parte.
+
+**Deciso insieme ad Alessio: non si implementa ora.** Tre motivi, discussi
+e condivisi:
+
+1. **Si sovrappone alla condivisione già esistente negli spazi.** Il
+   progetto ha già un meccanismo di condivisione — gli spazi con i loro
+   ruoli membro (proprietario/amministratore/membro, vedi
+   `docs/database.md` e `docs/condivisione.md`) — che risolve un
+   problema simile (più persone che vedono/modificano la stessa cosa) con
+   un modello diverso (appartenenza allo spazio, non copia+sincronizzazione
+   punto a punto fra due entità specifiche). Costruire un secondo
+   meccanismo di condivisione in parallelo, prima di aver capito bene dove
+   finisce l'uno e comincia l'altro, rischia di produrre due sistemi che si
+   accavallano invece di uno solo coerente.
+2. **È un'infrastruttura di permessi orizzontale**, non un dettaglio del
+   modulo Turni: riguarderebbe potenzialmente ogni entità copiabile
+   presente e futura del bot (non solo i modelli turno), con le sue
+   proprie regole di consenso, revoca, conflitto (cosa succede se le due
+   copie divergono nel frattempo e poi si sincronizzano?). Un meccanismo
+   così trasversale merita una sessione di progettazione dedicata, con lo
+   stesso livello di attenzione già dato a spazi/membership/ruoli in
+   7.0-7.1 — non va deciso di corsa dentro una sessione di correzioni di
+   collaudo su un modulo specifico.
+3. **Un solo caso d'uso reale oggi**: la copia dei modelli turno appena
+   costruita (`copia_modello_per_profilo`), e proprio quella è stata
+   progettata **deliberatamente scollegata** dall'originale dopo la copia
+   (vedi sopra, "Condivisione e copia") — un secondo meccanismo che la
+   ricollega introdurrebbe complessità per un bisogno non ancora sentito
+   due volte. Se in futuro emergesse un secondo caso d'uso reale (un'altra
+   entità copiabile con lo stesso bisogno di restare sincronizzata), sarebbe
+   il momento giusto per riprendere questa idea con più contesto, non prima.
+
+Nessun codice scritto per questa idea: resta qui come traccia della
+discussione, per non doverla rifare da capo se in futuro tornerà utile.

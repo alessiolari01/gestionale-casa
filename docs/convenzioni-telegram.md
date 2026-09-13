@@ -509,13 +509,22 @@ bottone `✅ Sì, elimina` di quella schermata esegue davvero l'azione
 (callback `...:yes:ID`) — lo stesso schema a due passi già usato da
 `turni:mpasto:remove:ask:`/`:yes:` e `lista_spesa:remove:ask:`/`:yes:`.
 
-**Non si applica** a un'azione reversibile: archiviare un modello (`🗑
+**Non si applica** a un'azione reversibile: archiviare un modello (`📦
 Archivia` di `turni.rs`) non chiede questa conferma perché un modello
 archiviato si ripristina da una schermata dedicata (punto 8 del collaudo
-dell'11 settembre 2026, `🗄 Modelli archiviati`) — l'icona `🗑` sul
-pulsante descrive l'effetto immediato (sparisce dall'elenco), non implica
-automaticamente C16. La differenza che conta è "esiste ancora un modo per
-tornare indietro dall'interfaccia", non l'icona sul pulsante.
+dell'11 settembre 2026, `🗄 Modelli archiviati`) — l'icona `📦` sul
+pulsante descrive l'effetto immediato (sparisce dall'elenco, ma resta
+recuperabile), non implica automaticamente C16. La differenza che conta è
+"esiste ancora un modo per tornare indietro dall'interfaccia", non l'icona
+sul pulsante.
+
+**Icona uniformata per "Archivia" (12 settembre 2026, secondo collaudo)**:
+`📦` in tutto il bot per ogni azione di archiviazione reversibile
+(`profili_alimentari.rs`, `miglioramenti.rs`, `ricette.rs`, `turni.rs`) —
+prima `ricette.rs` usava `🗄` e `turni.rs` usava `🗑`, un'icona da cestino
+che suggerisce (erroneamente) un'eliminazione permanente. `🗄` resta solo
+come icona della *sezione* "Modelli archiviati"/liste analoghe, non
+dell'azione di archiviare.
 
 Trovato mancante, oltre al modulo Turni e routine appena scritto, in
 `lista_spesa.rs` (`🗑️ Rimuovi voci`, corretto nello stesso lavoro): un
@@ -532,6 +541,13 @@ il tutorial guidato dell'allegato in Miglioramenti
 binaria "tieni/elimina" è già una conferma) e non è stato rinominato allo
 schema `ask`/`yes` per non rischiare di rompere un flusso già collaudato
 dal vivo.
+
+**Due nuove applicazioni di C16 (12 settembre 2026, secondo collaudo)**,
+sempre nello stesso schema `ask`/`yes`: eliminazione definitiva di un
+modello archiviato o di tutti insieme (`turni:archived:delete:ask:`/
+`:yes:`, `turni:archived:delete_all:ask`/`:yes`), ed eliminazione di
+un'intera assegnazione (`turni:assegnazione:delete:ask:`/`:yes:`) —
+entrambe in `turni.rs`, dettagliate in `docs/moduli/turni-e-routine.md`.
 
 ---
 

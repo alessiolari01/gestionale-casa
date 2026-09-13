@@ -2,6 +2,72 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_TURNI_SECONDO_COLLAUDO_20260912 -->
+# 12/09/2026 — Turni e routine: correzioni del secondo collaudo dal vivo (scritte, collaudo da rifare)
+
+Secondo giro di collaudo dal vivo di Alessio sulla prima fetta di Turni e
+routine (dopo le tredici correzioni dell'11 settembre), dieci correzioni
+tutte discusse e decise con lui. Dettagli completi in
+`docs/moduli/turni-e-routine.md`. Nessuna nuova migration: tutti i punti
+lavorano su dati e schema già esistenti.
+
+**Punti più rilevanti**:
+
+- **Tre bug identici di ordine dei callback** (`turni:model:copy:`,
+  `turni:assignhere:`, `turni:model:setprofile:`): un prefisso generico
+  scritto prima dei suoi corrispondenti più specifici nella stessa catena
+  di `if let` intercettava sempre anche le forme specifiche, perché ne è
+  un prefisso letterale — un pulsante sembrava "non fare nulla" (in realtà
+  ricaricava la stessa schermata agganciata all'id sbagliato, spesso `0`).
+  Corretto spostando i tre controlli generici dopo le loro varianti
+  specifiche; per "📤 Copia per un altro profilo" lo smistamento è stato
+  estratto in un'unica funzione pura testabile
+  (`parse_model_copy_callback`), così l'ordine giusto è garantito a
+  prescindere da come la si richiama. Audit dell'intero file per lo stesso
+  schema: nessun altro punto trovato.
+- **"❌ Annulla" dalla scelta tipo pasto con solo "Altro"** tornava
+  all'elenco generale dei modelli invece che al modello di partenza:
+  quella schermata non salvava un draft (nessun tipo ancora scelto), e il
+  gestore generico di annullamento dipende dal draft per sapere dove
+  tornare. Corretto passando `modello_id` direttamente nel callback di
+  quella schermata specifica (`turni:pasto:add:cancel:{modello_id}`), con
+  un gestore nuovo che non dipende dal draft.
+- **Icona "Archivia" uniformata a 📦** in tutto il bot: `ricette.rs`
+  (`🗄`) e `turni.rs` (`🗑`, la più fuorviante — un cestino suggerisce
+  un'eliminazione permanente) allineati a `profili_alimentari.rs` e
+  `miglioramenti.rs`, che la usavano già.
+- **Eliminazione definitiva dei modelli archiviati**: "🗄 Modelli
+  archiviati" ha ora, per ciascun modello, "🗑 Elimina definitivamente"
+  oltre al ripristino esistente, più "🗑️ Elimina tutti" per l'intera
+  lista — entrambe con conferma esplicita (C16), stesso stile di "🗑️
+  Elimina tutti" dei miglioramenti scartati. Le assegnazioni già fatte con
+  un modello eliminato restano, con il nome congelato
+  (`modello_nome_snapshot`, `ON DELETE SET NULL` già in schema).
+- **"🗑 Elimina assegnazione"** nel dettaglio di una singola assegnazione:
+  elimina tutti i suoi pasti insieme (cascata già `ON DELETE CASCADE`),
+  con conferma esplicita (C16); dopo l'eliminazione torna alla scelta
+  profilo/data di "📅 Vedi/modifica assegnazione", non al menù Turni.
+- **Salta la scelta profilo quando è ridondante**, in
+  `profili_alimentari.rs`: se l'utente ha già un profilo "sé stesso"
+  collegato, "➕ Nuovo profilo" va dritto alla richiesta del nome invece
+  di mostrare una schermata con un solo bottone reale da premere
+  ("➕ Persona senza account").
+- **Correzione testo**: "Esempio: Giulia" → "Esempio: Giorgia" nella
+  richiesta del nome di un nuovo profilo.
+- **Navigazione dopo un'assegnazione completata**: `esegui_assegnazione`
+  (percorso diretto e dopo un conflitto risolto) torna ora al dettaglio
+  del modello invece che al dettaglio dell'assegnazione mai richiesto,
+  quando non si arriva dal planner.
+- **"🔄 Aggiorna assegnazione" anche nella schermata Giorno del planner**:
+  un bottone per ciascuna assegnazione del giorno con un aggiornamento
+  disponibile (stesso controllo già usato da "📅 Vedi/modifica
+  assegnazione"), etichettato con il nome del profilo quando ce n'è più
+  di una; dopo la conferma torna alla schermata Giorno, non al menù Turni.
+- **Documentata, non costruita**: un'idea di sincronizzazione opzionale
+  con diritto di veto del proprietario per le entità copiabili (oggi solo
+  i modelli turno) — `docs/previsto/turni-e-routine.md`, con le ragioni
+  del rinvio.
+
 <!-- CHANGELOG_C16_NUTRIZIONE_20260911 -->
 # 11/09/2026 — C16 anche su "Rimuovi valori" nutrizionali
 
