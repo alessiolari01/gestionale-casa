@@ -1600,6 +1600,12 @@ schema già esistenti. Pipeline `fmt`, `check --locked`,
 `clippy --all-targets --locked -- -D warnings`, `test --locked` verde in
 locale.
 
+**Distribuito sull'S9 il 13 settembre 2026** (commit `253db44`): CI verde,
+`applied_migrations=50` (invariato) confermato nel log di avvio, bot
+online. Miglioramenti 12, 13, 14 segnati "fatto" sul database reale via
+SSH, in coda per il prossimo collaudo dal vivo di Alessio (non ancora
+dichiarati "collaudati").
+
 ## 3. Stato tecnico verificato
 
 - **50 migration** nel repository, tutte **applicate** al database reale
