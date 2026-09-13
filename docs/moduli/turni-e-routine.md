@@ -86,17 +86,20 @@ che ha ancora dei tipi fissi mancanti (non serve aver creato il modello lì
 per lì): la scelta del tipo sparisce dalla UI finché ne manca uno fisso,
 e ricompare (limitata ad "altro") solo quando i 5 sono già tutti presenti.
 
-**🗄 Modelli archiviati (punto 8, esteso il 12 settembre 2026 — punto D)** —
-elenco dei modelli con `archiviato = 1`, ognuno con `♻️ Ripristina` e
-`🗑 Elimina definitivamente`, più `🗑️ Elimina tutti` per l'intera lista
-quando non è vuota. Prima del punto 8 un modello archiviato spariva per
-sempre nei fatti: non c'era nessuna schermata per rivederlo. Le due nuove
-azioni sono permanenti e applicano C16 (schermata "sei sicuro?"): la
-cascata su `turno_modello_pasti` è `ON DELETE CASCADE`, mentre le
-assegnazioni già fatte con quel modello restano (`turno_assegnazioni.
-modello_id` è `ON DELETE SET NULL`) con il nome congelato in
-`modello_nome_snapshot` — lo stesso principio già usato per rinomina e
-archiviazione.
+**🗄 Modelli archiviati (punto 8, esteso il 12 settembre 2026 — punto D,
+rifinito il 13 settembre 2026 — punto 12)** — elenco dei modelli con
+`archiviato = 1`, ognuno su una sola riga: `♻️ nome` a sinistra (ripristina)
+e solo l'icona `🗑` a destra (elimina definitivamente, senza scritta —
+spiegata una volta sola nel testo sotto la lista), più `🗑️ Elimina tutti`
+per l'intera lista quando non è vuota. Prima del punto 8 un modello
+archiviato spariva per sempre nei fatti: non c'era nessuna schermata per
+rivederlo; prima del punto 12, ripristino ed eliminazione stavano su due
+righe separate per ogni modello. Le due azioni di eliminazione sono
+permanenti e applicano C16 (schermata "sei sicuro?"): la cascata su
+`turno_modello_pasti` è `ON DELETE CASCADE`, mentre le assegnazioni già
+fatte con quel modello restano (`turno_assegnazioni.modello_id` è
+`ON DELETE SET NULL`) con il nome congelato in `modello_nome_snapshot` —
+lo stesso principio già usato per rinomina e archiviazione.
 
 **📤 Copia per un altro profilo (punto 13)** — crea un nuovo modello
 indipendente con gli stessi pasti, intestato a un profilo diverso scelto
@@ -135,6 +138,18 @@ sull'assegnazione stessa. Dal 12 settembre 2026 (punto E) c'è anche
 (C16); dopo l'eliminazione si torna alla scelta profilo di questa stessa
 sezione, non al menù Turni generale.
 
+**Eliminare un'assegnazione anche dalla schermata Giorno del planner
+(punto 14, 13 settembre 2026)** — prima "🗑 Elimina assegnazione" esisteva
+solo nel dettaglio raggiunto da "📅 Vedi/modifica assegnazione". Ora la
+schermata Giorno mostra, per ciascuna assegnazione di quel giorno, un
+bottone `🗑 Elimina {profilo}` con il nome del turno a capo: stessa
+conferma esplicita (C16) e stessa funzione di dominio
+(`elimina_assegnazione`); dopo la conferma si torna alla schermata Giorno
+del planner (non al menù Turni), passando `data` nel callback
+(`turni:assegnazione:delete:ask:{id}:planner:{data}`) — stesso schema già
+usato per "🔄 Aggiorna assegnazione" (la funzione di parsing condivisa,
+`parse_id_con_ritorno_planner`, serve ora a entrambi i flussi).
+
 **Assegnare un turno dalla schermata Giorno del planner (punto 3)** — un
 pulsante `📅 Assegna un turno a questo giorno` in `planner_show_day` apre
 lo stesso flusso di assegnazione saltando la scelta della data (già nota):
@@ -154,13 +169,15 @@ dell'assegnazione resta raggiungibile solo esplicitamente, da "📅
 Vedi/modifica assegnazione".
 
 **"🔄 Aggiorna assegnazione" anche nella schermata Giorno del planner
-(punto I, 12 settembre 2026)** — prima il blocco informativo del turno lì
-era solo testo, senza bottoni. Ora, per ciascuna assegnazione di quel
-giorno (di uno o più profili dello spazio) con un aggiornamento
-disponibile dal modello (stesso controllo di
+(punto I, 12 settembre 2026; rifinito il 13 settembre 2026 — punto 13)** —
+prima il blocco informativo del turno lì era solo testo, senza bottoni.
+Ora, per ciascuna assegnazione di quel giorno (di uno o più profili dello
+spazio) con un aggiornamento disponibile dal modello (stesso controllo di
 `assegnazione_ha_aggiornamento_disponibile`), compare un bottone `🔄
-Aggiorna {profilo}` — con il nome per distinguerli quando ce n'è più di
-uno. Porta alla stessa schermata di conferma di "📅 Vedi/modifica
+Aggiorna {profilo}` con il nome del turno a capo (`«{modello}»`, C15) —
+prima c'era solo il nome del profilo, che con due turni assegnati a
+profili diversi lo stesso giorno non bastava a capire quale modello fosse
+di chi. Porta alla stessa schermata di conferma di "📅 Vedi/modifica
 assegnazione"; dopo la conferma torna alla schermata Giorno del planner
 (non al menù Turni), passando `data` nel callback
 (`turni:assign:refresh:ask:{id}:planner:{data}`) esattamente come
@@ -176,9 +193,13 @@ per quella data nello stesso spazio — antepone un blocco di sola lettura:
 
 ```text
 📋 Turno assegnato:
-🔸 Alessio: 🍝 Pranzo 12:00 (casa)
-🔸 Alessio: 🍽️ Cena 19:00 (lavoro, da preparare prima)
+🔸 Alessio · turno «Ufficio»: 🍝 Pranzo 12:00 (casa)
+🔸 Alessio · turno «Ufficio»: 🍽️ Cena 19:00 (lavoro, da preparare prima)
 ```
+
+Dal 13 settembre 2026 (punto 13) ogni riga porta anche il nome del
+modello (`« »`), non solo il profilo: con due assegnazioni lo stesso
+giorno su profili diversi non si capiva quale turno fosse di chi.
 
 Solo i pasti il cui **tipo** non ha già un pasto vero pianificato per
 quella data compaiono nel blocco (calcolato da `pasti_da_segnalare`,
@@ -290,6 +311,21 @@ richiede.
 10. **Documentata, non costruita**: l'idea di sincronizzazione opzionale
     con diritto di veto del proprietario per le entità copiabili — vedi
     `docs/previsto/turni-e-routine.md`.
+
+Collaudate dal vivo da Alessio il 13 settembre 2026: tutte confermate
+corrette.
+
+## Le tre rifiniture del collaudo del terzo giro (13 settembre 2026), in sintesi
+
+Segnalate collaudando dal vivo le dieci correzioni sopra.
+
+12. **"🗄 Modelli archiviati" su una riga sola** — vedi "🗄 Modelli
+    archiviati" sopra.
+13. **Nome del turno accanto al profilo** — vedi "🔄 Aggiorna assegnazione"
+    e il blocco `📋 Turno assegnato:` sopra.
+14. **Eliminare un'assegnazione anche dalla schermata Giorno del planner**
+    — vedi "Eliminare un'assegnazione anche dalla schermata Giorno del
+    planner" sopra.
 
 ## Tabelle
 

@@ -284,6 +284,11 @@ fn e_violazione_unicita(errore: &anyhow::Error) -> bool {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PastoRoutine {
     pub profilo_nome: String,
+    /// Punto 13 (miglioramento del 13 settembre 2026, terzo giro): con due
+    /// turni assegnati lo stesso giorno a profili diversi non si capiva
+    /// quale modello fosse associato a quale profilo -- il nome del turno
+    /// resta sempre affiancato al profilo nel testo.
+    pub modello_nome: String,
     pub tipo_pasto: String,
     pub orario: Option<String>,
     pub situazione: Situazione,
@@ -327,8 +332,9 @@ fn formatta_riga_routine(pasto: &PastoRoutine) -> String {
         ""
     };
     format!(
-        "🔸 {}: {tipo}{orario} ({}{prep})",
+        "🔸 {} · turno «{}»: {tipo}{orario} ({}{prep})",
         pasto.profilo_nome,
+        pasto.modello_nome,
         pasto.situazione.label().to_lowercase()
     )
 }
@@ -405,8 +411,13 @@ mod domain_tests {
     }
 
     fn pasto(tipo: &str, prep: bool) -> PastoRoutine {
+        pasto_di(tipo, prep, "Alessio", "Chiusura")
+    }
+
+    fn pasto_di(tipo: &str, prep: bool, profilo_nome: &str, modello_nome: &str) -> PastoRoutine {
         PastoRoutine {
-            profilo_nome: "Alessio".to_string(),
+            profilo_nome: profilo_nome.to_string(),
+            modello_nome: modello_nome.to_string(),
             tipo_pasto: tipo.to_string(),
             orario: Some("12:00".to_string()),
             situazione: Situazione::Casa,
@@ -452,6 +463,20 @@ mod domain_tests {
         assert!(blocco.contains("Alessio"));
         assert!(blocco.contains("12:00"));
         assert!(blocco.contains("da preparare prima"));
+    }
+
+    // Punto 13 (miglioramento del 13 settembre 2026, terzo giro): con due
+    // profili diversi assegnati lo stesso giorno non si capiva quale turno
+    // fosse di chi -- il nome del modello resta sempre accanto al profilo.
+    #[test]
+    fn blocco_distingue_turno_e_profilo_quando_ce_ne_sono_due() {
+        let mancanti = vec![
+            pasto_di("pranzo", false, "Alessio", "Ufficio"),
+            pasto_di("cena", false, "Giorgia", "Turno notte"),
+        ];
+        let blocco = formatta_blocco_routine(&mancanti).unwrap();
+        assert!(blocco.contains("Alessio · turno «Ufficio»"));
+        assert!(blocco.contains("Giorgia · turno «Turno notte»"));
     }
 
     // Punto A (secondo collaudo, 12 settembre 2026): tre bug identici di
@@ -1881,9 +1906,9 @@ pub async fn info_giorno_per_planner(pool: &SqlitePool, data: &str) -> Option<St
     .ok()?;
     let tipi_pianificati: HashSet<String> = tipi_pianificati.into_iter().map(|(t,)| t).collect();
 
-    let righe: Vec<(String, String, Option<String>, String, i64)> = sqlx::query_as(
-        "SELECT ta.profilo_nome_snapshot, tap.tipo_pasto, tap.orario, tap.situazione, \
-                tap.preparazione_anticipata \
+    let righe: Vec<(String, String, String, Option<String>, String, i64)> = sqlx::query_as(
+        "SELECT ta.profilo_nome_snapshot, ta.modello_nome_snapshot, tap.tipo_pasto, \
+                tap.orario, tap.situazione, tap.preparazione_anticipata \
          FROM turno_assegnazioni ta \
          JOIN turno_assegnazione_pasti tap ON tap.assegnazione_id = ta.id \
          WHERE date(ta.data) = date(?1) AND ta.spazio_id = ?2 \
@@ -1897,34 +1922,27 @@ pub async fn info_giorno_per_planner(pool: &SqlitePool, data: &str) -> Option<St
 
     let assegnati: Vec<PastoRoutine> = righe
         .into_iter()
-        .filter_map(|(profilo_nome, tipo_pasto, orario, situazione, prep)| {
-            Some(PastoRoutine {
-                profilo_nome,
-                tipo_pasto,
-                orario,
-                situazione: Situazione::from_token(&situazione)?,
-                preparazione_anticipata: prep != 0,
-            })
-        })
+        .filter_map(
+            |(profilo_nome, modello_nome, tipo_pasto, orario, situazione, prep)| {
+                Some(PastoRoutine {
+                    profilo_nome,
+                    modello_nome,
+                    tipo_pasto,
+                    orario,
+                    situazione: Situazione::from_token(&situazione)?,
+                    preparazione_anticipata: prep != 0,
+                })
+            },
+        )
         .collect();
 
     let mancanti = pasti_da_segnalare(&assegnati, &tipi_pianificati);
     formatta_blocco_routine(&mancanti)
 }
 
-/// Punto I (secondo collaudo, 12 settembre 2026): le assegnazioni turno di
-/// quel giorno (spazio dell'attore corrente) che hanno un aggiornamento
-/// disponibile dal modello -- stesso controllo già usato da
-/// `assegnazione_ha_aggiornamento_disponibile` per "📅 Vedi/modifica
-/// assegnazione". Restituisce id e nome profilo, per un bottone "🔄
-/// Aggiorna {profilo}" ciascuna nella schermata Giorno del planner (più
-/// profili possono avere un'assegnazione aggiornabile lo stesso giorno).
-pub async fn assegnazioni_aggiornabili_del_giorno(
-    pool: &SqlitePool,
-    data: &str,
-) -> Vec<(i64, String)> {
+async fn righe_assegnazioni_del_giorno(pool: &SqlitePool, data: &str) -> Vec<AssegnazioneRow> {
     let actor = crate::identity::current_actor();
-    let righe: Vec<AssegnazioneRow> = sqlx::query_as(&format!(
+    sqlx::query_as(&format!(
         "SELECT {COLONNE_ASSEGNAZIONE} FROM turno_assegnazioni \
          WHERE date(data) = date(?1) AND spazio_id = ?2"
     ))
@@ -1932,15 +1950,45 @@ pub async fn assegnazioni_aggiornabili_del_giorno(
     .bind(actor.spazio_id)
     .fetch_all(pool)
     .await
-    .unwrap_or_default();
+    .unwrap_or_default()
+}
 
+/// Punto I (secondo collaudo, 12 settembre 2026): le assegnazioni turno di
+/// quel giorno (spazio dell'attore corrente) che hanno un aggiornamento
+/// disponibile dal modello -- stesso controllo già usato da
+/// `assegnazione_ha_aggiornamento_disponibile` per "📅 Vedi/modifica
+/// assegnazione". Restituisce id, nome profilo e nome modello, per un
+/// bottone "🔄 Aggiorna {profilo}" ciascuna nella schermata Giorno del
+/// planner (più profili possono avere un'assegnazione aggiornabile lo
+/// stesso giorno; il nome del modello, punto 13 del terzo giro, distingue
+/// quale turno è di chi).
+pub async fn assegnazioni_aggiornabili_del_giorno(
+    pool: &SqlitePool,
+    data: &str,
+) -> Vec<(i64, String, String)> {
     let mut risultato = Vec::new();
-    for assegnazione in righe {
+    for assegnazione in righe_assegnazioni_del_giorno(pool, data).await {
         if assegnazione_ha_aggiornamento_disponibile(pool, &assegnazione).await {
-            risultato.push((assegnazione.id, assegnazione.profilo_nome_snapshot));
+            risultato.push((
+                assegnazione.id,
+                assegnazione.profilo_nome_snapshot,
+                assegnazione.modello_nome_snapshot,
+            ));
         }
     }
     risultato
+}
+
+/// Punto 14 (miglioramento del 13 settembre 2026, terzo giro): tutte le
+/// assegnazioni turno di quel giorno, per poter offrire "🗑 Elimina
+/// assegnazione" direttamente dalla schermata Giorno del planner (prima
+/// era possibile solo da "📅 Vedi/modifica assegnazione").
+pub async fn assegnazioni_del_giorno(pool: &SqlitePool, data: &str) -> Vec<(i64, String, String)> {
+    righe_assegnazioni_del_giorno(pool, data)
+        .await
+        .into_iter()
+        .map(|a| (a.id, a.profilo_nome_snapshot, a.modello_nome_snapshot))
+        .collect()
 }
 
 // ===========================================================================
@@ -2191,7 +2239,13 @@ fn parse_model_copy_callback(data: &str) -> Option<ModelCopyCallback> {
 /// oppure `id:planner:data` quando si arriva dalla schermata Giorno del
 /// planner -- stesso principio di `turni:assign:conflict:keep:`, che porta
 /// già `modello_id:data:planner` per lo stesso motivo.
-fn parse_refresh_target(rest: &str) -> (i64, Option<&str>) {
+/// Punto I (secondo collaudo, 12 settembre 2026), poi riusata dal punto 14
+/// (miglioramento del 13 settembre 2026, terzo giro): un id di
+/// assegnazione, opzionalmente seguito da `:planner:{data}` quando il
+/// callback arriva dalla schermata Giorno del planner invece che dal
+/// dettaglio dell'assegnazione -- serve sia ad "🔄 Aggiorna assegnazione"
+/// sia a "🗑 Elimina assegnazione" per sapere dove tornare dopo l'azione.
+fn parse_id_con_ritorno_planner(rest: &str) -> (i64, Option<&str>) {
     match rest.split_once(":planner:") {
         Some((id_parte, data_planner)) => (id_parte.parse().unwrap_or(0), Some(data_planner)),
         None => (rest.parse().unwrap_or(0), None),
@@ -2368,18 +2422,20 @@ async fn show_archived(
         .await
         .unwrap_or_default();
 
+    // Punto 12 (miglioramento del 13 settembre 2026, terzo giro): il
+    // ripristino e l'eliminazione definitiva stanno ora sulla stessa riga
+    // -- nome del modello a sinistra, solo l'icona del cestino a destra
+    // (senza la scritta "Elimina definitivamente", spiegata una volta sola
+    // nel testo sotto) -- invece di due righe separate per ogni modello.
     let mut rows: Vec<Vec<InlineKeyboardButton>> = modelli
         .iter()
-        .flat_map(|modello| {
-            [
-                vec![button(
+        .map(|modello| {
+            vec![
+                button(
                     format!("♻️ {}", modello.nome),
                     format!("turni:archived:restore:{}", modello.id),
-                )],
-                vec![button(
-                    "🗑 Elimina definitivamente",
-                    format!("turni:archived:delete:ask:{}", modello.id),
-                )],
+                ),
+                button("🗑", format!("turni:archived:delete:ask:{}", modello.id)),
             ]
         })
         .collect();
@@ -2406,7 +2462,10 @@ async fn show_archived(
     if totale == 0 {
         testo.push_str("\n\nNessun modello archiviato.");
     } else {
-        testo.push_str("\n\nTocca un modello per ripristinarlo, oppure eliminalo definitivamente.");
+        testo.push_str(
+            "\n\nTocca il nome per ripristinare un modello, oppure 🗑 per eliminarlo \
+             definitivamente (chiede conferma prima di procedere).",
+        );
     }
 
     bot.send_message(chat_id, testo)
@@ -4576,12 +4635,26 @@ pub async fn handle_callback(
     // i suoi pasti insieme), non un pasto alla volta -- va prima del
     // prefisso generico "turni:assegnazione:" qui sotto, altrimenti lo
     // intercetterebbe come se fosse un id (stesso errore dei punti A).
+    // Punto 14 (terzo giro): un `:planner:{data}` opzionale in coda, come
+    // già per "🔄 Aggiorna assegnazione" (punto I), quando si arriva dalla
+    // schermata Giorno del planner invece che dal dettaglio
+    // dell'assegnazione -- per tornare lì dopo l'eliminazione.
     if let Some(rest) = data.strip_prefix("turni:assegnazione:delete:ask:") {
-        let assegnazione_id: i64 = rest.parse().unwrap_or(0);
+        let (assegnazione_id, torna_al_planner_data) = parse_id_con_ritorno_planner(rest);
+        let annulla_cb = match torna_al_planner_data {
+            Some(data_planner) => format!("planner:day:{data_planner}"),
+            None => format!("turni:assegnazione:{assegnazione_id}"),
+        };
+        let conferma_cb = match torna_al_planner_data {
+            Some(data_planner) => {
+                format!("turni:assegnazione:delete:yes:{assegnazione_id}:planner:{data_planner}")
+            }
+            None => format!("turni:assegnazione:delete:yes:{assegnazione_id}"),
+        };
         let (testo, markup) = conferma_eliminazione_markup(
             "questa assegnazione (tutti i suoi pasti)",
-            &format!("turni:assegnazione:delete:yes:{assegnazione_id}"),
-            &format!("turni:assegnazione:{assegnazione_id}"),
+            &conferma_cb,
+            &annulla_cb,
         );
         bot.send_message(chat_id, testo)
             .reply_markup(markup)
@@ -4589,9 +4662,20 @@ pub async fn handle_callback(
         return Ok(true);
     }
     if let Some(rest) = data.strip_prefix("turni:assegnazione:delete:yes:") {
-        let assegnazione_id: i64 = rest.parse().unwrap_or(0);
+        let (assegnazione_id, torna_al_planner_data) = parse_id_con_ritorno_planner(rest);
         let _ = elimina_assegnazione(pool, assegnazione_id).await;
-        show_vedi_start(bot, chat_id, pool, Some("🗑 Assegnazione eliminata.")).await?;
+        if let Some(data_planner) = torna_al_planner_data {
+            crate::modules::planner_alimentare::planner_show_day_pub(
+                bot,
+                chat_id,
+                pool,
+                data_planner,
+                Some("🗑 Assegnazione eliminata."),
+            )
+            .await?;
+        } else {
+            show_vedi_start(bot, chat_id, pool, Some("🗑 Assegnazione eliminata.")).await?;
+        }
         return Ok(true);
     }
     if let Some(rest) = data.strip_prefix("turni:assegnazione:") {
@@ -4600,7 +4684,7 @@ pub async fn handle_callback(
         return Ok(true);
     }
     if let Some(rest) = data.strip_prefix("turni:assign:refresh:ask:") {
-        let (assegnazione_id, torna_al_planner_data) = parse_refresh_target(rest);
+        let (assegnazione_id, torna_al_planner_data) = parse_id_con_ritorno_planner(rest);
         show_refresh_assegnazione_confirmation(
             bot,
             chat_id,
@@ -4612,7 +4696,7 @@ pub async fn handle_callback(
         return Ok(true);
     }
     if let Some(rest) = data.strip_prefix("turni:assign:refresh:yes:") {
-        let (assegnazione_id, torna_al_planner_data) = parse_refresh_target(rest);
+        let (assegnazione_id, torna_al_planner_data) = parse_id_con_ritorno_planner(rest);
         match aggiorna_assegnazione(pool, assegnazione_id).await {
             Ok(()) => {
                 // Punto I: tornata dalla schermata Giorno del planner, ci
@@ -5334,6 +5418,53 @@ mod db_tests {
         crate::identity::with_actor(actor(user_id, space_id, "Alessio"), async {
             let blocco = info_giorno_per_planner(&pool, "2026-09-27").await;
             assert!(blocco.is_none());
+        })
+        .await;
+    }
+
+    // Punto 14 (miglioramento del 13 settembre 2026, terzo giro): elencare
+    // tutte le assegnazioni del giorno (non solo quelle aggiornabili),
+    // ciascuna con nome profilo e nome modello, per poter offrire "🗑
+    // Elimina assegnazione" per ciascuna direttamente dalla schermata
+    // Giorno del planner.
+    #[tokio::test]
+    async fn assegnazioni_del_giorno_elenca_tutte_con_profilo_e_modello() {
+        let pool = test_pool().await;
+        let (user_id, space_id) = setup(&pool).await;
+        let alessio_id = create_profilo(&pool, user_id, "Alessio").await;
+        let giorgia_id = create_profilo(&pool, user_id, "Giorgia").await;
+
+        crate::identity::with_actor(actor(user_id, space_id, "Alessio"), async {
+            let modello_ufficio = crea_modello(&pool, "Ufficio", alessio_id)
+                .await
+                .expect("creato");
+            let modello_notte = crea_modello(&pool, "Turno notte", giorgia_id)
+                .await
+                .expect("creato");
+            let id_alessio = assegna_modello(&pool, modello_ufficio, "2026-09-27")
+                .await
+                .expect("assegnato");
+            let id_giorgia = assegna_modello(&pool, modello_notte, "2026-09-27")
+                .await
+                .expect("assegnato");
+
+            let tutte = assegnazioni_del_giorno(&pool, "2026-09-27").await;
+            assert_eq!(tutte.len(), 2);
+            assert!(tutte.contains(&(id_alessio, "Alessio".to_string(), "Ufficio".to_string())));
+            assert!(tutte.contains(&(
+                id_giorgia,
+                "Giorgia".to_string(),
+                "Turno notte".to_string()
+            )));
+
+            // Eliminando una, resta solo l'altra -- stessa funzione usata
+            // dal callback "turni:assegnazione:delete:yes:".
+            elimina_assegnazione(&pool, id_alessio).await.unwrap();
+            let restanti = assegnazioni_del_giorno(&pool, "2026-09-27").await;
+            assert_eq!(
+                restanti,
+                vec![(id_giorgia, "Giorgia".to_string(), "Turno notte".to_string())]
+            );
         })
         .await;
     }

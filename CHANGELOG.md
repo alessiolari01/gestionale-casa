@@ -2,8 +2,33 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_TURNI_TERZO_GIRO_20260913 -->
+# 13/09/2026 — Turni e planner: tre rifiniture dal collaudo del terzo giro
+
+Alessio ha collaudato dal vivo le dieci correzioni del secondo giro
+(sezione 2septies di STATO.md): tutto confermato corretto, tranne tre
+rifiniture sulla stessa area (assegnazioni turno viste dal planner o dagli
+archiviati). Nessuna nuova migration.
+
+- **"🗄 Modelli archiviati"**: ripristino ed eliminazione definitiva sulla
+  stessa riga invece di due righe separate — "♻️ nome" a sinistra, solo
+  l'icona "🗑" (senza scritta) a destra; il testo sotto la lista spiega una
+  volta sola cosa fa il cestino. Stessa conferma esplicita di sempre
+  (C16), invariata.
+- **Nome del turno accanto al profilo**: con due assegnazioni lo stesso
+  giorno su profili diversi non si capiva quale modello fosse di chi. Il
+  nome del modello ora accompagna il profilo sia nel blocco testuale della
+  schermata Giorno del planner sia nei bottoni "🔄 Aggiorna" lì generati.
+- **Eliminare un'assegnazione anche dal planner**: prima serviva passare
+  da "📅 Vedi/modifica assegnazione". Ora la schermata Giorno del planner
+  offre anche un pulsante "🗑 Elimina" per ciascuna assegnazione di quel
+  giorno, con la stessa conferma esplicita (C16); dopo l'eliminazione si
+  torna alla schermata Giorno.
+
+391 test (389 prima).
+
 <!-- CHANGELOG_TURNI_SECONDO_COLLAUDO_20260912 -->
-# 12/09/2026 — Turni e routine: correzioni del secondo collaudo dal vivo (scritte, collaudo da rifare)
+# 12/09/2026 — Turni e routine: correzioni del secondo collaudo dal vivo (collaudate il 13/09)
 
 Secondo giro di collaudo dal vivo di Alessio sulla prima fetta di Turni e
 routine (dopo le tredici correzioni dell'11 settembre), dieci correzioni

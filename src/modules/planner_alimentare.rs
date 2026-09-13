@@ -1222,13 +1222,29 @@ async fn planner_show_day(
     // Aggiorna {profilo}" per ciascuna assegnazione turno di questo
     // giorno che ha un aggiornamento disponibile dal modello -- stesso
     // controllo già usato da "📅 Vedi/modifica assegnazione", ma prima non
-    // c'era nessun bottone qui, solo il blocco testuale sopra.
-    for (assegnazione_id, profilo_nome) in
+    // c'era nessun bottone qui, solo il blocco testuale sopra. Punto 13
+    // (miglioramento del 13 settembre 2026, terzo giro): il nome del
+    // turno va a capo (C15) accanto al profilo, per distinguere quale
+    // modello è di chi quando più assegnazioni cadono lo stesso giorno.
+    for (assegnazione_id, profilo_nome, modello_nome) in
         crate::modules::turni::assegnazioni_aggiornabili_del_giorno(pool, date).await
     {
         rows.push(vec![planner_button(
-            format!("🔄 Aggiorna {profilo_nome}"),
+            format!("🔄 Aggiorna {profilo_nome}\n«{modello_nome}»"),
             format!("turni:assign:refresh:ask:{assegnazione_id}:planner:{date}"),
+        )]);
+    }
+
+    // Punto 14 (miglioramento del 13 settembre 2026, terzo giro): poter
+    // eliminare un'intera assegnazione anche da qui, non solo da "📅
+    // Vedi/modifica assegnazione" -- stesso flusso con conferma (C16) di
+    // "🗑 Elimina assegnazione" nel dettaglio, tornando qui dopo.
+    for (assegnazione_id, profilo_nome, modello_nome) in
+        crate::modules::turni::assegnazioni_del_giorno(pool, date).await
+    {
+        rows.push(vec![planner_button(
+            format!("🗑 Elimina {profilo_nome}\n«{modello_nome}»"),
+            format!("turni:assegnazione:delete:ask:{assegnazione_id}:planner:{date}"),
         )]);
     }
 

@@ -1544,10 +1544,61 @@ locale su questo worktree.
 
 **Distribuito sull'S9 il 13 settembre 2026** (commit `6ac436d`): CI verde,
 `applied_migrations=50` (invariato) confermato nel log di avvio, bot
-online. **Non dichiarato "collaudato dal vivo"**: questo è esplicitamente
-un secondo giro di correzioni scritte a tavolino sulla base del collaudo
-di Alessio dell'11-12 settembre — resta da riverificare da lui sul bot
-vero prima di poterlo segnare come tale.
+online. **Collaudato dal vivo da Alessio il 13 settembre 2026**: confermato
+tutto corretto tranne i tre punti raccolti nella sezione 2octies (12, 13,
+14), che nascono proprio da questo collaudo.
+
+## 2octies. Turni e planner — tre rifiniture dal collaudo del terzo giro (13 settembre 2026)
+
+Collaudando dal vivo le dieci correzioni della sezione 2septies, Alessio
+ha confermato che vanno tutte bene e ha segnalato tre rifiniture, tutte
+sulla stessa area (assegnazioni turno viste dal planner o dagli
+archiviati):
+
+12. **Nella lista "🗄 Modelli archiviati"**: prima il ripristino e
+    l'eliminazione definitiva di un modello stavano su due righe separate
+    ("♻️ nome" sopra, "🗑 Elimina definitivamente" sotto). Ora stanno sulla
+    stessa riga: "♻️ nome" a sinistra, solo l'icona "🗑" (senza scritta) a
+    destra — il testo sotto la lista spiega una volta sola che il cestino
+    elimina definitivamente, passando comunque dalla stessa schermata di
+    conferma di sempre (C16), invariata.
+13. **Con due assegnazioni turno lo stesso giorno su profili diversi**, non
+    si capiva bene quale turno (modello) fosse associato a quale profilo.
+    Il nome del modello ora accompagna sempre il nome del profilo: nel
+    blocco testuale "📋 Turno assegnato:" della schermata Giorno del
+    planner (`🔸 Alessio · turno «Ufficio»: ...`) e nei bottoni "🔄 Aggiorna"
+    generati lì (il nome del turno va a capo nel pulsante, C15).
+14. **Eliminare un'intera assegnazione anche dal planner**: prima era
+    possibile solo aprendo "📅 Vedi/modifica assegnazione" dal menù Turni.
+    Ora la schermata Giorno del planner mostra anche un pulsante "🗑
+    Elimina" per ciascuna assegnazione di quel giorno (etichettato con
+    profilo e turno, punto 13), con la stessa conferma esplicita (C16) già
+    in uso; dopo l'eliminazione si torna alla schermata Giorno, non al
+    menù Turni.
+
+**Scelte tecniche**: `assegnazioni_aggiornabili_del_giorno` (punto I della
+sezione 2septies) ora restituisce anche il nome del modello, non solo
+profilo e id; nuova funzione `assegnazioni_del_giorno` (senza filtro
+sull'aggiornamento disponibile) per il punto 14, che riusa la stessa
+query di base tramite un piccolo helper condiviso
+(`righe_assegnazioni_del_giorno`) invece di duplicarla. Il callback di
+eliminazione (`turni:assegnazione:delete:ask:`/`:delete:yes:`) accetta ora
+lo stesso suffisso opzionale `:planner:{data}` già usato per "🔄 Aggiorna
+assegnazione" (rinominata la funzione di parsing condivisa,
+`parse_id_con_ritorno_planner`, da `parse_refresh_target`, visto che ora
+serve a due flussi e non solo al refresh) — stesso principio già
+consolidato nella sezione 2septies per non introdurre un secondo bug di
+ordine dei callback.
+
+**2 nuovi test** in `src/modules/turni.rs`: un test di dominio
+(`blocco_distingue_turno_e_profilo_quando_ce_ne_sono_due`, punto 13) e un
+test su `sqlite::memory:` (`assegnazioni_del_giorno_elenca_tutte_con_
+profilo_e_modello`, punto 14, che verifica anche che eliminando
+un'assegnazione l'altra resti intatta) — per un totale di **391 (389
+prima)**. Nessuna migration nuova: tutti e tre i punti lavorano su dati e
+schema già esistenti. Pipeline `fmt`, `check --locked`,
+`clippy --all-targets --locked -- -D warnings`, `test --locked` verde in
+locale.
 
 ## 3. Stato tecnico verificato
 
@@ -1555,15 +1606,16 @@ vero prima di poterlo segnare come tale.
   dell'S9 (l'ultima, `migrations/20260911090000_turni_correzioni_collaudo.sql`
   per le tredici correzioni ai turni, l'11 settembre 2026), verificato
   leggendo `applied_migrations=50` nel log di avvio del bot dopo il
-  deploy — non dedotto. **Nessuna migration nuova** per il secondo giro di
-  correzioni del 12 settembre 2026 (sezione 2septies): tutti e dieci i
-  punti lavorano su dati e schema già esistenti, confermato di nuovo
-  `applied_migrations=50` (invariato) nel log di avvio dopo il deploy del
-  13 settembre 2026;
+  deploy — non dedotto. **Nessuna migration nuova** né per il secondo giro
+  di correzioni del 12 settembre 2026 (sezione 2septies) né per le tre
+  rifiniture del 13 settembre 2026 (sezione 2octies): tutti i punti
+  lavorano su dati e schema già esistenti, confermato di nuovo
+  `applied_migrations=50` (invariato) nel log di avvio dopo ciascun deploy;
 - pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa,
   punto 1 della sezione 6): `fmt`, `check --locked`,
   `clippy --all-targets --locked -- -D warnings`, `test --locked` —
-  **389 test** (385 prima del secondo giro di
+  **391 test** (389 prima delle tre rifiniture della sezione 2octies, 385
+  prima del secondo giro di
   correzioni ai turni del 12 settembre 2026, 372 prima delle tredici
   correzioni ai turni e della correzione C16 sulla nutrizione, 355 prima
   di Turni e routine, 348
