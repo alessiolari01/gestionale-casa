@@ -1542,12 +1542,12 @@ documentazione. Pipeline `fmt`, `check --locked`,
 `clippy --all-targets --locked -- -D warnings`, `test --locked` verde in
 locale su questo worktree.
 
-**Scritto, collaudo dal vivo su Telegram da fare**: nessun accesso a
-Telegram/S9 in questo worktree isolato — non è stato verificato con un
-avvio reale del bot, solo con la pipeline automatica. **Non dichiarato
-"collaudato dal vivo"**: questo è esplicitamente un secondo giro di
-correzioni scritte a tavolino sulla base del collaudo di Alessio, non
-ancora riverificate da lui sul bot vero.
+**Distribuito sull'S9 il 13 settembre 2026** (commit `6ac436d`): CI verde,
+`applied_migrations=50` (invariato) confermato nel log di avvio, bot
+online. **Non dichiarato "collaudato dal vivo"**: questo è esplicitamente
+un secondo giro di correzioni scritte a tavolino sulla base del collaudo
+di Alessio dell'11-12 settembre — resta da riverificare da lui sul bot
+vero prima di poterlo segnare come tale.
 
 ## 3. Stato tecnico verificato
 
@@ -1557,10 +1557,13 @@ ancora riverificate da lui sul bot vero.
   leggendo `applied_migrations=50` nel log di avvio del bot dopo il
   deploy — non dedotto. **Nessuna migration nuova** per il secondo giro di
   correzioni del 12 settembre 2026 (sezione 2septies): tutti e dieci i
-  punti lavorano su dati e schema già esistenti;
-- pipeline verde in locale, su questo worktree isolato (`fmt`,
-  `check --locked`, `clippy --all-targets --locked -- -D warnings`,
-  `test --locked`) — **389 test** (385 prima del secondo giro di
+  punti lavorano su dati e schema già esistenti, confermato di nuovo
+  `applied_migrations=50` (invariato) nel log di avvio dopo il deploy del
+  13 settembre 2026;
+- pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa,
+  punto 1 della sezione 6): `fmt`, `check --locked`,
+  `clippy --all-targets --locked -- -D warnings`, `test --locked` —
+  **389 test** (385 prima del secondo giro di
   correzioni ai turni del 12 settembre 2026, 372 prima delle tredici
   correzioni ai turni e della correzione C16 sulla nutrizione, 355 prima
   di Turni e routine, 348
