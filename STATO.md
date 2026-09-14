@@ -1606,6 +1606,22 @@ online. Miglioramenti 12, 13, 14 segnati "fatto" sul database reale via
 SSH, in coda per il prossimo collaudo dal vivo di Alessio (non ancora
 dichiarati "collaudati").
 
+**Collaudo dal vivo, 14 settembre 2026**: 12 e 14 confermati corretti. Il
+punto 13 no — con più pasti di uno stesso turno, ripetere "profilo · turno
+«nome»" su ogni riga era, parole di Alessio, "troppo confusionario".
+Richiesto: separare visivamente dove inizia il turno di un profilo, e
+descrivere i pasti sotto senza ripetere profilo+turno a ogni riga.
+Corretto raggruppando: un'intestazione `👤 {profilo} — «{turno}»` una
+volta sola per turno, seguita dai soli pasti (tipo, orario, situazione),
+sia nel blocco testuale della schermata Giorno del planner sia nel
+dominio (`formatta_blocco_routine`, nuova `formatta_riga_pasto` senza
+profilo/turno) — i bottoni "🔄 Aggiorna"/"🗑 Elimina" restano invariati
+(non erano nella segnalazione). Un test rifatto per riflettere il nuovo
+raggruppamento
+(`blocco_raggruppa_i_pasti_per_profilo_e_turno_senza_ripetere_l_intestazione`,
+sostituisce `blocco_distingue_turno_e_profilo_quando_ce_ne_sono_due`) —
+stesso totale di prima, 391 test. Nessuna migration nuova.
+
 ## 3. Stato tecnico verificato
 
 - **50 migration** nel repository, tutte **applicate** al database reale

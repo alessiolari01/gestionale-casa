@@ -2,6 +2,23 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_TURNI_BLOCCO_ROUTINE_20260914 -->
+# 14/09/2026 — Turni: il blocco "Turno assegnato" raggruppa i pasti invece di ripetere profilo e turno
+
+Collaudando dal vivo le tre rifiniture del 13 settembre (voce sotto),
+Alessio ha confermato corrette la lista archiviati (12) e l'eliminazione
+dal planner (14), ma non il punto 13: ripetere "profilo · turno «nome»"
+su ogni riga, con più pasti dello stesso turno, era "troppo
+confusionario". Corretto raggruppando i pasti sotto un'unica intestazione
+per profilo+turno (`👤 {profilo} — «{turno}»`), seguita solo da tipo,
+orario e situazione di ciascun pasto, mai più ripetuti — sia nel blocco
+testuale della schermata Giorno del planner sia nel dominio
+(`formatta_blocco_routine`). I bottoni "🔄 Aggiorna"/"🗑 Elimina" restano
+invariati, non erano nella segnalazione.
+
+Nessuna migration nuova. 391 test (invariati: un test sostituito, non
+aggiunto).
+
 <!-- CHANGELOG_TURNI_TERZO_GIRO_20260913 -->
 # 13/09/2026 — Turni e planner: tre rifiniture dal collaudo del terzo giro
 

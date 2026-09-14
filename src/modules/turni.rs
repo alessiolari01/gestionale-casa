@@ -317,7 +317,9 @@ pub fn pasti_da_segnalare(
         .collect()
 }
 
-fn formatta_riga_routine(pasto: &PastoRoutine) -> String {
+/// Un pasto senza ripetere profilo e turno (già nell'intestazione del suo
+/// gruppo, vedi `formatta_blocco_routine`): solo tipo, orario e situazione.
+fn formatta_riga_pasto(pasto: &PastoRoutine) -> String {
     let tipo = MealType::from_token(&pasto.tipo_pasto)
         .map(|meal| format!("{} {}", meal_emoji(meal), meal.label()))
         .unwrap_or_else(|| "🍴 Pasto".to_string());
@@ -332,9 +334,7 @@ fn formatta_riga_routine(pasto: &PastoRoutine) -> String {
         ""
     };
     format!(
-        "🔸 {} · turno «{}»: {tipo}{orario} ({}{prep})",
-        pasto.profilo_nome,
-        pasto.modello_nome,
+        "{tipo}{orario} ({}{prep})",
         pasto.situazione.label().to_lowercase()
     )
 }
@@ -342,14 +342,34 @@ fn formatta_riga_routine(pasto: &PastoRoutine) -> String {
 /// Il blocco testuale da anteporre alla schermata "Giorno" del planner,
 /// `None` se non c'è nulla da segnalare (nessun turno assegnato quel
 /// giorno, o tutti i suoi pasti sono già pianificati per davvero).
+///
+/// Punto 13 (rifinito il 14 settembre 2026, dopo il collaudo del terzo
+/// giro): prima ogni riga ripeteva profilo e turno (`🔸 Alessio · turno
+/// «X»: ...`), illeggibile con più pasti dello stesso turno -- Alessio:
+/// "troppo confusionario". Ora i pasti sono raggruppati sotto
+/// un'intestazione per profilo+turno (`👤 {profilo} — «{turno}»`), una
+/// volta sola, seguita dai soli pasti (tipo, orario, situazione). Il
+/// raggruppamento si basa sull'ordine già dato dalla query SQL (per
+/// profilo, poi per ordinamento del pasto): un profilo ha al più
+/// un'assegnazione per giorno (`idx_turno_assegnazioni_profilo_data`),
+/// quindi le righe dello stesso gruppo sono sempre consecutive.
 pub fn formatta_blocco_routine(righe: &[PastoRoutine]) -> Option<String> {
     if righe.is_empty() {
         return None;
     }
     let mut testo = String::from("📋 Turno assegnato:");
+    let mut gruppo_corrente: Option<(&str, &str)> = None;
     for riga in righe {
+        let chiave = (riga.profilo_nome.as_str(), riga.modello_nome.as_str());
+        if gruppo_corrente != Some(chiave) {
+            gruppo_corrente = Some(chiave);
+            testo.push_str(&format!(
+                "\n\n👤 {} — «{}»",
+                riga.profilo_nome, riga.modello_nome
+            ));
+        }
         testo.push('\n');
-        testo.push_str(&formatta_riga_routine(riga));
+        testo.push_str(&formatta_riga_pasto(riga));
     }
     Some(testo)
 }
@@ -468,15 +488,24 @@ mod domain_tests {
     // Punto 13 (miglioramento del 13 settembre 2026, terzo giro): con due
     // profili diversi assegnati lo stesso giorno non si capiva quale turno
     // fosse di chi -- il nome del modello resta sempre accanto al profilo.
+    // Rifinito il 14 settembre 2026: raggruppato sotto un'intestazione
+    // unica per profilo+turno invece di ripeterlo su ogni riga -- Alessio,
+    // collaudando dal vivo, l'aveva trovato "troppo confusionario".
     #[test]
-    fn blocco_distingue_turno_e_profilo_quando_ce_ne_sono_due() {
+    fn blocco_raggruppa_i_pasti_per_profilo_e_turno_senza_ripetere_l_intestazione() {
         let mancanti = vec![
             pasto_di("pranzo", false, "Alessio", "Ufficio"),
+            pasto_di("cena", true, "Alessio", "Ufficio"),
             pasto_di("cena", false, "Giorgia", "Turno notte"),
         ];
         let blocco = formatta_blocco_routine(&mancanti).unwrap();
-        assert!(blocco.contains("Alessio · turno «Ufficio»"));
-        assert!(blocco.contains("Giorgia · turno «Turno notte»"));
+        // Una sola intestazione per Alessio anche con due pasti dello
+        // stesso turno.
+        assert_eq!(blocco.matches("👤 Alessio — «Ufficio»").count(), 1);
+        assert!(blocco.contains("👤 Giorgia — «Turno notte»"));
+        // Le righe dei pasti non ripetono più profilo o turno.
+        assert!(!blocco.contains("Alessio: "));
+        assert!(!blocco.contains("turno «"));
     }
 
     // Punto A (secondo collaudo, 12 settembre 2026): tre bug identici di

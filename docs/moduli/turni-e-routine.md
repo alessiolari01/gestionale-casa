@@ -193,13 +193,21 @@ per quella data nello stesso spazio — antepone un blocco di sola lettura:
 
 ```text
 📋 Turno assegnato:
-🔸 Alessio · turno «Ufficio»: 🍝 Pranzo 12:00 (casa)
-🔸 Alessio · turno «Ufficio»: 🍽️ Cena 19:00 (lavoro, da preparare prima)
+
+👤 Alessio — «Ufficio»
+🍝 Pranzo 12:00 (casa)
+🍽️ Cena 19:00 (lavoro, da preparare prima)
 ```
 
-Dal 13 settembre 2026 (punto 13) ogni riga porta anche il nome del
-modello (`« »`), non solo il profilo: con due assegnazioni lo stesso
-giorno su profili diversi non si capiva quale turno fosse di chi.
+Dal 13 settembre 2026 (punto 13) il profilo e il turno comparivano su
+ogni riga (`🔸 Alessio · turno «Ufficio»: ...`): con due assegnazioni lo
+stesso giorno su profili diversi non si capiva quale turno fosse di chi,
+ma ripetuti su ogni pasto dello stesso turno il risultato era confuso.
+Rifinito il 14 settembre 2026 (collaudo dal vivo): i pasti sono ora
+raggruppati sotto un'intestazione `👤 {profilo} — «{turno}»` una volta
+sola per turno, seguita solo da tipo, orario e situazione di ciascun
+pasto — mai più ripetuti (`formatta_blocco_routine`, con la nuova
+`formatta_riga_pasto` senza profilo/turno).
 
 Solo i pasti il cui **tipo** non ha già un pasto vero pianificato per
 quella data compaiono nel blocco (calcolato da `pasti_da_segnalare`,
