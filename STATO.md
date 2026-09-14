@@ -1622,6 +1622,12 @@ raggruppamento
 sostituisce `blocco_distingue_turno_e_profilo_quando_ce_ne_sono_due`) —
 stesso totale di prima, 391 test. Nessuna migration nuova.
 
+**Distribuito sull'S9 il 14 settembre 2026** (commit `3b72ff5`): CI verde,
+`applied_migrations=50` (invariato) confermato nel log di avvio, bot
+online. Il miglioramento 13 resta "fatto" sul database reale (la nuova
+versione sostituisce quella già distribuita e non ancora collaudata) —
+da riverificare da Alessio.
+
 ## 3. Stato tecnico verificato
 
 - **50 migration** nel repository, tutte **applicate** al database reale
