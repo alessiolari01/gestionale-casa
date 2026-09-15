@@ -4840,6 +4840,7 @@ async fn alimentation_menu_keyboard(pool: &SqlitePool) -> InlineKeyboardMarkup {
             crate::modules::novita::etichetta_con_badge("🛒 Lista della spesa", badge_lista_spesa),
             "lista_spesa:menu",
         )],
+        vec![button("🥫 Scorte", "dispensa:menu")],
         vec![button("📋 Turni e routine", "turni:menu")],
         // Deciso il 7 settembre 2026: anche se `⬅️ Indietro` porterebbe
         // esattamente dove porta `🏠 Menù principale`, resta comunque
@@ -4863,7 +4864,9 @@ async fn badge_lista_spesa(pool: &SqlitePool) -> bool {
     };
     crate::modules::novita::viste_da_utente(pool, utente_id)
         .await
-        .map(|viste| crate::modules::novita::serve_badge("lista_spesa", &viste))
+        .map(|viste| {
+            crate::modules::novita::serve_badge(crate::modules::lista_spesa::NOVITA_CHIAVE, &viste)
+        })
         .unwrap_or(false)
 }
 

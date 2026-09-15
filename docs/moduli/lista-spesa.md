@@ -25,8 +25,14 @@ correzioni sono scritte e testate in locale, **non ancora ricollaudate dal
 vivo**. Resta non ancora collaudato anche il profilo alimentare automatico
 (`docs/moduli/profili-e-porzioni.md`, stesso giro di feedback, non riguarda
 questo modulo direttamente).
+**Il 16 settembre 2026** sono arrivate tre aggiunte chieste da Alessio —
+chiusura della spesa, intervallo che parte sempre almeno da oggi, accesso
+dalla schermata Settimana del planner — descritte nelle sezioni dedicate più
+sotto: **scritte e testate in locale, non ancora collaudate dal vivo**,
+insieme alle correzioni del 10 settembre.
+
 `src/modules/lista_spesa.rs`, raggiungibile da
-`🍽️ Alimentazione → 🛒 Lista della spesa`.
+`🍽️ Alimentazione → 🛒 Lista della spesa` oppure dal planner.
 
 Aggrega automaticamente gli ingredienti dei pasti pianificati in un
 intervallo di date scelto dall'utente, indipendente dalle settimane del
@@ -39,6 +45,22 @@ Stesso principio del planner (`spazio_id` nullable, una lista attiva per
 spazio o personale): non esiste una creazione manuale, la lista nasce alla
 prima apertura con un intervallo di default (oggi + 6 giorni), modificabile
 in qualunque momento con `🗓️ Cambia intervallo`.
+
+**La lista parte sempre almeno da oggi (16 settembre 2026)**, chiesto da
+Alessio: prima un intervallo scelto la settimana precedente restava fermo
+lì e continuava ad aggregare pasti ormai passati, che non si comprano più.
+A ogni apertura `applica_inizio_da_oggi` porta l'inizio a oggi se è rimasto
+indietro (dominio puro in `intervallo_da_oggi`, nessuna scrittura se non
+serve); se anche la fine è passata, l'intervallo riparte come quello di
+default, oggi + 6 giorni.
+
+Un inizio **precedente a oggi resta possibile** — serve a recuperare i
+pasti di ieri — ma è una scelta esplicita e viene trattata come tale: al
+momento della scelta il bot avvisa, la schermata della lista lo ripete
+sotto l'intervallo, e da quel momento lo spostamento automatico si ferma
+(colonna `liste_spesa.inizio_manuale`), perché una scelta esplicita non si
+corregge alle spalle di chi l'ha fatta. Scegliere di nuovo un inizio da
+oggi in avanti riattiva lo spostamento automatico.
 
 L'intervallo della lista **non è legato alle settimane del planner**: il
 planner crea una riga `planner_alimentari` per settimana, ma la lista
@@ -270,6 +292,51 @@ esistenza, quindi anche una voce manuale già comprata resta rimovibile.
   eventualmente già in lista non sparisce da sola: il refresh la ricalcola
   secondo il fabbisogno rimasto — torna al solo fabbisogno del planner se
   ce n'è ancora, sparisce del tutto se non ne resta nessuno.
+
+## Chiusura della spesa (16 settembre 2026)
+
+Chiesto da Alessio: mancava il momento **"spesa fatta"**. La lista è una
+sola e le voci comprate ci restavano per sempre, quindi il giro di spesa
+successivo ripartiva sporco e `comprato` finiva per voler dire due cose
+diverse — *l'ho appena preso* e *l'avevo preso la settimana scorsa*.
+
+`🧾 Chiudi la spesa` (visibile solo con almeno una voce comprata) apre una
+conferma e poi, con `✅ Sì, chiudi la spesa`:
+
+- sposta **tutte** le voci comprate (generate e manuali) in
+  `liste_spesa_voci_archiviate`, sotto una riga di
+  `liste_spesa_chiusure` che ricorda quando, da chi e su quale intervallo;
+- le toglie dalla lista attiva; **le voci non comprate restano** dov'erano,
+  con il loro ordine;
+- toglie le **aggiunte dal catalogo già coperte** da ciò che si è comprato
+  (`aggiunte_coperte_dalla_spesa`, dominio puro): un'aggiunta resta viva
+  attraverso ogni refresh — è il suo scopo — quindi senza questo passaggio
+  ricomparirebbe il giorno dopo come se non fosse mai stata comprata. Si
+  scala il comprato sulle aggiunte della stessa identità e unità, dalla più
+  vecchia alla più recente, e rientra solo l'aggiunta coperta per intero;
+- ricalcola subito la lista (`aggiorna_lista`), così il fabbisogno dei
+  pasti ancora pianificati torna senza dover premere `🔄 Aggiorna lista`.
+
+**Non è un'eliminazione**, e per questo non segue C16: le voci restano
+consultabili in `🗄 Ultima spesa chiusa` e sono la memoria di cosa è entrato
+in casa — la base su cui si appoggerà la futura dispensa
+(`docs/previsto/dispensa.md`). La conferma dice quindi cosa succede, non
+che "non si può recuperare". Una voce archiviata però non si modifica più:
+lo impedisce il trigger `trg_lista_spesa_voce_archiviata_immutabile`,
+stesso principio del congelamento di una voce comprata.
+
+## Accesso dal planner (16 settembre 2026)
+
+La schermata della settimana del planner ha un pulsante `🛒 Lista della
+spesa`: è pianificando i pasti che viene in mente cosa manca, e prima
+bisognava risalire fino a `🍽️ Alimentazione`.
+
+Il pulsante usa un callback dedicato (`lista_spesa:menu:planner`) che
+registra la provenienza, così `⬅️ Indietro` dalla lista riporta al planner
+invece che al menù Alimentazione, come vuole C3. Le schermate interne della
+lista (riordino, rimozione, archivio, calendario) tornano con
+`lista_spesa:back`, che non tocca la provenienza: un giro dentro la lista
+non deve far dimenticare da dove si è entrati.
 
 ## Schermate
 

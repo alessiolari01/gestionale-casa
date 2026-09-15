@@ -5894,6 +5894,13 @@ mod db_tests {
                 "2026-09-27"
             ));
 
+            // `aggiornato_il` ha la risoluzione del millisecondo: creare il
+            // modello e modificarlo dentro lo stesso millisecondo lascia i
+            // due valori identici, e il confronto non vede nessun
+            // cambiamento. Senza questa pausa il test falliva circa una
+            // volta su tre su questa macchina -- il difetto era del test,
+            // non del confronto.
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
             aggiungi_pasto_modello(&pool, modello_id, "pranzo", None, "casa", false, None, None)
                 .await
                 .unwrap();

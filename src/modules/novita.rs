@@ -60,6 +60,24 @@ pub const REGISTRO: &[VoceNovita] = &[
              aggiungere voci a mano e spuntarle mentre fai la spesa.",
         ),
     },
+    // Chiusura della spesa (16 settembre 2026): genitore "lista_spesa", che
+    // da qui in avanti e' un nodo intermedio e non piu' una foglia -- il suo
+    // tutorial resta per memoria di cosa era stato annunciato, ma non viene
+    // piu' mostrato (`e_foglia` lo esclude). Il badge risale da qui a
+    // "lista_spesa" (il pulsante "🛒 Lista della spesa", sia in
+    // "🍽️ Alimentazione" sia nel planner) e poi a "food_menu", cioe' il
+    // pulsante del menu' principale: ogni passaggio reale del percorso lo
+    // mostra, come richiede C14.
+    VoceNovita {
+        chiave: "lista_spesa_chiusura",
+        genitore: Some("lista_spesa"),
+        tutorial: Some(
+            "🆕 Quando hai finito la spesa, premi 🧾 Chiudi la spesa: le voci \
+             comprate finiscono nell'archivio e la lista resta pulita per il \
+             giro dopo. La lista parte sempre da oggi e si sposta da sola in \
+             avanti; se scegli un inizio nel passato te lo segnala.",
+        ),
+    },
 ];
 
 /// Vero se nessun'altra voce del registro ha `chiave` come genitore: cioè

@@ -85,6 +85,13 @@ La lista può essere generata da una pianificazione/intervallo e deve:
 
 La futura dispensa potrà sottrarre le scorte ma non fa parte dello Step 7.
 
+**Aggiornamento del 16 settembre 2026**: la dispensa **esiste**
+(`docs/moduli/dispensa.md`) e la spesa chiusa ci entra da sola, ma la
+sottrazione delle scorte dal fabbisogno resta da fare — cambia
+`calcola_fresche`, collaudato e in produzione, quindi è un blocco a sé. Vedi
+`docs/previsto/dispensa.md`. Nello stesso giorno è arrivata la **chiusura
+della spesa**, che mancava del tutto: vedi `docs/moduli/lista-spesa.md`.
+
 ## Relazione con Acquisti
 
 La lista dice **cosa serve**. Il futuro modulo Acquisti dirà **quale prodotto o

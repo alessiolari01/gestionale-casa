@@ -15,6 +15,7 @@ pub mod calendario;
 pub mod collaudo;
 #[allow(dead_code)]
 pub mod contenitori;
+pub mod dispensa;
 pub mod distribuzione;
 pub mod foto;
 pub mod lista_spesa;

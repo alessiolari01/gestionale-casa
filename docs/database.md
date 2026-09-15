@@ -193,6 +193,7 @@ settimane del planner.
 | `spazio_id` | INTEGER | nullable: `NULL` per una lista personale |
 | `data_inizio` / `data_fine` | TEXT | intervallo su cui si aggregano i pasti pianificati |
 | `aggiornata_il` | TEXT | ultima volta che è girato un refresh esplicito, `NULL` se mai |
+| `inizio_manuale` | INTEGER | `1` se l'utente ha scelto di proposito un inizio precedente a oggi (16 settembre 2026): da lì in poi la lista non si sposta più in avanti da sola, e la schermata lo segnala |
 
 ### `liste_spesa_voci`
 Le voci della lista: generate dall'aggregazione dei pasti pianificati, o
@@ -254,6 +255,54 @@ Nessun CHECK che leghi `tipo` alla colonna non-NULL corrispondente:
 quell'`UPDATE` violerebbe un CHECK del genere quando la riga referenziata
 viene cancellata — stesso motivo per cui
 `planner_pasto_ingredienti_snapshot.alimento_id` non ha un vincolo simile.
+
+## Step 7.4ter: chiusura della spesa e scorte (16 settembre 2026)
+
+Due migration dello stesso giorno:
+`migrations/20260916090000_lista_spesa_chiusura.sql` (chiusura) e
+`migrations/20260916120000_dispensa.sql` (scorte). Comportamento in
+`docs/moduli/lista-spesa.md` e `docs/moduli/dispensa.md`, decisioni di
+struttura in `docs/previsto/dispensa.md`.
+
+### `liste_spesa_chiusure`
+Una spesa chiusa: lo scontrino di un giro di spesa.
+
+| Campo | Tipo | Note |
+|---|---|---|
+| `lista_id` | INTEGER | riferimento a `liste_spesa(id)`, `ON DELETE CASCADE` |
+| `chiusa_da_utente_id` | INTEGER | nullable, `ON DELETE SET NULL`: l'archivio di una spesa fatta non deve impedire di eliminare un utente |
+| `data_inizio` / `data_fine` | TEXT | intervallo della lista al momento della chiusura, che intanto si è già spostato in avanti |
+| `voci_totali` | INTEGER | quante voci sono state archiviate |
+| `chiusa_il` | TEXT | quando |
+
+### `liste_spesa_voci_archiviate`
+Le voci comprate spostate qui dalla chiusura: stesse colonne di
+`liste_spesa_voci` meno quelle che qui non hanno più senso (`comprato`, vero
+per costruzione, e `ordinamento`, che riguarda solo la lista attiva).
+
+Un trigger (`trg_lista_spesa_voce_archiviata_immutabile`) blocca **ogni**
+`UPDATE`: dopo la chiusura non esiste nessuna modifica legittima — è lo
+stesso principio del congelamento di una voce comprata, portato fino in
+fondo.
+
+### `scorte`
+Cosa c'è già in casa, per luogo di conservazione.
+
+| Campo | Tipo | Note |
+|---|---|---|
+| `proprietario_utente_id` / `spazio_id` | INTEGER | stessa visibilità di `liste_spesa` |
+| `conservazione` | TEXT | `dispensa`, `frigo` o `freezer`: i tre posti standard esistono sempre, senza configurazione |
+| `alimento_id` / `prodotto_alimentare_id` | INTEGER | nullable, `ON DELETE SET NULL`: valorizzati quando la scorta è stata scelta dal catalogo, servono alla futura sottrazione dal fabbisogno |
+| `descrizione` | TEXT | nome al momento dell'inserimento, resta leggibile anche se il catalogo cambia |
+| `quantita` / `unita_simbolo` | REAL / TEXT | sempre obbligatorie |
+| `scadenza` | TEXT | **opzionale**, decisione di Alessio: una scorta nasce senza |
+| `origine` | TEXT | `spesa` (entrata chiudendo la spesa) o `manuale` |
+| `chiusura_id` | INTEGER | nullable, da quale spesa chiusa è entrata |
+
+### `preferenze_utente.dispensa_ingresso_automatico`
+`1` di default: chiudendo la spesa la merce collegata al catalogo entra da
+sola in dispensa. Preferenza **per utente**, stesso schema di `vista_spazi`
+— più persone usano lo stesso bot e ciascuna decide per sé.
 
 ## Step 7.4bis: Turni e routine (prima fetta, 10 settembre 2026)
 

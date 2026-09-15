@@ -20,9 +20,9 @@ use std::{
 use anyhow::Context;
 use config::Config;
 use modules::{
-    alimentazione::FoodSessionStore, contenitori::ContainerSessionStore, foto::PhotoSessionStore,
-    lista_spesa::ListaSpesaSessionStore, luoghi::LocationSessionStore,
-    miglioramenti::ImprovementSessionStore, oggetti::SessionStore,
+    alimentazione::FoodSessionStore, contenitori::ContainerSessionStore,
+    dispensa::DispensaSessionStore, foto::PhotoSessionStore, lista_spesa::ListaSpesaSessionStore,
+    luoghi::LocationSessionStore, miglioramenti::ImprovementSessionStore, oggetti::SessionStore,
     profili_alimentari::ProfileSessionStore, ricette::RecipeSessionStore, turni::TurniSessionStore,
 };
 use sqlx::SqlitePool;
@@ -263,6 +263,7 @@ struct HandlerDependencies {
     identity_sessions: IdentitySessionStore,
     distribuzione_sessions: DistribuzioneSessionStore,
     lista_spesa_sessions: ListaSpesaSessionStore,
+    dispensa_sessions: DispensaSessionStore,
     turni_sessions: TurniSessionStore,
     shutdown_controller: ShutdownController,
     modalita_riservata: ModalitaRiservata,
@@ -308,6 +309,7 @@ fn chat_con_sessione_attiva(deps: &HandlerDependencies) -> std::collections::BTr
     chat_ids.extend(deps.identity_sessions.active_chat_ids());
     chat_ids.extend(deps.distribuzione_sessions.active_chat_ids());
     chat_ids.extend(deps.lista_spesa_sessions.active_chat_ids());
+    chat_ids.extend(deps.dispensa_sessions.active_chat_ids());
     chat_ids.extend(deps.turni_sessions.active_chat_ids());
     chat_ids
 }
@@ -535,6 +537,7 @@ async fn async_main() -> anyhow::Result<()> {
     let identity_sessions = IdentitySessionStore::new();
     let distribuzione_sessions = DistribuzioneSessionStore::new();
     let lista_spesa_sessions = ListaSpesaSessionStore::new();
+    let dispensa_sessions = DispensaSessionStore::new();
     let turni_sessions = TurniSessionStore::new();
     let shutdown_controller = ShutdownController::default();
     // Sotto-step 5a del punto 6 del ciclo di automazione: solo lo swap
@@ -563,6 +566,7 @@ async fn async_main() -> anyhow::Result<()> {
         identity_sessions,
         distribuzione_sessions,
         lista_spesa_sessions,
+        dispensa_sessions,
         turni_sessions,
         shutdown_controller: shutdown_controller.clone(),
         modalita_riservata,
@@ -691,6 +695,7 @@ async fn handle_message(
     let identity_sessions = deps.identity_sessions.clone();
     let distribuzione_sessions = deps.distribuzione_sessions.clone();
     let lista_spesa_sessions = deps.lista_spesa_sessions.clone();
+    let dispensa_sessions = deps.dispensa_sessions.clone();
     let turni_sessions = deps.turni_sessions.clone();
     let modalita_riservata = deps.modalita_riservata.clone();
     let chat_id = msg.chat.id.0;
@@ -771,6 +776,7 @@ async fn handle_message(
             identity_sessions,
             distribuzione_sessions,
             lista_spesa_sessions,
+            dispensa_sessions,
             turni_sessions,
             modalita_riservata,
             actor,
@@ -803,6 +809,7 @@ async fn handle_authorized_message(
     identity_sessions: IdentitySessionStore,
     distribuzione_sessions: DistribuzioneSessionStore,
     lista_spesa_sessions: ListaSpesaSessionStore,
+    dispensa_sessions: DispensaSessionStore,
     turni_sessions: TurniSessionStore,
     modalita_riservata: ModalitaRiservata,
     actor: identity::AuditActor,
@@ -822,6 +829,7 @@ async fn handle_authorized_message(
         identity_sessions.clear_chat(chat_id);
         distribuzione_sessions.clear_chat(chat_id);
         lista_spesa_sessions.clear_chat(chat_id);
+        dispensa_sessions.clear_chat(chat_id);
         turni_sessions.clear_chat(chat_id);
         return respond(());
     }
@@ -840,6 +848,7 @@ async fn handle_authorized_message(
         identity_sessions.clear_chat(chat_id);
         distribuzione_sessions.clear_chat(chat_id);
         lista_spesa_sessions.clear_chat(chat_id);
+        dispensa_sessions.clear_chat(chat_id);
         turni_sessions.clear_chat(chat_id);
         return respond(());
     }
@@ -866,6 +875,7 @@ async fn handle_authorized_message(
         identity_sessions.clear_chat(chat_id);
         distribuzione_sessions.clear_chat(chat_id);
         lista_spesa_sessions.clear_chat(chat_id);
+        dispensa_sessions.clear_chat(chat_id);
         turni_sessions.clear_chat(chat_id);
         return respond(());
     }
@@ -924,6 +934,7 @@ async fn handle_authorized_message(
         identity_sessions.clear_chat(chat_id);
         distribuzione_sessions.clear_chat(chat_id);
         lista_spesa_sessions.clear_chat(chat_id);
+        dispensa_sessions.clear_chat(chat_id);
         turni_sessions.clear_chat(chat_id);
         bot.annulla_e_avvisa(chat_id, "❌ Operazione annullata.");
         send_spaces(&bot, msg.chat.id, &pool, &actor).await?;
@@ -933,6 +944,7 @@ async fn handle_authorized_message(
     if command == Some("/annulla") && distribuzione_sessions.get(chat_id).is_some() {
         distribuzione_sessions.clear_chat(chat_id);
         lista_spesa_sessions.clear_chat(chat_id);
+        dispensa_sessions.clear_chat(chat_id);
         turni_sessions.clear_chat(chat_id);
         bot.annulla_e_avvisa(chat_id, "❌ Operazione annullata.");
         send_admin_distribuzione(&bot, msg.chat.id, &pool, &actor).await?;
@@ -1059,6 +1071,7 @@ async fn handle_authorized_message(
         identity_sessions.clear_chat(chat_id);
         distribuzione_sessions.clear_chat(chat_id);
         lista_spesa_sessions.clear_chat(chat_id);
+        dispensa_sessions.clear_chat(chat_id);
         turni_sessions.clear_chat(chat_id);
         return respond(());
     }
@@ -1076,6 +1089,7 @@ async fn handle_authorized_message(
         identity_sessions.clear_chat(chat_id);
         distribuzione_sessions.clear_chat(chat_id);
         lista_spesa_sessions.clear_chat(chat_id);
+        dispensa_sessions.clear_chat(chat_id);
         turni_sessions.clear_chat(chat_id);
         return respond(());
     }
@@ -1098,6 +1112,7 @@ async fn handle_authorized_message(
         identity_sessions.clear_chat(chat_id);
         distribuzione_sessions.clear_chat(chat_id);
         lista_spesa_sessions.clear_chat(chat_id);
+        dispensa_sessions.clear_chat(chat_id);
         turni_sessions.clear_chat(chat_id);
         return respond(());
     }
@@ -1117,6 +1132,22 @@ async fn handle_authorized_message(
         return respond(());
     }
 
+    if modules::dispensa::handle_message(&bot, &msg, &pool, &dispensa_sessions, text).await? {
+        sessions.clear_chat(chat_id);
+        location_sessions.clear_chat(chat_id);
+        container_sessions.clear_chat(chat_id);
+        photo_sessions.clear_chat(chat_id);
+        food_sessions.clear_chat(chat_id);
+        profile_sessions.clear_chat(chat_id);
+        improvement_sessions.clear_chat(chat_id);
+        recipe_sessions.clear_chat(chat_id);
+        identity_sessions.clear_chat(chat_id);
+        distribuzione_sessions.clear_chat(chat_id);
+        lista_spesa_sessions.clear_chat(chat_id);
+        turni_sessions.clear_chat(chat_id);
+        return respond(());
+    }
+
     if modules::turni::handle_message(&bot, &msg, &pool, &turni_sessions, text).await? {
         sessions.clear_chat(chat_id);
         location_sessions.clear_chat(chat_id);
@@ -1129,6 +1160,7 @@ async fn handle_authorized_message(
         identity_sessions.clear_chat(chat_id);
         distribuzione_sessions.clear_chat(chat_id);
         lista_spesa_sessions.clear_chat(chat_id);
+        dispensa_sessions.clear_chat(chat_id);
         return respond(());
     }
 
@@ -1339,6 +1371,7 @@ async fn handle_callback(
     let identity_sessions = deps.identity_sessions.clone();
     let distribuzione_sessions = deps.distribuzione_sessions.clone();
     let lista_spesa_sessions = deps.lista_spesa_sessions.clone();
+    let dispensa_sessions = deps.dispensa_sessions.clone();
     let turni_sessions = deps.turni_sessions.clone();
     let shutdown_controller = deps.shutdown_controller.clone();
     let modalita_riservata = deps.modalita_riservata.clone();
@@ -1439,6 +1472,7 @@ async fn handle_callback(
             identity_sessions,
             distribuzione_sessions,
             lista_spesa_sessions,
+            dispensa_sessions,
             turni_sessions,
             shutdown_controller,
             modalita_riservata,
@@ -1466,6 +1500,7 @@ async fn handle_authorized_callback(
     identity_sessions: IdentitySessionStore,
     distribuzione_sessions: DistribuzioneSessionStore,
     lista_spesa_sessions: ListaSpesaSessionStore,
+    dispensa_sessions: DispensaSessionStore,
     turni_sessions: TurniSessionStore,
     shutdown_controller: ShutdownController,
     modalita_riservata: ModalitaRiservata,
@@ -1494,6 +1529,7 @@ async fn handle_authorized_callback(
             || identity_sessions.has_active(chat_id.0)
             || distribuzione_sessions.has_active(chat_id.0)
             || lista_spesa_sessions.has_active(chat_id.0)
+            || dispensa_sessions.has_active(chat_id.0)
             || turni_sessions.has_active(chat_id.0));
 
     if (data.starts_with("improve:")
@@ -1581,6 +1617,7 @@ async fn handle_authorized_callback(
             identity_sessions.clear_chat(chat_id.0);
             distribuzione_sessions.clear_chat(chat_id.0);
             lista_spesa_sessions.clear_chat(chat_id.0);
+            dispensa_sessions.clear_chat(chat_id.0);
             turni_sessions.clear_chat(chat_id.0);
             return respond(());
         }
@@ -1608,6 +1645,7 @@ async fn handle_authorized_callback(
             identity_sessions.clear_chat(chat_id.0);
             distribuzione_sessions.clear_chat(chat_id.0);
             lista_spesa_sessions.clear_chat(chat_id.0);
+            dispensa_sessions.clear_chat(chat_id.0);
             turni_sessions.clear_chat(chat_id.0);
             return respond(());
         }
@@ -1638,6 +1676,30 @@ async fn handle_authorized_callback(
         lista_spesa_sessions.clear_chat(chat_id.0);
     }
 
+    if data.starts_with("dispensa:")
+        || (data == "menu:main" && dispensa_sessions.has_active(chat_id.0))
+    {
+        if modules::dispensa::handle_callback(&bot, chat_id, &pool, &dispensa_sessions, data)
+            .await?
+        {
+            sessions.clear_chat(chat_id.0);
+            location_sessions.clear_chat(chat_id.0);
+            container_sessions.clear_chat(chat_id.0);
+            photo_sessions.clear_chat(chat_id.0);
+            food_sessions.clear_chat(chat_id.0);
+            profile_sessions.clear_chat(chat_id.0);
+            improvement_sessions.clear_chat(chat_id.0);
+            recipe_sessions.clear_chat(chat_id.0);
+            identity_sessions.clear_chat(chat_id.0);
+            distribuzione_sessions.clear_chat(chat_id.0);
+            lista_spesa_sessions.clear_chat(chat_id.0);
+            turni_sessions.clear_chat(chat_id.0);
+            return respond(());
+        }
+    } else {
+        dispensa_sessions.clear_chat(chat_id.0);
+    }
+
     if data.starts_with("turni:") || (data == "menu:main" && turni_sessions.has_active(chat_id.0)) {
         if modules::turni::handle_callback(&bot, chat_id, &pool, &turni_sessions, data).await? {
             sessions.clear_chat(chat_id.0);
@@ -1651,6 +1713,7 @@ async fn handle_authorized_callback(
             identity_sessions.clear_chat(chat_id.0);
             distribuzione_sessions.clear_chat(chat_id.0);
             lista_spesa_sessions.clear_chat(chat_id.0);
+            dispensa_sessions.clear_chat(chat_id.0);
             return respond(());
         }
     } else {
@@ -1688,6 +1751,7 @@ async fn handle_authorized_callback(
             identity_sessions.clear_chat(chat_id.0);
             distribuzione_sessions.clear_chat(chat_id.0);
             lista_spesa_sessions.clear_chat(chat_id.0);
+            dispensa_sessions.clear_chat(chat_id.0);
             turni_sessions.clear_chat(chat_id.0);
             if annullamento_da_sessione {
                 bot.annulla_e_avvisa(chat_id.0, "❌ Operazione annullata.");

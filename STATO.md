@@ -1628,21 +1628,99 @@ online. Il miglioramento 13 resta "fatto" sul database reale (la nuova
 versione sostituisce quella già distribuita e non ancora collaudata) —
 da riverificare da Alessio.
 
+## 2nonies. Chiusura della spesa, intervallo da oggi, accesso dal planner e scorte (16 settembre 2026)
+
+Chiesto da Alessio il 16 settembre 2026, **prima** del collaudo delle
+correzioni del 10 settembre alla lista della spesa: ragionando su come si
+collegherebbe una futura dispensa sono emerse tre mancanze vere, e nello
+stesso giro è arrivato il via libera esplicito per costruire anche frigo,
+freezer e dispensa.
+
+**1. Chiusura della spesa.** Mancava il momento "spesa fatta": la lista è
+una sola e le voci comprate ci restavano per sempre, quindi il giro dopo
+ripartiva sporco e `comprato` finiva per dire due cose diverse (l'ho preso
+adesso / l'avevo preso la settimana scorsa). `🧾 Chiudi la spesa` archivia
+le voci comprate in `liste_spesa_chiusure` + `liste_spesa_voci_archiviate`
+e le toglie dalla lista; le non comprate restano. Non è un'eliminazione
+(restano in `🗄 Ultima spesa chiusa` e sono la base della dispensa), quindi
+la conferma non è quella di C16: dice cosa succede, non che non si può
+recuperare. Un trigger blocca ogni `UPDATE` su una voce archiviata. Le
+aggiunte dal catalogo già coperte da ciò che si è comprato vengono tolte
+insieme (`aggiunte_coperte_dalla_spesa`, dominio puro), altrimenti
+tornerebbero il giorno dopo come se non fossero mai state comprate.
+
+**2. La lista parte sempre almeno da oggi.** `intervallo_da_oggi` (dominio
+puro) sposta in avanti l'inizio rimasto indietro a ogni apertura; se anche
+la fine è passata riparte come il default, oggi + 6 giorni. Un inizio nel
+passato resta possibile — serve a recuperare i pasti di ieri — ma è una
+scelta esplicita: viene segnalata al momento della scelta e sulla schermata,
+e da lì lo spostamento automatico si ferma (`liste_spesa.inizio_manuale`).
+
+**3. Lista della spesa raggiungibile dal planner.** La schermata Settimana
+ha ora `🛒 Lista della spesa`; il callback dedicato registra la provenienza
+così `⬅️ Indietro` torna al planner e non al menù Alimentazione (C3). Le
+schermate interne della lista usano `lista_spesa:back`, che non tocca la
+provenienza.
+
+**4. Scorte: dispensa, frigo e freezer** (`src/modules/dispensa.rs`, nuovo,
+`🍽️ Alimentazione → 🥫 Scorte`). Decisioni prese da me dove Alessio ha
+detto "scegli tu", motivate in `docs/previsto/dispensa.md`: la conservazione
+è un'entità propria e non un riuso di case/stanze/contenitori; l'ingresso
+automatico della spesa chiusa è **acceso di default** e si spegne con una
+preferenza per utente; la **scadenza è opzionale** (decisa da Alessio), si
+aggiunge dopo se serve. Elenco paginato per luogo con le scadenze prima,
+aggiunta dal catalogo (ricerca condivisa con la lista della spesa) o a mano,
+quantità, spostamento fra i tre luoghi, eliminazione con conferma C16.
+
+**Non costruito di proposito, documentato in `docs/previsto/dispensa.md`**:
+la sottrazione delle scorte dal fabbisogno della lista della spesa (cambia
+il cuore di `calcola_fresche`, collaudato e in produzione: merita un blocco
+a sé), lo scarico al consumo di un pasto, la quantità realmente comprata con
+il formato della confezione, gli avvisi di scadenza (servono i reminder).
+
+**Badge "🆕" (C14)**: nuova voce `lista_spesa_chiusura` in
+`novita::REGISTRO`, con `lista_spesa` che da nodo foglia diventa
+intermedio — il badge risale dal pulsante della lista (in Alimentazione e
+nel planner) fino al menù principale.
+
+**Un test instabile trovato e corretto, non causato da questo lavoro**:
+`assegnazione_da_aggiornare_solo_se_il_modello_e_cambiato_dopo`
+(`turni.rs`) falliva circa una volta su tre — creare il modello e
+modificarlo dentro lo stesso millisecondo lascia `aggiornato_il` identico,
+e il confronto non vede nessun cambiamento. Difetto del test, non del
+confronto: risolto con una pausa di 5 ms prima della modifica.
+
+15 nuovi test (5 di dominio puro sulla lista della spesa — spostamento
+dell'intervallo e aggiunte coperte —, 4 su `sqlite::memory:` per
+archiviazione, pulizia delle aggiunte comprate, trigger di immutabilità e
+spostamento automatico; 3 di dominio puro sulle scorte — scadenza nei due
+formati, etichetta a capo, token dei luoghi — e 3 su `sqlite::memory:` —
+ciclo di vita di una scorta, ordine per scadenza, preferenza dell'ingresso
+automatico). Due migration nuove.
+
+**Scritto, collaudo dal vivo su Telegram da fare.**
+
 ## 3. Stato tecnico verificato
 
-- **50 migration** nel repository, tutte **applicate** al database reale
-  dell'S9 (l'ultima, `migrations/20260911090000_turni_correzioni_collaudo.sql`
-  per le tredici correzioni ai turni, l'11 settembre 2026), verificato
-  leggendo `applied_migrations=50` nel log di avvio del bot dopo il
-  deploy — non dedotto. **Nessuna migration nuova** né per il secondo giro
-  di correzioni del 12 settembre 2026 (sezione 2septies) né per le tre
-  rifiniture del 13 settembre 2026 (sezione 2octies): tutti i punti
-  lavorano su dati e schema già esistenti, confermato di nuovo
+- **52 migration** nel repository. Le prime 50 sono **applicate** al
+  database reale dell'S9 (l'ultima applicata,
+  `migrations/20260911090000_turni_correzioni_collaudo.sql` per le tredici
+  correzioni ai turni, l'11 settembre 2026), verificato leggendo
+  `applied_migrations=50` nel log di avvio del bot dopo il deploy — non
+  dedotto. **Le due del 16 settembre 2026**
+  (`20260916090000_lista_spesa_chiusura.sql` e `20260916120000_dispensa.sql`,
+  sezione 2nonies) **non sono ancora applicate**: il numero da leggere nel
+  log dopo il prossimo deploy è `applied_migrations=52`. Né il secondo giro
+  di correzioni del 12 settembre 2026 (sezione 2septies) né le tre
+  rifiniture del 13 settembre 2026 (sezione 2octies) avevano migration
+  proprie: lavoravano su schema già esistente, confermato di nuovo
   `applied_migrations=50` (invariato) nel log di avvio dopo ciascun deploy;
 - pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa,
   punto 1 della sezione 6): `fmt`, `check --locked`,
   `clippy --all-targets --locked -- -D warnings`, `test --locked` —
-  **391 test** (389 prima delle tre rifiniture della sezione 2octies, 385
+  **406 test** (391 prima della chiusura della spesa e delle scorte del
+  16 settembre 2026 — sezione 2nonies —, 389 prima delle tre rifiniture
+  della sezione 2octies, 385
   prima del secondo giro di
   correzioni ai turni del 12 settembre 2026, 372 prima delle tredici
   correzioni ai turni e della correzione C16 sulla nutrizione, 355 prima

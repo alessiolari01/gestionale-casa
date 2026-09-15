@@ -71,8 +71,17 @@ Prossimi blocchi funzionali, nell'ordine:
 3. **Planner pasti** versionato — OPERATIVO;
 4. **Lista della spesa** aggregata — scritta l'8 settembre 2026
    (`src/modules/lista_spesa.rs`), collaudo dal vivo su Telegram da fare:
-   vedi `STATO.md` e `docs/moduli/lista-spesa.md`;
-5. reminder/export Alimentazione.
+   vedi `STATO.md` e `docs/moduli/lista-spesa.md`. **Dal 16 settembre 2026**
+   ha anche la chiusura della spesa (archivio di ciò che si è comprato),
+   l'intervallo che parte sempre almeno da oggi e l'accesso diretto dal
+   planner;
+5. **Scorte: dispensa, frigo e freezer** — scritte il 16 settembre 2026
+   (`src/modules/dispensa.rs`), collaudo dal vivo da fare. La merce entra
+   da sola chiudendo la spesa. Restano fuori, documentate in
+   `docs/previsto/dispensa.md`: sottrazione delle scorte dal fabbisogno
+   della lista, scarico al consumo di un pasto, quantità realmente comprata
+   con il formato della confezione, avvisi di scadenza;
+6. reminder/export Alimentazione.
 
 ### 7.3 — Integrazioni — PREVISTO
 

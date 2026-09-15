@@ -2,6 +2,104 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_DISPENSA_20260916 -->
+# 16/09/2026 — Scorte: dispensa, frigo e freezer
+
+Via libera di Alessio nello stesso giro della chiusura della spesa (voce
+sotto), che è il momento in cui la merce entra in casa. Nuovo modulo
+`src/modules/dispensa.rs`, tabella `scorte`
+(`migrations/20260916120000_dispensa.sql`), raggiungibile da
+`🍽️ Alimentazione → 🥫 Scorte`. Risponde a una domanda sola: cosa ho già in
+casa.
+
+- **I tre luoghi esistono sempre**, senza configurazione: `🧺 Dispensa`,
+  `🧊 Frigo`, `❄️ Freezer`. Sono un'entità propria e non un riuso di
+  case/stanze/contenitori — un contenitore dice *dove sta un oggetto*, una
+  scorta dice *in che condizione è conservata una quantità*, ed è quella
+  condizione a decidere quanto dura (scelta presa dove Alessio ha detto
+  "scegli tu", motivata in `docs/previsto/dispensa.md`).
+- **La merce entra da sola chiudendo la spesa**, con preferenza per utente
+  (`preferenze_utente.dispensa_ingresso_automatico`, accesa di default):
+  entrano solo le voci collegate al catalogo, sempre in dispensa, e
+  spostarle in frigo o freezer è un tocco. Le voci libere restano fuori:
+  "Detersivo piatti" non è un alimento.
+- **La scadenza è opzionale** (decisa da Alessio): una scorta nasce senza e
+  chi vuole la aggiunge dopo. Si scrive `31/12/2026` o `2026-12-31`, con
+  validazione semantica — `30/02/2026` viene rifiutata subito invece di
+  diventare `NULL` a database.
+- Elenco paginato per luogo (C6) con **prima le scorte che scadono**,
+  aggiunta dal catalogo (ricerca condivisa con la lista della spesa, non
+  duplicata) o a mano, modifica della quantità, spostamento fra i luoghi ed
+  eliminazione con la conferma esplicita di C16.
+
+**Non costruito di proposito** e documentato in
+`docs/previsto/dispensa.md`: la sottrazione delle scorte dal fabbisogno
+della lista della spesa (cambierebbe il cuore di `calcola_fresche`, che è
+collaudato e in produzione: merita un blocco a sé), lo scarico al consumo di
+un pasto, la quantità realmente comprata con il formato della confezione,
+gli avvisi di scadenza (richiedono i reminder, che non esistono).
+
+Corretto anche un **test instabile trovato per caso e non causato da questo
+lavoro**: `assegnazione_da_aggiornare_solo_se_il_modello_e_cambiato_dopo`
+(`turni.rs`) falliva circa una volta su tre, perché creare il modello e
+modificarlo nello stesso millisecondo lascia `aggiornato_il` identico. Il
+difetto era del test, non del confronto.
+
+6 nuovi test (3 di dominio puro, 3 su `sqlite::memory:`). Una migration
+nuova.
+
+<!-- CHANGELOG_LISTA_SPESA_CHIUSURA_20260916 -->
+# 16/09/2026 — Lista della spesa: chiusura della spesa, intervallo che parte da oggi, accesso dal planner
+
+Chiesto da Alessio il 16 settembre 2026, prima del collaudo delle
+correzioni del 10 settembre: tre mancanze trovate ragionando sul
+collegamento con una futura dispensa.
+
+- **Chiusura della spesa.** Mancava il momento "spesa fatta": la lista è
+  una sola e le voci comprate ci restavano per sempre, quindi il giro dopo
+  ripartiva sporco e "comprato" finiva per dire due cose diverse (l'ho
+  preso adesso / l'avevo preso la settimana scorsa). `🧾 Chiudi la spesa`
+  (visibile solo con almeno una voce comprata) archivia le voci comprate in
+  due tabelle nuove — `liste_spesa_chiusure` e
+  `liste_spesa_voci_archiviate`, migration
+  `migrations/20260916090000_lista_spesa_chiusura.sql` — e le toglie dalla
+  lista; le voci non comprate restano. Non è un'eliminazione (le voci sono
+  consultabili in `🗄 Ultima spesa chiusa` e sono la base della futura
+  dispensa), quindi la conferma non è quella di C16: dice cosa succede,
+  non che non si può recuperare. Le aggiunte dal catalogo già coperte da
+  ciò che si è comprato vengono tolte insieme (`aggiunte_coperte_dalla_spesa`),
+  altrimenti tornerebbero il giorno dopo come se non fossero mai state
+  comprate.
+- **La lista parte sempre almeno da oggi.** Prima un intervallo scelto la
+  settimana prima restava lì, aggregando pasti ormai passati. Ora
+  l'intervallo si sposta da solo in avanti a ogni apertura
+  (`intervallo_da_oggi`); se anche la fine è passata riparte come quello di
+  default, oggi + 6 giorni. Un inizio nel passato resta possibile — serve a
+  recuperare i pasti di ieri — ma è una scelta esplicita: viene segnalata
+  al momento della scelta e sulla schermata della lista, e da lì in poi lo
+  spostamento automatico si ferma (nuova colonna
+  `liste_spesa.inizio_manuale`).
+- **Lista della spesa raggiungibile dal planner.** È pianificando i pasti
+  che viene in mente cosa manca, e prima bisognava risalire fino a
+  `🍽️ Alimentazione`. La schermata della settimana ha ora un pulsante
+  `🛒 Lista della spesa`; `⬅️ Indietro` dalla lista riporta al planner e non
+  al menù Alimentazione, come vuole C3.
+
+Novità registrata in `novita::REGISTRO` (`lista_spesa_chiusura`, C14): il
+badge `🆕` risale dal pulsante della lista — in Alimentazione e nel planner
+— fino al menù principale, con un tutorial alla prima visita.
+
+Documentata (non costruita) la **dispensa** in `docs/previsto/dispensa.md`:
+frigo/freezer/dispensa come luoghi di conservazione, ingresso automatico
+della merce alla chiusura della spesa con possibilità di disattivarlo,
+scadenza opzionale. Le decisioni di struttura sono state prese qui perché
+Alessio ha risposto "scegli tu"; la costruzione resta rimandata.
+
+9 nuovi test (5 di dominio puro sullo spostamento dell'intervallo e sulle
+aggiunte coperte, 4 su `sqlite::memory:` per archiviazione, pulizia delle
+aggiunte comprate, trigger di immutabilità dell'archivio e spostamento
+automatico dell'intervallo). Una migration nuova.
+
 <!-- CHANGELOG_TURNI_BLOCCO_ROUTINE_20260914 -->
 # 14/09/2026 — Turni: il blocco "Turno assegnato" raggruppa i pasti invece di ripetere profilo e turno
 

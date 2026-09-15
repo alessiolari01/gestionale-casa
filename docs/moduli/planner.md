@@ -46,6 +46,13 @@ un'assegnazione turno (per qualunque profilo dello spazio, vedi
 simbolo diverso da `•` del calendario mensile, per non confondere i due
 significati (C4).
 
+**Dal 16 settembre 2026** la schermata Settimana porta anche
+`🛒 Lista della spesa`, chiesto da Alessio: è pianificando i pasti che viene
+in mente cosa manca, e prima bisognava risalire fino a `🍽️ Alimentazione`.
+Il pulsante usa un callback dedicato (`lista_spesa:menu:planner`), così
+`⬅️ Indietro` dalla lista riporta qui e non al menù Alimentazione (C3) —
+vedi `docs/moduli/lista-spesa.md`.
+
 **`📅 Vai a una data`** — griglia del mese; i giorni che hanno già dei pasti
 portano un `•`, quelli con un turno assegnato portano `◆` (entrambi insieme:
 `•◆`). La settimana appartiene al mese in cui cade il giovedì, così aprendo

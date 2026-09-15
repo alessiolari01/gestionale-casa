@@ -903,6 +903,22 @@ async fn planner_show_menu(
     planner_show_week(bot, chat_id, pool, &week).await
 }
 
+/// Se il pulsante "🛒 Lista della spesa" di questa schermata deve mostrare
+/// il badge "🆕" (C14): stessa lettura già fatta dal gemello in
+/// `alimentazione.rs`, mai in errore -- un problema nel calcolo del badge
+/// non deve impedire di aprire il planner.
+async fn planner_badge_lista_spesa(pool: &SqlitePool) -> bool {
+    let Some(utente_id) = crate::identity::current_actor().utente_id else {
+        return false;
+    };
+    crate::modules::novita::viste_da_utente(pool, utente_id)
+        .await
+        .map(|viste| {
+            crate::modules::novita::serve_badge(crate::modules::lista_spesa::NOVITA_CHIAVE, &viste)
+        })
+        .unwrap_or(false)
+}
+
 async fn planner_show_week(
     bot: &PlannerBot,
     chat_id: ChatId,
@@ -1014,6 +1030,20 @@ async fn planner_show_week(
             "planner:cal:{}",
             planner_month_of_week(week_start).unwrap_or_else(|| week_start[..7].to_string())
         ),
+    )]);
+    // Accesso alla lista della spesa dal planner (chiesto da Alessio il 16
+    // settembre 2026): è pianificando i pasti che viene in mente cosa manca,
+    // e prima bisognava risalire fino a "🍽️ Alimentazione" per arrivarci.
+    // Il callback è quello dedicato (`:planner`), così `⬅️ Indietro` nella
+    // lista riporta qui e non al menù Alimentazione (C3).
+    // Il badge "🆕" (C14) accompagna ogni passaggio reale del percorso, non
+    // solo quello che parte dal menù principale.
+    rows.push(vec![planner_button(
+        crate::modules::novita::etichetta_con_badge(
+            "🛒 Lista della spesa",
+            planner_badge_lista_spesa(pool).await,
+        ),
+        "lista_spesa:menu:planner",
     )]);
     rows.push(planner_global_nav("food:menu"));
 
