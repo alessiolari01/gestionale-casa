@@ -4835,7 +4835,13 @@ async fn alimentation_menu_keyboard(pool: &SqlitePool) -> InlineKeyboardMarkup {
         vec![button("🥕 Alimenti", "food:foods")],
         vec![button("🍳 Ricette", "recipe:menu")],
         vec![button("👥 Profili alimentari", "foodprof:menu")],
-        vec![button("📅 Planner alimentare", "planner:menu")],
+        // `:alimentazione` dice al planner che si arriva da qui, così il suo
+        // `⬅️ Indietro` torna qui anche se prima ci si era passati dalla
+        // lista della spesa (C3).
+        vec![button(
+            "📅 Planner alimentare",
+            "planner:menu:alimentazione",
+        )],
         vec![button(
             crate::modules::novita::etichetta_con_badge("🛒 Lista della spesa", badge_lista_spesa),
             "lista_spesa:menu",

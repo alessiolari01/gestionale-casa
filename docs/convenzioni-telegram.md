@@ -549,6 +549,30 @@ modello archiviato o di tutti insieme (`turni:archived:delete:ask:`/
 un'intera assegnazione (`turni:assegnazione:delete:ask:`/`:yes:`) —
 entrambe in `turni.rs`, dettagliate in `docs/moduli/turni-e-routine.md`.
 
+### C17. Le date si leggono come le dice una persona
+
+Deciso il 16 settembre 2026, chiesto da Alessio guardando la lista della
+spesa: `16/09/2026 → 20/09/2026` si legge, `Mer 16 Set → Dom 20 Set` si
+capisce al volo. Il giorno della settimana è quello che serve davvero per
+organizzarsi.
+
+**Regola**: una data mostrata si scrive `Gio 17 Set` — giorno della
+settimana e mese abbreviati — e porta l'anno **solo** quando non è quello in
+corso (`Lun 4 Gen 2027`): ripeterlo su ogni data dell'anno non distingue
+niente, ometterlo su una data di un altro anno la renderebbe ambigua.
+Dentro una riga che ha già il giorno della settimana davanti (le righe dei
+giorni del planner) basta `17 Set`.
+
+Si applica **in un posto solo**: `calendario::display_date` e
+`calendario::display_day_month`, usate da tutto il bot, quindi ogni
+schermata ha cambiato formato insieme. La logica è in
+`calendario::data_leggibile`, pura, con l'anno di riferimento passato da
+fuori.
+
+**Non si applica all'input**: dove si scrive una data a mano (la scadenza di
+una scorta, per esempio) il formato richiesto resta `31/12/2026`, che si
+digita senza ambiguità.
+
 ---
 
 ## Parte 3 — Come si applica

@@ -93,6 +93,62 @@ condivisa fra i due moduli invece di duplicata.
 blocco) chiede conferma prima di salvare — la pianificazione può sempre
 fare override della routine, vedi `docs/moduli/turni-e-routine.md`.
 
+## Pasti e scorte (17 settembre 2026)
+
+Da quando la lista della spesa sottrae quello che c'è in casa, qualcuno deve
+anche toglierlo quando lo si mangia: altrimenti dopo una settimana il bot
+direbbe "hai la pasta" di una pasta già cucinata. Dettagli in
+`docs/moduli/dispensa.md`; qui quello che cambia nel planner.
+
+- **`🍳 Segna come preparato`** nel dettaglio di un pasto pianificato: gli
+  ingredienti escono dalle scorte in quel momento. **Non è un nuovo stato**:
+  il pasto resta pianificato finché non lo si consuma (colonna
+  `planner_pasti.preparato_il`), così i trigger di congelamento non
+  cambiano. Il dettaglio mostra `🍳 Preparato`.
+- **`✅ Segna come consumato`**: se il pasto non era stato preparato, le
+  scorte si scalano adesso.
+- **Orario passato**: le scorte si scalano da sole, ma lo stato del pasto
+  non cambia — segnarlo consumato lo congelerebbe e non si potrebbe più dire
+  che è stato saltato. Il dettaglio lo dice: `🥫 Ingredienti tolti dalle
+  scorte da soli, a orario passato. Se lo segni saltato tornano indietro.`
+- **`⏭ Segna come saltato`** dopo uno scarico automatico: gli ingredienti
+  tornano esattamente com'erano (richiesta esplicita di Alessio). Dopo un
+  `🍳 Preparato`, no: il cibo è stato usato comunque.
+- **`✏️ Modifica`** di un pasto che aveva già preso le sue scorte: tornano
+  tutte, e se era preparato si riscalano con gli ingredienti nuovi. Per un
+  pasto pianificato "sostituirlo con un altro" è proprio questo.
+
+Il lato "lista della spesa": un pasto le cui scorte sono già state scalate
+non chiede più niente alla lista, perché quegli ingredienti sono già stati
+usati.
+
+## Sostituire un pasto consumato (17 settembre 2026)
+
+Chiesto da Alessio: "avevo pianificato la pasta, ho mangiato la pizza". Un
+pasto consumato resta congelato, ma nel suo dettaglio c'è **`🔁 Sostituisci`**:
+si sceglie il pasto mangiato davvero (stesso giorno, tipo, orario e
+partecipanti già compilati, la ricetta da scegliere) e, salvando:
+
+1. il nuovo pasto viene creato;
+2. il vecchio restituisce tutte le sue scorte e **viene eliminato** — l'unico
+   punto del bot che elimina un pasto consumato, e solo su richiesta
+   esplicita: il congelamento serve a non riscrivere la storia per sbaglio,
+   non a impedire di correggerla;
+3. il nuovo diventa consumato e scala le sue scorte.
+
+Se il passo 2 fallisse dopo il salvataggio del nuovo pasto, il messaggio lo
+dice ("controlla il giorno") invece di tacere.
+
+## Da dove si arriva (17 settembre 2026)
+
+La settimana ricorda se ci si è arrivati dalla lista della spesa
+(`planner:menu:lista`, pulsante `📅 Planner` della lista): in quel caso
+`⬅️ Indietro` e `🛒 Lista della spesa` riportano alla lista (C3), invece
+di aprire un nuovo giro. Il pulsante del menù Alimentazione usa
+`planner:menu:alimentazione`, che azzera questa memoria. Il semplice
+`planner:menu`, usato da tutte le schermate interne del planner, non la
+tocca.
+
 ## La settimana si crea da sola
 
 Non esiste una creazione manuale del planner: la settimana nasce alla prima

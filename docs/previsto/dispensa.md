@@ -35,7 +35,8 @@ una dispensa darebbe numeri sbagliati.
    (`docs/moduli/alimenti.md`), ma la lista non chiede mai quale si è
    preso.
 3. **Il consumo.** Un pasto segnato "consumato" nel planner non toglie
-   niente da nessuna scorta.
+   niente da nessuna scorta. *(Risolto il 17 settembre 2026: vedi
+   `docs/moduli/dispensa.md`.)*
 4. **Le voci libere.** "Detersivo piatti" non è collegato al catalogo: non
    può diventare una scorta di un alimento, e va trattato a parte (o
    lasciato fuori).
@@ -133,15 +134,21 @@ i tre luoghi di conservazione, l'aggiunta dal catalogo o a mano, quantità,
 scadenza opzionale, spostamento, eliminazione con conferma, e l'ingresso
 automatico dalla spesa chiusa con la sua preferenza per utente.
 
-**Restano da fare**, nell'ordine suggerito:
+**Costruito il secondo giro** (17 settembre 2026, dopo il collaudo dal
+vivo di Alessio): la destinazione per alimento (scelta a mano, nome,
+categoria), le righe sommate con le singole confezioni, la **sottrazione
+delle scorte dal fabbisogno della lista** e lo **scarico al pasto**
+(preparato, consumato, o da solo a orario passato, con la restituzione se il
+pasto viene saltato). Il timore scritto qui il giorno prima — che la
+sottrazione toccasse un'aggregazione già collaudata — è rimasto vero: per
+questo è coperta da test propri (`sottrai_scorte`) ed è la prima cosa da
+riverificare dal vivo.
+
+**Restano da fare**:
 
 1. la **quantità realmente comprata** e il formato della confezione sulla
    voce della lista della spesa (punti 1 e 2 di "Cosa manca"): finché non ci
-   sono, in dispensa entra la quantità che serviva, non quella che si è
-   presa davvero;
-2. la **sottrazione delle scorte** dal fabbisogno della lista
-   (`calcola_fresche`): cambia il cuore di un'aggregazione collaudata e in
-   produzione, quindi è un blocco a sé con il suo collaudo dal vivo;
-3. lo **scarico al consumo** di un pasto del planner;
-4. gli **avvisi di scadenza**, quando esisterà l'infrastruttura dei reminder
+   sono, in casa entra la quantità che serviva, non quella che si è presa
+   davvero — si corregge a mano con `✏️ Quantità`;
+2. gli **avvisi di scadenza**, quando esisterà l'infrastruttura dei reminder
    (`docs/previsto/reminder.md`).

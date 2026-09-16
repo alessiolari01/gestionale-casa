@@ -2,6 +2,71 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_COLLAUDO_SCORTE_20260917 -->
+# 17/09/2026 — Lista al netto delle scorte, aggiornamento con resoconto, scorte che si consumano coi pasti, date leggibili
+
+Dal collaudo dal vivo di Alessio della chiusura della spesa e delle scorte
+(16 settembre), più le richieste arrivate durante il collaudo. Una migration
+nuova (`migrations/20260917090000_scorte_netto_e_aggiornamento.sql`).
+Principio dichiarato da Alessio: tutto il più automatico possibile, ma
+correggibile a mano.
+
+**Difetti trovati dal collaudo**
+
+- **Chiudendo la spesa la roba comprata ricompariva subito** (blocco A): il
+  ricalcolo dopo la chiusura rigenerava le voci dei pasti ancora pianificati,
+  perché la riga comprata, archiviata, non le copriva più. Risolto alla
+  radice con la lista **al netto delle scorte** (sotto): chiudendo, la roba
+  esce dalla lista ed entra in casa, e il totale sottratto non cambia.
+- **Il riordino sembrava morto su una voce spuntata**: sul database reale due
+  voci avevano la stessa posizione, e scambiare due posizioni uguali non
+  sposta niente. Le produceva il ricalcolo. Ora `aggiorna_lista` rinumera
+  sempre da 1, e la migration ha ripulito i dati esistenti.
+- **L'avviso dell'inizio nel passato arrivava troppo tardi** (blocco B):
+  ora compare al tocco del giorno, con `✅ Tienila` / `📅 Scegli un'altra
+  data`; l'avviso finale è stato tolto.
+- **Scorte uguali in righe separate** (blocco D): ora si sommano entrando,
+  e l'elenco mostra una riga per alimento con le singole confezioni (e le
+  loro scadenze) nel dettaglio.
+- Trovati da me: "voci archiviate nell'archivio" riscritto; l'eccesso nella
+  lista mostrava il numero senza l'unità, al contrario della documentazione.
+
+**Richieste nuove**
+
+- **Lista al netto di quello che c'è in casa**: fabbisogno dei pasti meno
+  dispensa/frigo/freezer meno quanto già spuntato. Un prodotto in casa copre
+  l'alimento generico, non il contrario.
+- **Aggiornamento automatico con resoconto**: preferenza per persona, attiva
+  di default. La lista si allinea da sola all'apertura — aggiungendo,
+  togliendo, alzando e abbassando — e dice **sempre** cosa ha cambiato
+  (`🔄 Aggiornata da sola: +1 nuova, 2 tolte…`, dettaglio riga per riga con
+  il motivo in `📋 Ultimi cambiamenti`, salvato a database). Nato da una
+  despunta che aveva svuotato la lista senza dire niente: con la preferenza
+  spenta, la despunta non ricalcola più.
+- **Ogni cosa nel suo posto**: chiudendo la spesa la roba entra in dispensa,
+  frigo o freezer secondo la scelta fatta a mano (`📌 Mettilo sempre qui`,
+  per spazio), poi il nome (surgelati in freezer, patate fuori dal frigo,
+  frutti di bosco in frigo…), poi la categoria.
+- **Le scorte si consumano coi pasti**: `🍳 Segna come preparato` nel
+  planner (non un nuovo stato del pasto), il consumo, o da sole a orario
+  passato — una volta sola per pasto, prima le confezioni che scadono prima.
+  Un pasto saltato dopo lo scarico automatico **restituisce tutto com'era**;
+  uno modificato restituisce e ricalcola.
+- **`🔁 Sostituisci` un pasto consumato** con quello mangiato davvero: il
+  vecchio restituisce le scorte e sparisce, il nuovo nasce consumato.
+- **Ricette con quello che ho**: ordinate da quella per cui hai più
+  ingredienti in casa, da `🥫 Scorte` e da `🍳 Ricette`.
+- **Pulsante `📅 Planner` nella lista della spesa**, con la settimana che
+  ricorda di arrivare dalla lista (C3) e senza giri infiniti fra le due.
+- **Date leggibili in tutto il bot** (nuova convenzione **C17**): `Mer 16
+  Set → Dom 20 Set`, anno solo fuori dall'anno in corso.
+
+Un difetto trovato dai test prima di arrivare al bot: le regole per nome
+mandavano i "pomodori ciliegini" in frigo come ciliegie.
+
+13 nuovi test (419; 406 prima). Rimandati al prossimo giro, con domande
+aperte ad Alessio: Documenti, Promemoria, Palestra, Soldi.
+
 <!-- CHANGELOG_DISPENSA_20260916 -->
 # 16/09/2026 — Scorte: dispensa, frigo e freezer
 

@@ -292,6 +292,11 @@ struct PlannerDraft {
     // (punto 4): letto da `handle_message`, che non ha altrimenti nessuno
     // stato testuale nel flusso del planner.
     orario_in_attesa: bool,
+    // 17 settembre 2026, chiesto da Alessio: il pasto già consumato che
+    // questo nuovo pasto sostituisce ("🔁 Sostituisci" — "avevo pianificato
+    // la pasta, ho mangiato la pizza"). Al salvataggio il vecchio sparisce
+    // restituendo le sue scorte, e il nuovo nasce già consumato.
+    sostituisce: Option<i64>,
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -377,6 +382,10 @@ struct PlannerMealDetail {
     current_recipe_version: Option<String>,
     // Punto 4 del collaudo dell'11 settembre 2026.
     orario: Option<String>,
+    // 17 settembre 2026: scarico delle scorte.
+    prepared_at: Option<String>,
+    stock_used_at: Option<String>,
+    stock_used_automatically: bool,
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -391,6 +400,9 @@ struct PlannerMealDetailRow {
     recipe_snapshot_version: Option<String>,
     current_recipe_version: Option<String>,
     orario: Option<String>,
+    prepared_at: Option<String>,
+    stock_used_at: Option<String>,
+    stock_used_automatically: i64,
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -508,6 +520,70 @@ pub async fn handle_callback(
         planner_show_menu(bot, chat_id, pool).await?;
         return Ok(true);
     }
+    // Ingressi che dicono da dove si arriva, per `⬅️ Indietro` (C3): dal
+    // menù Alimentazione si riparte da zero, dalla lista della spesa si
+    // torna alla lista.
+    if data == "planner:menu:alimentazione" {
+        planner_origine_set(chat_id.0, None);
+        planner_clear_draft(chat_id.0);
+        planner_show_menu(bot, chat_id, pool).await?;
+        return Ok(true);
+    }
+    if data == "planner:menu:lista" {
+        planner_origine_set(chat_id.0, Some("lista"));
+        planner_clear_draft(chat_id.0);
+        planner_show_menu(bot, chat_id, pool).await?;
+        return Ok(true);
+    }
+    if let Some(raw_id) = data.strip_prefix("planner:prepare:") {
+        let Some(meal_id) = planner_positive_i64(raw_id) else {
+            planner_invalid(bot, chat_id).await?;
+            return Ok(true);
+        };
+        match planner_prepare_meal(pool, meal_id).await {
+            Ok(_) => {
+                planner_show_meal_detail(
+                    bot,
+                    chat_id,
+                    pool,
+                    meal_id,
+                    Some("🍳 Pasto segnato come preparato: gli ingredienti sono usciti dalle scorte."),
+                )
+                .await?;
+            }
+            Err(error) => {
+                bot.send_message(chat_id, format!("⚠️ {error}"))
+                    .reply_markup(planner_nav_markup("planner:menu"))
+                    .await?;
+            }
+        }
+        return Ok(true);
+    }
+    if let Some(raw_id) = data.strip_prefix("planner:replace:") {
+        let Some(meal_id) = planner_positive_i64(raw_id) else {
+            planner_invalid(bot, chat_id).await?;
+            return Ok(true);
+        };
+        match planner_load_replace_draft(pool, meal_id).await {
+            Ok(Some(draft)) => {
+                let date = draft.date.clone();
+                planner_set_draft(chat_id.0, draft);
+                planner_show_type_picker(
+                    bot,
+                    chat_id,
+                    &date,
+                    Some("🔁 Sostituisci pasto — scegli quello che hai mangiato davvero"),
+                )
+                .await?;
+            }
+            _ => {
+                bot.send_message(chat_id, "⚠️ Si può sostituire solo un pasto consumato.")
+                    .reply_markup(planner_nav_markup("planner:menu"))
+                    .await?;
+            }
+        }
+        return Ok(true);
+    }
     if let Some(mese) = data.strip_prefix("planner:cal:") {
         planner_clear_draft(chat_id.0);
         match planner_parse_month(mese) {
@@ -552,6 +628,7 @@ pub async fn handle_callback(
                 orario: None,
                 ignora_avviso_turno: false,
                 orario_in_attesa: false,
+                sostituisce: None,
             },
         );
         planner_show_type_picker(bot, chat_id, date, None).await?;
@@ -849,14 +926,23 @@ pub async fn handle_callback(
         };
         match planner_skip_meal(pool, meal_id).await {
             Ok(()) => {
-                planner_show_meal_detail(
-                    bot,
-                    chat_id,
-                    pool,
-                    meal_id,
-                    Some("⏭ Pasto segnato come saltato."),
-                )
-                .await?;
+                // Se le scorte erano già state scalate da sole a orario
+                // passato, tornano esattamente com'erano (chiesto da Alessio
+                // il 17 settembre 2026). Uno scarico fatto a mano con
+                // "🍳 Preparato" resta: il cibo è stato usato comunque.
+                let rimesse =
+                    crate::modules::dispensa::restituisci_scorte_pasto(pool, meal_id, true)
+                        .await
+                        .unwrap_or_else(|error| {
+                            tracing::warn!(?error, meal_id, "Restituzione scorte fallita");
+                            0
+                        });
+                let notice = if rimesse > 0 {
+                    "⏭ Pasto segnato come saltato. Gli ingredienti sono tornati nelle scorte."
+                } else {
+                    "⏭ Pasto segnato come saltato."
+                };
+                planner_show_meal_detail(bot, chat_id, pool, meal_id, Some(notice)).await?;
             }
             Err(error) => {
                 bot.send_message(chat_id, format!("⚠️ {error}"))
@@ -873,6 +959,13 @@ pub async fn handle_callback(
         };
         match planner_complete_meal(pool, meal_id).await {
             Ok(()) => {
+                // Consumato senza essere passato da "preparato": le scorte si
+                // scalano adesso (se erano già scalate, non succede niente).
+                if let Err(error) =
+                    crate::modules::dispensa::scala_scorte_per_pasto(pool, meal_id, false).await
+                {
+                    tracing::warn!(?error, meal_id, "Scarico scorte al consumo fallito");
+                }
                 planner_show_meal_detail(
                     bot,
                     chat_id,
@@ -1038,14 +1131,26 @@ async fn planner_show_week(
     // lista riporta qui e non al menù Alimentazione (C3).
     // Il badge "🆕" (C14) accompagna ogni passaggio reale del percorso, non
     // solo quello che parte dal menù principale.
+    // Se al planner si è arrivati dalla lista, il pulsante della lista ci
+    // torna e basta (e così fa `⬅️ Indietro`): aprirla di nuovo "dal
+    // planner" farebbe nascere un giro lista → planner → lista senza fine.
+    let dalla_lista = planner_origine_di(chat_id.0).as_deref() == Some("lista");
     rows.push(vec![planner_button(
         crate::modules::novita::etichetta_con_badge(
             "🛒 Lista della spesa",
             planner_badge_lista_spesa(pool).await,
         ),
-        "lista_spesa:menu:planner",
+        if dalla_lista {
+            "lista_spesa:back"
+        } else {
+            "lista_spesa:menu:planner"
+        },
     )]);
-    rows.push(planner_global_nav("food:menu"));
+    rows.push(planner_global_nav(if dalla_lista {
+        "lista_spesa:back"
+    } else {
+        "food:menu"
+    }));
 
     bot.send_message(chat_id, text)
         .reply_markup(InlineKeyboardMarkup::new(rows))
@@ -1572,12 +1677,26 @@ async fn planner_commit_save(
         return Ok(());
     }
     match planner_save_draft(pool, &draft).await {
-        Ok(_meal_id) => {
+        Ok(meal_id) => {
             planner_clear_draft(chat_id.0);
-            let notice = if draft.meal_id.is_some() {
-                "✅ Pasto aggiornato."
-            } else {
-                "✅ Pasto aggiunto al Planner."
+            let notice = match (draft.meal_id, draft.sostituisce) {
+                (_, Some(vecchio_id)) => {
+                    match planner_completa_sostituzione(pool, vecchio_id, meal_id).await {
+                        Ok(()) => "🔁 Pasto sostituito: le scorte sono state ricalcolate.",
+                        Err(error) => {
+                            tracing::warn!(?error, vecchio_id, meal_id, "Sostituzione fallita");
+                            "⚠️ Il nuovo pasto è salvato, ma non sono riuscito a togliere quello vecchio: controlla il giorno."
+                        }
+                    }
+                }
+                (Some(_), None) => {
+                    if let Err(error) = planner_riallinea_scorte_dopo_modifica(pool, meal_id).await
+                    {
+                        tracing::warn!(?error, meal_id, "Riallineamento scorte fallito");
+                    }
+                    "✅ Pasto aggiornato."
+                }
+                (None, None) => "✅ Pasto aggiunto al Planner.",
             };
             planner_show_day(bot, chat_id, pool, &draft.date, Some(notice)).await?;
         }
@@ -1666,6 +1785,17 @@ async fn planner_show_meal_detail(
     if let Some(orario) = &meal.orario {
         text.push_str(&format!("\n🕐 {orario}"));
     }
+    // 17 settembre 2026: cosa è successo alle scorte di questo pasto.
+    if meal.prepared_at.is_some() {
+        text.push_str("\n🍳 Preparato");
+    }
+    if meal.stock_used_at.is_some() {
+        text.push_str(if meal.stock_used_automatically {
+            "\n🥫 Ingredienti tolti dalle scorte da soli, a orario passato. Se lo segni saltato tornano indietro."
+        } else {
+            "\n🥫 Ingredienti tolti dalle scorte."
+        });
+    }
 
     if changed {
         text.push_str(
@@ -1696,13 +1826,30 @@ async fn planner_show_meal_detail(
                 format!("planner:complete:{}", meal.id),
             ),
         ]);
-        rows.push(vec![planner_button(
+        let mut riga = Vec::new();
+        if meal.prepared_at.is_none() {
+            riga.push(planner_button(
+                "🍳 Segna come preparato",
+                format!("planner:prepare:{}", meal.id),
+            ));
+        }
+        riga.push(planner_button(
             "⏭ Segna come saltato",
             format!("planner:skip:{}", meal.id),
-        )]);
+        ));
+        rows.push(riga);
         rows.push(vec![planner_button(
             "🗑️ Rimuovi pasto",
             format!("planner:delete:ask:{}", meal.id),
+        )]);
+    }
+    // Un pasto consumato resta congelato, ma si può sostituire con quello
+    // mangiato davvero (chiesto da Alessio il 17 settembre 2026). Per un
+    // pasto pianificato la stessa cosa è già "✏️ Modifica".
+    if meal.state == "completato" {
+        rows.push(vec![planner_button(
+            "🔁 Sostituisci",
+            format!("planner:replace:{}", meal.id),
         )]);
     }
     rows.push(planner_global_nav(&format!("planner:day:{}", meal.date)));
@@ -2419,7 +2566,169 @@ async fn planner_load_edit_draft(
         // può anche non cambiare affatto.
         ignora_avviso_turno: true,
         orario_in_attesa: false,
+        sostituisce: None,
     }))
+}
+
+/// Bozza per sostituire un pasto **già consumato** con quello mangiato
+/// davvero: stessi giorno, tipo, orario e partecipanti, ricetta da
+/// scegliere. Il pasto consumato resta congelato finché il nuovo non viene
+/// salvato davvero (`planner_commit_save`).
+async fn planner_load_replace_draft(
+    pool: &SqlitePool,
+    meal_id: i64,
+) -> anyhow::Result<Option<PlannerDraft>> {
+    let Some(meal) = planner_load_meal_detail(pool, meal_id).await? else {
+        return Ok(None);
+    };
+    if meal.state != "completato" {
+        return Ok(None);
+    }
+    let selected_profiles: Vec<i64> = sqlx::query_scalar(
+        "SELECT profilo_alimentare_id FROM planner_pasto_profili \
+         WHERE pasto_id = ? AND profilo_alimentare_id IS NOT NULL \
+         ORDER BY profilo_nome_snapshot",
+    )
+    .bind(meal_id)
+    .fetch_all(pool)
+    .await
+    .context("Impossibile leggere i partecipanti")?;
+
+    Ok(Some(PlannerDraft {
+        meal_id: None,
+        date: meal.date,
+        meal_type: MealType::from_token(&meal.meal_type),
+        recipe_id: None,
+        selected_profiles,
+        orario: meal.orario,
+        ignora_avviso_turno: true,
+        orario_in_attesa: false,
+        sostituisce: Some(meal_id),
+    }))
+}
+
+/// Segna un pasto come preparato: gli ingredienti escono dalle scorte in
+/// quel momento (se prepari lunedì sera il pranzo di martedì, la pasta
+/// sparisce lunedì). Non è un nuovo stato: il pasto resta pianificato
+/// finché non lo si consuma, così la logica di congelamento non cambia.
+async fn planner_prepare_meal(pool: &SqlitePool, meal_id: i64) -> anyhow::Result<usize> {
+    let meal = planner_load_meal_detail(pool, meal_id)
+        .await?
+        .context("Pasto non disponibile")?;
+    if meal.state != "pianificato" || meal.skipped_at.is_some() {
+        anyhow::bail!("Il pasto è già consumato o saltato");
+    }
+    if meal.prepared_at.is_some() {
+        anyhow::bail!("Il pasto è già segnato come preparato");
+    }
+    sqlx::query(
+        "UPDATE planner_pasti SET preparato_il = strftime('%Y-%m-%dT%H:%M:%fZ','now'), \
+         aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?",
+    )
+    .bind(meal_id)
+    .execute(pool)
+    .await
+    .context("Impossibile segnare il pasto come preparato")?;
+    // Se l'orario era già passato e le scorte erano già state scalate in
+    // automatico, quello scarico diventa "a mano": il cibo è stato usato
+    // davvero, e saltare il pasto non deve più restituirlo.
+    if meal.stock_used_at.is_some() {
+        sqlx::query("UPDATE planner_pasti SET scorte_scalate_automaticamente = 0 WHERE id = ?")
+            .bind(meal_id)
+            .execute(pool)
+            .await
+            .context("Impossibile aggiornare lo scarico delle scorte")?;
+        sqlx::query(
+            "UPDATE scorte_movimenti SET automatico = 0 \
+             WHERE pasto_id = ? AND restituito_il IS NULL",
+        )
+        .bind(meal_id)
+        .execute(pool)
+        .await
+        .context("Impossibile aggiornare i prelievi")?;
+        return Ok(0);
+    }
+    crate::modules::dispensa::scala_scorte_per_pasto(pool, meal_id, false).await
+}
+
+/// Dopo aver cambiato un pasto (ricetta, partecipanti) le scorte che aveva
+/// già preso non corrispondono più: tornano tutte in casa, e se il pasto
+/// era stato preparato si riscalano subito con gli ingredienti nuovi. Uno
+/// scarico automatico invece si rifà da solo alla prossima apertura della
+/// lista o delle scorte, se l'orario è ancora passato.
+async fn planner_riallinea_scorte_dopo_modifica(
+    pool: &SqlitePool,
+    meal_id: i64,
+) -> anyhow::Result<()> {
+    let Some(meal) = planner_load_meal_detail(pool, meal_id).await? else {
+        return Ok(());
+    };
+    if meal.stock_used_at.is_none() {
+        return Ok(());
+    }
+    crate::modules::dispensa::restituisci_scorte_pasto(pool, meal_id, false).await?;
+    if meal.prepared_at.is_some() {
+        crate::modules::dispensa::scala_scorte_per_pasto(pool, meal_id, false).await?;
+    }
+    Ok(())
+}
+
+/// Chiude una sostituzione di un pasto consumato ("🔁 Sostituisci"): il
+/// nuovo pasto è già salvato come pianificato; qui il vecchio restituisce
+/// le sue scorte e sparisce, e il nuovo diventa consumato scalando le sue.
+///
+/// È l'unico punto del bot che elimina un pasto consumato, e lo fa solo su
+/// richiesta esplicita: il congelamento serve a non riscrivere la storia
+/// per sbaglio, non a impedire di correggerla ("avevo pianificato la
+/// pasta, ho mangiato la pizza").
+async fn planner_completa_sostituzione(
+    pool: &SqlitePool,
+    vecchio_id: i64,
+    nuovo_id: i64,
+) -> anyhow::Result<()> {
+    crate::modules::dispensa::restituisci_scorte_pasto(pool, vecchio_id, false).await?;
+    sqlx::query("DELETE FROM planner_pasti WHERE id = ? AND stato = 'completato'")
+        .bind(vecchio_id)
+        .execute(pool)
+        .await
+        .context("Impossibile togliere il pasto sostituito")?;
+    planner_complete_meal(pool, nuovo_id).await?;
+    crate::modules::dispensa::scala_scorte_per_pasto(pool, nuovo_id, false).await?;
+    Ok(())
+}
+
+/// Da dove si è arrivati al planner: solo la lista della spesa lo cambia
+/// (17 settembre 2026, pulsante "📅 Planner" nella lista), così
+/// `⬅️ Indietro` nella settimana torna lì invece che al menù Alimentazione
+/// (C3). Un ingresso da "🍽️ Alimentazione" lo azzera.
+static PLANNER_ORIGINI: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<i64, String>>,
+> = std::sync::OnceLock::new();
+
+fn planner_origini() -> &'static std::sync::Mutex<std::collections::HashMap<i64, String>> {
+    PLANNER_ORIGINI.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+fn planner_origine_set(chat_id: i64, origine: Option<&str>) {
+    let mut mappa = planner_origini()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    match origine {
+        Some(origine) => {
+            mappa.insert(chat_id, origine.to_string());
+        }
+        None => {
+            mappa.remove(&chat_id);
+        }
+    }
+}
+
+fn planner_origine_di(chat_id: i64) -> Option<String> {
+    planner_origini()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(&chat_id)
+        .cloned()
 }
 
 async fn planner_load_meal_detail(
@@ -2430,7 +2739,7 @@ async fn planner_load_meal_detail(
     let user_id = actor.utente_id.context("Utente non disponibile")?;
 
     let row: Option<PlannerMealDetailRow> = sqlx::query_as(
-        "SELECT pp.id, pp.data_pasto AS date, pp.tipo_pasto AS meal_type, pp.ricetta_id AS recipe_id,                 pp.ricetta_nome_snapshot AS recipe_name, pp.stato AS state, pp.saltato_il AS skipped_at,                 pp.ricetta_aggiornato_il_snapshot AS recipe_snapshot_version,                 (SELECT r.aggiornato_il FROM ricette r WHERE r.id = pp.ricetta_id) AS current_recipe_version,                 pp.orario AS orario          FROM planner_pasti pp          JOIN planner_alimentari p ON p.id = pp.planner_id          WHERE pp.id = ?            AND p.spazio_id = ?            AND p.archiviato = 0            AND EXISTS (                SELECT 1 FROM membri_spazio ms                WHERE ms.spazio_id = p.spazio_id AND ms.utente_id = ?            )",
+        "SELECT pp.id, pp.data_pasto AS date, pp.tipo_pasto AS meal_type, pp.ricetta_id AS recipe_id,                 pp.ricetta_nome_snapshot AS recipe_name, pp.stato AS state, pp.saltato_il AS skipped_at,                 pp.ricetta_aggiornato_il_snapshot AS recipe_snapshot_version,                 (SELECT r.aggiornato_il FROM ricette r WHERE r.id = pp.ricetta_id) AS current_recipe_version,                 pp.orario AS orario, pp.preparato_il AS prepared_at,                 pp.scorte_scalate_il AS stock_used_at,                 pp.scorte_scalate_automaticamente AS stock_used_automatically          FROM planner_pasti pp          JOIN planner_alimentari p ON p.id = pp.planner_id          WHERE pp.id = ?            AND p.spazio_id = ?            AND p.archiviato = 0            AND EXISTS (                SELECT 1 FROM membri_spazio ms                WHERE ms.spazio_id = p.spazio_id AND ms.utente_id = ?            )",
     )
     .bind(meal_id)
     .bind(actor.spazio_id)
@@ -2450,6 +2759,9 @@ async fn planner_load_meal_detail(
         recipe_snapshot_version: row.recipe_snapshot_version,
         current_recipe_version: row.current_recipe_version,
         orario: row.orario,
+        prepared_at: row.prepared_at,
+        stock_used_at: row.stock_used_at,
+        stock_used_automatically: row.stock_used_automatically != 0,
     }))
 }
 
@@ -2592,7 +2904,7 @@ mod telegram_tests {
     fn data_iso_e_formattazione_italiana() {
         assert!(calendario::valid_date("2026-08-31"));
         assert!(!calendario::valid_date("31/08/2026"));
-        assert_eq!(calendario::display_date("2026-08-31"), "31/08/2026");
+        assert_eq!(calendario::data_leggibile("2026-08-31", 2026), "Lun 31 Ago");
     }
 
     /// La validazione ora e' semantica, non piu' di sola forma: prima queste
@@ -2731,13 +3043,13 @@ mod telegram_tests {
     #[test]
     fn giorni_abbreviati_e_date_senza_anno() {
         let attesi = [
-            ("2026-08-31", "Lun", "31/08"),
-            ("2026-09-01", "Mar", "01/09"),
-            ("2026-09-02", "Mer", "02/09"),
-            ("2026-09-03", "Gio", "03/09"),
-            ("2026-09-04", "Ven", "04/09"),
-            ("2026-09-05", "Sab", "05/09"),
-            ("2026-09-06", "Dom", "06/09"),
+            ("2026-08-31", "Lun", "31 Ago"),
+            ("2026-09-01", "Mar", "1 Set"),
+            ("2026-09-02", "Mer", "2 Set"),
+            ("2026-09-03", "Gio", "3 Set"),
+            ("2026-09-04", "Ven", "4 Set"),
+            ("2026-09-05", "Sab", "5 Set"),
+            ("2026-09-06", "Dom", "6 Set"),
         ];
         for (data, giorno, breve) in attesi {
             assert_eq!(calendario::weekday_short(data), giorno);

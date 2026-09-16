@@ -1706,13 +1706,98 @@ confermati nel log di avvio. **Collaudo dal vivo su Telegram ancora da
 fare**, sia per queste novità sia per le correzioni del 10 settembre alla
 lista della spesa e per il punto 13 dei turni.
 
+## 2decies. Dal collaudo della spesa e delle scorte: netto, resoconto, scarico coi pasti (17 settembre 2026)
+
+Alessio ha collaudato dal vivo la sezione 2nonies e, durante il collaudo, ha
+chiesto altro. Tutto discusso con lui prima di scrivere codice; dove ha detto
+"scegli tu" la scelta è motivata nei documenti dei moduli. Dettaglio in
+`docs/moduli/lista-spesa.md`, `docs/moduli/dispensa.md`,
+`docs/moduli/planner.md`, `docs/moduli/ricette.md` e nella nuova convenzione
+**C17** (date leggibili). Una migration nuova,
+`migrations/20260917090000_scorte_netto_e_aggiornamento.sql`.
+
+**Esito del collaudo della sezione 2nonies**:
+
+- **Blocco A (chiusura)**: la roba comprata e chiusa ricompariva subito come
+  non comprata — difetto di progettazione mio, che un test del 16 settembre
+  verificava perfino come comportamento giusto. Risolto con la lista al
+  netto delle scorte.
+- **Blocco B (intervallo)**: l'avviso dell'inizio nel passato arrivava
+  troppo tardi; ora al tocco del giorno, con "tienila" o "cambiala".
+- **Blocco D (scorte)**: confezioni uguali in righe separate; ora sommate,
+  con il dettaglio delle confezioni e delle loro scadenze.
+- **Riordino di una voce spuntata "morto"**: diagnosticato leggendo una copia
+  del database reale (cancellata subito dopo) — due voci con la stessa
+  posizione. Corretto nel ricalcolo e ripulito dalla migration.
+- Blocchi C (planner → lista) ed E (correzioni del 10 settembre, turni punto
+  13): nessun difetto riportato.
+
+**Costruito**:
+
+1. **Lista al netto delle scorte** (`sottrai_scorte`), esclusi i pasti già
+   scaricati. Un prodotto in casa copre l'alimento generico, non il
+   contrario.
+2. **Aggiornamento automatico con resoconto**, preferenza per persona attiva
+   di default: all'apertura (solo se serve) e nei casi di prima; aggiunge,
+   toglie, alza, abbassa, e lo dice sempre — riepilogo in testa, dettaglio
+   con il motivo in `📋 Ultimi cambiamenti`, salvato a database. Confronta i
+   totali per alimento, così spuntare e despuntare non producono rumore.
+3. **Destinazione per alimento**: scelta a mano per spazio, poi nome, poi
+   categoria. Frutta decisa dopo una ricerca su come si conserva.
+4. **Scarico coi pasti**: `🍳 Segna come preparato` (colonna, non un nuovo
+   stato), consumato, o da solo a orario passato; una volta sola per pasto;
+   restituzione esatta se il pasto viene saltato dopo uno scarico
+   automatico, o se viene modificato. Non c'è uno scheduler: il controllo
+   gira all'apertura di lista, scorte e ricette con quello che ho.
+5. **`🔁 Sostituisci` un pasto consumato** — l'unico punto che elimina un
+   pasto consumato, solo su richiesta esplicita.
+6. **Ricette con quello che ho**, da Scorte e da Ricette.
+7. **`📅 Planner` nella lista**, con la memoria di provenienza nel planner
+   (`planner:menu:lista` / `planner:menu:alimentazione`) e senza giri
+   infiniti fra le due schermate.
+8. **Date leggibili** in tutto il bot (C17), in un punto solo
+   (`calendario::display_date`).
+9. Messaggio della chiusura riscritto; l'eccesso mostra di nuovo l'unità.
+
+**Scelte prese in autonomia** (oltre a quelle delegate da Alessio):
+
+- lo stato del pasto **non** cambia da solo a orario passato — si scalano
+  solo le scorte — per non congelare un pasto che magari è stato saltato;
+- il pasto preparato e poi saltato **non** restituisce le scorte: il cibo è
+  stato usato comunque;
+- la migration considera già scaricati i pasti dei giorni passati, per non
+  svuotare le scorte di oggi al primo avvio;
+- per un pasto pianificato "sostituire" è il `✏️ Modifica` di sempre (ora
+  con il ricalcolo delle scorte), per non avere due pulsanti per la stessa
+  cosa;
+- la preferenza "aggiornamento automatico" spenta ferma anche il ricalcolo
+  alla despunta introdotto il 9 settembre: con la preferenza spenta la lista
+  cambia solo quando lo chiede l'utente.
+
+**Un difetto trovato dai test, non dal bot**: le regole per nome mandavano i
+"pomodori ciliegini" in frigo come ciliegie; ora la verdura da tenere fuori
+viene controllata prima della frutta da frigo.
+
+13 nuovi test (5 di dominio e 4 su `sqlite::memory:` nella lista della
+spesa; nelle scorte 2 di dominio e 2 su database in più, con due test
+esistenti riscritti), per un totale di 419. Il test di chiusura del 16
+settembre che verificava la voce che ricompare ora verifica il contrario.
+
+**Scritto, collaudo dal vivo su Telegram da fare.**
+
+**Rimandato al prossimo giro, su richiesta di Alessio**: Documenti,
+Promemoria, Palestra e Soldi nel menù principale — domande aperte fatte,
+risposte da raccogliere (`docs/roadmap.md`).
+
 ## 3. Stato tecnico verificato
 
-- **52 migration** nel repository, tutte **applicate** al database reale
-  dell'S9: le ultime due (`20260916090000_lista_spesa_chiusura.sql` e
-  `20260916120000_dispensa.sql`, sezione 2nonies) il 16 settembre 2026,
-  verificato leggendo `applied_migrations=52` nel log di avvio del bot dopo
-  il deploy — non dedotto. Né il secondo giro
+- **53 migration** nel repository. Le prime 52 sono **applicate** al
+  database reale dell'S9 (le due della sezione 2nonies il 16 settembre
+  2026), verificato leggendo `applied_migrations=52` nel log di avvio del bot
+  dopo il deploy — non dedotto. **L'ultima**,
+  `20260917090000_scorte_netto_e_aggiornamento.sql` (sezione 2decies), **non
+  è ancora applicata**: il numero da leggere nel log dopo il prossimo deploy
+  è `applied_migrations=53`. Né il secondo giro
   di correzioni del 12 settembre 2026 (sezione 2septies) né le tre
   rifiniture del 13 settembre 2026 (sezione 2octies) avevano migration
   proprie: lavoravano su schema già esistente, confermato di nuovo
@@ -1720,8 +1805,9 @@ lista della spesa e per il punto 13 dei turni.
 - pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa,
   punto 1 della sezione 6): `fmt`, `check --locked`,
   `clippy --all-targets --locked -- -D warnings`, `test --locked` —
-  **406 test** (391 prima della chiusura della spesa e delle scorte del
-  16 settembre 2026 — sezione 2nonies —, 389 prima delle tre rifiniture
+  **419 test** (406 prima del giro della sezione 2decies, 391 prima della
+  chiusura della spesa e delle scorte del 16 settembre 2026 — sezione
+  2nonies —, 389 prima delle tre rifiniture
   della sezione 2octies, 385
   prima del secondo giro di
   correzioni ai turni del 12 settembre 2026, 372 prima delle tredici

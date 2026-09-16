@@ -304,6 +304,55 @@ Cosa c'è già in casa, per luogo di conservazione.
 sola in dispensa. Preferenza **per utente**, stesso schema di `vista_spazi`
 — più persone usano lo stesso bot e ciascuna decide per sé.
 
+## Step 7.4quater: netto delle scorte, resoconto, scarico al pasto (17 settembre 2026)
+
+`migrations/20260917090000_scorte_netto_e_aggiornamento.sql`. Comportamento
+in `docs/moduli/lista-spesa.md`, `docs/moduli/dispensa.md`,
+`docs/moduli/planner.md`.
+
+### `categorie_alimento.conservazione_predefinita`
+`dispensa`, `frigo` o `freezer`, `dispensa` di default. Verdure, carne,
+pesce, latticini e uova vanno in frigo. Le eccezioni per nome (surgelati,
+patate, frutti di bosco...) stanno nel codice
+(`dispensa::conservazione_da_nome`), non qui.
+
+### `scorte_destinazioni`
+Il posto scelto a mano ("📌 Mettilo sempre qui") per un alimento **o** un
+prodotto, per spazio: il catalogo globale è condiviso, e scriverci sopra
+cambierebbe il posto per tutti. Un CHECK impone esattamente uno dei due id;
+due indici unique parziali ne tengono uno per spazio.
+
+### `preferenze_utente.lista_spesa_aggiornamento_automatico`
+`1` di default: la lista si aggiorna da sola all'apertura, dicendo cosa ha
+cambiato. Per utente, come `dispensa_ingresso_automatico`.
+
+### `liste_spesa_aggiornamenti` e `liste_spesa_modifiche`
+Il resoconto di ogni aggiornamento che ha cambiato qualcosa: chi, se
+automatico, quando (`avvenuto_il_locale`, già nell'ora del telefono), e una
+riga per voce (`tipo` aggiunta/tolta/aumentata/ridotta, quantità prima e
+dopo, `motivo` per le voci calate o sparite). Le modifiche non si riscrivono
+(trigger `trg_lista_spesa_modifica_immutabile`).
+
+### `planner_pasti`: `preparato_il`, `scorte_scalate_il`, `scorte_scalate_automaticamente`
+Il pasto preparato (non un nuovo stato: `stato` resta `pianificato`),
+quando le sue scorte sono state scalate (una volta sola), e se da solo a
+orario passato — solo quello si restituisce se il pasto viene saltato. I
+trigger di congelamento dei pasti completati e saltati non elencano queste
+colonne, quindi restano aggiornabili. La migration segna come già scalati i
+pasti dei giorni passati: sono storia precedente alla funzione.
+
+### `scorte_movimenti`
+Ogni prelievo di un pasto dalle scorte, con i dati della confezione (posto,
+alimento, prodotto, unità, scadenza), per poterlo restituire com'era anche
+se nel frattempo la confezione è finita e sparita. `restituito_il` segna la
+restituzione.
+
+### `liste_spesa_voci.ordinamento`: posizioni doppie ripulite
+La migration rinumera le voci di ogni lista da 1, mantenendo l'ordine
+visibile (`ROW_NUMBER() OVER (PARTITION BY lista_id ...)`): sul database
+reale due voci avevano la stessa posizione e il riordino non riusciva a
+scambiarle. Da qui in avanti ci pensa `aggiorna_lista`.
+
 ## Step 7.4bis: Turni e routine (prima fetta, 10 settembre 2026)
 
 Nuove tabelle di `migrations/20260910120000_turni_e_routine.sql`, dominio e

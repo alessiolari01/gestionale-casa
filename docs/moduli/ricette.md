@@ -194,7 +194,8 @@ Menu Ricette:
 ├── 📋 Elenco ricette
 ├── ➕ Nuova ricetta
 ├── 🔎 Cerca
-└── 🥕 Cerca per ingredienti
+├── 🥕 Cerca per ingredienti
+└── 🥫 Con quello che ho in casa      (17 settembre 2026)
 ```
 
 Gli elenchi usano 5 ricette per pagina e il pulsante centrale pagina/totale è
@@ -225,6 +226,17 @@ Ricetta C → 1/3
 
 A parità vengono usati nome ricetta e ID interno stabile; l'ID non viene
 mostrato all'utente.
+
+## Con quello che ho in casa (17 settembre 2026)
+
+Stessa idea della ricerca per ingredienti, ma gli ingredienti non si
+scrivono: sono **quelli che ci sono già in dispensa, frigo e freezer**.
+Chiesto da Alessio: le ricette ordinate da quella per cui hai più
+ingredienti a quella per cui ne hai meno, con il conteggio sul pulsante
+(`Carbonara · 3/5`). La schermata vive in `src/modules/dispensa.rs`
+(`ricette_con_quello_che_ho`), che conosce le scorte; il pulsante è qui e
+anche in `🥫 Scorte`, e `⬅️ Indietro` torna da dove si è arrivati. Dettagli
+in `docs/moduli/dispensa.md`.
 
 ## Compatibilità alimentare
 

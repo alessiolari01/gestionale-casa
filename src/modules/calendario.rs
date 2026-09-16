@@ -100,22 +100,71 @@ pub fn weekday_short(date: &str) -> &'static str {
     }
 }
 
-/// `GG/MM/AAAA`, la forma con cui le date si leggono in italiano.
-pub fn display_date(value: &str) -> String {
-    if valid_date(value) {
-        format!("{}/{}/{}", &value[8..10], &value[5..7], &value[..4])
+const MESI_BREVI: [&str; 12] = [
+    "Gen", "Feb", "Mar", "Apr", "Mag", "Giu", "Lug", "Ago", "Set", "Ott", "Nov", "Dic",
+];
+
+/// `Mer 16 Set`, e `Mer 16 Set 2027` solo quando l'anno non è quello in
+/// corso.
+///
+/// Chiesto da Alessio il 16 settembre 2026 guardando la lista della spesa:
+/// `16/09/2026 → 20/09/2026` si legge, `Mer 16 Set → Dom 20 Set` si capisce
+/// al volo — il giorno della settimana è quello che serve davvero per
+/// organizzarsi. L'anno ripetuto su ogni data dell'anno in corso non
+/// distingue niente; su una data di un altro anno, invece, senza sarebbe
+/// ambigua.
+///
+/// Funzione pura: l'anno di riferimento arriva da fuori, così i test non
+/// dipendono dall'anno in cui girano.
+pub fn data_leggibile(value: &str, anno_corrente: i32) -> String {
+    let Some(parsed) = parse_date(value) else {
+        return value.to_string();
+    };
+    let base = format!(
+        "{} {} {}",
+        weekday_short(value),
+        parsed.day(),
+        MESI_BREVI[parsed.month0() as usize]
+    );
+    if parsed.year() == anno_corrente {
+        base
     } else {
-        value.to_string()
+        format!("{base} {}", parsed.year())
     }
 }
 
-/// `GG/MM`. Dentro una settimana o un mese l'anno è lo stesso su tutte le
-/// righe: ripeterlo costa spazio e non distingue niente.
+/// L'anno in corso, dall'orologio del sistema.
+///
+/// È l'anno in UTC, non quello locale: `chrono` qui è senza la funzione
+/// orologio (vedi l'intestazione del modulo), e il fuso orario del telefono
+/// lo conosce solo SQLite. La differenza esiste solo fra le 23 e mezzanotte
+/// del 31 dicembre, e l'effetto sarebbe mostrare o nascondere l'anno su una
+/// data: non vale una query per ogni data mostrata.
+pub fn anno_corrente() -> i32 {
+    let secondi = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|durata| durata.as_secs())
+        .unwrap_or(0);
+    NaiveDate::from_ymd_opt(1970, 1, 1)
+        .and_then(|epoca| epoca.checked_add_days(Days::new(secondi / 86_400)))
+        .map(|oggi| oggi.year())
+        .unwrap_or(1970)
+}
+
+/// La forma con cui le date si mostrano in tutto il bot: vedi
+/// `data_leggibile`. Una stringa che non è una data resta com'è.
+pub fn display_date(value: &str) -> String {
+    data_leggibile(value, anno_corrente())
+}
+
+/// `16 Set`. Dentro una settimana o un mese l'anno è lo stesso su tutte le
+/// righe: ripeterlo costa spazio e non distingue niente. Il giorno della
+/// settimana lo aggiunge chi lo serve (`weekday_short`), perché le righe dei
+/// giorni del planner lo mettono in testa.
 pub fn display_day_month(value: &str) -> String {
-    if valid_date(value) {
-        format!("{}/{}", &value[8..10], &value[5..7])
-    } else {
-        value.to_string()
+    match parse_date(value) {
+        Some(parsed) => format!("{} {}", parsed.day(), MESI_BREVI[parsed.month0() as usize]),
+        None => value.to_string(),
     }
 }
 
@@ -484,8 +533,11 @@ mod tests {
         for value in ["2026-02-30", "2026-13-01", "2026-00-10", "31/08/2026", ""] {
             assert!(!valid_date(value), "{value}");
         }
-        assert_eq!(display_date("2026-08-31"), "31/08/2026");
-        assert_eq!(display_day_month("2026-08-31"), "31/08");
+        assert_eq!(data_leggibile("2026-08-31", 2026), "Lun 31 Ago");
+        // Un altro anno si dichiara, altrimenti la data sarebbe ambigua.
+        assert_eq!(data_leggibile("2027-01-04", 2026), "Lun 4 Gen 2027");
+        assert_eq!(data_leggibile("boh", 2026), "boh");
+        assert_eq!(display_day_month("2026-08-31"), "31 Ago");
         assert_eq!(shift_date("2026-12-31", 1).as_deref(), Some("2027-01-01"));
         assert_eq!(
             week_start_for_date("2026-09-06").as_deref(),

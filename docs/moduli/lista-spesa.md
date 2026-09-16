@@ -27,9 +27,13 @@ vivo**. Resta non ancora collaudato anche il profilo alimentare automatico
 questo modulo direttamente).
 **Il 16 settembre 2026** sono arrivate tre aggiunte chieste da Alessio —
 chiusura della spesa, intervallo che parte sempre almeno da oggi, accesso
-dalla schermata Settimana del planner — descritte nelle sezioni dedicate più
-sotto: **scritte e testate in locale, non ancora collaudate dal vivo**,
-insieme alle correzioni del 10 settembre.
+dalla schermata Settimana del planner — distribuite lo stesso giorno e
+collaudate dal vivo in parte. Da quel collaudo è nato **il giro del 17
+settembre 2026**: lista al netto di quello che c'è in casa, aggiornamento
+automatico con resoconto dei cambiamenti, avviso della data passata al
+momento della scelta, pulsante per il planner, e la correzione del riordino
+(posizioni doppie). **Il giro del 17 settembre è scritto e testato in locale,
+collaudo dal vivo da fare.**
 
 `src/modules/lista_spesa.rs`, raggiungibile da
 `🍽️ Alimentazione → 🛒 Lista della spesa` oppure dal planner.
@@ -55,12 +59,17 @@ serve); se anche la fine è passata, l'intervallo riparte come quello di
 default, oggi + 6 giorni.
 
 Un inizio **precedente a oggi resta possibile** — serve a recuperare i
-pasti di ieri — ma è una scelta esplicita e viene trattata come tale: al
-momento della scelta il bot avvisa, la schermata della lista lo ripete
-sotto l'intervallo, e da quel momento lo spostamento automatico si ferma
-(colonna `liste_spesa.inizio_manuale`), perché una scelta esplicita non si
-corregge alle spalle di chi l'ha fatta. Scegliere di nuovo un inizio da
-oggi in avanti riattiva lo spostamento automatico.
+pasti di ieri — ma è una scelta esplicita e viene trattata come tale.
+**Dal 17 settembre 2026** (collaudo di Alessio, blocco B) l'avviso arriva
+**al tocco del giorno**, non più alla fine dopo aver scelto anche la data di
+fine: `⚠️ Mer 10 Set è prima di oggi.` con `✅ Tienila` (si passa alla data
+di fine) e `📅 Scegli un'altra data` (si torna al calendario). L'avviso che
+compariva alla fine è stato tolto, perché ripeteva una scelta già
+confermata; resta la riga fissa in testa alla lista, che spiega perché la
+lista non si sposta più da sola. Da quel momento lo spostamento automatico
+si ferma (colonna `liste_spesa.inizio_manuale`), perché una scelta
+esplicita non si corregge alle spalle di chi l'ha fatta. Scegliere di nuovo
+un inizio da oggi in avanti lo riattiva.
 
 L'intervallo della lista **non è legato alle settimane del planner**: il
 planner crea una riga `planner_alimentari` per settimana, ma la lista
@@ -208,10 +217,14 @@ ricetta ridotta), l'utente deve poterlo sapere: `eccessi_comprati` confronta
 il fabbisogno grezzo (`fresche_grezze`, *prima* di sottrarre il comprato,
 condivisa con `calcola_fresche`) con quanto è già segnato comprato per
 quell'identità; se il comprato supera il fabbisogno, la differenza è
-l'eccesso. `calcola_eccessi` è dominio puro, testato senza database.
+l'eccesso. `calcola_eccessi` è dominio puro, testato senza database. **Dal
+17 settembre 2026** il fabbisogno con cui si confronta è quello **al netto
+delle scorte** (sezione seguente): quello che serve davvero.
 
 La lista lo mostra su ogni voce coinvolta, su una riga a parte dentro lo
-stesso pulsante (`⚠️ 150 g in eccesso` **a capo**, non accodato con " · ":
+stesso pulsante (`⚠️ 150 g in eccesso` **a capo**, non accodato con " · ".
+Fino al 17 settembre 2026 il codice mostrava il numero senza l'unità, al
+contrario di quanto scritto qui: allineato alla documentazione.
 su una riga sola Telegram tronca il testo con "…" invece di andare a capo
 da solo, visto da Alessio dal vivo — un "\n" fa occupare al pulsante una
 riga in più invece di tagliare) più un avviso generale in testa alla
@@ -219,12 +232,73 @@ schermata quando c'è almeno un eccesso — non un'azione da compiere, solo
 un'informazione: sta all'utente decidere cosa farne (usarlo comunque,
 tenerlo per un pasto futuro...).
 
-## Aggiornamento esplicito, mai automatico
+## Al netto di quello che c'è in casa (17 settembre 2026)
 
-`🔄 Aggiorna lista` ricalcola **solo** le voci `origine = 'generato' AND
-comprato = 0`: le cancella e re-inserisce da zero il risultato fresco
-dell'aggregazione. Le voci comprate (generate o manuali) e le voci manuali
-non comprate non vengono mai toccate.
+Chiesto da Alessio: la lista deve dire **quanto serve comprare davvero**,
+tenendo conto di dispensa, frigo e freezer (`docs/moduli/dispensa.md`). Il
+fabbisogno si calcola così:
+
+1. ingredienti dei pasti pianificati nell'intervallo + aggiunte dal
+   catalogo (`fresche_grezze`) — **esclusi i pasti le cui scorte sono già
+   state scalate** (preparati, o con l'orario passato): quegli ingredienti
+   sono già stati usati, non si ricomprano;
+2. **meno le scorte** dello spazio (`sottrai_scorte`, dominio puro), con la
+   solita conversione di unità. Una richiesta di un prodotto specifico si
+   copre solo con quel prodotto; una di un alimento generico con le scorte
+   generiche e poi con quelle dei suoi prodotti (la pasta De Cecco va bene
+   quando la ricetta chiede pasta), mai il contrario;
+3. **meno quanto è già spuntato comprato** in lista (`sottrai_gia_comprato`).
+
+L'ordine dei punti 2 e 3 è quello che ha risolto il difetto trovato da
+Alessio collaudando la chiusura (blocco A): una voce spuntata e non ancora
+chiusa non è ancora in casa, quindi le due sottrazioni non si sovrappongono;
+chiudendo la spesa la voce esce dalla lista ed entra nelle scorte, e il
+totale sottratto resta lo stesso. Prima la voce appena chiusa ricompariva
+subito, identica, perché il pasto che la chiedeva c'era ancora e niente la
+copriva più.
+
+## Aggiornamento automatico, con resoconto (17 settembre 2026)
+
+Nato dal collaudo: una despunta aveva fatto ripartire il ricalcolo e
+svuotato di colpo la lista, senza dire niente. Alessio ha scelto: **la lista
+si aggiorna da sola, anche togliendo e riducendo, ma dice sempre cosa ha
+cambiato.**
+
+- **Preferenza per persona**, attiva di default: `⚙️ Aggiornamento
+  automatico` (`preferenze_utente.lista_spesa_aggiornamento_automatico`).
+- **Quando**: all'apertura della lista — solo se c'è davvero qualcosa da
+  cambiare (`serve_aggiornamento`), per non riscrivere le voci a ogni tocco
+  — più i casi di prima (despunta di una voce generata, aggiunta o
+  rimozione dal catalogo, chiusura della spesa). Con la preferenza spenta la
+  despunta non ricalcola più niente: la lista cambia solo con
+  `🔄 Aggiorna lista`, che compare quando serve.
+- **Cosa dice**: in testa alla lista `🔄 Aggiornata da sola: +1 nuova, 2
+  tolte, 1 ridotta.` (`riepilogo_modifiche`), e `📋 Ultimi cambiamenti` apre
+  il dettaglio riga per riga (`riga_modifica`):
+  ```
+  ➕ 🌾 Pasta · 250 g
+  ➖ 🥩 Sovracosce · 125 g — non serve più per i pasti pianificati
+  🔽 🥛 Latte · 500 → 300 ml — ce l'hai già in casa
+  🔼 🌾 Farina · 200 → 350 g
+  ```
+- **Come si confronta** (`confronta_totali`, dominio puro): i **totali** di
+  ogni alimento prima e dopo, comprate e non comprate insieme — non le
+  singole righe. Così spuntare o togliere la spunta, che fonde o separa
+  righe dello stesso alimento senza cambiarne il totale, non produce un
+  resoconto inutile.
+- **Salvato a database** (`liste_spesa_aggiornamenti`,
+  `liste_spesa_modifiche`, deciso con Alessio): "avvisare sempre" regge male
+  se l'avviso può svanire con un riavvio del bot. Si registra solo un
+  aggiornamento che ha cambiato qualcosa. Anche `🔄 Aggiorna lista` a mano
+  registra e dice cosa ha fatto (`🔄 Lista aggiornata: …` oppure
+  `🔄 Lista già aggiornata.`).
+
+## Cosa fa un aggiornamento
+
+Un aggiornamento (automatico o con `🔄 Aggiorna lista`) ricalcola **solo** le
+voci `origine = 'generato' AND comprato = 0`: le cancella e re-inserisce da
+zero il risultato fresco dell'aggregazione. Le voci comprate (generate o
+manuali) e le voci manuali non comprate non vengono mai toccate.
 
 Se dopo un refresh serve più di un alimento già segnato comprato (es. un
 nuovo pasto pianificato che usa lo stesso ingrediente), compare una voce
@@ -270,6 +344,16 @@ un'identità davvero nuova (mai vista tra le voci generate non comprate)
 prende un ordinamento nuovo, in coda. Un refresh che non cambia nulla di
 reale, quindi, non cambia nemmeno l'ordine — coerente con `serve_aggiornamento`.
 
+**Posizioni doppie (17 settembre 2026)**: collaudando, Alessio non riusciva
+a spostare una voce spuntata. Guardando il database reale, due voci avevano
+lo **stesso** `ordinamento`: scambiare due posizioni uguali non sposta
+niente, e le frecce sembravano morte. Le produceva il refresh, che riusava
+il numero di una voce rigenerata mentre contava quelle nuove solo da quelle
+rimaste. Ora ogni `aggiorna_lista` **rinumera** tutte le voci da 1,
+mantenendo l'ordine visibile; la migration del 17 settembre ha ripulito i
+dati già esistenti. Non c'entrava lo stato comprato: il blocco a database
+sulle voci comprate non protegge la posizione.
+
 ## Rimozione di voci manuali e aggiunte dal catalogo (10 settembre 2026)
 
 Chiesto da Alessio dopo un collaudo dal vivo: prima non si poteva
@@ -314,16 +398,22 @@ conferma e poi, con `✅ Sì, chiudi la spesa`:
   ricomparirebbe il giorno dopo come se non fosse mai stata comprata. Si
   scala il comprato sulle aggiunte della stessa identità e unità, dalla più
   vecchia alla più recente, e rientra solo l'aggiunta coperta per intero;
-- ricalcola subito la lista (`aggiorna_lista`), così il fabbisogno dei
-  pasti ancora pianificati torna senza dover premere `🔄 Aggiorna lista`.
+- fa entrare in casa, ognuna nel suo posto, le voci collegate al catalogo
+  (`dispensa::ingresso_da_chiusura`, se l'ingresso automatico è acceso);
+- ricalcola subito la lista, che — al netto delle scorte appena entrate —
+  non fa ricomparire la roba comprata.
+
+Il messaggio dopo la chiusura: `✅ Spesa chiusa: 2 voci nell'archivio.` e,
+a capo, `Entrate in casa: 1 in 🧺 Dispensa, 1 in 🧊 Frigo.` (la prima
+versione diceva "voci archiviate nell'archivio", ripetizione corretta il 17
+settembre 2026).
 
 **Non è un'eliminazione**, e per questo non segue C16: le voci restano
-consultabili in `🗄 Ultima spesa chiusa` e sono la memoria di cosa è entrato
-in casa — la base su cui si appoggerà la futura dispensa
-(`docs/previsto/dispensa.md`). La conferma dice quindi cosa succede, non
-che "non si può recuperare". Una voce archiviata però non si modifica più:
-lo impedisce il trigger `trg_lista_spesa_voce_archiviata_immutabile`,
-stesso principio del congelamento di una voce comprata.
+consultabili in `🗄 Ultima spesa` e sono la memoria di cosa è entrato in
+casa. La conferma dice quindi cosa succede, non che "non si può
+recuperare". Una voce archiviata però non si modifica più: lo impedisce il
+trigger `trg_lista_spesa_voce_archiviata_immutabile`, stesso principio del
+congelamento di una voce comprata.
 
 ## Accesso dal planner (16 settembre 2026)
 
@@ -338,17 +428,41 @@ lista (riordino, rimozione, archivio, calendario) tornano con
 `lista_spesa:back`, che non tocca la provenienza: un giro dentro la lista
 non deve far dimenticare da dove si è entrati.
 
+**E il contrario (17 settembre 2026)**: la lista ha `📅 Planner`, chiesto da
+Alessio. Porta al planner con `planner:menu:lista`, così la settimana
+ricorda di arrivare dalla lista e il suo `⬅️ Indietro` (e il suo
+`🛒 Lista della spesa`) tornano qui. Se invece alla lista si era arrivati
+proprio dal planner, `📅 Planner` ci torna e basta: senza questa regola
+lista → planner → lista → planner diventava un giro senza fine, perché
+ognuno dei due avrebbe ricordato di arrivare dall'altro.
+
 ## Schermate
 
-**Principale** — intervallo, conteggio comprate/totale, avviso generale se
+**Principale** — intervallo (con le date leggibili, `Mer 17 Set → Mar 23
+Set`), eventuale riga fissa sull'inizio nel passato, eventuale resoconto
+dell'aggiornamento automatico, conteggio comprate/totale, avviso generale se
 c'è un eccesso, **tutte** le voci come pulsanti `✅`/`☐` (toggle al tocco,
 con l'eventuale eccesso sul pulsante), **senza paginazione**: eccezione
 esplicita a C6 (`docs/convenzioni-telegram.md`), l'unica lista del bot che
 mostra tutto insieme, perché l'utente deve vedere l'intera lista per
-decidere cosa prendere prima e cosa dopo. `🔄 Aggiorna lista` (solo se
-serve davvero, vedi sopra), `➕ Aggiungi voce manuale`, `↕️ Riordina lista`
-(con più di una voce), `🗑️ Rimuovi voci` (solo se c'è qualcosa da
-rimuovere), `🗓️ Cambia intervallo`.
+decidere cosa prendere prima e cosa dopo. Poi, dal 17 settembre 2026, le
+azioni a coppie per non allungare troppo la schermata:
+
+```text
+[ 🔄 Aggiorna lista ]                        solo con l'aggiornamento automatico spento, e se serve
+[ ➕ Aggiungi voce manuale ]
+[ ↕️ Riordina        | 🗑️ Rimuovi voci  ]      ciascuno solo se ha senso
+[ 🧾 Chiudi la spesa | 🗄 Ultima spesa   ]      ciascuno solo se ha senso
+[ 🗓️ Cambia intervallo | 📅 Planner      ]
+[ 📋 Ultimi cambiamenti ]                    solo se c'è un resoconto
+[ ⚙️ Aggiornamento automatico: attivo ]
+[ ⬅️ Indietro | 💡 Migliora | 🏠 Menù principale ]
+```
+
+**Ultimi cambiamenti** — il resoconto dell'ultimo aggiornamento che ha
+cambiato qualcosa: automatico o a mano, quando, e le righe una per una.
+Solo lettura, quindi l'elenco sta nel testo (C1 vieta di ripetere i
+pulsanti, non di scrivere un elenco quando i pulsanti non ci sono).
 
 **Riordina lista** — ogni voce come `⬆️ | etichetta | ⬇️`, **sempre tre
 pulsanti nello stesso ordine**: prima le frecce assenti alle estremità
@@ -378,21 +492,27 @@ quantità`. Sessione dedicata (`ListaSpesaSessionStore`, dentro
 
 **Cambia intervallo** — due passaggi sul calendario di `modules::calendario`
 (data di inizio, poi data di fine — i giorni prima dell'inizio sono
-bloccati).
+bloccati). Un inizio precedente a oggi chiede conferma subito (vedi sopra).
 
 ## Tabelle
 
 ```text
-liste_spesa                       intervallo, proprietario, spazio
+liste_spesa                       intervallo, proprietario, spazio, inizio_manuale
 liste_spesa_voci                  voci generate o manuali, comprato/comprato_il, ordinamento
 liste_spesa_aggiunte_catalogo     aggiunte dal catalogo, vive attraverso ogni refresh
+liste_spesa_chiusure              una spesa chiusa
+liste_spesa_voci_archiviate       le voci di una spesa chiusa, immutabili
+liste_spesa_aggiornamenti         un aggiornamento che ha cambiato qualcosa
+liste_spesa_modifiche             le righe del resoconto, immutabili
 ```
 
 Vedi `docs/database.md` per i campi.
 
 ## Fuori scope
 
-Non modella la dispensa, i prezzi, o la scelta del formato/confezione da
-acquistare: quello è il futuro modulo Acquisti, che dirà *quale prodotto o
-confezione comprare*, mentre questa lista dice solo *cosa serve* — vedi
-`docs/previsto/lista-della-spesa.md`, sezione "Relazione con Acquisti".
+Non modella i prezzi o la scelta del formato/confezione da acquistare:
+quello è il futuro modulo Acquisti, che dirà *quale prodotto o confezione
+comprare*, mentre questa lista dice solo *cosa serve* — vedi
+`docs/previsto/lista-della-spesa.md`, sezione "Relazione con Acquisti". Le
+scorte in casa invece le conosce, dal 17 settembre 2026
+(`docs/moduli/dispensa.md`).

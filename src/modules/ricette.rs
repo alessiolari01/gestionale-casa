@@ -2576,6 +2576,10 @@ async fn show_menu(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> ResponseRes
             button("🔎 Cerca per nome", "recipe:search"),
             button("🥕 Cerca per ingredienti", "recipe:find"),
         ],
+        // Chiesto da Alessio il 17 settembre 2026: le ricette ordinate per
+        // quanti ingredienti ci sono già in casa. La schermata vive in
+        // `dispensa.rs`, che conosce le scorte; `:r` fa tornare qui.
+        vec![button("🥫 Con quello che ho in casa", "dispensa:ricette:r")],
     ];
     if pending > 0 {
         rows.push(vec![button(
@@ -5951,6 +5955,7 @@ fn recipe_menu_keyboard() -> InlineKeyboardMarkup {
             button("🔎 Cerca per nome", "recipe:search"),
             button("🥕 Cerca per ingredienti", "recipe:find"),
         ],
+        vec![button("🥫 Con quello che ho in casa", "dispensa:ricette:r")],
         vec![
             button("⬅️ Indietro", "food:menu"),
             button("🏠 Menù principale", "menu:main"),
