@@ -1698,19 +1698,21 @@ formati, etichetta a capo, token dei luoghi — e 3 su `sqlite::memory:` —
 ciclo di vita di una scorta, ordine per scadenza, preferenza dell'ingresso
 automatico). Due migration nuove.
 
-**Scritto, collaudo dal vivo su Telegram da fare.**
+**Distribuito sull'S9 il 16 settembre 2026** (commit `c6c71d9`): CI verde
+(run #141 sul commit giusto), 406 test e clippy verdi anche sulla toolchain
+del telefono, backup del database creato e le due migration nuove provate
+prima su una copia; `applied_migrations=52` e `Gestionale Casa online`
+confermati nel log di avvio. **Collaudo dal vivo su Telegram ancora da
+fare**, sia per queste novità sia per le correzioni del 10 settembre alla
+lista della spesa e per il punto 13 dei turni.
 
 ## 3. Stato tecnico verificato
 
-- **52 migration** nel repository. Le prime 50 sono **applicate** al
-  database reale dell'S9 (l'ultima applicata,
-  `migrations/20260911090000_turni_correzioni_collaudo.sql` per le tredici
-  correzioni ai turni, l'11 settembre 2026), verificato leggendo
-  `applied_migrations=50` nel log di avvio del bot dopo il deploy — non
-  dedotto. **Le due del 16 settembre 2026**
-  (`20260916090000_lista_spesa_chiusura.sql` e `20260916120000_dispensa.sql`,
-  sezione 2nonies) **non sono ancora applicate**: il numero da leggere nel
-  log dopo il prossimo deploy è `applied_migrations=52`. Né il secondo giro
+- **52 migration** nel repository, tutte **applicate** al database reale
+  dell'S9: le ultime due (`20260916090000_lista_spesa_chiusura.sql` e
+  `20260916120000_dispensa.sql`, sezione 2nonies) il 16 settembre 2026,
+  verificato leggendo `applied_migrations=52` nel log di avvio del bot dopo
+  il deploy — non dedotto. Né il secondo giro
   di correzioni del 12 settembre 2026 (sezione 2septies) né le tre
   rifiniture del 13 settembre 2026 (sezione 2octies) avevano migration
   proprie: lavoravano su schema già esistente, confermato di nuovo
