@@ -1783,7 +1783,14 @@ spesa; nelle scorte 2 di dominio e 2 su database in più, con due test
 esistenti riscritti), per un totale di 419. Il test di chiusura del 16
 settembre che verificava la voce che ricompare ora verifica il contrario.
 
-**Scritto, collaudo dal vivo su Telegram da fare.**
+**Distribuito sull'S9 il 17 settembre 2026** (commit `73654e4`): CI verde
+(run #143 sul commit giusto), 419 test e clippy verdi anche sul telefono,
+backup del database creato, migration provata prima su una copia;
+`applied_migrations=53` e `Gestionale Casa online` confermati nel log di
+avvio. I controlli sul telefono ora girano staccati dalla sessione SSH, con
+il PID salvato: il 16 settembre una caduta della connessione durante i test
+aveva interrotto il primo tentativo. **Collaudo dal vivo su Telegram da
+fare.**
 
 **Rimandato al prossimo giro, su richiesta di Alessio**: Documenti,
 Promemoria, Palestra e Soldi nel menù principale — domande aperte fatte,
@@ -1791,13 +1798,11 @@ risposte da raccogliere (`docs/roadmap.md`).
 
 ## 3. Stato tecnico verificato
 
-- **53 migration** nel repository. Le prime 52 sono **applicate** al
-  database reale dell'S9 (le due della sezione 2nonies il 16 settembre
-  2026), verificato leggendo `applied_migrations=52` nel log di avvio del bot
-  dopo il deploy — non dedotto. **L'ultima**,
-  `20260917090000_scorte_netto_e_aggiornamento.sql` (sezione 2decies), **non
-  è ancora applicata**: il numero da leggere nel log dopo il prossimo deploy
-  è `applied_migrations=53`. Né il secondo giro
+- **53 migration** nel repository, tutte **applicate** al database reale
+  dell'S9: l'ultima (`20260917090000_scorte_netto_e_aggiornamento.sql`,
+  sezione 2decies) il 17 settembre 2026, verificato leggendo
+  `applied_migrations=53` nel log di avvio del bot dopo il deploy — non
+  dedotto. Né il secondo giro
   di correzioni del 12 settembre 2026 (sezione 2septies) né le tre
   rifiniture del 13 settembre 2026 (sezione 2octies) avevano migration
   proprie: lavoravano su schema già esistente, confermato di nuovo
