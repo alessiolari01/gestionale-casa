@@ -1871,16 +1871,20 @@ degli ingredienti delle ricette, 3 nelle scorte (mancanze, scarico con
 annotazione, trigger dei pasti), 1 nei turni, 1 nel planner. Più due test
 esistenti estesi con i nuovi callback. Totale 428.
 
-**Collaudo dal vivo su Telegram da fare.**
+**Distribuito sull'S9 il 17 settembre 2026** (commit `5448d6e`): CI verde
+(run #145 sul commit giusto), 428 test e clippy verdi anche sul telefono,
+backup del database creato (`gestionale_pre_20260917_193955.db`), migration
+provata prima su una copia; `applied_migrations=54` e `Gestionale Casa
+online` confermati nel log di avvio. **Collaudo dal vivo su Telegram da
+fare.**
 
 ## 3. Stato tecnico verificato
 
-- **54 migration** nel repository. Applicate al database reale dell'S9 le
-  prime 53: l'ultima applicata e' `20260917090000_scorte_netto_e_aggiornamento.sql`
-  (sezione 2decies), il 17 settembre 2026, verificato leggendo
-  `applied_migrations=53` nel log di avvio del bot dopo il deploy — non
-  dedotto. **Da applicare**: `20260917180000_consegna_a_pasti_e_spesa.sql`
-  (sezione 2undecies). Né il secondo giro
+- **54 migration** nel repository, tutte **applicate** al database reale
+  dell'S9: l'ultima (`20260917180000_consegna_a_pasti_e_spesa.sql`, sezione
+  2undecies) il 17 settembre 2026, verificato leggendo
+  `applied_migrations=54` nel log di avvio del bot dopo il deploy — non
+  dedotto. Né il secondo giro
   di correzioni del 12 settembre 2026 (sezione 2septies) né le tre
   rifiniture del 13 settembre 2026 (sezione 2octies) avevano migration
   proprie: lavoravano su schema già esistente, confermato di nuovo
