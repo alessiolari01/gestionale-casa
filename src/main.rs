@@ -897,6 +897,13 @@ async fn handle_authorized_message(
         return respond(());
     }
 
+    // Una foto del codice a barre nella lista della spesa: va gestita prima
+    // del controllo sul testo, perche' una foto testo non e' (18 settembre
+    // 2026).
+    if modules::lista_spesa::handle_photo(&bot, &msg, &pool, &lista_spesa_sessions).await? {
+        return respond(());
+    }
+
     let Some(text) = msg.text() else {
         if msg.photo().is_some() {
             bot.send_message(

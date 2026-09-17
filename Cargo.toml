@@ -12,12 +12,24 @@ dotenvy = "0.15"
 # Gia' nel grafo tramite teloxide-core: qui si aggiunge solo la feature
 # "json", per leggere Open Food Facts e Open Prices (consegna B).
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# Lettura del codice a barre dalla foto (18 settembre 2026): solo il
+# decodificatore 1D, senza il crate "image" e senza i suoi formati, altrimenti
+# il grafo cresce di 82 crate invece di 13 -- e a compilare e' un telefono.
+rxing = { version = "0.9.3", default-features = false, features = ["oned", "decoders", "no_character_set_support"] }
 serde_json = "1"
 sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
 teloxide = { version = "0.17", default-features = false, features = ["rustls", "ctrlc_handler"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "time", "signal"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
+url = "2.5.8"
+# Le foto di Telegram sono JPEG: questo le porta a pixel, il resto lo fa rxing.
+zune-jpeg = "0.5.15"
+
+# Solo per i test: genera un codice a barre vero da rileggere, cosi' la
+# lettura e' provata davvero e non a parole. Non entra nel binario.
+[dev-dependencies]
+rxing = { version = "0.9.3", default-features = false, features = ["oned", "decoders", "encoders", "no_character_set_support"] }
 
 # Perche' questi profili sono nel progetto e non solo in `aggiorna-s9.sh`.
 #

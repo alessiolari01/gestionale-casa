@@ -245,7 +245,7 @@ mod tests {
 
 // ===== Step 7.3B · Planner Telegram operativo =====
 
-use crate::modules::calendario;
+use crate::modules::{calendario, liste};
 use anyhow::Context as _;
 use sqlx::{FromRow, SqliteConnection, SqlitePool};
 use std::{
@@ -597,6 +597,17 @@ pub async fn handle_callback(
             return Ok(true);
         };
         planner_esegui_salto(bot, chat_id, pool, meal_id, false).await?;
+        return Ok(true);
+    }
+    // Legenda: la preferenza cambia e la schermata si ridisegna dov'era.
+    if let Some(week) = data.strip_prefix("planner:legenda:week:") {
+        liste::cambia_legenda(pool).await;
+        planner_show_week(bot, chat_id, pool, week).await?;
+        return Ok(true);
+    }
+    if let Some(date) = data.strip_prefix("planner:legenda:") {
+        liste::cambia_legenda(pool).await;
+        planner_show_day(bot, chat_id, pool, date, None).await?;
         return Ok(true);
     }
     if let Some(raw_id) = data.strip_prefix("planner:unskip:") {
@@ -1294,6 +1305,11 @@ async fn planner_show_week(
         text.push_str("\nNessun pasto pianificato in questa settimana.\nApri un giorno per aggiungerne uno.\n");
     }
 
+    let legenda = liste::legenda_attiva(pool).await;
+    if legenda {
+        text.push_str(&liste::blocco_legenda(liste::LEGENDA_PLANNER));
+    }
+
     if settimana_da_aggiornare {
         text.push_str(
             "\n🔄 In questa settimana c'è almeno una ricetta cambiata dopo la pianificazione.\n",
@@ -1337,6 +1353,10 @@ async fn planner_show_week(
         } else {
             "lista_spesa:menu:planner"
         },
+    )]);
+    rows.push(vec![liste::pulsante_legenda(
+        legenda,
+        &format!("planner:legenda:week:{week_start}"),
     )]);
     rows.push(planner_global_nav(if dalla_lista {
         "lista_spesa:back"
@@ -1575,6 +1595,12 @@ async fn planner_show_day(
         )]);
     }
 
+    // Legenda dei simboli (18 settembre 2026): accesa finché non la spegni.
+    let legenda = liste::legenda_attiva(pool).await;
+    if legenda {
+        text.push_str(&liste::blocco_legenda(liste::LEGENDA_PLANNER));
+    }
+
     rows.push(vec![planner_button(
         "➕ Nuovo pasto",
         format!("planner:add:{date}"),
@@ -1584,6 +1610,10 @@ async fn planner_show_day(
     rows.push(vec![planner_button(
         "📅 Assegna un turno a questo giorno",
         format!("turni:assignhere:{date}"),
+    )]);
+    rows.push(vec![liste::pulsante_legenda(
+        legenda,
+        &format!("planner:legenda:{date}"),
     )]);
     let week = calendario::week_start_for_date(date).unwrap_or_else(|| date.to_string());
     rows.push(planner_global_nav(&format!("planner:week:{week}")));

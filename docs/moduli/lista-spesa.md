@@ -457,6 +457,16 @@ saltare.
 Tutto il resto — negozi, prezzi per negozio, preferiti, codice a barre,
 Open Food Facts e Open Prices — è in `docs/moduli/mercato.md`.
 
+## Foto del codice a barre (18 settembre 2026)
+
+`📦 Ho preso…` → `🏷 Codice a barre` accetta **una foto** oltre alle cifre.
+La lettura è dentro il bot (`mercato::leggi_codice_da_jpeg`, che usa
+`rxing`): la foto non esce dal telefono e non serve nessun servizio esterno.
+
+Se il codice non si legge — sfocata, storta, troppo lontana — il bot lo dice
+e spiega come rifarla, invece di lasciare l'utente a indovinare. Le cifre
+scritte a mano restano sempre possibili.
+
 ## Accesso dal planner (16 settembre 2026)
 
 La schermata della settimana del planner ha un pulsante `🛒 Lista della

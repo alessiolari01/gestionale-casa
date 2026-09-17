@@ -182,6 +182,10 @@ pub struct Negozio {
     /// `1` se l'utente l'ha scelto per il confronto.
     #[sqlx(default)]
     pub scelto: i64,
+    /// `1` per un negozio creato nello spazio: solo quelli si rinominano e
+    /// si tolgono. Le catene comuni sono di tutti (18 settembre 2026).
+    #[sqlx(default)]
+    pub mio: i64,
 }
 
 /// I negozi visibili: le catene comuni più quelli creati nello spazio
@@ -191,7 +195,8 @@ pub async fn negozi_visibili(pool: &SqlitePool) -> anyhow::Result<Vec<Negozio>> 
     let user_id = actor.utente_id.context("Utente non disponibile")?;
     sqlx::query_as(
         "SELECT n.id, n.nome, \
-                CASE WHEN nc.utente_id IS NULL THEN 0 ELSE 1 END AS scelto \
+                CASE WHEN nc.utente_id IS NULL THEN 0 ELSE 1 END AS scelto, \
+                CASE WHEN n.spazio_id IS NULL THEN 0 ELSE 1 END AS mio \
          FROM negozi n \
          LEFT JOIN negozi_confronto nc ON nc.negozio_id = n.id AND nc.utente_id = ? \
          WHERE n.attivo = 1 AND (n.spazio_id IS NULL OR n.spazio_id = ?) \
@@ -214,11 +219,15 @@ pub async fn negozi_scelti(pool: &SqlitePool) -> anyhow::Result<Vec<Negozio>> {
 }
 
 pub async fn negozio_per_id(pool: &SqlitePool, negozio_id: i64) -> anyhow::Result<Option<Negozio>> {
-    sqlx::query_as("SELECT id, nome, 0 AS scelto FROM negozi WHERE id = ?")
-        .bind(negozio_id)
-        .fetch_optional(pool)
-        .await
-        .context("Impossibile leggere il negozio")
+    sqlx::query_as(
+        "SELECT id, nome, 0 AS scelto, \
+                CASE WHEN spazio_id IS NULL THEN 0 ELSE 1 END AS mio \
+         FROM negozi WHERE id = ?",
+    )
+    .bind(negozio_id)
+    .fetch_optional(pool)
+    .await
+    .context("Impossibile leggere il negozio")
 }
 
 /// Aggiunge o toglie un negozio dal confronto dell'utente. Ritorna lo stato
@@ -287,6 +296,61 @@ pub async fn crea_negozio(pool: &SqlitePool, nome: &str) -> anyhow::Result<i64> 
     .context("Impossibile creare il negozio")?
     .last_insert_rowid();
     Ok(id)
+}
+
+/// Cambia il nome di un negozio dello spazio. Le catene comuni non si
+/// toccano: sono nel catalogo condiviso, e rinominarle cambierebbe il nome
+/// a chiunque userà il bot.
+pub async fn rinomina_negozio(
+    pool: &SqlitePool,
+    negozio_id: i64,
+    nome: &str,
+) -> anyhow::Result<()> {
+    let actor = crate::identity::current_actor();
+    let nome = nome.trim();
+    anyhow::ensure!(!nome.is_empty(), "Il nome non può essere vuoto");
+    anyhow::ensure!(nome.chars().count() <= 60, "Il nome è troppo lungo");
+    let aggiornati = sqlx::query(
+        "UPDATE negozi SET nome = ?, nome_normalizzato = ? \
+         WHERE id = ? AND spazio_id = ?",
+    )
+    .bind(nome)
+    .bind(nome.to_lowercase())
+    .bind(negozio_id)
+    .bind(actor.spazio_id)
+    .execute(pool)
+    .await
+    .context("Impossibile rinominare il negozio")?
+    .rows_affected();
+    anyhow::ensure!(aggiornati == 1, "Questo negozio non si può rinominare");
+    Ok(())
+}
+
+/// Toglie un negozio dello spazio: diventa inattivo e sparisce dagli
+/// elenchi, ma **i prezzi già registrati restano** nello storico — servono
+/// ancora a capire quanto costava una cosa. Esce anche dal confronto.
+pub async fn rimuovi_negozio(pool: &SqlitePool, negozio_id: i64) -> anyhow::Result<()> {
+    let actor = crate::identity::current_actor();
+    let aggiornati = sqlx::query("UPDATE negozi SET attivo = 0 WHERE id = ? AND spazio_id = ?")
+        .bind(negozio_id)
+        .bind(actor.spazio_id)
+        .execute(pool)
+        .await
+        .context("Impossibile togliere il negozio")?
+        .rows_affected();
+    anyhow::ensure!(aggiornati == 1, "Questo negozio non si può togliere");
+    sqlx::query("DELETE FROM negozi_confronto WHERE negozio_id = ?")
+        .bind(negozio_id)
+        .execute(pool)
+        .await
+        .context("Impossibile togliere il negozio dal confronto")?;
+    // Una spesa in corso non può restare legata a un negozio che non c'è più.
+    sqlx::query("UPDATE liste_spesa SET negozio_id = NULL WHERE negozio_id = ?")
+        .bind(negozio_id)
+        .execute(pool)
+        .await
+        .context("Impossibile staccare il negozio dalle liste")?;
+    Ok(())
 }
 
 /// Registra un prezzo visto. `quantita`/`unita` sono quelle della confezione
@@ -568,6 +632,83 @@ fn client_rete() -> anyhow::Result<reqwest::Client> {
         .context("Impossibile preparare la connessione")
 }
 
+/// Legge un codice a barre da una foto (18 settembre 2026, chiesto da
+/// Alessio: "dai la possibilità di fare una foto al codice a barre").
+///
+/// Telegram non decodifica niente: il lavoro lo fa il bot, con `rxing` (il
+/// porto Rust di ZXing) su una immagine in scala di grigi. Niente rete,
+/// niente servizi esterni — la foto non esce dal telefono.
+///
+/// `Ok(None)` vuol dire "non l'ho riconosciuto": succede, ed è il caso in
+/// cui si chiede all'utente le cifre a mano.
+pub fn leggi_codice_da_jpeg(dati: &[u8]) -> anyhow::Result<Option<String>> {
+    let mut decodificatore = zune_jpeg::JpegDecoder::new(std::io::Cursor::new(dati));
+    decodificatore
+        .decode_headers()
+        .map_err(|errore| anyhow::anyhow!("Immagine non leggibile: {errore}"))?;
+    let (larghezza, altezza) = decodificatore
+        .dimensions()
+        .context("Immagine senza dimensioni")?;
+    let pixel = decodificatore
+        .decode()
+        .map_err(|errore| anyhow::anyhow!("Immagine non leggibile: {errore}"))?;
+    let luminanza = in_luminanza(&pixel, larghezza, altezza)?;
+
+    // Primo tentativo diretto; il secondo applica un filtro, che aiuta con
+    // le foto storte o poco a fuoco (è il caso normale di una foto fatta al
+    // volo nel corridoio del supermercato).
+    let formati_attesi = None;
+    if let Ok(risultato) = rxing::helpers::detect_in_luma(
+        luminanza.clone(),
+        larghezza as u32,
+        altezza as u32,
+        formati_attesi,
+    ) {
+        return Ok(pulisci_codice(risultato.getText()));
+    }
+    match rxing::helpers::detect_in_luma_filtered(
+        luminanza,
+        larghezza as u32,
+        altezza as u32,
+        formati_attesi,
+    ) {
+        Ok(risultato) => Ok(pulisci_codice(risultato.getText())),
+        Err(_) => Ok(None),
+    }
+}
+
+/// Un codice letto vale solo se è un codice da prodotto (8, 12, 13 o 14
+/// cifre): un QR con dentro un indirizzo non deve diventare un EAN.
+fn pulisci_codice(testo: &str) -> Option<String> {
+    codice_a_barre_valido(testo)
+}
+
+/// Quanto è chiaro un pixel colorato, come lo vede l'occhio (pesi BT.601).
+fn grigio(rosso: u8, verde: u8, blu: u8) -> u8 {
+    ((rosso as u32 * 299 + verde as u32 * 587 + blu as u32 * 114) / 1000) as u8
+}
+
+/// Da RGB (o grigio) a un byte di luminanza per pixel, che è quello che
+/// serve al lettore.
+fn in_luminanza(pixel: &[u8], larghezza: usize, altezza: usize) -> anyhow::Result<Vec<u8>> {
+    let attesi = larghezza * altezza;
+    match pixel.len() {
+        n if n == attesi => Ok(pixel.to_vec()),
+        n if n == attesi * 3 => Ok(pixel
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .map(|rgb| grigio(rgb[0], rgb[1], rgb[2]))
+            .collect()),
+        n if n == attesi * 4 => Ok(pixel
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|rgba| grigio(rgba[0], rgba[1], rgba[2]))
+            .collect()),
+        _ => anyhow::bail!("Formato immagine non gestito"),
+    }
+}
 // ---------------------------------------------------------------------------
 // UI Telegram
 // ---------------------------------------------------------------------------
@@ -611,10 +752,19 @@ pub async fn mostra_negozi(
         .iter()
         .map(|negozio| {
             let icona = if negozio.scelto == 1 { "✅" } else { "☐" };
-            vec![button(
+            let mut riga = vec![button(
                 format!("{icona} {}", negozio.nome),
                 format!("mercato:negozio:{}", negozio.id),
-            )]
+            )];
+            // Solo i negozi creati qui si rinominano o si tolgono: le catene
+            // comuni sono condivise con chiunque userà il bot.
+            if negozio.mio == 1 {
+                riga.push(button(
+                    "✏️",
+                    format!("mercato:negozio:gestisci:{}", negozio.id),
+                ));
+            }
+            riga
         })
         .collect();
     rows.push(vec![button(
@@ -627,6 +777,62 @@ pub async fn mostra_negozi(
     ]);
     bot.send_message(chat_id, testo)
         .reply_markup(InlineKeyboardMarkup::new(rows))
+        .await?;
+    Ok(())
+}
+
+/// La scheda di un negozio creato a mano: qui si rinomina e si toglie.
+pub async fn mostra_negozio(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    negozio_id: i64,
+    notice: Option<&str>,
+) -> ResponseResult<()> {
+    let negozio = negozio_per_id(pool, negozio_id).await.unwrap_or_default();
+    let Some(negozio) = negozio.filter(|negozio| negozio.mio == 1) else {
+        mostra_negozi(
+            bot,
+            chat_id,
+            pool,
+            Some("⚠️ Questo negozio non si può gestire."),
+        )
+        .await?;
+        return Ok(());
+    };
+    let prezzi: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM prezzi_osservati WHERE negozio_id = ?")
+            .bind(negozio_id)
+            .fetch_one(pool)
+            .await
+            .unwrap_or(0);
+    let mut testo = String::new();
+    if let Some(notice) = notice {
+        testo.push_str(notice);
+        testo.push_str("\n\n");
+    }
+    testo.push_str(&format!("🏪 {}\n", negozio.nome));
+    testo.push_str(&match prezzi {
+        0 => "\nNessun prezzo segnato qui.".to_string(),
+        1 => "\n1 prezzo segnato qui.".to_string(),
+        n => format!("\n{n} prezzi segnati qui."),
+    });
+
+    bot.send_message(chat_id, testo)
+        .reply_markup(InlineKeyboardMarkup::new(vec![
+            vec![button(
+                "✏️ Rinomina",
+                format!("lista_spesa:negozio:rinomina:{negozio_id}"),
+            )],
+            vec![button(
+                "🗑 Togli questo negozio",
+                format!("mercato:negozio:rimuovi:ask:{negozio_id}"),
+            )],
+            vec![
+                button("⬅️ Indietro", "mercato:negozi"),
+                button("🏠 Menù principale", "menu:main"),
+            ],
+        ]))
         .await?;
     Ok(())
 }
@@ -730,6 +936,55 @@ pub async fn handle_callback(
 ) -> ResponseResult<bool> {
     if data == "mercato:negozi" {
         mostra_negozi(bot, chat_id, pool, None).await?;
+        return Ok(true);
+    }
+    if let Some(raw) = data.strip_prefix("mercato:negozio:gestisci:") {
+        let Some(negozio_id) = raw.parse::<i64>().ok().filter(|v| *v > 0) else {
+            return Ok(true);
+        };
+        mostra_negozio(bot, chat_id, pool, negozio_id, None).await?;
+        return Ok(true);
+    }
+    if let Some(raw) = data.strip_prefix("mercato:negozio:rimuovi:ask:") {
+        let Some(negozio_id) = raw.parse::<i64>().ok().filter(|v| *v > 0) else {
+            return Ok(true);
+        };
+        let nome = negozio_per_id(pool, negozio_id)
+            .await
+            .unwrap_or_default()
+            .map(|negozio| negozio.nome)
+            .unwrap_or_else(|| "questo negozio".to_string());
+        // C16: sparisce dagli elenchi e non si rimette dal bot. I prezzi
+        // invece restano, e va detto qui.
+        bot.send_message(
+            chat_id,
+            format!("⚠️ Togliere {nome}?\n\nSparisce dagli elenchi e dal confronto. I prezzi che hai già segnato lì restano nello storico."),
+        )
+        .reply_markup(InlineKeyboardMarkup::new(vec![
+            vec![button(
+                "🗑 Sì, toglilo",
+                format!("mercato:negozio:rimuovi:si:{negozio_id}"),
+            )],
+            vec![
+                button("❌ Annulla", format!("mercato:negozio:gestisci:{negozio_id}")),
+                button("🏠 Menù principale", "menu:main"),
+            ],
+        ]))
+        .await?;
+        return Ok(true);
+    }
+    if let Some(raw) = data.strip_prefix("mercato:negozio:rimuovi:si:") {
+        let Some(negozio_id) = raw.parse::<i64>().ok().filter(|v| *v > 0) else {
+            return Ok(true);
+        };
+        let notice = match rimuovi_negozio(pool, negozio_id).await {
+            Ok(()) => "✅ Negozio tolto.".to_string(),
+            Err(errore) => {
+                tracing::warn!(?errore, negozio_id, "Rimozione negozio fallita");
+                format!("⚠️ {errore}")
+            }
+        };
+        mostra_negozi(bot, chat_id, pool, Some(&notice)).await?;
         return Ok(true);
     }
     if let Some(raw) = data.strip_prefix("mercato:negozio:") {
@@ -974,6 +1229,109 @@ mod db_tests {
         .await;
     }
 
+    /// La foto del codice a barre: qui il codice viene generato e riletto,
+    /// così la lettura è provata davvero. Le foto vere sono peggio di
+    /// questa immagine perfetta, ma se questo non passasse non funzionerebbe
+    /// niente.
+    #[test]
+    fn un_codice_a_barre_si_legge_dall_immagine() {
+        use rxing::{BarcodeFormat, EncodeHints, Writer};
+
+        let codice = "8001120000019";
+        let matrice = rxing::MultiFormatWriter
+            .encode_with_hints(
+                codice,
+                &BarcodeFormat::EAN_13,
+                400,
+                200,
+                &EncodeHints::default(),
+            )
+            .expect("codifica del codice di prova");
+        let (larghezza, altezza) = (matrice.getWidth(), matrice.getHeight());
+        let mut luminanza = Vec::with_capacity((larghezza * altezza) as usize);
+        for y in 0..altezza {
+            for x in 0..larghezza {
+                luminanza.push(if matrice.get(x, y) { 0u8 } else { 255u8 });
+            }
+        }
+        // Stessa strada del bot dopo aver aperto la foto: solo luminanza.
+        let letto =
+            rxing::helpers::detect_in_luma(luminanza, larghezza, altezza, None).expect("lettura");
+        assert_eq!(pulisci_codice(letto.getText()), Some(codice.to_string()));
+
+        // Un dato che non è un codice prodotto non deve passare per tale.
+        assert_eq!(pulisci_codice("https://esempio.it"), None);
+        // Una foto che non è un JPEG non fa crollare niente.
+        assert!(leggi_codice_da_jpeg(b"non sono una foto").is_err());
+    }
+
+    #[tokio::test]
+    async fn un_negozio_mio_si_rinomina_e_si_toglie_una_catena_no() {
+        let pool = test_pool().await;
+        let (user_id, space_id) = utente_e_spazio(&pool).await;
+
+        crate::identity::with_actor(actor(user_id, space_id), async {
+            let mio = crea_negozio(&pool, "Fruttivendolo").await.expect("negozio");
+            let lidl = negozi_visibili(&pool)
+                .await
+                .expect("negozi")
+                .into_iter()
+                .find(|negozio| negozio.nome == "Lidl")
+                .expect("Lidl");
+            assert_eq!(lidl.mio, 0, "una catena comune non è di nessuno");
+
+            rinomina_negozio(&pool, mio, "Frutta e verdura da Gino")
+                .await
+                .expect("rinomina");
+            assert_eq!(
+                negozio_per_id(&pool, mio)
+                    .await
+                    .expect("lettura")
+                    .expect("negozio")
+                    .nome,
+                "Frutta e verdura da Gino"
+            );
+            // Le catene comuni sono di tutti: non si rinominano e non si tolgono.
+            assert!(rinomina_negozio(&pool, lidl.id, "Il mio Lidl")
+                .await
+                .is_err());
+            assert!(rimuovi_negozio(&pool, lidl.id).await.is_err());
+            assert!(rinomina_negozio(&pool, mio, "   ").await.is_err());
+
+            // Un prezzo segnato lì deve sopravvivere alla rimozione.
+            let pasta = alimento(&pool, "Pasta").await;
+            registra_prezzo(
+                &pool,
+                mio,
+                Some(pasta),
+                None,
+                "Pasta",
+                120,
+                Some(500.0),
+                Some("g"),
+                "spesa",
+            )
+            .await
+            .expect("prezzo");
+            rimuovi_negozio(&pool, mio).await.expect("rimozione");
+            assert!(
+                negozi_visibili(&pool)
+                    .await
+                    .expect("negozi")
+                    .iter()
+                    .all(|negozio| negozio.id != mio),
+                "sparisce dagli elenchi"
+            );
+            let prezzi: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM prezzi_osservati WHERE negozio_id = ?")
+                    .bind(mio)
+                    .fetch_one(&pool)
+                    .await
+                    .expect("conteggio");
+            assert_eq!(prezzi, 1, "i prezzi già visti restano nello storico");
+        })
+        .await;
+    }
     #[tokio::test]
     async fn il_prezzo_si_ricorda_per_negozio_e_il_preferito_per_alimento() {
         let pool = test_pool().await;

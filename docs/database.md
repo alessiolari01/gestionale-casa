@@ -353,6 +353,28 @@ visibile (`ROW_NUMBER() OVER (PARTITION BY lista_id ...)`): sul database
 reale due voci avevano la stessa posizione e il riordino non riusciva a
 scambiarle. Da qui in avanti ci pensa `aggiorna_lista`.
 
+## Step 7.4septies: legenda, prodotti di marca, fonte delle ricette (18 settembre 2026)
+
+Tre migration dal collaudo di Alessio.
+
+### `preferenze_utente.mostra_legenda`
+`migrations/20260918100000_legenda_simboli.sql`. Acceso di default, per
+utente, come le altre preferenze: la legenda dei simboli serve a chi
+comincia e si spegne quando non serve più.
+
+### Prodotti delle marche note
+`migrations/20260918120000_prodotti_marche_note.sql`. Novanta prodotti
+agganciati agli alimenti globali per `nome_normalizzato`, con `verificato =
+0`: marca, nome e formato vengono dalla memoria del modello, **senza codici
+a barre e senza prezzi inventati**. Le righe che non trovano il loro
+alimento non producono niente (JOIN), e un `NOT EXISTS` evita i doppioni se
+un prodotto uguale esiste già.
+
+### `ricette.fonte_nome`, `ricette.fonte_url`
+`migrations/20260918130000_ricette_fonte.sql`. Da dove viene una ricetta e
+il suo link; il bot mostra il pulsante solo se l'indirizzo è http(s). Il
+procedimento resta quello scritto dall'utente.
+
 ## Step 7.4sexies: consegna B, negozi e prezzi (17 settembre 2026)
 
 `migrations/20260917210000_consegna_b_negozi_e_prezzi.sql`. Comportamento in

@@ -81,6 +81,17 @@ La UI usa etichette descrittive, ad esempio:
 
 Non vengono inventate conversioni massa↔volume senza dati specifici dell'alimento.
 
+## Dove va a finire dopo la spesa (18 settembre 2026)
+
+Nel dettaglio di un alimento: `📦 Dopo la spesa va in: 🧊 Frigo (deciso da
+nome e categoria)`, e il pulsante `📦 Dove va dopo la spesa` apre la scelta
+fra dispensa, frigo e freezer. È la stessa scelta di `📌 Mettilo sempre qui`
+delle scorte (`scorte_destinazioni`, per spazio), raggiungibile prima ancora
+di avere la roba in casa — chiesto da Alessio il 18 settembre 2026.
+
+`↩️ Decidi tu per me` toglie il posto fisso e rimette in mano al bot la
+scelta per nome e categoria (`docs/moduli/dispensa.md`).
+
 ## Prodotti e formati
 
 Un alimento può avere più prodotti commerciali; ogni prodotto può avere più formati acquistabili. Il prodotto conserva identità commerciale/nutrizione, il formato conserva quantità/unità/barcode.

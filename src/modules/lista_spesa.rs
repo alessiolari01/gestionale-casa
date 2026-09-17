@@ -22,6 +22,9 @@ use std::{
 use anyhow::Context as _;
 use sqlx::{FromRow, SqlitePool};
 use teloxide::{
+    // `Download`: serve a scaricare la foto del codice a barre (consegna B,
+    // 18 settembre 2026).
+    net::Download,
     prelude::*,
     types::{InlineKeyboardButton, InlineKeyboardMarkup},
 };
@@ -5168,6 +5171,89 @@ mod db_tests {
         .await;
     }
 
+    /// Il prezzo segnato sulla voce: fino al 18 settembre 2026 questa strada
+    /// non era coperta da nessun test, e infatti non funzionava — la query
+    /// non leggeva una colonna che la struct pretendeva. Il test passa da
+    /// `registra_prezzo_voce`, cioè esattamente da dove passa il bot.
+    #[tokio::test]
+    async fn il_prezzo_di_una_voce_si_salva_e_finisce_nello_storico_del_negozio() {
+        let pool = test_pool().await;
+        let user_id = create_user(&pool, "Alessio").await;
+        let space_id = create_space(&pool, "Casa").await;
+        add_membership(&pool, space_id, user_id).await;
+
+        crate::identity::with_actor(actor(user_id, space_id, "Alessio"), async {
+            let (lista, farina, _) = lista_con_farina(&pool, user_id, space_id).await;
+            aggiorna_lista(&pool, &lista).await.expect("refresh");
+            let voce_id = carica_voci(&pool, lista.id).await.expect("voci")[0].id;
+            let negozio = crate::modules::mercato::negozi_visibili(&pool)
+                .await
+                .expect("negozi")
+                .into_iter()
+                .find(|negozio| negozio.nome == "Coop")
+                .expect("Coop")
+                .id;
+
+            registra_prezzo_voce(&pool, voce_id, 249, Some(negozio))
+                .await
+                .expect("prezzo");
+
+            let voce = carica_voci(&pool, lista.id).await.expect("voci").remove(0);
+            assert_eq!(voce.prezzo_centesimi, Some(249));
+            assert_eq!(voce.comprato, 1, "segnare il prezzo spunta la voce");
+            let storico =
+                crate::modules::mercato::ultimo_prezzo(&pool, negozio, Some(farina), None)
+                    .await
+                    .expect("storico")
+                    .expect("prezzo nello storico");
+            assert_eq!(storico.0, 249);
+            assert_eq!(storico.1, Some(200.0), "la quantità della voce");
+            assert_eq!(storico.2.as_deref(), Some("g"));
+
+            // Senza negozio il prezzo resta comunque sulla voce: è la spesa
+            // di chi non sceglie il negozio, e non deve rompersi.
+            registra_prezzo_voce(&pool, voce_id, 300, None)
+                .await
+                .expect("prezzo senza negozio");
+            let voce = carica_voci(&pool, lista.id).await.expect("voci").remove(0);
+            assert_eq!(voce.prezzo_centesimi, Some(300));
+
+            // Chiudendo la spesa il prezzo va in archivio con la voce.
+            chiudi_spesa(&pool, &lista).await.expect("chiusura");
+            let archiviato: Option<i64> =
+                sqlx::query_scalar("SELECT prezzo_centesimi FROM liste_spesa_voci_archiviate")
+                    .fetch_one(&pool)
+                    .await
+                    .expect("archivio");
+            assert_eq!(archiviato, Some(300));
+        })
+        .await;
+    }
+
+    /// La legenda: accesa all'inizio, si spegne e resta spenta.
+    #[tokio::test]
+    async fn la_legenda_parte_accesa_e_si_spegne() {
+        let pool = test_pool().await;
+        let user_id = create_user(&pool, "Alessio").await;
+        let space_id = create_space(&pool, "Casa").await;
+        add_membership(&pool, space_id, user_id).await;
+        sqlx::query("INSERT INTO preferenze_utente (utente_id, spazio_attivo_id) VALUES (?, ?)")
+            .bind(user_id)
+            .bind(space_id)
+            .execute(&pool)
+            .await
+            .expect("preferenze");
+
+        crate::identity::with_actor(actor(user_id, space_id, "Alessio"), async {
+            assert!(liste::legenda_attiva(&pool).await, "accesa all'inizio");
+            assert!(!liste::cambia_legenda(&pool).await);
+            assert!(!liste::legenda_attiva(&pool).await, "resta spenta");
+            assert!(liste::cambia_legenda(&pool).await);
+            assert!(liste::legenda_attiva(&pool).await);
+        })
+        .await;
+    }
+
     #[tokio::test]
     async fn quello_che_c_e_in_casa_si_toglie_dalla_lista() {
         let pool = test_pool().await;
@@ -5345,6 +5431,10 @@ enum ListaSpesaConversationState {
     },
     /// Consegna B: il nome di un negozio nuovo.
     AwaitingNomeNegozio,
+    /// Il nome nuovo di un negozio creato a mano (18 settembre 2026).
+    AwaitingRinominaNegozio {
+        negozio_id: i64,
+    },
     /// Consegna B: quanto è costata questa voce.
     AwaitingPrezzo {
         voce_id: i64,
@@ -5679,6 +5769,87 @@ async fn segna_vista_novita(pool: &SqlitePool) {
     }
 }
 
+/// Una foto mentre si aspetta un codice a barre (18 settembre 2026, chiesto
+/// da Alessio: al supermercato si fotografa, non si copiano tredici cifre).
+/// La lettura è tutta nel bot (`mercato::leggi_codice_da_jpeg`): la foto non
+/// esce dal telefono.
+pub async fn handle_photo(
+    bot: &Bot,
+    msg: &Message,
+    pool: &SqlitePool,
+    sessions: &ListaSpesaSessionStore,
+) -> ResponseResult<bool> {
+    let chat_id = msg.chat.id.0;
+    let Some(ListaSpesaConversationState::AwaitingCodiceBarre { voce_id }) = sessions.get(chat_id)
+    else {
+        return Ok(false);
+    };
+    let Some(foto) = msg.photo().and_then(|formati| {
+        formati
+            .iter()
+            .max_by_key(|f| u64::from(f.width) * u64::from(f.height))
+    }) else {
+        return Ok(false);
+    };
+
+    bot.send_message(msg.chat.id, "🔎 Guardo la foto…").await?;
+    let dati = match scarica_foto(bot, foto.file.id.clone()).await {
+        Ok(dati) => dati,
+        Err(errore) => {
+            tracing::warn!(?errore, "Download della foto del codice fallito");
+            mostra_presa(
+                bot,
+                msg.chat.id,
+                pool,
+                sessions,
+                voce_id,
+                Some("⚠️ Non riesco a scaricare la foto. Riprova, oppure scrivi le cifre."),
+            )
+            .await?;
+            return Ok(true);
+        }
+    };
+    let letto = crate::modules::mercato::leggi_codice_da_jpeg(&dati).unwrap_or_else(|errore| {
+        tracing::warn!(?errore, "Lettura del codice dalla foto fallita");
+        None
+    });
+    match letto {
+        Some(codice) => {
+            sessions.clear_chat(chat_id);
+            leggi_codice_a_barre(bot, msg.chat.id, pool, sessions, voce_id, &codice).await?;
+        }
+        None => {
+            // Succede: sfocata, storta, o troppo lontana. Si dice come
+            // rifarla invece di lasciare l'utente a indovinare.
+            mostra_presa(
+                bot,
+                msg.chat.id,
+                pool,
+                sessions,
+                voce_id,
+                Some("🔎 Non sono riuscito a leggere il codice.
+Riprova più da vicino, con le righe dritte e tutta l'etichetta dentro la foto — oppure scrivi le cifre."),
+            )
+            .await?;
+        }
+    }
+    Ok(true)
+}
+
+/// Scarica una foto di Telegram in memoria: non serve tenerla su disco, si
+/// guarda e si butta.
+async fn scarica_foto(bot: &Bot, file_id: teloxide::types::FileId) -> anyhow::Result<Vec<u8>> {
+    let file = bot
+        .get_file(file_id)
+        .await
+        .context("Impossibile leggere il file da Telegram")?;
+    let mut dati: Vec<u8> = Vec::new();
+    bot.download_file(&file.path, &mut dati)
+        .await
+        .context("Download della foto fallito")?;
+    Ok(dati)
+}
+
 pub async fn handle_message(
     bot: &Bot,
     msg: &Message,
@@ -5821,6 +5992,32 @@ pub async fn handle_message(
                     bot.send_message(msg.chat.id, format!("⚠️ {errore}"))
                         .reply_markup(InlineKeyboardMarkup::new(vec![vec![
                             button("❌ Annulla", "mercato:negozi"),
+                            button("🏠 Menù principale", "menu:main"),
+                        ]]))
+                        .await?;
+                }
+            }
+        }
+        ListaSpesaConversationState::AwaitingRinominaNegozio { negozio_id } => {
+            match crate::modules::mercato::rinomina_negozio(pool, negozio_id, text).await {
+                Ok(()) => {
+                    sessions.clear_chat(chat_id);
+                    crate::modules::mercato::mostra_negozio(
+                        bot,
+                        msg.chat.id,
+                        pool,
+                        negozio_id,
+                        Some("✅ Nome cambiato."),
+                    )
+                    .await?;
+                }
+                Err(errore) => {
+                    bot.send_message(msg.chat.id, format!("⚠️ {errore}"))
+                        .reply_markup(InlineKeyboardMarkup::new(vec![vec![
+                            button(
+                                "❌ Annulla",
+                                format!("mercato:negozio:gestisci:{negozio_id}"),
+                            ),
                             button("🏠 Menù principale", "menu:main"),
                         ]]))
                         .await?;
@@ -6262,6 +6459,28 @@ pub async fn handle_callback(
         attendi_nome_negozio(bot, chat_id, sessions).await?;
         return Ok(true);
     }
+    // La sessione di testo è qui, quindi anche la rinomina passa da questo
+    // modulo anche se la schermata del negozio sta in `mercato`.
+    if let Some(raw) = data.strip_prefix("lista_spesa:negozio:rinomina:") {
+        let Some(negozio_id) = raw.parse::<i64>().ok().filter(|value| *value > 0) else {
+            invalid(bot, chat_id).await?;
+            return Ok(true);
+        };
+        sessions.set(
+            chat_id.0,
+            ListaSpesaConversationState::AwaitingRinominaNegozio { negozio_id },
+        );
+        bot.send_message(chat_id, "✏️ Scrivi il nome nuovo del negozio.")
+            .reply_markup(InlineKeyboardMarkup::new(vec![vec![
+                button(
+                    "❌ Annulla",
+                    format!("mercato:negozio:gestisci:{negozio_id}"),
+                ),
+                button("🏠 Menù principale", "menu:main"),
+            ]]))
+            .await?;
+        return Ok(true);
+    }
     if let Some(raw) = data.strip_prefix("lista_spesa:negozio:set:") {
         let Some(negozio_id) = raw.parse::<i64>().ok() else {
             invalid(bot, chat_id).await?;
@@ -6344,9 +6563,9 @@ Scrivi il prezzo pagato, ad esempio 1,29.",
         );
         bot.send_message(
             chat_id,
-            "🏷 Scrivi il codice a barre della confezione.
+            "🏷 Fotografa il codice a barre della confezione, oppure scrivi le cifre sotto le righe nere.
 
-Le cifre sotto le righe nere: lo cerco su Open Food Facts e segno la confezione che hai preso.",
+Lo leggo io, poi lo cerco su Open Food Facts e segno la confezione che hai preso.",
         )
         .reply_markup(InlineKeyboardMarkup::new(vec![vec![
             button("❌ Annulla", "lista_spesa:back"),
@@ -6474,6 +6693,11 @@ Le cifre sotto le righe nere: lo cerco su Open Food Facts e segno la confezione 
                 .await?;
             }
         }
+        return Ok(true);
+    }
+    if data == "lista_spesa:legenda" {
+        liste::cambia_legenda(pool).await;
+        show_lista(bot, chat_id, pool, None).await?;
         return Ok(true);
     }
     if data == "lista_spesa:auto" {
@@ -7519,9 +7743,14 @@ async fn registra_prezzo_voce(
     prezzo_centesimi: i64,
     negozio_id: Option<i64>,
 ) -> anyhow::Result<()> {
+    // Tutte le colonne di `VocePresa`: il 17 settembre 2026 qui mancava
+    // `prezzo_centesimi`, la lettura falliva sempre e all'utente arrivava
+    // solo "non riesco a segnare il prezzo". Stessa famiglia del difetto
+    // degli ingredienti delle ricette — una colonna che la struct pretende
+    // e la query non dà — trovata da Alessio nel collaudo del 18 settembre.
     let voce: Option<VocePresa> = sqlx::query_as(
         "SELECT descrizione, alimento_id, prodotto_alimentare_id, quantita, unita_simbolo, \
-                quantita_presa, unita_presa, prodotto_preso_id \
+                quantita_presa, unita_presa, prodotto_preso_id, prezzo_centesimi \
          FROM liste_spesa_voci WHERE id = ?",
     )
     .bind(voce_id)
@@ -7830,6 +8059,12 @@ async fn show_lista(
         ));
     }
 
+    // Legenda dei simboli (18 settembre 2026), accesa finché non la spegni.
+    let legenda = liste::legenda_attiva(pool).await;
+    if legenda && totale > 0 {
+        testo.push_str(&liste::blocco_legenda(liste::LEGENDA_LISTA_SPESA));
+    }
+
     let mut rows: Vec<Vec<InlineKeyboardButton>> = Vec::new();
     for voce in &voci {
         let icona = if voce.comprato != 0 { "✅" } else { "☐" };
@@ -7935,6 +8170,10 @@ async fn show_lista(
             "⚙️ Aggiornamento automatico: spento"
         },
         "lista_spesa:auto",
+    )]);
+    rows.push(vec![liste::pulsante_legenda(
+        legenda,
+        "lista_spesa:legenda",
     )]);
     rows.push(nav_row(&origine_di(chat_id.0)));
 

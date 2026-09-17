@@ -68,6 +68,17 @@ totale sono indipendenti e facoltativi. Il totale resta in
 `liste_spesa_chiusure.totale_centesimi` e **diventerà una transazione del
 modulo Soldi** (approvato da Alessio, `docs/previsto/spese.md`).
 
+## Negozi propri: rinomina e rimozione (18 settembre 2026)
+
+Nell'elenco dei negozi, quelli creati qui portano `✏️` accanto al nome: apre
+la loro scheda, con `✏️ Rinomina` e `🗑 Togli questo negozio` (conferma
+C16). Le catene comuni non hanno la matita: sono nel catalogo condiviso, e
+rinominarle cambierebbe il nome a chiunque userà il bot.
+
+Togliere un negozio lo rende inattivo: sparisce dagli elenchi e dal
+confronto, esce dalla spesa in corso, ma **i prezzi già segnati lì restano**
+nello storico — servono ancora a sapere quanto costava una cosa.
+
 ## Prodotti preferiti
 
 Nella schermata `📦 Ho preso…`, accanto a ogni confezione c'è `⭐`: segna il
@@ -77,9 +88,13 @@ prossima spesa è un tocco solo.
 
 ## Codice a barre (Open Food Facts)
 
-`🏷 Codice a barre` nella schermata `📦 Ho preso…`: si scrivono le cifre
-sotto le righe nere.
+`🏷 Codice a barre` nella schermata `📦 Ho preso…`: si **fotografa** il
+codice, oppure si scrivono le cifre sotto le righe nere.
 
+0. se arriva una foto, il codice lo legge il bot (`rxing`, il porto Rust di
+   ZXing) su una immagine in scala di grigi: **la foto non esce dal
+   telefono**, e se il codice non si legge il bot dice come rifarla
+   (18 settembre 2026);
 1. il codice si controlla prima (8, 12, 13 o 14 cifre): un errore di
    battitura non diventa una richiesta di rete;
 2. se il catalogo conosce già quel codice, non si chiede niente a nessuno;
@@ -102,6 +117,23 @@ prezzo segnato da altri per quel codice e lo riporta così:
 Non viene mai registrato da solo: `prezzi_osservati.fonte` distingue
 `spesa` (visto da noi) da `open_prices`, e un prezzo di altri non deve
 finire nelle nostre stime senza conferma.
+
+## Prodotti di marca già nel catalogo (18 settembre 2026)
+
+La migration `20260918120000_prodotti_marche_note.sql` semina novanta
+prodotti delle marche più diffuse in Italia, agganciati agli alimenti del
+catalogo globale.
+
+Cosa c'è e cosa no, detto chiaro anche qui:
+
+- marca, nome e formato vengono dalla memoria del modello, non da un
+  listino: un formato può essere cambiato. Sono correggibili come qualunque
+  prodotto, e `verificato = 0` dice che nessuno li ha confermati;
+- **nessun codice a barre**: un EAN inventato sarebbe un dato falso, e il
+  bot lo userebbe per interrogare Open Food Facts. Il codice vero arriva
+  fotografando la confezione;
+- **nessun prezzo**: i prezzi cambiano per negozio e per settimana, e si
+  segnano facendo la spesa.
 
 ## Rete assente
 

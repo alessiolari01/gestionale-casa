@@ -101,6 +101,27 @@ Vedi `STATO.md` (sezione 2duodecies) e `docs/moduli/mercato.md`. Conteneva:
 - il **totale della spesa chiusa** conservato per diventare una transazione
   del futuro modulo Soldi.
 
+### Domande aperte dal collaudo del 18 settembre 2026
+
+Chieste ad Alessio, risposta ancora da raccogliere. Finché non risponde, non
+si fa niente di tutto questo:
+
+- **Ricette da GialloZafferano.** Importare i loro procedimenti vuol dire
+  copiare testi protetti da diritto d'autore, e i loro termini d'uso non lo
+  permettono: non l'ho fatto. Il meccanismo della **fonte con link** c'è già
+  (`docs/moduli/ricette.md`). Le strade possibili: (a) ricette con nome,
+  link e ingredienti scritti da noi, senza il loro procedimento; (b) solo il
+  link, come segnalibro; (c) niente.
+- **Prezzi automatici per molti prodotti.** Open Prices copre poco l'Italia
+  e cerca per codice a barre, che i prodotti seminati non hanno; leggere i
+  listini dei supermercati vuol dire raschiare i loro siti, contro le loro
+  condizioni e fragile a ogni restyling. Le strade: (a) prezzi solo a mano,
+  come adesso; (b) Open Prices solo per i prodotti con codice a barre letto
+  dalla fotocamera; (c) inserimento veloce "un prezzo per voce" a fine
+  spesa.
+- **Codici a barre dei novanta prodotti seminati**: si riempiono man mano
+  fotografando le confezioni, oppure restano vuoti.
+
 ### Prossimo giro, chiesto da Alessio il 17 settembre 2026
 
 Quattro moduli nuovi da aggiungere al menù principale, ciascuno da

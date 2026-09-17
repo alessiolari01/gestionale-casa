@@ -295,6 +295,19 @@ Se la directory non esiste, l'operazione è comunque considerata riuscita. Se il
 database è stato eliminato ma il filesystem restituisce un altro errore, il bot
 segnala la directory residua invece di nascondere il problema.
 
+## Campi della bozza: pulsanti, non comandi (18 settembre 2026)
+
+Aprendo un campo (nome, marca, data di acquisto, prezzo…) la schermata ha
+`⏭ Salta`, `🗑 Rimuovi` e la riga di navigazione. Fino al 18 settembre 2026
+non aveva **nessuna** tastiera: `⏭ Salta` e `🗑 Rimuovi` erano solo i
+comandi scritti `/salta` e `/rimuovi`, che il testo nominava come se fossero
+pulsanti, e non c'era modo di tornare indietro — violava C3, e l'ha trovato
+Alessio dal vivo sulla data di acquisto.
+
+`🗑 Rimuovi` non compare sul nome (obbligatorio) né su un campo già vuoto
+(C8). I comandi `/salta` e `/rimuovi` continuano a funzionare. Il testo non
+nomina più i pulsanti (C1).
+
 ## Comandi
 
 | Azione | Pulsante | Comando |

@@ -1954,13 +1954,89 @@ provata prima su una copia; `applied_migrations=55` e `Gestionale Casa
 online` confermati nel log di avvio. **Collaudo dal vivo su Telegram da
 fare** (consegne A e B insieme).
 
+## 2terdecies. Dal collaudo di A e B: correzioni, legenda, foto del codice a barre (18 settembre 2026)
+
+Collaudo dal vivo di Alessio delle consegne A e B, con via libera esplicito
+a correggere tutto insieme. Tre migration nuove:
+`20260918100000_legenda_simboli.sql`,
+`20260918120000_prodotti_marche_note.sql`,
+`20260918130000_ricette_fonte.sql`.
+
+**Difetti trovati dal collaudo**:
+
+- **`💶 Prezzo` non funzionava mai**: la query che rilegge la voce non
+  leggeva `prezzo_centesimi`, che la struct pretendeva — stessa famiglia del
+  difetto degli ingredienti delle ricette. Nessun test copriva quella
+  strada: ora ce n'è uno che passa da `registra_prezzo_voce`, cioè da dove
+  passa il bot.
+- **Due frasi con quattordici spazi in mezzo**: avevo spezzato il testo con
+  la continuazione di riga `\`, e `cargo fmt` l'ha riunita male. Corretto, e
+  imparata la regola: una frase mostrata all'utente non si spezza mai così.
+- **I campi di un oggetto non avevano nessuna tastiera**: `⏭ Salta` e
+  `🗑 Rimuovi` erano solo i comandi scritti `/salta` e `/rimuovi`, che il
+  testo nominava come se fossero pulsanti, e non c'era modo di tornare
+  indietro (C3). Ora la tastiera c'è, i comandi restano, e il testo non
+  ripete i pulsanti (C1).
+- **Un negozio creato a mano non si poteva né rinominare né togliere**: ora
+  sì, e togliendolo i prezzi già visti restano nello storico.
+- **L'allegato si eliminava senza vederlo**: ora la foto (o il video)
+  arriva prima della conferma.
+
+**Richieste nuove**:
+
+1. **Legenda dei simboli** su planner (giorno e settimana), lista della
+   spesa e scorte, con `❓ Mostra/Nascondi legenda` e una preferenza per
+   persona, accesa all'inizio.
+2. **Foto del codice a barre**: si fotografa invece di copiare tredici
+   cifre. La lettura è tutta nel bot (`rxing`, il porto Rust di ZXing, su
+   una immagine in scala di grigi): **la foto non esce dal telefono**.
+   Tredici crate in più, un minuto e 48 di compilazione sull'S9 — provato
+   in una cartella usa e getta prima di aggiungerlo al progetto.
+3. **Dove va a finire un alimento dopo la spesa**, visibile e modificabile
+   dalla sezione Alimenti (`📦 Dove va dopo la spesa`): la stessa scelta di
+   `📌 Mettilo sempre qui`, raggiungibile prima di avere la roba in casa.
+4. **Prodotti delle marche più diffuse in Italia**: 90 prodotti attaccati
+   agli alimenti del catalogo. Marca, nome e formato vengono dalla mia
+   memoria: **nessun codice a barre e nessun prezzo inventati**. Il codice
+   vero si aggiunge fotografando la confezione.
+5. **Fonte di una ricetta**: `🔗 Fonte della ricetta` nel menù di modifica.
+   Un link diventa un pulsante che apre il sito e il nome del sito compare
+   nel dettaglio ("🔗 Ricetta di giallozafferano.it"); un testo qualunque
+   vale come nome ("Nonna"). **Il procedimento resta quello scritto da chi
+   usa il bot**: copiare i passaggi di GialloZafferano dentro il bot è
+   copiare materiale di altri, e non l'ho fatto — è la prima delle domande
+   aperte qui sotto.
+
+**Icona del pasto preparato**: era `🍳`, che però vuol dire "ricetta" in
+mezzo bot. Ora il preparato è `🍲` e `🍳` resta la ricetta (C4).
+
+**Domande aperte, in attesa di risposta** (`docs/roadmap.md`):
+
+- **GialloZafferano**: importare i loro procedimenti sarebbe copiare testi
+  protetti. Si può fare la ricetta con nome, link e ingredienti scritti da
+  noi, oppure lasciare solo il link. Serve una decisione.
+- **Prezzi automatici per molti prodotti**: Open Prices copre poco l'Italia
+  e serve il codice a barre, che i prodotti seminati non hanno. Leggere i
+  listini dei supermercati significa raschiare i loro siti, contro le loro
+  condizioni e fragile. Serve una decisione.
+- **Codici a barre dei prodotti seminati**: si riempiono man mano
+  fotografando le confezioni, oppure si lasciano vuoti.
+
+8 nuovi test: prezzo di una voce con lo storico del negozio, legenda,
+negozio rinominato e tolto, lettura del codice da immagine, navigazione dei
+campi oggetto, divisione del procedimento, fonte di una ricetta, prodotti
+seminati. Totale 445.
+
+**Collaudo dal vivo su Telegram da fare.**
+
 ## 3. Stato tecnico verificato
 
-- **55 migration** nel repository, tutte **applicate** al database reale
-  dell'S9: l'ultima (`20260917210000_consegna_b_negozi_e_prezzi.sql`,
-  sezione 2duodecies) il 17 settembre 2026, verificato leggendo
-  `applied_migrations=55` nel log di avvio del bot dopo il deploy — non
-  dedotto. Né il secondo giro
+- **58 migration** nel repository. Applicate al database reale dell'S9 le
+  prime 55: l'ultima applicata è
+  `20260917210000_consegna_b_negozi_e_prezzi.sql` (sezione 2duodecies), il
+  17 settembre 2026, verificato leggendo `applied_migrations=55` nel log di
+  avvio del bot dopo il deploy — non dedotto. **Da applicare**: le tre della
+  sezione 2terdecies. Né il secondo giro
   di correzioni del 12 settembre 2026 (sezione 2septies) né le tre
   rifiniture del 13 settembre 2026 (sezione 2octies) avevano migration
   proprie: lavoravano su schema già esistente, confermato di nuovo
@@ -1968,8 +2044,9 @@ fare** (consegne A e B insieme).
 - pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa,
   punto 1 della sezione 6): `fmt`, `check --locked`,
   `clippy --all-targets --locked -- -D warnings`, `test --locked` —
-  **437 test** (428 dopo la consegna A e prima della consegna B della
-  sezione 2duodecies, 419 prima della consegna A,
+  **445 test** (437 prima del giro della sezione 2terdecies, 428 dopo la
+  consegna A e prima della consegna B della sezione 2duodecies, 419 prima
+  della consegna A,
   406 prima del giro della sezione 2decies, 391 prima della
   chiusura della spesa e delle scorte del 16 settembre 2026 — sezione
   2nonies —, 389 prima delle tre rifiniture

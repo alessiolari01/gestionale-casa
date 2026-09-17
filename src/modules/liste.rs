@@ -150,6 +150,107 @@ pub fn tronca(valore: &str, massimo: usize) -> String {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Legenda dei simboli (18 settembre 2026)
+// ---------------------------------------------------------------------------
+//
+// Chiesta da Alessio dal vivo: i simboli di C4 sono pochi e sempre gli
+// stessi, ma la prima settimana non li ricorda nessuno. Sta in una
+// preferenza per utente (`preferenze_utente.mostra_legenda`), accesa
+// all'inizio, e la si spegne con lo stesso pulsante che la mostra.
+//
+// Vive qui per la stessa ragione delle pagine: le schermate che la usano
+// sono tre (planner, lista della spesa, scorte) e devono dire la stessa
+// cosa nello stesso modo.
+
+/// Una riga di legenda: simbolo e significato.
+pub type VoceLegenda = (&'static str, &'static str);
+
+/// I simboli del planner (C4).
+pub const LEGENDA_PLANNER: &[VoceLegenda] = &[
+    ("○", "pianificato"),
+    ("🍲", "preparato, non ancora consumato"),
+    ("✅", "consumato"),
+    ("⏭", "saltato"),
+    ("🔄", "ricetta cambiata, da aggiornare"),
+];
+
+/// I simboli della lista della spesa.
+pub const LEGENDA_LISTA_SPESA: &[VoceLegenda] = &[
+    ("☐", "da comprare"),
+    ("✅", "comprato"),
+    ("📦", "quanto hai preso davvero"),
+    ("💶", "prezzo pagato"),
+    ("⚠️", "più di quanto serve ora"),
+];
+
+/// I simboli delle scorte.
+pub const LEGENDA_SCORTE: &[VoceLegenda] = &[
+    ("🧺", "dispensa"),
+    ("🧊", "frigo"),
+    ("❄️", "freezer"),
+    ("📅", "scadenza"),
+    ("📌", "posto fisso scelto da te"),
+];
+
+/// Il blocco di testo da mettere in fondo a una schermata.
+pub fn blocco_legenda(voci: &[VoceLegenda]) -> String {
+    let righe: Vec<String> = voci
+        .iter()
+        .map(|(simbolo, significato)| format!("{simbolo} {significato}"))
+        .collect();
+    format!("\n❓ Legenda\n{}\n", righe.join("\n"))
+}
+
+/// Il pulsante che accende e spegne la legenda. Dice sempre cosa fa
+/// premendolo, non in che stato è (C1: il testo non ripete i pulsanti, e il
+/// pulsante non ripete il testo).
+pub fn pulsante_legenda(attiva: bool, callback: &str) -> InlineKeyboardButton {
+    InlineKeyboardButton::callback(
+        if attiva {
+            "❓ Nascondi legenda".to_string()
+        } else {
+            "❓ Mostra legenda".to_string()
+        },
+        callback.to_string(),
+    )
+}
+
+/// Se questo utente vuole vedere la legenda. Accesa finché non la spegne.
+pub async fn legenda_attiva(pool: &sqlx::SqlitePool) -> bool {
+    let Some(utente_id) = crate::identity::current_actor().utente_id else {
+        return true;
+    };
+    sqlx::query_scalar::<_, i64>("SELECT mostra_legenda FROM preferenze_utente WHERE utente_id = ?")
+        .bind(utente_id)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten()
+        .map(|valore| valore != 0)
+        .unwrap_or(true)
+}
+
+/// Accende o spegne la legenda per questo utente, e ritorna lo stato nuovo.
+pub async fn cambia_legenda(pool: &sqlx::SqlitePool) -> bool {
+    let attiva = legenda_attiva(pool).await;
+    let Some(utente_id) = crate::identity::current_actor().utente_id else {
+        return attiva;
+    };
+    let nuovo = i64::from(!attiva);
+    if let Err(errore) =
+        sqlx::query("UPDATE preferenze_utente SET mostra_legenda = ? WHERE utente_id = ?")
+            .bind(nuovo)
+            .bind(utente_id)
+            .execute(pool)
+            .await
+    {
+        tracing::warn!(?errore, "Salvataggio della preferenza legenda fallito");
+        return attiva;
+    }
+    !attiva
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

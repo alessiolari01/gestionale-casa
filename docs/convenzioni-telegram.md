@@ -285,6 +285,21 @@ uniformità. Il simbolo dell'annullamento è sempre `❌`, mai `↩️`.
 miglioramenti non possono avere la stessa icona: la lista diventa
 `📋 Miglioramenti`.
 
+### C4bis. La legenda dei simboli, quando serve
+
+Deciso il 18 settembre 2026, chiesto da Alessio: i simboli di C4 sono pochi,
+ma la prima settimana non li ricorda nessuno.
+
+Le schermate con più simboli di stato — planner (giorno e settimana), lista
+della spesa, scorte — chiudono il testo con un blocco `❓ Legenda` e portano
+`❓ Nascondi legenda` / `❓ Mostra legenda`. La scelta è **per persona**
+(`preferenze_utente.mostra_legenda`) ed è accesa di default: serve a chi
+comincia, e si spegne da sola quando l'utente decide.
+
+Le voci stanno in un punto solo (`liste::LEGENDA_PLANNER`,
+`LEGENDA_LISTA_SPESA`, `LEGENDA_SCORTE`): tre schermate che spiegano gli
+stessi simboli in tre modi diversi sarebbero tre convenzioni.
+
 ### C5. Le parole dell'utente, non quelle del modello
 
 - niente «ruolo sistema», «vista», «spazio predefinito» senza una frase che le
@@ -582,6 +597,20 @@ delega a `calendario::display_date`), e le intestazioni che mostrano già
 **Non si applica all'input**: dove si scrive una data a mano (la scadenza di
 una scorta, per esempio) il formato richiesto resta `31/12/2026`, che si
 digita senza ambiguità.
+
+---
+
+### C18. Un testo mostrato all'utente non si spezza con `\`
+
+Trovato da Alessio il 18 settembre 2026, da uno screenshot: due messaggi
+avevano una fila di spazi in mezzo alla frase. Erano stringhe spezzate su più
+righe nel codice con la continuazione `\`, che `cargo fmt` ha riunito
+lasciando l'indentazione dentro il testo.
+
+**Regola**: una frase che l'utente legge sta su una riga sola nel codice,
+per quanto lunga, oppure si compone con `format!` e `push_str`. La
+continuazione `\` resta buona per le query SQL, dove gli spazi in più non si
+vedono.
 
 ---
 

@@ -208,6 +208,20 @@ dettaglio e la gestione scrivono "⚠️ Non riesco a leggere gli
 ingredienti." e lasciano una riga nel log, e un test passa da tutte le
 letture di una ricetta vera.
 
+### Da dove viene la ricetta (18 settembre 2026)
+
+`🔗 Fonte della ricetta` nel menù di modifica: si incolla un link — il bot
+ne ricava il nome del sito e mostra `🔗 Apri su giallozafferano.it`, un
+pulsante che apre la pagina — oppure si scrive un nome qualunque ("Nonna"),
+che resta solo come testo. `🗑 Nessuna fonte` la toglie.
+
+Il dettaglio mostra `🔗 Ricetta di …` sotto la visibilità.
+
+**Il procedimento resta quello scritto da chi usa il bot.** Copiare i
+passaggi di un sito dentro le proprie ricette è copiare materiale di altri:
+il meccanismo della fonte serve a dare il merito e a portare all'originale,
+non a sostituirlo.
+
 ## Elenco, dettaglio e ricerca
 
 Menu Ricette:

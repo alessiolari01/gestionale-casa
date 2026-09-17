@@ -645,6 +645,12 @@ pub async fn handle_callback(
             )
             .await?;
         }
+        "oggetti:draft:skip" => {
+            skip_current_field(bot, chat_id, raw_chat_id, sessions).await?;
+        }
+        "oggetti:draft:remove" => {
+            remove_current_field(bot, chat_id, raw_chat_id, sessions).await?;
+        }
         "oggetti:draft:back" => {
             if let Some(ConversationState::EditingObject { draft, .. }) = sessions.get(raw_chat_id)
             {
@@ -1278,6 +1284,7 @@ async fn set_draft_field(
     };
 
     let prompt = field_prompt(field, &draft);
+    let keyboard = field_keyboard(field, &draft);
 
     sessions.set(
         raw_chat_id,
@@ -1287,7 +1294,9 @@ async fn set_draft_field(
         },
     );
 
-    bot.send_message(chat_id, prompt).await?;
+    bot.send_message(chat_id, prompt)
+        .reply_markup(keyboard)
+        .await?;
     Ok(())
 }
 
@@ -1450,6 +1459,7 @@ async fn skip_current_field(
 
     if let Some(next_field) = next {
         let prompt = field_prompt(next_field, &draft);
+        let keyboard = field_keyboard(next_field, &draft);
         sessions.set(
             raw_chat_id,
             ConversationState::EditingObject {
@@ -1457,7 +1467,9 @@ async fn skip_current_field(
                 field: Some(next_field),
             },
         );
-        bot.send_message(chat_id, prompt).await?;
+        bot.send_message(chat_id, prompt)
+            .reply_markup(keyboard)
+            .await?;
     } else {
         finish_field(bot, chat_id, raw_chat_id, sessions, *draft).await?;
     }
@@ -1504,6 +1516,7 @@ async fn remove_current_field(
 
     if let Some(next_field) = next_draft_field(field) {
         let prompt = field_prompt(next_field, &draft);
+        let keyboard = field_keyboard(next_field, &draft);
         sessions.set(
             raw_chat_id,
             ConversationState::EditingObject {
@@ -1511,7 +1524,9 @@ async fn remove_current_field(
                 field: Some(next_field),
             },
         );
-        bot.send_message(chat_id, prompt).await?;
+        bot.send_message(chat_id, prompt)
+            .reply_markup(keyboard)
+            .await?;
     } else {
         finish_field(bot, chat_id, raw_chat_id, sessions, *draft).await?;
     }
@@ -3057,6 +3072,42 @@ fn button(label: &str, data: &str) -> InlineKeyboardButton {
     InlineKeyboardButton::callback(label.to_string(), data.to_string())
 }
 
+/// La tastiera di un campo aperto. Fino al 18 settembre 2026 questa
+/// schermata non ne aveva **nessuna**: `⏭ Salta` e `🗑 Rimuovi` erano solo i
+/// comandi scritti `/salta` e `/rimuovi`, che il testo nominava come se
+/// fossero pulsanti, e non c'era modo di tornare indietro (C3). Trovato da
+/// Alessio dal vivo, sulla data di acquisto.
+fn field_keyboard(field: DraftField, draft: &ObjectDraft) -> InlineKeyboardMarkup {
+    let mut rows = vec![vec![button("⏭ Salta", "oggetti:draft:skip")]];
+    // Il nome è obbligatorio, e un campo già vuoto non ha niente da
+    // cancellare: il pulsante comparirebbe per non fare niente (C8).
+    if field != DraftField::Name && field_has_value(field, draft) {
+        rows[0].push(button("🗑 Rimuovi", "oggetti:draft:remove"));
+    }
+    rows.push(vec![
+        button("⬅️ Indietro", "oggetti:draft:back"),
+        button("🏠 Menù principale", "menu:main"),
+    ]);
+    InlineKeyboardMarkup::new(rows)
+}
+
+/// Se il campo ha già un valore da poter cancellare.
+fn field_has_value(field: DraftField, draft: &ObjectDraft) -> bool {
+    match field {
+        DraftField::Name => true,
+        DraftField::Brand => draft.brand.is_some(),
+        DraftField::Model => draft.model.is_some(),
+        DraftField::Position => draft.position.is_some(),
+        DraftField::PurchaseDate => draft.purchase_date.is_some(),
+        DraftField::PurchasePrice => draft.purchase_price_cents.is_some(),
+        DraftField::Seller => draft.seller.is_some(),
+        DraftField::Notes => draft.notes.is_some(),
+        DraftField::Description => draft.description.is_some(),
+        DraftField::EstimatedValue => draft.estimated_value_cents.is_some(),
+        DraftField::SerialNumber => draft.serial_number.is_some(),
+    }
+}
+
 fn field_prompt(field: DraftField, draft: &ObjectDraft) -> String {
     let instruction = match field {
         DraftField::Name => "✏️ Inserisci il nome dell'oggetto.".to_string(),
@@ -3087,20 +3138,17 @@ fn field_prompt(field: DraftField, draft: &ObjectDraft) -> String {
         DraftField::SerialNumber => draft.serial_number.clone(),
     };
 
+    // C1: il testo non ripete i pulsanti, che adesso ci sono davvero.
     if let Some(current) = current {
         if field == DraftField::Name {
             format!(
-                "{instruction}\n\nValore attuale:\n{current}\n\nScrivi un nuovo valore oppure premi ⏭ Salta per mantenere quello attuale. Il nome è obbligatorio e non può essere rimosso."
+                "{instruction}\n\nValore attuale:\n{current}\n\nScrivi un nuovo nome. Il nome è obbligatorio e non si può cancellare."
             )
         } else {
-            format!(
-                "{instruction}\n\nValore attuale:\n{current}\n\nScrivi un nuovo valore, premi ⏭ Salta per mantenerlo oppure 🗑 Rimuovi per cancellarlo."
-            )
+            format!("{instruction}\n\nValore attuale:\n{current}\n\nScrivi un nuovo valore.")
         }
-    } else if field == DraftField::Name {
-        instruction
     } else {
-        format!("{instruction}\n\nPremi ⏭ Salta per lasciare il campo vuoto.")
+        instruction
     }
 }
 
@@ -3337,8 +3385,49 @@ mod tests {
 
         assert!(prompt.contains("Valore attuale:"));
         assert!(prompt.contains("Bosch"));
-        assert!(prompt.contains("⏭ Salta per mantenerlo"));
-        assert!(prompt.contains("🗑 Rimuovi per cancellarlo"));
+        // C1: dal 18 settembre 2026 i pulsanti esistono davvero, quindi il
+        // testo non li nomina più.
+        assert!(!prompt.contains("⏭ Salta"));
+        assert!(!prompt.contains("🗑 Rimuovi"));
+    }
+
+    #[test]
+    fn i_campi_di_un_oggetto_hanno_sempre_come_uscire() {
+        let mut draft = ObjectDraft::new("Trapano").expect("bozza");
+        draft.brand = Some("Bosch".to_string());
+
+        // C3: ogni schermata ha la riga di navigazione. Prima del 18
+        // settembre 2026 questa non aveva nessun pulsante, e l'unica uscita
+        // era scrivere /salta o /rimuovi.
+        let etichette: Vec<String> = field_keyboard(DraftField::Brand, &draft)
+            .inline_keyboard
+            .iter()
+            .flatten()
+            .map(|pulsante| pulsante.text.clone())
+            .collect();
+        assert!(etichette.iter().any(|testo| testo.contains("Salta")));
+        assert!(etichette.iter().any(|testo| testo.contains("Rimuovi")));
+        assert!(etichette.iter().any(|testo| testo.contains("Indietro")));
+        assert!(etichette.iter().any(|testo| testo.contains("Menù")));
+
+        // Un campo vuoto non offre di cancellare il nulla (C8).
+        draft.brand = None;
+        let etichette: Vec<String> = field_keyboard(DraftField::Brand, &draft)
+            .inline_keyboard
+            .iter()
+            .flatten()
+            .map(|pulsante| pulsante.text.clone())
+            .collect();
+        assert!(!etichette.iter().any(|testo| testo.contains("Rimuovi")));
+
+        // Il nome è obbligatorio: non si cancella mai.
+        let etichette: Vec<String> = field_keyboard(DraftField::Name, &draft)
+            .inline_keyboard
+            .iter()
+            .flatten()
+            .map(|pulsante| pulsante.text.clone())
+            .collect();
+        assert!(!etichette.iter().any(|testo| testo.contains("Rimuovi")));
     }
 
     #[test]

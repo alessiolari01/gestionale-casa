@@ -2,6 +2,38 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_COLLAUDO_AB_20260918 -->
+# 18/09/2026 — Dal collaudo di A e B: prezzo che non si salvava, legenda, foto del codice a barre
+
+Collaudo dal vivo di Alessio, con via libera a correggere tutto insieme. Tre
+migration nuove. Dettagli in `STATO.md`, sezione 2terdecies.
+
+**Difetti corretti**
+
+- **`💶 Prezzo` non salvava mai**: la query non leggeva una colonna che la
+  struct pretendeva. Ora c'è un test che passa da quella strada.
+- **Due frasi con una fila di spazi in mezzo** (riscrittura del
+  procedimento): la continuazione di riga `\` non si usa più nei testi.
+- **I campi di un oggetto non avevano pulsanti**: `⏭ Salta` e `🗑 Rimuovi`
+  erano solo comandi scritti, e non si poteva tornare indietro.
+- **Un negozio creato a mano** ora si rinomina e si toglie; i prezzi già
+  segnati lì restano.
+- **L'allegato di una ricetta** si vede prima di confermarne l'eliminazione.
+
+**Novità**
+
+- **❓ Legenda** dei simboli su planner, lista della spesa e scorte, con una
+  preferenza per persona (accesa all'inizio).
+- **Foto del codice a barre**: si fotografa invece di scrivere le cifre. La
+  lettura è dentro il bot, la foto non esce dal telefono.
+- **📦 Dove va dopo la spesa** nella sezione Alimenti: si vede e si cambia
+  dove finirà un alimento, prima ancora di comprarlo.
+- **90 prodotti di marca** nel catalogo, senza codici a barre né prezzi
+  inventati.
+- **🔗 Fonte della ricetta**: nome del sito nel dettaglio e pulsante che
+  apre il link.
+- Il pasto preparato ora è `🍲`: `🍳` vuol dire ricetta.
+
 <!-- CHANGELOG_CONSEGNA_B_20260917 -->
 # 17/09/2026 — Consegna B: negozi, prezzi, prodotti preferiti, codice a barre
 

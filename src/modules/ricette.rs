@@ -183,6 +183,11 @@ enum RecipeConversationState {
     RewriteSteps {
         recipe_id: i64,
     },
+    /// Da dove viene la ricetta: un link, o il nome di chi l'ha data
+    /// (18 settembre 2026).
+    EditSource {
+        recipe_id: i64,
+    },
     EditStepPhoto {
         recipe_id: i64,
         step_id: i64,
@@ -252,6 +257,11 @@ struct RecipeRecord {
     owner_user_id: Option<i64>,
     owner_name: Option<String>,
     global_catalog: i64,
+    /// Da dove viene la ricetta e il suo link (18 settembre 2026): il
+    /// procedimento resta quello scritto qui, la fonte dice a chi va il
+    /// merito e porta al sito.
+    fonte_nome: Option<String>,
+    fonte_url: Option<String>,
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -936,6 +946,34 @@ pub async fn handle_message(
                 Err(error) => {
                     bot.send_message(msg.chat.id, format!("⚠️ {error}"))
                         .reply_markup(flow_keyboard(&format!("recipe:edit:steps:{recipe_id}")))
+                        .await?;
+                }
+            }
+            Ok(true)
+        }
+        RecipeConversationState::EditSource { recipe_id } => {
+            let Some(text) = text_hint.and_then(|value| clean_text(value, 500)) else {
+                send_text_required(bot, msg.chat.id, "Scrivi il link o il nome della fonte.")
+                    .await?;
+                return Ok(true);
+            };
+            let fonte = match link_valido(&text) {
+                // Un link: il nome della fonte lo ricavo dal sito.
+                Some(url) => {
+                    let nome = nome_fonte_da_link(&url).unwrap_or_else(|| "Sito".to_string());
+                    Some((nome, Some(url)))
+                }
+                // Non è un link: vale come nome ("Nonna", "Libro di casa").
+                None => Some((truncate_chars(&text, 60), None)),
+            };
+            match set_recipe_source(pool, recipe_id, fonte).await {
+                Ok(()) => {
+                    sessions.clear_chat(chat_id);
+                    show_recipe_detail(bot, msg.chat.id, pool, recipe_id).await?;
+                }
+                Err(error) => {
+                    bot.send_message(msg.chat.id, format!("⚠️ {error}"))
+                        .reply_markup(flow_keyboard(&format!("recipe:edit:menu:{recipe_id}")))
                         .await?;
                 }
             }
@@ -2239,6 +2277,39 @@ async fn handle_edit_callback(
         }
         return Ok(());
     }
+    if let Some(recipe_id) = data
+        .strip_prefix("recipe:edit:src:togli:")
+        .and_then(parse_positive_i64_str)
+    {
+        sessions.clear_chat(chat_id.0);
+        if let Err(error) = set_recipe_source(pool, recipe_id, None).await {
+            bot.send_message(chat_id, format!("⚠️ {error}")).await?;
+        }
+        show_recipe_detail(bot, chat_id, pool, recipe_id).await?;
+        return Ok(());
+    }
+    if let Some(recipe_id) = data
+        .strip_prefix("recipe:edit:src:")
+        .and_then(parse_positive_i64_str)
+    {
+        sessions.set(chat_id.0, RecipeConversationState::EditSource { recipe_id });
+        bot.send_message(
+            chat_id,
+            "🔗 Da dove viene questa ricetta?\n\nIncolla il link (compare un pulsante che apre il sito), oppure scrivi un nome, ad esempio Nonna.",
+        )
+        .reply_markup(InlineKeyboardMarkup::new(vec![
+            vec![button(
+                "🗑 Nessuna fonte",
+                format!("recipe:edit:src:togli:{recipe_id}"),
+            )],
+            vec![
+                button("❌ Annulla", format!("recipe:edit:menu:{recipe_id}")),
+                button("🏠 Menù principale", "menu:main"),
+            ],
+        ]))
+        .await?;
+        return Ok(());
+    }
     // Prima del prefisso generico `recipe:edit:steps:`, che altrimenti se lo
     // mangerebbe.
     if let Some(recipe_id) = data
@@ -2250,7 +2321,7 @@ async fn handle_edit_callback(
         // allegati, che non si recuperano.
         bot.send_message(
             chat_id,
-            "📝 Riscrivere tutto il procedimento?\n\nGli step di adesso vengono sostituiti,              e le loro foto e video eliminati definitivamente.",
+            "📝 Riscrivere tutto il procedimento?\n\nGli step di adesso vengono sostituiti, e le loro foto e video eliminati definitivamente.",
         )
         .reply_markup(InlineKeyboardMarkup::new(vec![
             vec![button(
@@ -2275,7 +2346,7 @@ async fn handle_edit_callback(
         );
         bot.send_message(
             chat_id,
-            "📝 Scrivi il procedimento completo in un messaggio solo.\n\nUn passaggio per riga,              oppure separati da una riga vuota. La numerazione la metto io.",
+            "📝 Scrivi il procedimento completo in un messaggio solo.\n\nUn passaggio per riga, oppure separati da una riga vuota. La numerazione la metto io.",
         )
         .reply_markup(flow_keyboard(&format!("recipe:edit:steps:{recipe_id}")))
         .await?;
@@ -2469,9 +2540,17 @@ async fn handle_edit_callback(
     // dell'allegato dal disco, non solo la riga a database.
     if let Some(raw) = data.strip_prefix("recipe:edit:md:ask:") {
         if let Some((recipe_id, media_id)) = parse_two_positive_ids(raw) {
+            // Prima la foto (o il video), poi la domanda: si deve vedere
+            // cosa si sta per perdere, non solo la parola "allegato".
+            let descrizione = match anteprima_allegato(bot, chat_id, pool, media_id).await? {
+                Some(descrizione) => format!("\n\n{descrizione}"),
+                None => String::new(),
+            };
             bot.send_message(
                 chat_id,
-                "⚠️ Eliminare definitivamente questo allegato? Non si può recuperare.",
+                format!(
+                    "⚠️ Eliminare definitivamente questo allegato? Non si può recuperare.{descrizione}"
+                ),
             )
             .reply_markup(InlineKeyboardMarkup::new(vec![
                 vec![button(
@@ -3060,6 +3139,11 @@ async fn show_recipe_detail(
     } else {
         text.push_str(&format!("\n👁 Visibile in: {}", spaces.join(", ")));
     }
+    // Da dove viene la ricetta (18 settembre 2026): il merito va detto, e il
+    // link ci porta.
+    if let Some(fonte) = recipe.fonte_nome.as_deref() {
+        text.push_str(&format!("\n🔗 Ricetta di {fonte}"));
+    }
 
     text.push_str("\n\n🥕 Ingredienti");
     match &ingredients {
@@ -3146,6 +3230,17 @@ async fn show_recipe_detail(
             format!("recipe:guided:{recipe_id}:0"),
         ),
     ]];
+    // Un pulsante che apre il sito della fonte, se il link è valido. Sta in
+    // cima perché è il modo più veloce di vedere la ricetta originale.
+    if let Some(url) = recipe.fonte_url.as_deref().and_then(link_valido) {
+        if let Ok(parsed) = url::Url::parse(&url) {
+            let etichetta = match recipe.fonte_nome.as_deref() {
+                Some(fonte) => format!("🔗 Apri su {fonte}"),
+                None => "🔗 Apri la ricetta originale".to_string(),
+            };
+            keyboard.push(vec![InlineKeyboardButton::url(etichetta, parsed)]);
+        }
+    }
     if can_edit {
         keyboard.push(vec![button(
             "✏️ Modifica ricetta",
@@ -3389,6 +3484,43 @@ async fn show_step_media(
     .reply_markup(InlineKeyboardMarkup::new(keyboard))
     .await?;
     Ok(())
+}
+
+/// Manda l'allegato da solo, senza pulsanti: serve prima di una conferma di
+/// eliminazione, perché la domanda arrivi con davanti quello che sparisce.
+/// Ritorna la riga che descrive l'allegato, da mettere nella domanda.
+async fn anteprima_allegato(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    media_id: i64,
+) -> ResponseResult<Option<String>> {
+    let Some((media, _, step_number)) = visible_media(pool, media_id).await.unwrap_or(None) else {
+        return Ok(None);
+    };
+    let icona = if media.kind == "foto" { "📷" } else { "🎥" };
+    let descrizione = match media.caption.clone() {
+        Some(caption) => format!("{icona} {caption} · step {step_number}"),
+        None => format!("{icona} Allegato dello step {step_number}"),
+    };
+    let path = PathBuf::from(&media.path);
+    if !path.exists() {
+        // Il file non c'è più sul telefono: la riga a database va comunque
+        // eliminata, e conviene dirlo invece di mandare una foto muta.
+        return Ok(Some(format!(
+            "{descrizione}\n⚠️ Il file non è più sul dispositivo."
+        )));
+    }
+    if media.kind == "foto" {
+        bot.send_photo(chat_id, InputFile::file(path))
+            .caption(descrizione.clone())
+            .await?;
+    } else {
+        bot.send_video(chat_id, InputFile::file(path))
+            .caption(descrizione.clone())
+            .await?;
+    }
+    Ok(Some(descrizione))
 }
 
 async fn show_media_item(
@@ -3674,6 +3806,10 @@ async fn show_edit_menu(
             ),
             button("📝 Procedimento", format!("recipe:edit:steps:{recipe_id}")),
         ]);
+        rows.push(vec![button(
+            "🔗 Fonte della ricetta",
+            format!("recipe:edit:src:{recipe_id}"),
+        )]);
     }
     if can_manage {
         rows.push(vec![
@@ -3755,6 +3891,57 @@ async fn load_ingredient_for_edit(
         return Ok(None);
     };
     Ok(Some((ingredient, food, unit)))
+}
+
+/// Un link valido per un pulsante: solo http o https, e niente spazi. Un
+/// testo qualunque come "chiedi alla nonna" resta solo come nome della
+/// fonte, senza pulsante.
+fn link_valido(valore: &str) -> Option<String> {
+    let valore = valore.trim();
+    if !(valore.starts_with("http://") || valore.starts_with("https://")) {
+        return None;
+    }
+    if valore.contains(char::is_whitespace) || valore.chars().count() > 500 {
+        return None;
+    }
+    Some(valore.to_string())
+}
+
+/// Il nome del sito dedotto dal link (`www.giallozafferano.it/...` →
+/// `giallozafferano.it`): così non bisogna scriverlo a mano.
+fn nome_fonte_da_link(url: &str) -> Option<String> {
+    let resto = url.split_once("://")?.1;
+    let host = resto.split('/').next()?.trim_start_matches("www.");
+    (!host.is_empty()).then(|| host.to_string())
+}
+
+/// Segna da dove viene una ricetta. `None` toglie la fonte.
+async fn set_recipe_source(
+    pool: &SqlitePool,
+    recipe_id: i64,
+    fonte: Option<(String, Option<String>)>,
+) -> Result<()> {
+    let user_id = identity::current_actor()
+        .utente_id
+        .context("Utente non disponibile")?;
+    if !can_edit_recipe(pool, recipe_id, user_id).await? {
+        bail!("Non hai il permesso di modificare questa ricetta");
+    }
+    let (nome, url) = match fonte {
+        Some((nome, url)) => (Some(nome), url),
+        None => (None, None),
+    };
+    sqlx::query(
+        "UPDATE ricette SET fonte_nome = ?, fonte_url = ?, \
+         aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?",
+    )
+    .bind(nome)
+    .bind(url)
+    .bind(recipe_id)
+    .execute(pool)
+    .await
+    .context("Impossibile salvare la fonte della ricetta")?;
+    Ok(())
 }
 
 /// Cambia quantità e unità di un ingrediente già presente.
@@ -5147,7 +5334,8 @@ async fn visible_recipe(pool: &SqlitePool, recipe_id: i64) -> Result<Option<Reci
     let (predicate, bind_space) = recipe_visibility_predicate("r", &actor);
     let sql = format!(
         "SELECT r.nome AS name, r.porzioni_base AS servings, r.proprietario_utente_id AS owner_user_id, \
-                u.nome_visualizzato AS owner_name, r.catalogo_globale AS global_catalog \
+                u.nome_visualizzato AS owner_name, r.catalogo_globale AS global_catalog, \
+                r.fonte_nome, r.fonte_url \
          FROM ricette r LEFT JOIN utenti u ON u.id = r.proprietario_utente_id \
          WHERE r.id = ? AND r.archiviata = 0 AND ({predicate})"
     );
@@ -7609,6 +7797,111 @@ mod tests {
                 .await
                 .expect("conteggio");
         assert_eq!(quanti, 3, "i tentativi falliti non toccano niente");
+    }
+
+    #[test]
+    fn la_fonte_accetta_solo_link_veri_e_ne_ricava_il_sito() {
+        assert_eq!(
+            link_valido("https://www.giallozafferano.it/ricetta/Carbonara.html"),
+            Some("https://www.giallozafferano.it/ricetta/Carbonara.html".to_string())
+        );
+        assert_eq!(
+            nome_fonte_da_link("https://www.giallozafferano.it/ricetta/Carbonara.html").as_deref(),
+            Some("giallozafferano.it")
+        );
+        // Niente pulsante per un testo qualunque: resta solo il nome.
+        assert_eq!(link_valido("Nonna"), None);
+        assert_eq!(link_valido("javascript:alert(1)"), None);
+        assert_eq!(link_valido("http://con spazi.it"), None);
+    }
+
+    #[tokio::test]
+    async fn una_ricetta_ricorda_da_dove_viene() {
+        let pool = test_pool().await;
+        let user_id = create_user(&pool, "Chef", 1).await;
+        let food = base_food(&pool, 0).await;
+        let grams = unit(&pool, "g").await;
+        let draft = RecipeDraft {
+            name: "Ricetta con fonte".to_string(),
+            servings: 2,
+            ingredients: vec![ingredient(&food, &grams, 100.0)],
+            steps: vec![DraftStep {
+                text: "Mescola".to_string(),
+                media: Vec::new(),
+            }],
+            visible_spaces: Vec::new(),
+        };
+        identity::with_actor(actor(user_id, 1, "Chef", false), async {
+            let recipe_id = save_recipe(&pool, 99, &draft).await.expect("salvataggio");
+            set_recipe_source(
+                &pool,
+                recipe_id,
+                Some((
+                    "giallozafferano.it".to_string(),
+                    Some("https://www.giallozafferano.it/ricetta/Carbonara.html".to_string()),
+                )),
+            )
+            .await
+            .expect("fonte");
+
+            let ricetta = visible_recipe(&pool, recipe_id)
+                .await
+                .expect("lettura")
+                .expect("ricetta");
+            assert_eq!(ricetta.fonte_nome.as_deref(), Some("giallozafferano.it"));
+            assert!(ricetta.fonte_url.is_some());
+
+            set_recipe_source(&pool, recipe_id, None)
+                .await
+                .expect("fonte tolta");
+            let ricetta = visible_recipe(&pool, recipe_id)
+                .await
+                .expect("lettura")
+                .expect("ricetta");
+            assert_eq!(ricetta.fonte_nome, None);
+            assert_eq!(ricetta.fonte_url, None);
+        })
+        .await;
+    }
+
+    /// I prodotti di marca seminati dalla migration: devono esserci, essere
+    /// attaccati agli alimenti giusti e non avere codici a barre inventati.
+    #[tokio::test]
+    async fn i_prodotti_di_marca_arrivano_col_catalogo() {
+        let pool = test_pool().await;
+        let quanti: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM prodotti_alimentari WHERE creato_da_utente_id IS NULL",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("conteggio");
+        assert!(quanti >= 80, "seminati troppi pochi prodotti: {quanti}");
+
+        let con_ean: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM prodotti_alimentari WHERE codice_ean IS NOT NULL",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("conteggio ean");
+        assert_eq!(con_ean, 0, "nessun codice a barre inventato");
+
+        let barilla: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM prodotti_alimentari p JOIN alimenti a ON a.id = p.alimento_id \
+             WHERE p.marca_normalizzata = 'barilla' AND a.nome_normalizzato = 'pasta'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("conteggio barilla");
+        assert!(barilla >= 4, "la pasta di marca deve stare sotto Pasta");
+
+        // Nessun prodotto orfano o con quantità impossibile.
+        let rotti: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM prodotti_alimentari WHERE quantita_confezione <= 0",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("conteggio rotti");
+        assert_eq!(rotti, 0);
     }
 
     #[test]

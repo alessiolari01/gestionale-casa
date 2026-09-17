@@ -487,6 +487,49 @@ pub async fn destinazione_per(
 
 /// Ricorda per lo spazio dove va un alimento (o un prodotto): la scelta a
 /// mano vince su nome e categoria da qui in avanti.
+/// Dove finirà questo alimento dopo la spesa, e se il posto l'ha scelto
+/// l'utente (`true`) o l'ha dedotto il bot da nome e categoria (`false`).
+/// Serve alla sezione Alimenti, dove il posto si vede e si cambia prima
+/// ancora di avere la roba in casa (chiesto da Alessio il 18 settembre 2026).
+pub async fn destinazione_alimento(
+    pool: &SqlitePool,
+    alimento_id: i64,
+    nome: &str,
+) -> anyhow::Result<(Conservazione, bool)> {
+    let spazio_id = crate::identity::current_actor().spazio_id;
+    let scelta: Option<String> = sqlx::query_scalar(
+        "SELECT conservazione FROM scorte_destinazioni \
+         WHERE spazio_id = ? AND alimento_id = ?",
+    )
+    .bind(spazio_id)
+    .bind(alimento_id)
+    .fetch_optional(pool)
+    .await
+    .context("Impossibile leggere la destinazione scelta")?;
+    if let Some(dove) = scelta.as_deref().and_then(Conservazione::da_token) {
+        return Ok((dove, true));
+    }
+    let mut conn = pool
+        .acquire()
+        .await
+        .context("Impossibile aprire la connessione")?;
+    let dove = destinazione_per(&mut conn, spazio_id, Some(alimento_id), None, nome).await?;
+    Ok((dove, false))
+}
+
+/// Torna alla scelta automatica: si cancella il posto fisso e riprendono a
+/// decidere il nome e la categoria.
+pub async fn togli_destinazione(pool: &SqlitePool, alimento_id: i64) -> anyhow::Result<()> {
+    let spazio_id = crate::identity::current_actor().spazio_id;
+    sqlx::query("DELETE FROM scorte_destinazioni WHERE spazio_id = ? AND alimento_id = ?")
+        .bind(spazio_id)
+        .bind(alimento_id)
+        .execute(pool)
+        .await
+        .context("Impossibile togliere il posto fisso")?;
+    Ok(())
+}
+
 pub async fn imposta_destinazione(
     pool: &SqlitePool,
     alimento_id: Option<i64>,
@@ -1822,6 +1865,11 @@ pub async fn handle_callback(
         mostra_menu(bot, chat_id, pool, None).await?;
         return Ok(true);
     }
+    if data == "dispensa:legenda" {
+        liste::cambia_legenda(pool).await;
+        mostra_menu(bot, chat_id, pool, None).await?;
+        return Ok(true);
+    }
     if data == "dispensa:auto" {
         let attuale = ingresso_automatico(pool).await;
         if let Err(errore) = imposta_ingresso_automatico(pool, !attuale).await {
@@ -2244,6 +2292,13 @@ async fn mostra_menu(
         "\nChiudendo la spesa, la roba comprata non entra da sola: la aggiungi tu."
     });
 
+    // Legenda dei simboli (18 settembre 2026), accesa finché non la spegni.
+    let legenda = liste::legenda_attiva(pool).await;
+    if legenda {
+        testo.push('\n');
+        testo.push_str(&liste::blocco_legenda(liste::LEGENDA_SCORTE));
+    }
+
     let mut rows = Vec::new();
     for dove in Conservazione::TUTTE {
         let totale = gruppi_del_luogo(pool, dove)
@@ -2267,6 +2322,7 @@ async fn mostra_menu(
         },
         "dispensa:auto",
     )]);
+    rows.push(vec![liste::pulsante_legenda(legenda, "dispensa:legenda")]);
     rows.push(nav_row("food:menu"));
 
     bot.send_message(chat_id, testo)

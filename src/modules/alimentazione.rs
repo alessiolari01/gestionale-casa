@@ -1792,6 +1792,56 @@ pub async fn handle_callback(
                 .await?;
             Ok(true)
         }
+        _ if data.starts_with("food:dest:set:") => {
+            let resto = data.strip_prefix("food:dest:set:").unwrap_or_default();
+            if let Some((food_id, dove)) = resto.split_once(':').and_then(|(id, token)| {
+                Some((
+                    parse_positive_id(id)?,
+                    crate::modules::dispensa::Conservazione::da_token(token)?,
+                ))
+            }) {
+                let avviso = match crate::modules::dispensa::imposta_destinazione(
+                    pool,
+                    Some(food_id),
+                    None,
+                    dove,
+                )
+                .await
+                {
+                    Ok(()) => format!("✅ D'ora in poi va in {}.", dove.etichetta()),
+                    Err(error) => {
+                        tracing::warn!(?error, food_id, "Scelta destinazione alimento fallita");
+                        "⚠️ Non riesco a salvare il posto.".to_string()
+                    }
+                };
+                send_food_destination(bot, chat_id, pool, food_id, Some(&avviso)).await?;
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:dest:auto:") => {
+            if let Some(food_id) = data
+                .strip_prefix("food:dest:auto:")
+                .and_then(parse_positive_id)
+            {
+                let avviso = match crate::modules::dispensa::togli_destinazione(pool, food_id).await
+                {
+                    Ok(()) => "✅ Torna a decidere il bot, da nome e categoria.".to_string(),
+                    Err(error) => {
+                        tracing::warn!(?error, food_id, "Rimozione destinazione fallita");
+                        "⚠️ Non riesco a togliere il posto fisso.".to_string()
+                    }
+                };
+                send_food_destination(bot, chat_id, pool, food_id, Some(&avviso)).await?;
+            }
+            Ok(true)
+        }
+        _ if data.starts_with("food:dest:") => {
+            if let Some(food_id) = data.strip_prefix("food:dest:").and_then(parse_positive_id) {
+                sessions.clear_chat(chat_id.0);
+                send_food_destination(bot, chat_id, pool, food_id, None).await?;
+            }
+            Ok(true)
+        }
         _ if data.starts_with("food:products:") => {
             let food_id = data
                 .strip_prefix("food:products:")
@@ -3919,6 +3969,80 @@ async fn set_food_category(pool: &SqlitePool, food_id: i64, category_id: i64) ->
     Ok(())
 }
 
+/// Dove finirà questo alimento dopo la spesa, e come cambiarlo (18
+/// settembre 2026, chiesto da Alessio). È la stessa scelta di
+/// "📌 Mettilo sempre qui" delle scorte, raggiungibile da qui perché il
+/// posto si decide prima di avere la roba in casa.
+async fn send_food_destination(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    food_id: i64,
+    notice: Option<&str>,
+) -> ResponseResult<()> {
+    use crate::modules::dispensa::Conservazione;
+
+    let Ok(Some(food)) = get_food(pool, food_id).await else {
+        bot.send_message(chat_id, "⚠️ Alimento non disponibile.")
+            .reply_markup(InlineKeyboardMarkup::new(vec![vec![
+                button("⬅️ Indietro", "food:list"),
+                button("🏠 Menù principale", "menu:main"),
+            ]]))
+            .await?;
+        return Ok(());
+    };
+    let destinazione =
+        crate::modules::dispensa::destinazione_alimento(pool, food.id, &food.name).await;
+
+    let mut testo = String::new();
+    if let Some(notice) = notice {
+        testo.push_str(notice);
+        testo.push_str("\n\n");
+    }
+    testo.push_str(&format!("📦 {}\n", food.name));
+    let (attuale, scelto_a_mano) = match destinazione {
+        Ok(valore) => valore,
+        Err(error) => {
+            tracing::warn!(?error, food_id, "Errore destinazione alimento");
+            (Conservazione::Dispensa, false)
+        }
+    };
+    testo.push_str(&format!(
+        "\nChiudendo la spesa va in: {}\n{}",
+        attuale.etichetta(),
+        if scelto_a_mano {
+            "L'hai scelto tu."
+        } else {
+            "Lo decido io dal nome e dalla categoria: scegli un posto per fissarlo."
+        }
+    ));
+
+    let mut rows: Vec<Vec<InlineKeyboardButton>> = Conservazione::TUTTE
+        .iter()
+        .map(|dove| {
+            let segno = if *dove == attuale { "✅ " } else { "" };
+            vec![button(
+                format!("{segno}{}", dove.etichetta()),
+                format!("food:dest:set:{food_id}:{}", dove.token()),
+            )]
+        })
+        .collect();
+    if scelto_a_mano {
+        rows.push(vec![button(
+            "↩️ Decidi tu per me",
+            format!("food:dest:auto:{food_id}"),
+        )]);
+    }
+    rows.push(vec![
+        button("⬅️ Indietro", format!("food:view:{food_id}")),
+        button("🏠 Menù principale", "menu:main"),
+    ]);
+    bot.send_message(chat_id, testo)
+        .reply_markup(InlineKeyboardMarkup::new(rows))
+        .await?;
+    Ok(())
+}
+
 async fn send_food_detail(
     bot: &Bot,
     chat_id: ChatId,
@@ -3977,6 +4101,24 @@ async fn send_food_detail(
                     Err(error) => {
                         tracing::error!(?error, food_id = food.id, "Errore spazi alimento");
                     }
+                }
+            }
+
+            // Dove finirà dopo la spesa (18 settembre 2026): è la stessa
+            // regola che usa la chiusura della spesa, mostrata prima di
+            // avere la roba in casa.
+            match crate::modules::dispensa::destinazione_alimento(pool, food.id, &food.name).await {
+                Ok((dove, scelto_a_mano)) => lines.push(format!(
+                    "📦 Dopo la spesa va in: {} {}",
+                    dove.etichetta(),
+                    if scelto_a_mano {
+                        "(scelto da te)"
+                    } else {
+                        "(deciso da nome e categoria)"
+                    }
+                )),
+                Err(error) => {
+                    tracing::warn!(?error, food_id = food.id, "Errore destinazione alimento");
                 }
             }
 
@@ -4978,6 +5120,10 @@ fn food_detail_keyboard(id: i64, can_edit: bool, can_manage: bool) -> InlineKeyb
     rows.push(vec![button(
         "🛒 Prodotti associati",
         format!("food:products:{id}"),
+    )]);
+    rows.push(vec![button(
+        "📦 Dove va dopo la spesa",
+        format!("food:dest:{id}"),
     )]);
     if can_edit {
         rows.push(vec![button(
@@ -7894,9 +8040,14 @@ mod tests {
         })
         .await;
 
-        let products = list_products_for_food(&pool, food_id)
+        // Il catalogo semina già dei prodotti di marca (migration del 18
+        // settembre 2026): qui conta il prodotto appena creato, non il totale.
+        let products: Vec<_> = list_products_for_food(&pool, food_id)
             .await
-            .expect("prodotti alimento");
+            .expect("prodotti alimento")
+            .into_iter()
+            .filter(|prodotto| prodotto.product_name == "Original")
+            .collect();
         assert_eq!(products.len(), 1);
         assert_eq!(products[0].brand, "Philadelphia");
         assert_eq!(products[0].product_name, "Original");
@@ -7957,9 +8108,12 @@ mod tests {
         })
         .await;
 
-        let products = list_products_for_food(&pool, food_id)
+        let products: Vec<_> = list_products_for_food(&pool, food_id)
             .await
-            .expect("prodotti");
+            .expect("prodotti")
+            .into_iter()
+            .filter(|prodotto| prodotto.product_name == "Original")
+            .collect();
         assert_eq!(products.len(), 1);
         assert_eq!(products[0].format_count, 2);
         let formats = list_product_formats(&pool, products[0].id)
