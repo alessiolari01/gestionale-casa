@@ -52,9 +52,23 @@ rxing = { version = "0.9.3", default-features = false, features = ["oned", "deco
 debug = 0
 codegen-units = 16
 
+# I proc-macro e i build script si compilano per la macchina che compila, e
+# non seguono il profilo qui sopra: hanno il loro. Senza questo, sul telefono
+# arrivavano con le informazioni di debug complete, ed e' li' che il linker e'
+# finito senza memoria il 18 settembre 2026 (`rxing-one-d-proc-derive`).
+[profile.dev.build-override]
+debug = 0
+opt-level = 0
+codegen-units = 16
+
 # Il profilo `test` erediterebbe da `dev`, ma il binario di test contiene
 # l'intero progetto in un solo eseguibile ed e' il piu' pesante da linkare:
 # meglio dichiararlo, cosi' resta vero anche se `dev` cambia.
 [profile.test]
 debug = 0
+codegen-units = 16
+
+[profile.test.build-override]
+debug = 0
+opt-level = 0
 codegen-units = 16

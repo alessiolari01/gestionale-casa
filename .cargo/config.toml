@@ -1,0 +1,18 @@
+# Il limite di thread del linker vale anche per i proc-macro.
+#
+# `build.rs` emette gia' `-Wl,--threads=1` su Android, ma un
+# `cargo:rustc-link-arg` vale **solo per il crate che lo dichiara**: le
+# dipendenze che si linkano da sole -- in particolare i proc-macro, che sono
+# librerie dinamiche compilate per la macchina che compila -- non lo vedono.
+#
+# Il 18 settembre 2026 il telefono si e' fermato proprio li': non sul nostro
+# binario, ma sul collegamento di `rxing-one-d-proc-derive`, con
+# "LLVM ERROR: out of memory". LLD lancia un thread per core e ognuno tiene la
+# sua copia delle strutture di link: su un S9 con 3,6 GB, meta' dei quali gia'
+# occupati, la memoria finisce.
+#
+# Questa riga vale solo per il target Android, quindi non tocca ne' il PC ne'
+# la CI. Resta anche `build.rs`, che copre il caso in cui una `RUSTFLAGS`
+# nell'ambiente sostituisca questo file invece di aggiungersi.
+[target.aarch64-linux-android]
+rustflags = ["-C", "link-arg=-Wl,--threads=1"]
