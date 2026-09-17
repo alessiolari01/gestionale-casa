@@ -1947,16 +1947,20 @@ del confronto, quantità di Open Food Facts, codice a barre), 2 su database
 consegna A. Totale 437. Le fonti esterne non sono coperte da test: nessun
 test tocca la rete.
 
-**Collaudo dal vivo su Telegram da fare.**
+**Distribuito sull'S9 il 17 settembre 2026** (commit `04b4e14`): CI verde
+(run #147 sul commit giusto), 437 test e clippy verdi anche sul telefono,
+backup del database creato (`gestionale_pre_20260917_204809.db`), migration
+provata prima su una copia; `applied_migrations=55` e `Gestionale Casa
+online` confermati nel log di avvio. **Collaudo dal vivo su Telegram da
+fare** (consegne A e B insieme).
 
 ## 3. Stato tecnico verificato
 
-- **55 migration** nel repository. Applicate al database reale dell'S9 le
-  prime 54: l'ultima applicata è `20260917180000_consegna_a_pasti_e_spesa.sql`
-  (sezione 2undecies), il 17 settembre 2026, verificato leggendo
-  `applied_migrations=54` nel log di avvio del bot dopo il deploy — non
-  dedotto. **Da applicare**:
-  `20260917210000_consegna_b_negozi_e_prezzi.sql` (sezione 2duodecies). Né il secondo giro
+- **55 migration** nel repository, tutte **applicate** al database reale
+  dell'S9: l'ultima (`20260917210000_consegna_b_negozi_e_prezzi.sql`,
+  sezione 2duodecies) il 17 settembre 2026, verificato leggendo
+  `applied_migrations=55` nel log di avvio del bot dopo il deploy — non
+  dedotto. Né il secondo giro
   di correzioni del 12 settembre 2026 (sezione 2septies) né le tre
   rifiniture del 13 settembre 2026 (sezione 2octies) avevano migration
   proprie: lavoravano su schema già esistente, confermato di nuovo
