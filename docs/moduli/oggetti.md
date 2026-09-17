@@ -34,7 +34,7 @@ La migration `20260814121600_oggetti.sql` aggiunge:
 | `modello` | testo | no | es. UniversalImpact 800 |
 | `numero_serie` | testo | no | tenuto per gli oggetti dove ha senso |
 | `posizione` | testo | no | dallo Step 6A: dettaglio libero, es. scaffale 2 |
-| `data_acquisto` | data ISO | no | salvata come `AAAA-MM-GG` |
+| `data_acquisto` | data ISO | no | salvata come `AAAA-MM-GG`, mostrata come `Gio 17 Set` (C17, dal 17 settembre 2026) |
 | `prezzo_acquisto_centesimi` | intero | no | denaro in centesimi, mai `REAL` |
 | `venditore` | testo | no | es. Amazon, MediaWorld, privato |
 | `valore_stimato_centesimi` | intero | no | valore attuale stimato |

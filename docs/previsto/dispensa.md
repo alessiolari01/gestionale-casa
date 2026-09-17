@@ -144,11 +144,12 @@ sottrazione toccasse un'aggregazione già collaudata — è rimasto vero: per
 questo è coperta da test propri (`sottrai_scorte`) ed è la prima cosa da
 riverificare dal vivo.
 
+**Costruita la quantità realmente comprata** (consegna A, 17 settembre
+2026): `📦 Ho preso…` sulla voce della lista registra la confezione o la
+quantità presa, ed è quella che entra in casa alla chiusura
+(`docs/moduli/lista-spesa.md`).
+
 **Restano da fare**:
 
-1. la **quantità realmente comprata** e il formato della confezione sulla
-   voce della lista della spesa (punti 1 e 2 di "Cosa manca"): finché non ci
-   sono, in casa entra la quantità che serviva, non quella che si è presa
-   davvero — si corregge a mano con `✏️ Quantità`;
-2. gli **avvisi di scadenza**, quando esisterà l'infrastruttura dei reminder
+1. gli **avvisi di scadenza**, quando esisterà l'infrastruttura dei reminder
    (`docs/previsto/reminder.md`).

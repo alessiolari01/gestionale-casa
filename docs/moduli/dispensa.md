@@ -54,6 +54,15 @@ dispensa. `destinazione_per` decide in quest'ordine:
 Le regole per nome stanno nel codice e non nel database perché così si
 testano, e valgono anche per gli alimenti che gli utenti creeranno in futuro.
 
+**Scelta di Alessio, contro le indicazioni ufficiali** (17 settembre 2026):
+zucchine, cetrioli, fagiolini, melanzane, peperoni e mele vanno in
+**frigo**. Le indicazioni del Ministero della Salute per alcune di queste
+verdure consigliano un posto fresco fuori dal frigo, per il danno da freddo.
+Alessio ha scelto il frigo sapendolo, quindi queste verdure **non** sono
+nell'elenco delle eccezioni per la dispensa: seguono la categoria "verdura".
+Le mele sono nella frutta da frigo. Chi vuole un altro posto può usare
+`📌 Mettilo sempre qui`.
+
 ## Una riga per alimento, con le sue confezioni (17 settembre 2026)
 
 Trovato da Alessio collaudando: due `Pasta sfoglia · 500 g` comparivano come
@@ -125,14 +134,28 @@ Ogni prelievo resta in `scorte_movimenti`, e serve a **restituirlo**:
 
 - **pasto saltato dopo uno scarico automatico**: tutto torna esattamente
   com'era — stessa confezione, stesso posto, stessa scadenza (richiesta
-  esplicita di Alessio). Uno scarico fatto a mano con `🍳 Preparato` invece
-  resta: il cibo è stato usato comunque;
+  esplicita di Alessio). Dopo uno scarico fatto a mano con `🍳 Preparato` il
+  planner chiede se gli ingredienti preparati ci sono ancora (consegna A):
+  sì li restituisce, no li lascia tolti;
+- **pasto consumato riportato a pianificato**: se non era preparato, torna
+  quello scalato al consumo; se era preparato, niente;
 - **pasto modificato** (`✏️ Modifica`, che cambia ricetta o partecipanti):
   torna tutto, e se il pasto era preparato si riscala subito con gli
   ingredienti nuovi;
 - **pasto consumato sostituito** (`🔁 Sostituisci`, vedi
   `docs/moduli/planner.md`): torna tutto quello del pasto vecchio, e si
   scala quello del nuovo.
+
+**Quando in casa non c'è abbastanza** (consegna A, 17 settembre 2026):
+
+- prima di `🍳 Preparato` e `✅ Consumato`, `mancanti_per_pasto` dice cosa
+  manca senza toccare niente, e il planner chiede conferma;
+- lo scarico (a mano o automatico) prende quello che c'è e annota il resto
+  in `planner_pasti.scorte_mancanti` (testo pronto, "Pasta brisée 200 g");
+  restituire le scorte cancella l'annotazione;
+- `scala_pasti_scaduti` restituisce i pasti scaricati con le loro
+  mancanze, e `avviso_scarichi` ne fa l'avviso mostrato in testa alla
+  lista della spesa e alle scorte, solo se mancava qualcosa.
 
 Nel primo avvio dopo la migration, i pasti dei **giorni passati** si
 considerano già scaricati: sono storia precedente alla funzione, e non

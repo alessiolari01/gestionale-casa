@@ -415,6 +415,36 @@ recuperare". Una voce archiviata però non si modifica più: lo impedisce il
 trigger `trg_lista_spesa_voce_archiviata_immutabile`, stesso principio del
 congelamento di una voce comprata.
 
+## "📦 Ho preso…" (consegna A, 17 settembre 2026)
+
+Al supermercato la confezione giusta al grammo non c'è quasi mai: servono
+250 g e la confezione è da 300 g. Chiesto da Alessio: segnarlo sul momento,
+così in casa entra quello che si è preso davvero.
+
+- Accanto a ogni voce **con una quantità** c'è `📦`
+  (`lista_spesa:presa:{voce}`). Spuntare resta un tocco solo sul nome.
+- La schermata dice quanto serve (e quanto è già segnato), propone le
+  **confezioni registrate** per l'alimento — il formato base di ogni
+  prodotto attivo e i suoi formati aggiuntivi, senza doppioni, al massimo 8;
+  solo quelle del prodotto se la voce è già di un prodotto preciso —
+  (`lista_spesa:presa:f:{voce}:p{prodotto}` / `:f{formato}`) e accetta una
+  quantità scritta (senza unità vale quella della voce).
+- Segnare la presa **spunta la voce**; il pulsante mostra, a capo,
+  `📦 presi 300 g`. `↩️ Conta la quantità in lista`
+  (`lista_spesa:presa:reset:{voce}`) la toglie lasciando la spunta.
+  **Togliere la spunta** dimentica anche la presa.
+- **Alla chiusura** entra in archivio — e quindi in casa — la quantità
+  presa, con il prodotto preso; l'archivio conserva accanto quanto serviva
+  (`quantita_richiesta`). Per coprire le aggiunte dal catalogo conta invece
+  quanto serviva: l'eccedenza entra in casa, ed è da lì che la lista la
+  sottrae.
+- Una voce con la presa segnata **non si fonde** con un'altra riga comprata
+  dello stesso alimento (vedi "fusione" sopra): la somma di due confezioni
+  diverse non avrebbe un significato chiaro. Restano due righe.
+
+Le colonne della presa non sono nel trigger di congelamento: si segnano
+proprio dopo aver spuntato.
+
 ## Accesso dal planner (16 settembre 2026)
 
 La schermata della settimana del planner ha un pulsante `🛒 Lista della
@@ -498,7 +528,7 @@ bloccati). Un inizio precedente a oggi chiede conferma subito (vedi sopra).
 
 ```text
 liste_spesa                       intervallo, proprietario, spazio, inizio_manuale
-liste_spesa_voci                  voci generate o manuali, comprato/comprato_il, ordinamento
+liste_spesa_voci                  voci generate o manuali, comprato/comprato_il, ordinamento, presa
 liste_spesa_aggiunte_catalogo     aggiunte dal catalogo, vive attraverso ogni refresh
 liste_spesa_chiusure              una spesa chiusa
 liste_spesa_voci_archiviate       le voci di una spesa chiusa, immutabili
@@ -510,7 +540,8 @@ Vedi `docs/database.md` per i campi.
 
 ## Fuori scope
 
-Non modella i prezzi o la scelta del formato/confezione da acquistare:
+Non modella i prezzi, né suggerisce quale formato/confezione acquistare
+(registra solo quella presa, con `📦`):
 quello è il futuro modulo Acquisti, che dirà *quale prodotto o confezione
 comprare*, mentre questa lista dice solo *cosa serve* — vedi
 `docs/previsto/lista-della-spesa.md`, sezione "Relazione con Acquisti". Le

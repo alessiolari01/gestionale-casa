@@ -1796,13 +1796,91 @@ fare.**
 Promemoria, Palestra e Soldi nel menù principale — domande aperte fatte,
 risposte da raccogliere (`docs/roadmap.md`).
 
+## 2undecies. Consegna A: ricette, esiti dei pasti, controllo delle scorte, confezione presa (17 settembre 2026)
+
+Dal collaudo dal vivo di Alessio della sezione 2decies, più le richieste
+arrivate durante il collaudo; via libera esplicito ("parti con la consegna
+A"). Una migration nuova,
+`migrations/20260917180000_consegna_a_pasti_e_spesa.sql`. Dettaglio in
+`docs/moduli/ricette.md`, `docs/moduli/planner.md`,
+`docs/moduli/dispensa.md`, `docs/moduli/lista-spesa.md`,
+`docs/moduli/turni-e-routine.md`. La **consegna B** (negozi, prezzi,
+prodotti preferiti, codice a barre) è concordata ma non ancora scritta:
+`docs/roadmap.md`.
+
+**Difetti trovati dal collaudo**:
+
+- **Ricette senza ingredienti**: ogni ricetta sembrava vuota. La lettura
+  cercava la colonna `notes` ma quella vera è `note`; falliva sempre, e chi
+  la chiamava nascondeva l'errore. Il difetto c'era dal 26 agosto. Corretto
+  l'alias, e gli errori di lettura ora si vedono ("⚠️ Non riesco a leggere
+  gli ingredienti.") invece di sembrare una ricetta vuota.
+- **Un pasto saltato non si poteva più cambiare**: il trigger del 31 agosto
+  bloccava tutto. Ora il pasto saltato o consumato torna a pianificato con
+  `↩️ Riporta a pianificato`; il resto del pasto resta bloccato.
+- **L'icona del pasto preparato non cambiava** nell'elenco del giorno: ora
+  `🍳`.
+- **Il giorno della settimana compariva due volte** in alcune intestazioni
+  dopo C17: tolto.
+- **Nessun controllo delle scorte** segnando preparato o consumato: ora c'è.
+
+**Costruito**:
+
+1. **Ingredienti delle ricette**: una riga per ingrediente, il nome apre la
+   modifica di quantità e unità, `🗑` accanto con conferma (C16).
+2. **`↩️ Riporta a pianificato`** sui pasti saltati e consumati. Consumato
+   senza preparazione: le scorte tornano. Preparato: restano tolte, il cibo
+   era già cucinato.
+3. **Saltare un pasto preparato chiede** "Gli ingredienti preparati li hai
+   ancora?": sì li rimette nelle scorte, no li lascia tolti. Questo
+   sostituisce la scelta autonoma della sezione 2decies ("il preparato
+   saltato non restituisce").
+4. **Controllo delle scorte** prima di preparato e consumato: se manca
+   qualcosa si vede cosa e si conferma. Nello scarico automatico a orario
+   passato nessuno può confermare: si prende quello che c'è, la mancanza
+   resta annotata sul pasto (`scorte_mancanti`) e compare come avviso
+   all'apertura di lista e scorte e nel dettaglio del pasto.
+5. **Il proprio profilo già spuntato** scegliendo i partecipanti di un
+   pasto, e **`⭐` in cima** all'elenco dei profili nei turni.
+6. **C17 anche in Oggetti.**
+7. **"📦 Ho preso…"** nella lista della spesa: accanto a ogni voce con una
+   quantità, per segnare la confezione presa (tra i prodotti registrati per
+   quell'alimento) o scrivere la quantità. Segnarla spunta la voce;
+   togliere la spunta la dimentica. Chiudendo la spesa entra in casa la
+   quantità presa, e l'archivio ricorda quanto serviva.
+8. **Conservazione**: per zucchine, cetrioli, fagiolini, melanzane,
+   peperoni e mele Alessio ha scelto il frigo, contro le indicazioni del
+   Ministero della Salute. Annotato in `docs/moduli/dispensa.md`.
+
+**Scelte prese in autonomia**:
+
+- una voce con la presa segnata non si fonde più con altre righe comprate
+  dello stesso alimento: la somma di due confezioni diverse non avrebbe un
+  significato chiaro;
+- per coprire le aggiunte dal catalogo alla chiusura conta la quantità che
+  serviva, non quella presa: l'eccedenza entra in casa, ed è da lì che si
+  sottrae;
+- `📦` compare solo sulle voci con una quantità;
+- le confezioni proposte sono al massimo 8.
+
+**Revisione di procedimento e allegati delle ricette**: fatta, riportata ad
+Alessio, **nessuna modifica** finché non dà il via libera.
+
+9 nuovi test: 2 sulla presa nella lista, 2 sulle letture e sulla modifica
+degli ingredienti delle ricette, 3 nelle scorte (mancanze, scarico con
+annotazione, trigger dei pasti), 1 nei turni, 1 nel planner. Più due test
+esistenti estesi con i nuovi callback. Totale 428.
+
+**Collaudo dal vivo su Telegram da fare.**
+
 ## 3. Stato tecnico verificato
 
-- **53 migration** nel repository, tutte **applicate** al database reale
-  dell'S9: l'ultima (`20260917090000_scorte_netto_e_aggiornamento.sql`,
-  sezione 2decies) il 17 settembre 2026, verificato leggendo
+- **54 migration** nel repository. Applicate al database reale dell'S9 le
+  prime 53: l'ultima applicata e' `20260917090000_scorte_netto_e_aggiornamento.sql`
+  (sezione 2decies), il 17 settembre 2026, verificato leggendo
   `applied_migrations=53` nel log di avvio del bot dopo il deploy — non
-  dedotto. Né il secondo giro
+  dedotto. **Da applicare**: `20260917180000_consegna_a_pasti_e_spesa.sql`
+  (sezione 2undecies). Né il secondo giro
   di correzioni del 12 settembre 2026 (sezione 2septies) né le tre
   rifiniture del 13 settembre 2026 (sezione 2octies) avevano migration
   proprie: lavoravano su schema già esistente, confermato di nuovo
@@ -1810,7 +1888,8 @@ risposte da raccogliere (`docs/roadmap.md`).
 - pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa,
   punto 1 della sezione 6): `fmt`, `check --locked`,
   `clippy --all-targets --locked -- -D warnings`, `test --locked` —
-  **419 test** (406 prima del giro della sezione 2decies, 391 prima della
+  **428 test** (419 prima della consegna A della sezione 2undecies,
+  406 prima del giro della sezione 2decies, 391 prima della
   chiusura della spesa e delle scorte del 16 settembre 2026 — sezione
   2nonies —, 389 prima delle tre rifiniture
   della sezione 2octies, 385

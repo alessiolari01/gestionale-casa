@@ -1532,6 +1532,14 @@ pub struct VoceListaSpesa {
     pub comprato: i64,
     #[allow(dead_code)]
     pub ordinamento: i64,
+    #[allow(dead_code)]
+    pub prodotto_alimentare_id: Option<i64>,
+    /// Quanto si è preso davvero ("📦 Ho preso…"), se diverso da quanto
+    /// serviva: è questo che entra in casa alla chiusura.
+    pub quantita_presa: Option<f64>,
+    pub unita_presa: Option<String>,
+    #[allow(dead_code)]
+    pub prodotto_preso_id: Option<i64>,
 }
 
 async fn trova_per_id(pool: &SqlitePool, id: i64) -> anyhow::Result<Option<ListaSpesa>> {
@@ -1670,7 +1678,8 @@ pub async fn cambia_intervallo(
 pub async fn carica_voci(pool: &SqlitePool, lista_id: i64) -> anyhow::Result<Vec<VoceListaSpesa>> {
     sqlx::query_as(
         "SELECT id, origine, alimento_id, descrizione, quantita, unita_simbolo, comprato, \
-                ordinamento \
+                ordinamento, prodotto_alimentare_id, quantita_presa, unita_presa, \
+                prodotto_preso_id \
          FROM liste_spesa_voci WHERE lista_id = ? \
          ORDER BY ordinamento ASC, id ASC",
     )
@@ -1789,8 +1798,11 @@ pub async fn imposta_comprato(
              aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?",
         )
     } else {
+        // Togliere la spunta vuol dire "non l'ho preso": quanto era stato
+        // segnato con 📦 non vale più.
         sqlx::query(
             "UPDATE liste_spesa_voci SET comprato = 0, comprato_il = NULL, \
+             quantita_presa = NULL, unita_presa = NULL, prodotto_preso_id = NULL, \
              aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?",
         )
     }
@@ -1862,7 +1874,8 @@ async fn fondi_comprate_se_serve(
 ) -> anyhow::Result<()> {
     let riga: Option<RigaFusioneGrezza> = sqlx::query_as(
         "SELECT alimento_id, prodotto_alimentare_id, descrizione, quantita, unita_simbolo \
-         FROM liste_spesa_voci WHERE id = ? AND origine = 'generato' AND comprato = 1",
+         FROM liste_spesa_voci WHERE id = ? AND origine = 'generato' AND comprato = 1 \
+           AND quantita_presa IS NULL",
     )
     .bind(voce_id)
     .fetch_optional(pool)
@@ -1883,7 +1896,7 @@ async fn fondi_comprate_se_serve(
         "SELECT id, alimento_id, prodotto_alimentare_id, descrizione, quantita \
          FROM liste_spesa_voci \
          WHERE lista_id = ? AND origine = 'generato' AND comprato = 1 \
-           AND id <> ? AND unita_simbolo = ?",
+           AND id <> ? AND unita_simbolo = ? AND quantita_presa IS NULL",
     )
     .bind(lista_id)
     .bind(voce_id)
@@ -1942,6 +1955,172 @@ async fn fondi_comprate_se_serve(
         .await
         .context("Impossibile salvare la fusione")?;
     Ok(())
+}
+
+/// "📦 Ho preso…": segna quanto si è preso davvero (una confezione da 300 g
+/// quando ne servivano 250) e, se serve, spunta la voce. Una voce con la
+/// presa segnata non si fonde più con altre righe comprate: la somma di due
+/// prese diverse non avrebbe un senso chiaro.
+pub async fn registra_presa(
+    pool: &SqlitePool,
+    voce_id: i64,
+    quantita: f64,
+    unita: &str,
+    prodotto_id: Option<i64>,
+) -> anyhow::Result<()> {
+    let aggiornate = sqlx::query(
+        "UPDATE liste_spesa_voci SET quantita_presa = ?, unita_presa = ?, \
+         prodotto_preso_id = ?, comprato = 1, \
+         comprato_il = COALESCE(comprato_il, strftime('%Y-%m-%dT%H:%M:%fZ','now')), \
+         aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?",
+    )
+    .bind(arrotonda(quantita))
+    .bind(unita.trim())
+    .bind(prodotto_id)
+    .bind(voce_id)
+    .execute(pool)
+    .await
+    .context("Impossibile segnare quanto preso")?
+    .rows_affected();
+    anyhow::ensure!(aggiornate == 1, "Voce non trovata");
+    Ok(())
+}
+
+/// Torna a "presa la quantità che serviva": la voce resta spuntata.
+pub async fn annulla_presa(pool: &SqlitePool, voce_id: i64) -> anyhow::Result<()> {
+    sqlx::query(
+        "UPDATE liste_spesa_voci SET quantita_presa = NULL, unita_presa = NULL, \
+         prodotto_preso_id = NULL, \
+         aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?",
+    )
+    .bind(voce_id)
+    .execute(pool)
+    .await
+    .context("Impossibile togliere quanto preso")?;
+    Ok(())
+}
+
+/// Una confezione proponibile in "📦 Ho preso…": il formato base di un
+/// prodotto (`token` = `p{id}`) o uno dei suoi formati aggiuntivi
+/// (`f{id}`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Confezione {
+    pub token: String,
+    pub prodotto_id: i64,
+    pub etichetta: String,
+    pub quantita: f64,
+    pub unita: String,
+}
+
+#[derive(Debug, FromRow)]
+struct ConfezioneGrezza {
+    prodotto_id: i64,
+    formato_id: Option<i64>,
+    marca: String,
+    nome_commerciale: String,
+    quantita: f64,
+    unita: String,
+}
+
+const CONFEZIONI_MAX: usize = 8;
+
+/// Le confezioni registrate per l'alimento della voce. Se la voce è già
+/// legata a un prodotto preciso, solo le sue; altrimenti quelle di tutti i
+/// prodotti attivi dell'alimento. Senza doppioni (stessa quantità e unità
+/// dello stesso prodotto).
+pub async fn confezioni_per_voce(
+    pool: &SqlitePool,
+    alimento_id: i64,
+    prodotto_id: Option<i64>,
+) -> anyhow::Result<Vec<Confezione>> {
+    let righe: Vec<ConfezioneGrezza> = sqlx::query_as(
+        "SELECT p.id AS prodotto_id, NULL AS formato_id, p.marca AS marca, \
+                p.nome_commerciale AS nome_commerciale, \
+                p.quantita_confezione AS quantita, um.simbolo AS unita \
+         FROM prodotti_alimentari p \
+         JOIN unita_misura um ON um.id = p.unita_confezione_id \
+         WHERE p.alimento_id = ? AND p.attivo = 1 AND (? IS NULL OR p.id = ?) \
+         UNION ALL \
+         SELECT p.id, f.id, p.marca, p.nome_commerciale, f.quantita_confezione, um.simbolo \
+         FROM formati_prodotto_alimentare f \
+         JOIN prodotti_alimentari p ON p.id = f.prodotto_alimentare_id \
+         JOIN unita_misura um ON um.id = f.unita_confezione_id \
+         WHERE p.alimento_id = ? AND p.attivo = 1 AND f.attivo = 1 \
+           AND (? IS NULL OR p.id = ?) \
+         ORDER BY marca, nome_commerciale, quantita, formato_id",
+    )
+    .bind(alimento_id)
+    .bind(prodotto_id)
+    .bind(prodotto_id)
+    .bind(alimento_id)
+    .bind(prodotto_id)
+    .bind(prodotto_id)
+    .fetch_all(pool)
+    .await
+    .context("Impossibile leggere le confezioni dell'alimento")?;
+
+    let mut confezioni: Vec<Confezione> = Vec::new();
+    for riga in righe {
+        let doppione = confezioni.iter().any(|altra| {
+            altra.prodotto_id == riga.prodotto_id
+                && altra.unita == riga.unita
+                && (altra.quantita - riga.quantita).abs() < 1e-9
+        });
+        if doppione {
+            continue;
+        }
+        let token = match riga.formato_id {
+            Some(formato_id) => format!("f{formato_id}"),
+            None => format!("p{}", riga.prodotto_id),
+        };
+        confezioni.push(Confezione {
+            token,
+            prodotto_id: riga.prodotto_id,
+            etichetta: format!(
+                "{} {} · {} {}",
+                riga.marca,
+                riga.nome_commerciale,
+                formatta_quantita(riga.quantita),
+                riga.unita
+            ),
+            quantita: riga.quantita,
+            unita: riga.unita,
+        });
+        if confezioni.len() == CONFEZIONI_MAX {
+            break;
+        }
+    }
+    Ok(confezioni)
+}
+
+/// Rilegge la confezione di un pulsante (`p{id}` o `f{id}`): quantità e
+/// unità vengono dal database, non dal callback.
+async fn confezione_da_token(
+    pool: &SqlitePool,
+    token: &str,
+) -> anyhow::Result<Option<(i64, f64, String)>> {
+    if let Some(id) = token.strip_prefix('p').and_then(|v| v.parse::<i64>().ok()) {
+        return sqlx::query_as(
+            "SELECT p.id, p.quantita_confezione, um.simbolo FROM prodotti_alimentari p \
+             JOIN unita_misura um ON um.id = p.unita_confezione_id WHERE p.id = ?",
+        )
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .context("Impossibile leggere la confezione");
+    }
+    if let Some(id) = token.strip_prefix('f').and_then(|v| v.parse::<i64>().ok()) {
+        return sqlx::query_as(
+            "SELECT f.prodotto_alimentare_id, f.quantita_confezione, um.simbolo \
+             FROM formati_prodotto_alimentare f \
+             JOIN unita_misura um ON um.id = f.unita_confezione_id WHERE f.id = ?",
+        )
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .context("Impossibile leggere il formato");
+    }
+    Ok(None)
 }
 
 /// Righe di ingrediente pianificate nell'intervallo della lista, già
@@ -3003,15 +3182,19 @@ pub struct VoceArchiviata {
 }
 
 /// Riga grezza di una voce comprata, letta prima di archiviarla.
-type RigaCompratGrezza = (
-    String,
-    Option<i64>,
-    Option<i64>,
-    String,
-    Option<f64>,
-    Option<String>,
-    Option<String>,
-);
+#[derive(Debug, Clone, FromRow)]
+struct VoceComprata {
+    origine: String,
+    alimento_id: Option<i64>,
+    prodotto_alimentare_id: Option<i64>,
+    descrizione: String,
+    quantita: Option<f64>,
+    unita_simbolo: Option<String>,
+    comprato_il: Option<String>,
+    quantita_presa: Option<f64>,
+    unita_presa: Option<String>,
+    prodotto_preso_id: Option<i64>,
+}
 
 /// Quante voci sono segnate comprate: decide se "🧾 Chiudi la spesa" ha
 /// senso di comparire, senza caricare tutte le voci per contarle.
@@ -3102,9 +3285,9 @@ pub struct EsitoChiusura {
 /// `archiviate = 0` significa che non c'era niente di comprato e che non è
 /// stata creata nessuna chiusura.
 pub async fn chiudi_spesa(pool: &SqlitePool, lista: &ListaSpesa) -> anyhow::Result<EsitoChiusura> {
-    let comprate: Vec<RigaCompratGrezza> = sqlx::query_as(
+    let comprate: Vec<VoceComprata> = sqlx::query_as(
         "SELECT origine, alimento_id, prodotto_alimentare_id, descrizione, quantita, \
-                unita_simbolo, comprato_il \
+                unita_simbolo, comprato_il, quantita_presa, unita_presa, prodotto_preso_id \
          FROM liste_spesa_voci WHERE lista_id = ? AND comprato = 1 \
          ORDER BY ordinamento ASC, id ASC",
     )
@@ -3120,20 +3303,21 @@ pub async fn chiudi_spesa(pool: &SqlitePool, lista: &ListaSpesa) -> anyhow::Resu
     // Solo le voci generate contano per coprire un'aggiunta dal catalogo:
     // una voce manuale libera non è collegata a nessuna identità del
     // catalogo, quindi non può coprire niente.
+    // Per coprire le aggiunte conta quanto serviva (la quantità in lista),
+    // non quanto si è preso: l'eccedenza di una confezione più grande entra
+    // in casa e lì viene sottratta dal fabbisogno.
     let comprate_generate: Vec<VoceGenerata> = comprate
         .iter()
-        .filter(|(origine, ..)| origine == "generato")
-        .filter_map(
-            |(_, alimento_id, prodotto_id, nome, quantita, unita_simbolo, _)| {
-                Some(VoceGenerata {
-                    alimento_id: *alimento_id,
-                    prodotto_id: *prodotto_id,
-                    nome: nome.clone(),
-                    quantita: (*quantita)?,
-                    unita_simbolo: unita_simbolo.clone()?,
-                })
-            },
-        )
+        .filter(|voce| voce.origine == "generato")
+        .filter_map(|voce| {
+            Some(VoceGenerata {
+                alimento_id: voce.alimento_id,
+                prodotto_id: voce.prodotto_alimentare_id,
+                nome: voce.descrizione.clone(),
+                quantita: voce.quantita?,
+                unita_simbolo: voce.unita_simbolo.clone()?,
+            })
+        })
         .collect();
     let mappa_unita = carica_mappa_unita(pool).await?;
     let aggiunte = aggiunte_convertite(pool, lista.id, &mappa_unita).await?;
@@ -3160,23 +3344,28 @@ pub async fn chiudi_spesa(pool: &SqlitePool, lista: &ListaSpesa) -> anyhow::Resu
     .context("Impossibile registrare la chiusura della spesa")?
     .last_insert_rowid();
 
-    for (origine, alimento_id, prodotto_id, descrizione, quantita, unita_simbolo, comprato_il) in
-        &comprate
-    {
+    for voce in &comprate {
+        // Se si è segnato cosa si è preso davvero ("📦"), in archivio -- e
+        // quindi in casa -- va quello, con la quantità che serviva accanto.
+        let (quantita, unita, richiesta) = match (voce.quantita_presa, &voce.unita_presa) {
+            (Some(presa), Some(unita)) => (Some(presa), Some(unita.clone()), voce.quantita),
+            _ => (voce.quantita, voce.unita_simbolo.clone(), None),
+        };
         sqlx::query(
             "INSERT INTO liste_spesa_voci_archiviate \
              (chiusura_id, origine, alimento_id, prodotto_alimentare_id, descrizione, \
-              quantita, unita_simbolo, comprato_il) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+              quantita, unita_simbolo, comprato_il, quantita_richiesta) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(chiusura_id)
-        .bind(origine)
-        .bind(alimento_id)
-        .bind(prodotto_id)
-        .bind(descrizione)
+        .bind(&voce.origine)
+        .bind(voce.alimento_id)
+        .bind(voce.prodotto_preso_id.or(voce.prodotto_alimentare_id))
+        .bind(&voce.descrizione)
         .bind(quantita)
-        .bind(unita_simbolo)
-        .bind(comprato_il)
+        .bind(unita)
+        .bind(&voce.comprato_il)
+        .bind(richiesta)
         .execute(&mut *tx)
         .await
         .context("Impossibile archiviare una voce comprata")?;
@@ -4838,6 +5027,125 @@ mod db_tests {
     }
 
     #[tokio::test]
+    async fn la_confezione_presa_entra_in_casa_al_posto_della_quantita_in_lista() {
+        let pool = test_pool().await;
+        let user_id = create_user(&pool, "Alessio").await;
+        let space_id = create_space(&pool, "Casa").await;
+        add_membership(&pool, space_id, user_id).await;
+
+        crate::identity::with_actor(actor(user_id, space_id, "Alessio"), async {
+            let (lista, farina, _) = lista_con_farina(&pool, user_id, space_id).await;
+            let prodotto = create_prodotto(&pool, farina, "Molino", "Farina 00").await;
+            let grammi = unita_id(&pool, "g").await;
+            let formato: i64 = sqlx::query(
+                "INSERT INTO formati_prodotto_alimentare \
+                 (prodotto_alimentare_id, quantita_confezione, unita_confezione_id) \
+                 VALUES (?, 1000, ?)",
+            )
+            .bind(prodotto)
+            .bind(grammi)
+            .execute(&pool)
+            .await
+            .expect("formato")
+            .last_insert_rowid();
+            // Un formato uguale a quello base non va proposto due volte.
+            sqlx::query(
+                "INSERT INTO formati_prodotto_alimentare \
+                 (prodotto_alimentare_id, quantita_confezione, unita_confezione_id) \
+                 VALUES (?, 500, ?)",
+            )
+            .bind(prodotto)
+            .bind(grammi)
+            .execute(&pool)
+            .await
+            .expect("formato doppione");
+
+            aggiorna_lista(&pool, &lista).await.expect("refresh");
+            let voce = carica_voci(&pool, lista.id).await.expect("voci").remove(0);
+            assert_eq!(voce.quantita, Some(200.0));
+
+            let confezioni = confezioni_per_voce(&pool, farina, None)
+                .await
+                .expect("confezioni");
+            let tokens: Vec<&str> = confezioni.iter().map(|c| c.token.as_str()).collect();
+            assert_eq!(tokens, vec![format!("p{prodotto}"), format!("f{formato}")]);
+            assert_eq!(confezioni[1].etichetta, "Molino Farina 00 · 1000 g");
+
+            let (preso_da, quantita, unita) = confezione_da_token(&pool, &format!("f{formato}"))
+                .await
+                .expect("lettura")
+                .expect("confezione");
+            assert_eq!(preso_da, prodotto);
+            registra_presa(&pool, voce.id, quantita, &unita, Some(preso_da))
+                .await
+                .expect("presa");
+
+            let voce = carica_voci(&pool, lista.id).await.expect("voci").remove(0);
+            assert_eq!(voce.comprato, 1, "segnare la presa spunta la voce");
+            assert_eq!(voce.quantita_presa, Some(1000.0));
+            assert_eq!(voce.quantita, Some(200.0), "quanto serviva resta");
+
+            chiudi_spesa(&pool, &lista).await.expect("chiusura");
+            let archiviata: (Option<f64>, Option<f64>, Option<i64>) = sqlx::query_as(
+                "SELECT quantita, quantita_richiesta, prodotto_alimentare_id \
+                 FROM liste_spesa_voci_archiviate",
+            )
+            .fetch_one(&pool)
+            .await
+            .expect("archivio");
+            assert_eq!(archiviata, (Some(1000.0), Some(200.0), Some(prodotto)));
+            let in_casa: f64 =
+                sqlx::query_scalar("SELECT SUM(quantita) FROM scorte WHERE alimento_id = ?")
+                    .bind(farina)
+                    .fetch_one(&pool)
+                    .await
+                    .expect("scorte");
+            assert_eq!(in_casa, 1000.0, "entra la confezione intera");
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn togliere_la_spunta_dimentica_la_presa() {
+        let pool = test_pool().await;
+        let user_id = create_user(&pool, "Alessio").await;
+        let space_id = create_space(&pool, "Casa").await;
+        add_membership(&pool, space_id, user_id).await;
+
+        crate::identity::with_actor(actor(user_id, space_id, "Alessio"), async {
+            let (lista, _, _) = lista_con_farina(&pool, user_id, space_id).await;
+            aggiorna_lista(&pool, &lista).await.expect("refresh");
+            let voce_id = carica_voci(&pool, lista.id).await.expect("voci")[0].id;
+
+            registra_presa(&pool, voce_id, 300.0, "g", None)
+                .await
+                .expect("presa");
+            annulla_presa(&pool, voce_id).await.expect("annulla");
+            let voce = carica_voci(&pool, lista.id).await.expect("voci").remove(0);
+            assert_eq!(voce.comprato, 1, "annullare la presa lascia la spunta");
+            assert_eq!(voce.quantita_presa, None);
+
+            registra_presa(&pool, voce_id, 300.0, "g", None)
+                .await
+                .expect("presa di nuovo");
+            imposta_comprato(&pool, voce_id, false)
+                .await
+                .expect("spunta tolta");
+            let voce = carica_voci(&pool, lista.id).await.expect("voci").remove(0);
+            assert_eq!(voce.quantita_presa, None);
+            assert_eq!(voce.unita_presa, None);
+
+            assert!(
+                registra_presa(&pool, 999_999, 1.0, "g", None)
+                    .await
+                    .is_err(),
+                "una voce che non esiste non si segna"
+            );
+        })
+        .await;
+    }
+
+    #[tokio::test]
     async fn quello_che_c_e_in_casa_si_toglie_dalla_lista() {
         let pool = test_pool().await;
         let user_id = create_user(&pool, "Alessio").await;
@@ -5005,6 +5313,11 @@ enum ListaSpesaConversationState {
     AwaitingQuantitaCatalogo {
         identita: IdentitaCatalogo,
         descrizione: String,
+        unita_default: Option<String>,
+    },
+    /// Nella schermata "📦 Ho preso…": un testo è la quantità presa.
+    AwaitingQuantitaPresa {
+        voce_id: i64,
         unita_default: Option<String>,
     },
 }
@@ -5448,6 +5761,19 @@ pub async fn handle_message(
                     .await?;
             }
         },
+        ListaSpesaConversationState::AwaitingQuantitaPresa {
+            voce_id,
+            unita_default,
+        } => match valida_quantita_con_default(text, unita_default.as_deref()) {
+            Ok((quantita, unita)) => {
+                sessions.clear_chat(chat_id);
+                salva_presa(bot, msg.chat.id, pool, voce_id, quantita, &unita, None).await?;
+            }
+            Err(errore) => {
+                let avviso = format!("⚠️ {errore}");
+                mostra_presa(bot, msg.chat.id, pool, sessions, voce_id, Some(&avviso)).await?;
+            }
+        },
     }
     Ok(true)
 }
@@ -5767,6 +6093,68 @@ pub async fn handle_callback(
                 .await?;
             }
         }
+        return Ok(true);
+    }
+    if let Some(resto) = data.strip_prefix("lista_spesa:presa:f:") {
+        let Some((voce_id, token)) = resto
+            .split_once(':')
+            .and_then(|(voce, token)| Some((voce.parse::<i64>().ok()?, token)))
+        else {
+            invalid(bot, chat_id).await?;
+            return Ok(true);
+        };
+        sessions.clear_chat(chat_id.0);
+        match confezione_da_token(pool, token).await {
+            Ok(Some((prodotto_id, quantita, unita))) => {
+                salva_presa(
+                    bot,
+                    chat_id,
+                    pool,
+                    voce_id,
+                    quantita,
+                    &unita,
+                    Some(prodotto_id),
+                )
+                .await?;
+            }
+            Ok(None) => invalid(bot, chat_id).await?,
+            Err(errore) => {
+                tracing::warn!(?errore, voce_id, "Lettura confezione fallita");
+                mostra_presa(
+                    bot,
+                    chat_id,
+                    pool,
+                    sessions,
+                    voce_id,
+                    Some("⚠️ Non riesco a leggere questa confezione."),
+                )
+                .await?;
+            }
+        }
+        return Ok(true);
+    }
+    if let Some(raw_id) = data.strip_prefix("lista_spesa:presa:reset:") {
+        let Some(voce_id) = raw_id.parse::<i64>().ok().filter(|value| *value > 0) else {
+            invalid(bot, chat_id).await?;
+            return Ok(true);
+        };
+        sessions.clear_chat(chat_id.0);
+        let avviso = match annulla_presa(pool, voce_id).await {
+            Ok(()) => "✅ Torna a contare la quantità in lista.",
+            Err(errore) => {
+                tracing::warn!(?errore, voce_id, "Annullamento presa fallito");
+                "⚠️ Non riesco ad aggiornare questa voce."
+            }
+        };
+        show_lista(bot, chat_id, pool, Some(avviso)).await?;
+        return Ok(true);
+    }
+    if let Some(raw_id) = data.strip_prefix("lista_spesa:presa:") {
+        let Some(voce_id) = raw_id.parse::<i64>().ok().filter(|value| *value > 0) else {
+            invalid(bot, chat_id).await?;
+            return Ok(true);
+        };
+        mostra_presa(bot, chat_id, pool, sessions, voce_id, None).await?;
         return Ok(true);
     }
     if let Some(raw_id) = data.strip_prefix("lista_spesa:toggle:") {
@@ -6464,6 +6852,143 @@ async fn mostra_modifiche(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> Resp
 /// altra lista del bot, qui l'utente deve vedere tutte le voci insieme per
 /// decidere cosa prendere prima e cosa dopo al supermercato -- spezzarla in
 /// pagine da cinque negherebbe proprio lo scopo della schermata.
+#[derive(Debug, FromRow)]
+struct VocePresa {
+    descrizione: String,
+    alimento_id: Option<i64>,
+    prodotto_alimentare_id: Option<i64>,
+    quantita: Option<f64>,
+    unita_simbolo: Option<String>,
+    quantita_presa: Option<f64>,
+    unita_presa: Option<String>,
+}
+
+/// "📦 Ho preso…": al supermercato la confezione raramente è quella
+/// giusta al grammo (servono 250 g, c'è quella da 300 g). Qui si sceglie
+/// una confezione registrata o si scrive quanto si è preso; alla chiusura
+/// entra in casa quello.
+async fn mostra_presa(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    sessions: &ListaSpesaSessionStore,
+    voce_id: i64,
+    notice: Option<&str>,
+) -> ResponseResult<()> {
+    let voce: Option<VocePresa> = sqlx::query_as(
+        "SELECT descrizione, alimento_id, prodotto_alimentare_id, quantita, unita_simbolo, \
+                quantita_presa, unita_presa \
+         FROM liste_spesa_voci WHERE id = ?",
+    )
+    .bind(voce_id)
+    .fetch_optional(pool)
+    .await
+    .unwrap_or_else(|errore| {
+        tracing::warn!(?errore, voce_id, "Lettura voce per la presa fallita");
+        None
+    });
+    let Some(voce) = voce else {
+        sessions.clear_chat(chat_id.0);
+        show_lista(
+            bot,
+            chat_id,
+            pool,
+            Some("⚠️ Questa voce non c'è più nella lista."),
+        )
+        .await?;
+        return Ok(());
+    };
+    let confezioni = match voce.alimento_id {
+        Some(alimento_id) => confezioni_per_voce(pool, alimento_id, voce.prodotto_alimentare_id)
+            .await
+            .unwrap_or_else(|errore| {
+                tracing::warn!(?errore, voce_id, "Lettura confezioni fallita");
+                Vec::new()
+            }),
+        None => Vec::new(),
+    };
+    sessions.set(
+        chat_id.0,
+        ListaSpesaConversationState::AwaitingQuantitaPresa {
+            voce_id,
+            unita_default: voce.unita_simbolo.clone(),
+        },
+    );
+
+    let mut testo = String::new();
+    if let Some(notice) = notice {
+        testo.push_str(notice);
+        testo.push_str("\n\n");
+    }
+    testo.push_str(&format!("📦 {}\n\n", voce.descrizione));
+    if let (Some(valore), Some(unita)) = (voce.quantita, &voce.unita_simbolo) {
+        testo.push_str(&format!(
+            "Servono: {} {unita}.\n",
+            formatta_quantita(valore)
+        ));
+    }
+    if let (Some(valore), Some(unita)) = (voce.quantita_presa, &voce.unita_presa) {
+        testo.push_str(&format!("Presi: {} {unita}.\n", formatta_quantita(valore)));
+    }
+    let esempio = match &voce.unita_simbolo {
+        Some(unita) => format!("es. 300, in {unita}"),
+        None => "es. 300 g".to_string(),
+    };
+    if confezioni.is_empty() {
+        testo.push_str(&format!("\nScrivi quanto hai preso ({esempio})."));
+    } else {
+        testo.push_str(&format!(
+            "\nTocca la confezione che hai preso, oppure scrivi quanto hai preso ({esempio})."
+        ));
+    }
+
+    let mut rows: Vec<Vec<InlineKeyboardButton>> = confezioni
+        .iter()
+        .map(|confezione| {
+            vec![button(
+                confezione.etichetta.clone(),
+                format!("lista_spesa:presa:f:{voce_id}:{}", confezione.token),
+            )]
+        })
+        .collect();
+    if voce.quantita_presa.is_some() {
+        rows.push(vec![button(
+            "↩️ Conta la quantità in lista",
+            format!("lista_spesa:presa:reset:{voce_id}"),
+        )]);
+    }
+    rows.push(vec![
+        button("⬅️ Indietro", "lista_spesa:back"),
+        button("🏠 Menù principale", "menu:main"),
+    ]);
+    bot.send_message(chat_id, testo)
+        .reply_markup(InlineKeyboardMarkup::new(rows))
+        .await?;
+    Ok(())
+}
+
+async fn salva_presa(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    voce_id: i64,
+    quantita: f64,
+    unita: &str,
+    prodotto_id: Option<i64>,
+) -> ResponseResult<()> {
+    let avviso = match registra_presa(pool, voce_id, quantita, unita, prodotto_id).await {
+        Ok(()) => format!(
+            "✅ Segnato: presi {} {unita}. Chiudendo la spesa entra in casa questa quantità.",
+            formatta_quantita(quantita)
+        ),
+        Err(errore) => {
+            tracing::warn!(?errore, voce_id, "Registrazione presa fallita");
+            "⚠️ Non riesco a segnare quanto hai preso.".to_string()
+        }
+    };
+    show_lista(bot, chat_id, pool, Some(&avviso)).await
+}
+
 async fn show_lista(
     bot: &Bot,
     chat_id: ChatId,
@@ -6482,9 +7007,13 @@ async fn show_lista(
     };
     // I pasti ormai passati si prendono le loro scorte prima di calcolare il
     // fabbisogno: è quello che la lista deve sapere per dire cosa manca.
-    if let Err(errore) = crate::modules::dispensa::scala_pasti_scaduti(pool).await {
-        tracing::warn!(?errore, "Scarico dei pasti passati fallito");
-    }
+    let scarichi = crate::modules::dispensa::scala_pasti_scaduti(pool)
+        .await
+        .unwrap_or_else(|errore| {
+            tracing::warn!(?errore, "Scarico dei pasti passati fallito");
+            Vec::new()
+        });
+    let avviso_scarichi = crate::modules::dispensa::avviso_scarichi(&scarichi);
     let automatico = aggiornamento_automatico(pool).await;
     // Il bottone "🔄 Aggiorna lista" compare solo se premerlo cambierebbe
     // davvero qualcosa (stesso principio di "🔄 Aggiorna planner" sulle
@@ -6557,6 +7086,10 @@ async fn show_lista(
         testo.push_str(notice);
         testo.push_str("\n\n");
     }
+    if let Some(avviso) = &avviso_scarichi {
+        testo.push_str(avviso);
+        testo.push_str("\n\n");
+    }
     if !modifiche_automatiche.is_empty() {
         testo.push_str(&format!(
             "🔄 Aggiornata da sola: {}.\nIl dettaglio è in 📋 Ultimi cambiamenti.\n\n",
@@ -6626,13 +7159,24 @@ async fn show_lista(
                 )
             })
             .unwrap_or_default();
-        rows.push(vec![button(
+        let presa = match (voce.quantita_presa, &voce.unita_presa) {
+            (Some(valore), Some(unita)) => {
+                format!("\n📦 presi {} {unita}", formatta_quantita(valore))
+            }
+            _ => String::new(),
+        };
+        let mut riga = vec![button(
             format!(
-                "{icona} {}{quantita}{eccesso}",
+                "{icona} {}{quantita}{presa}{eccesso}",
                 liste::tronca(&voce.descrizione, 40)
             ),
             format!("lista_spesa:toggle:{}", voce.id),
-        )]);
+        )];
+        // "📦 Ho preso…" solo dove c'è una quantità da correggere.
+        if voce.quantita.is_some() {
+            riga.push(button("📦", format!("lista_spesa:presa:{}", voce.id)));
+        }
+        rows.push(riga);
     }
     if serve_refresh {
         rows.push(vec![button("🔄 Aggiorna lista", "lista_spesa:refresh")]);

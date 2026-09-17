@@ -617,6 +617,11 @@ pub struct PastoAssegnatoRow {
 pub struct ProfiloScelta {
     pub id: i64,
     pub name: String,
+    /// `1` per il profilo "te stesso" dell'utente corrente: sta in cima
+    /// all'elenco con `⭐` (17 settembre 2026). Le query che non lo leggono
+    /// lasciano `0`.
+    #[sqlx(default)]
+    pub mio: i64,
 }
 
 /// Ambito di visibilità di `turno_modelli` e `turno_assegnazioni`: lo
@@ -1211,12 +1216,15 @@ pub async fn profili_visibili_pagina(
     let user_id = actor.utente_id.context("Utente non disponibile")?;
     let view_all = i64::from(actor.view_all);
     sqlx::query_as(
-        "SELECT pa.id, pa.nome AS name FROM profili_alimentari pa WHERE pa.archiviato = 0 AND \
+        "SELECT pa.id, pa.nome AS name, \
+                CASE WHEN pa.utente_collegato_id = ? THEN 1 ELSE 0 END AS mio \
+         FROM profili_alimentari pa WHERE pa.archiviato = 0 AND \
          (pa.gestore_utente_id = ? OR pa.utente_collegato_id = ? OR EXISTS (\
            SELECT 1 FROM profilo_alimentare_spazi pas JOIN membri_spazio ms ON ms.spazio_id = pas.spazio_id \
            WHERE pas.profilo_alimentare_id = pa.id AND ms.utente_id = ? AND (? = 1 OR pas.spazio_id = ?))) \
-         ORDER BY pa.nome_normalizzato, pa.id LIMIT ? OFFSET ?",
+         ORDER BY mio DESC, pa.nome_normalizzato, pa.id LIMIT ? OFFSET ?",
     )
+    .bind(user_id)
     .bind(user_id)
     .bind(user_id)
     .bind(user_id)
@@ -2784,7 +2792,11 @@ async fn show_profile_picker(
         .iter()
         .map(|profilo| {
             vec![button(
-                format!("👤 {}", profilo.name),
+                if profilo.mio != 0 {
+                    format!("⭐ {}", profilo.name)
+                } else {
+                    format!("👤 {}", profilo.name)
+                },
                 callback_scelta(profilo.id),
             )]
         })
@@ -5089,6 +5101,30 @@ mod db_tests {
         let space_id = create_space(pool, "Casa").await;
         add_membership(pool, space_id, user_id).await;
         (user_id, space_id)
+    }
+
+    #[tokio::test]
+    async fn il_proprio_profilo_viene_per_primo() {
+        let pool = test_pool().await;
+        let (user_id, space_id) = setup(&pool).await;
+        create_profilo(&pool, user_id, "Anna").await;
+        let mio = create_profilo(&pool, user_id, "Zeno").await;
+        sqlx::query("UPDATE profili_alimentari SET utente_collegato_id = ? WHERE id = ?")
+            .bind(user_id)
+            .bind(mio)
+            .execute(&pool)
+            .await
+            .expect("collegamento");
+
+        crate::identity::with_actor(actor(user_id, space_id, "Alessio"), async {
+            let profili = profili_visibili_pagina(&pool, 0).await.expect("profili");
+            let ordine: Vec<(&str, i64)> = profili
+                .iter()
+                .map(|profilo| (profilo.name.as_str(), profilo.mio))
+                .collect();
+            assert_eq!(ordine, vec![("Zeno", 1), ("Anna", 0)]);
+        })
+        .await;
     }
 
     #[tokio::test]

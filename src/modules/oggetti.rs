@@ -3225,21 +3225,12 @@ fn format_money(cents: i64) -> String {
     format!("{},{:02} €", cents / 100, cents % 100)
 }
 
+/// Le date degli oggetti seguono la regola di tutto il bot (C17, `Mer 14
+/// Mag 2025`): prima questo modulo aveva una sua copia che scriveva
+/// `14/05/2025`, e la regola delle date leggibili qui non valeva. Resta il
+/// formato numerico solo per scriverle a mano (`parse_date_to_iso`).
 fn display_date(iso: &str) -> String {
-    let mut parts = iso.split('-');
-    let Some(year) = parts.next() else {
-        return iso.to_string();
-    };
-    let Some(month) = parts.next() else {
-        return iso.to_string();
-    };
-    let Some(day) = parts.next() else {
-        return iso.to_string();
-    };
-    if parts.next().is_some() {
-        return iso.to_string();
-    }
-    format!("{day}/{month}/{year}")
+    crate::modules::calendario::display_date(iso)
 }
 
 fn push_optional_line(lines: &mut Vec<String>, label: &str, value: Option<&str>) {

@@ -185,6 +185,29 @@ La UI operativa permette almeno:
 
 Una ricetta deve mantenere almeno uno step.
 
+### Ingredienti (17 settembre 2026)
+
+`🥕 Ingredienti` mostra una riga per ingrediente: a sinistra il nome con
+quantità e unità (e, a capo, `🛒` col prodotto specifico se c'è), a destra
+`🗑`. Il testo della schermata dice solo quanti sono (C1).
+
+- **Toccare il nome** apre la modifica: si scrive la nuova quantità
+  nell'unità attuale, oppure `📏 Cambia unità` e poi la quantità.
+  Solo chi può modificare la ricetta (controllo anche a database).
+- **`🗑`** chiede conferma (C16): "Eliminare X dalla ricetta
+  definitivamente? Non si può recuperare."
+- L'esito ("✅ Ingrediente aggiunto.", "✅ Farina: ora 250 g." ...) sta in
+  testa alla stessa schermata (C3).
+
+**Il difetto che ha portato qui**: fino al 17 settembre ogni ricetta
+sembrava senza ingredienti. La lettura (`list_recipe_ingredients`) chiedeva
+la colonna `notes`, che a database si chiama `note`: falliva sempre, e sia
+il dettaglio sia la gestione degli ingredienti nascondevano l'errore
+mostrando un elenco vuoto. C'era dal 26 agosto (Step 7.2F.1). Ora il
+dettaglio e la gestione scrivono "⚠️ Non riesco a leggere gli
+ingredienti." e lasciano una riga nel log, e un test passa da tutte le
+letture di una ricetta vera.
+
 ## Elenco, dettaglio e ricerca
 
 Menu Ricette:

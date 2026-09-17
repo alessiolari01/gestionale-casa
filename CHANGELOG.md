@@ -2,6 +2,38 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_CONSEGNA_A_20260917 -->
+# 17/09/2026 — Consegna A: ingredienti delle ricette, esiti dei pasti reversibili, controllo delle scorte, "📦 Ho preso…"
+
+Dal collaudo dal vivo di Alessio del giro precedente. Una migration nuova
+(`migrations/20260917180000_consegna_a_pasti_e_spesa.sql`). Stato e scelte in
+`STATO.md`, sezione 2undecies.
+
+**Difetti trovati dal collaudo**
+
+- **Ogni ricetta sembrava senza ingredienti**: la lettura chiedeva una
+  colonna `notes` che si chiama `note`, falliva sempre, e l'errore veniva
+  nascosto. C'era dal 26 agosto. Ora gli errori di lettura si vedono.
+- **Un pasto saltato restava saltato per sempre**: il trigger lo bloccava
+  del tutto. Ora torna a pianificato, e così anche un pasto consumato.
+- **L'icona del pasto preparato non cambiava**: ora `🍳`.
+- **Giorno della settimana ripetuto** nelle intestazioni dopo C17.
+- **Preparato e consumato non controllavano le scorte.**
+
+**Richieste nuove**
+
+- Ingredienti delle ricette uno per riga, con modifica di quantità e unità e
+  `🗑` con conferma.
+- `↩️ Riporta a pianificato` per i pasti saltati e consumati; saltando un
+  pasto preparato il bot chiede se gli ingredienti preparati ci sono ancora.
+- Controllo delle scorte con conferma quando manca qualcosa; nello scarico
+  automatico la mancanza viene annotata e mostrata.
+- Il proprio profilo già spuntato nel planner, `⭐` in cima nei turni.
+- C17 anche in Oggetti.
+- "📦 Ho preso…" nella lista della spesa: la confezione o la quantità presa
+  davvero entra in casa alla chiusura.
+- Nota sulle scelte di conservazione in frigo fatte da Alessio.
+
 <!-- CHANGELOG_COLLAUDO_SCORTE_20260917 -->
 # 17/09/2026 — Lista al netto delle scorte, aggiornamento con resoconto, scorte che si consumano coi pasti, date leggibili
 

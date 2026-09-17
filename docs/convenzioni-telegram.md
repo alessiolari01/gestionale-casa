@@ -261,7 +261,8 @@ lo manda.
 | `✅` | fatto, confermato, consumato | ovunque |
 | `⏭` | saltato | ovunque |
 | `🔄` | da aggiornare | ovunque |
-| `⭐` | predefinito | spazi, profili |
+| `🍳` | pasto preparato | planner (dal 17 settembre 2026) |
+| `⭐` | predefinito, il tuo | spazi, profili (nei turni: il tuo profilo, in cima) |
 | `👤` | mio / personale | proprietà dei contenuti |
 | `👥` | condiviso | proprietà dei contenuti |
 | `🌐` | globale, di tutti | proprietà dei contenuti |
@@ -568,6 +569,10 @@ Si applica **in un posto solo**: `calendario::display_date` e
 schermata ha cambiato formato insieme. La logica è in
 `calendario::data_leggibile`, pura, con l'anno di riferimento passato da
 fuori.
+
+Dal 17 settembre 2026 vale anche per Oggetti (`oggetti::display_date`
+delega a `calendario::display_date`), e le intestazioni che mostrano già
+`📅 Mer 16 Set` non ripetono il giorno della settimana altrove.
 
 **Non si applica all'input**: dove si scrive una data a mano (la scadenza di
 una scorta, per esempio) il formato richiesto resta `31/12/2026`, che si

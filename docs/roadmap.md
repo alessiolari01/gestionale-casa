@@ -86,6 +86,22 @@ Prossimi blocchi funzionali, nell'ordine:
    scadenza;
 6. reminder/export Alimentazione.
 
+### Consegna B, concordata con Alessio il 17 settembre 2026
+
+Dopo la consegna A (`STATO.md`, sezione 2undecies), da scrivere in un giro a
+parte:
+
+- **negozi e prezzi**: prezzo registrabile durante la spesa e totale dello
+  scontrino alla chiusura, entrambi facoltativi;
+- **confronto tra supermercati scelti dall'utente** (Conad, Coop, Famila,
+  Esselunga, Lidl, Penny, Eurospin e le altre catene diffuse in Italia);
+- **prodotti preferiti**;
+- **registrazione dal codice a barre** con Open Food Facts;
+- **stima della spesa e "dove conviene"** con Open Prices, come
+  suggerimento (connessione esterna approvata da Alessio);
+- il **totale della spesa chiusa** conservato per diventare una transazione
+  del futuro modulo Soldi.
+
 ### Prossimo giro, chiesto da Alessio il 17 settembre 2026
 
 Quattro moduli nuovi da aggiungere al menù principale, ciascuno da

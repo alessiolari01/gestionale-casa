@@ -163,6 +163,14 @@ enum RecipeConversationState {
         product: Option<ProductChoice>,
         unit: UnitChoice,
     },
+    // 17 settembre 2026: cambiare quantità (e unità) di un ingrediente già
+    // presente, senza doverlo togliere e aggiungere di nuovo.
+    EditIngredientAmount {
+        recipe_id: i64,
+        ingredient_id: i64,
+        food: FoodChoice,
+        unit: UnitChoice,
+    },
     EditStepText {
         recipe_id: i64,
         step_id: Option<i64>,
@@ -241,9 +249,11 @@ struct RecipeRecord {
 #[derive(Debug, Clone, FromRow)]
 struct IngredientRecord {
     id: i64,
+    food_id: i64,
     food_name: String,
     product_label: Option<String>,
     quantity: f64,
+    unit_id: i64,
     unit_symbol: String,
     optional: i64,
     notes: Option<String>,
@@ -794,9 +804,16 @@ pub async fn handle_message(
             {
                 Ok(()) => {
                     sessions.clear_chat(chat_id);
-                    bot.send_message(msg.chat.id, "✅ Ingrediente aggiunto.")
-                        .await?;
-                    show_manage_ingredients(bot, msg.chat.id, pool, recipe_id).await?;
+                    // L'avviso va nella stessa schermata (C3): un messaggio a
+                    // parte sparirebbe subito, sostituito dalla schermata.
+                    show_manage_ingredients(
+                        bot,
+                        msg.chat.id,
+                        pool,
+                        recipe_id,
+                        Some("✅ Ingrediente aggiunto."),
+                    )
+                    .await?;
                 }
                 Err(error) => {
                     bot.send_message(msg.chat.id, format!("⚠️ {error}"))
@@ -806,6 +823,55 @@ pub async fn handle_message(
                         .await?;
                 }
             }
+            Ok(true)
+        }
+        RecipeConversationState::EditIngredientAmount {
+            recipe_id,
+            ingredient_id,
+            food,
+            unit,
+        } => {
+            let Some(text) = text_hint else {
+                send_text_required(bot, msg.chat.id, "Scrivi la nuova quantità.").await?;
+                return Ok(true);
+            };
+            let Some(quantity) = parse_positive_number(text) else {
+                bot.send_message(
+                    msg.chat.id,
+                    "⚠️ Quantità non valida. Scrivi solo il numero, es. 250.",
+                )
+                .reply_markup(ingredient_amount_keyboard(recipe_id))
+                .await?;
+                sessions.set(
+                    chat_id,
+                    RecipeConversationState::EditIngredientAmount {
+                        recipe_id,
+                        ingredient_id,
+                        food,
+                        unit,
+                    },
+                );
+                return Ok(true);
+            };
+            let notice = match update_recipe_ingredient_amount(
+                pool,
+                recipe_id,
+                ingredient_id,
+                quantity,
+                unit.id,
+            )
+            .await
+            {
+                Ok(()) => format!(
+                    "✅ {}: ora {} {}.",
+                    food.name,
+                    display_quantity(quantity),
+                    unit.symbol
+                ),
+                Err(error) => format!("⚠️ {error}"),
+            };
+            sessions.clear_chat(chat_id);
+            show_manage_ingredients(bot, msg.chat.id, pool, recipe_id, Some(&notice)).await?;
             Ok(true)
         }
         RecipeConversationState::EditStepText { recipe_id, step_id } => {
@@ -1736,7 +1802,7 @@ async fn handle_edit_callback(
         .and_then(parse_positive_i64_str)
     {
         sessions.clear_chat(chat_id.0);
-        show_manage_ingredients(bot, chat_id, pool, recipe_id).await?;
+        show_manage_ingredients(bot, chat_id, pool, recipe_id, None).await?;
         return Ok(());
     }
     if let Some(recipe_id) = data
@@ -1759,24 +1825,172 @@ async fn handle_edit_callback(
         }
         return Ok(());
     }
-    if let Some(raw) = data.strip_prefix("recipe:edit:irem:") {
-        if let Some((recipe_id, ingredient_id)) = parse_two_positive_ids(raw) {
-            match remove_recipe_ingredient(pool, recipe_id, ingredient_id).await {
-                Ok(()) => {
-                    bot.send_message(chat_id, "✅ Ingrediente rimosso.").await?;
-                    show_manage_ingredients(bot, chat_id, pool, recipe_id).await?;
-                }
-                Err(error) => {
-                    bot.send_message(chat_id, format!("⚠️ {error}"))
-                        .reply_markup(back_home_keyboard(&format!(
-                            "recipe:edit:ingredients:{recipe_id}"
-                        )))
-                        .await?;
-                }
-            }
-        } else {
+    // 17 settembre 2026, chiesto da Alessio: ogni ingrediente su una riga,
+    // con il nome che apre la modifica della quantità e il cestino accanto.
+    // Prima il cestino eliminava al primo tocco, senza la conferma di C16
+    // (sfuggito all'audit dell'11 settembre).
+    //
+    // `iq`: modifica quantità (ricetta, ingrediente).
+    if let Some(raw) = data.strip_prefix("recipe:edit:iq:") {
+        let Some((recipe_id, ingredient_id)) = parse_two_positive_ids(raw) else {
             show_invalid_action(bot, chat_id).await?;
+            return Ok(());
+        };
+        if !ensure_recipe_edit_ui(bot, chat_id, pool, recipe_id).await? {
+            return Ok(());
         }
+        match load_ingredient_for_edit(pool, recipe_id, ingredient_id).await {
+            Ok(Some((ingredient, food, unit))) => {
+                sessions.set(
+                    chat_id.0,
+                    RecipeConversationState::EditIngredientAmount {
+                        recipe_id,
+                        ingredient_id,
+                        food,
+                        unit: unit.clone(),
+                    },
+                );
+                bot.send_message(
+                    chat_id,
+                    format!(
+                        "✏️ {}\n\nOra: {} {}.\nScrivi la nuova quantità in {} (es. 250), oppure cambia unità.",
+                        ingredient.food_name,
+                        display_quantity(ingredient.quantity),
+                        unit.symbol,
+                        unit.symbol
+                    ),
+                )
+                .reply_markup(ingredient_amount_keyboard(recipe_id))
+                .await?;
+            }
+            Ok(None) => {
+                show_manage_ingredients(
+                    bot,
+                    chat_id,
+                    pool,
+                    recipe_id,
+                    Some("⚠️ Questo ingrediente non c'è più."),
+                )
+                .await?;
+            }
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    recipe_id,
+                    ingredient_id,
+                    "Ingrediente non leggibile"
+                );
+                show_manage_ingredients(
+                    bot,
+                    chat_id,
+                    pool,
+                    recipe_id,
+                    Some("⚠️ Non riesco a leggere questo ingrediente."),
+                )
+                .await?;
+            }
+        }
+        return Ok(());
+    }
+    // `iw`: scegli un'altra unità per l'ingrediente in modifica (i dati
+    // stanno nella sessione, così il callback resta corto).
+    if data == "recipe:edit:iw" {
+        match sessions.get(chat_id.0) {
+            Some(RecipeConversationState::EditIngredientAmount {
+                recipe_id, food, ..
+            }) => {
+                show_unit_choice(
+                    bot,
+                    chat_id,
+                    pool,
+                    &food,
+                    "recipe:edit:iv",
+                    &format!("recipe:edit:ingredients:{recipe_id}"),
+                )
+                .await?;
+            }
+            _ => show_expired_flow(bot, chat_id).await?,
+        }
+        return Ok(());
+    }
+    // `iv`: unità scelta per l'ingrediente in modifica.
+    if let Some(unit_id) = data
+        .strip_prefix("recipe:edit:iv:")
+        .and_then(parse_positive_i64_str)
+    {
+        match sessions.get(chat_id.0) {
+            Some(RecipeConversationState::EditIngredientAmount {
+                recipe_id,
+                ingredient_id,
+                food,
+                ..
+            }) => {
+                let Some(unit) = unit_by_id(pool, unit_id).await.unwrap_or(None) else {
+                    show_invalid_action(bot, chat_id).await?;
+                    return Ok(());
+                };
+                sessions.set(
+                    chat_id.0,
+                    RecipeConversationState::EditIngredientAmount {
+                        recipe_id,
+                        ingredient_id,
+                        food: food.clone(),
+                        unit: unit.clone(),
+                    },
+                );
+                bot.send_message(
+                    chat_id,
+                    format!(
+                        "✏️ {}\n\nScrivi la quantità in {} (es. 250).",
+                        food.name, unit.symbol
+                    ),
+                )
+                .reply_markup(ingredient_amount_keyboard(recipe_id))
+                .await?;
+            }
+            _ => show_expired_flow(bot, chat_id).await?,
+        }
+        return Ok(());
+    }
+    // `ix:ask` / `ix:yes`: eliminazione con conferma (C16).
+    if let Some(raw) = data.strip_prefix("recipe:edit:ix:ask:") {
+        let Some((recipe_id, ingredient_id)) = parse_two_positive_ids(raw) else {
+            show_invalid_action(bot, chat_id).await?;
+            return Ok(());
+        };
+        let nome = list_recipe_ingredients(pool, recipe_id)
+            .await
+            .ok()
+            .and_then(|righe| righe.into_iter().find(|r| r.id == ingredient_id))
+            .map(|r| r.food_name)
+            .unwrap_or_else(|| "questo ingrediente".to_string());
+        bot.send_message(
+            chat_id,
+            format!("⚠️ Eliminare {nome} dalla ricetta definitivamente? Non si può recuperare."),
+        )
+        .reply_markup(InlineKeyboardMarkup::new(vec![
+            vec![button(
+                "✅ Sì, elimina",
+                format!("recipe:edit:ix:yes:{recipe_id}:{ingredient_id}"),
+            )],
+            vec![
+                button("❌ Annulla", format!("recipe:edit:ingredients:{recipe_id}")),
+                button("🏠 Menù principale", "menu:main"),
+            ],
+        ]))
+        .await?;
+        return Ok(());
+    }
+    if let Some(raw) = data.strip_prefix("recipe:edit:ix:yes:") {
+        let Some((recipe_id, ingredient_id)) = parse_two_positive_ids(raw) else {
+            show_invalid_action(bot, chat_id).await?;
+            return Ok(());
+        };
+        let notice = match remove_recipe_ingredient(pool, recipe_id, ingredient_id).await {
+            Ok(()) => "✅ Ingrediente rimosso.".to_string(),
+            Err(error) => format!("⚠️ {error}"),
+        };
+        show_manage_ingredients(bot, chat_id, pool, recipe_id, Some(&notice)).await?;
         return Ok(());
     }
     if let Some(raw) = data.strip_prefix("recipe:edit:addfood:") {
@@ -2682,10 +2896,21 @@ async fn show_recipe_detail(
             .await?;
         return Ok(());
     };
-    let ingredients = list_recipe_ingredients(pool, recipe_id)
-        .await
-        .unwrap_or_default();
-    let steps = list_recipe_steps(pool, recipe_id).await.unwrap_or_default();
+    // Gli errori di lettura si vedono e finiscono nel log, invece di
+    // diventare liste vuote: "Nessun ingrediente" su una ricetta piena di
+    // ingredienti è quello che ha visto Alessio per tre settimane.
+    let ingredients = list_recipe_ingredients(pool, recipe_id).await;
+    if let Err(error) = &ingredients {
+        tracing::warn!(?error, recipe_id, "Ingredienti della ricetta non leggibili");
+    }
+    let steps = list_recipe_steps(pool, recipe_id).await;
+    if let Err(error) = &steps {
+        tracing::warn!(
+            ?error,
+            recipe_id,
+            "Procedimento della ricetta non leggibile"
+        );
+    }
     let spaces = recipe_space_names(pool, recipe_id)
         .await
         .unwrap_or_default();
@@ -2718,37 +2943,42 @@ async fn show_recipe_detail(
     }
 
     text.push_str("\n\n🥕 Ingredienti");
-    if ingredients.is_empty() {
-        text.push_str("\n— Nessun ingrediente");
-    } else {
-        for ingredient in &ingredients {
-            let product = ingredient
-                .product_label
-                .as_ref()
-                .map(|label| format!(" · 🛒 {label}"))
-                .unwrap_or_default();
-            let optional = if ingredient.optional == 1 {
-                " · opzionale"
-            } else {
-                ""
-            };
-            let notes = ingredient
-                .notes
-                .as_ref()
-                .map(|note| format!(" · {note}"))
-                .unwrap_or_default();
-            text.push_str(&format!(
-                "\n• {} {} {}{}{}{}",
-                display_quantity(ingredient.quantity),
-                ingredient.unit_symbol,
-                ingredient.food_name,
-                product,
-                optional,
-                notes
-            ));
+    match &ingredients {
+        Err(_) => text.push_str("\n⚠️ Non riesco a leggere gli ingredienti."),
+        Ok(ingredients) if ingredients.is_empty() => text.push_str("\n— Nessun ingrediente"),
+        Ok(ingredients) => {
+            for ingredient in ingredients {
+                let product = ingredient
+                    .product_label
+                    .as_ref()
+                    .map(|label| format!(" · 🛒 {label}"))
+                    .unwrap_or_default();
+                let optional = if ingredient.optional == 1 {
+                    " · opzionale"
+                } else {
+                    ""
+                };
+                let notes = ingredient
+                    .notes
+                    .as_ref()
+                    .map(|note| format!(" · {note}"))
+                    .unwrap_or_default();
+                text.push_str(&format!(
+                    "\n• {} {} {}{}{}{}",
+                    display_quantity(ingredient.quantity),
+                    ingredient.unit_symbol,
+                    ingredient.food_name,
+                    product,
+                    optional,
+                    notes
+                ));
+            }
         }
     }
-    text.push_str(&format!("\n\n📝 Procedimento: {} step", steps.len()));
+    match &steps {
+        Ok(steps) => text.push_str(&format!("\n\n📝 Procedimento: {} step", steps.len())),
+        Err(_) => text.push_str("\n\n📝 Procedimento: ⚠️ non riesco a leggerlo"),
+    }
 
     if !compat.is_empty() {
         let highlights = compat
@@ -3357,11 +3587,103 @@ async fn show_edit_menu(
     Ok(())
 }
 
+/// Tastiera della modifica quantità: cambiare unità o annullare.
+fn ingredient_amount_keyboard(recipe_id: i64) -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![
+        vec![button("📏 Cambia unità", "recipe:edit:iw")],
+        vec![
+            button("❌ Annulla", format!("recipe:edit:ingredients:{recipe_id}")),
+            button("🏠 Menù principale", "menu:main"),
+        ],
+    ])
+}
+
+/// Etichetta di un ingrediente nella schermata di modifica: nome e
+/// quantità, e -- se c'è -- il prodotto specifico **a capo** (C15: una parte
+/// opzionale non si accoda, altrimenti Telegram taglia l'etichetta).
+fn ingredient_button_label(ingredient: &IngredientRecord) -> String {
+    let base = format!(
+        "{} · {} {}",
+        crate::modules::liste::tronca(&ingredient.food_name, 28),
+        display_quantity(ingredient.quantity),
+        ingredient.unit_symbol
+    );
+    match &ingredient.product_label {
+        Some(label) => format!("{base}\n🛒 {label}"),
+        None => base,
+    }
+}
+
+/// L'ingrediente da modificare, con alimento e unità pronti per il flusso di
+/// modifica. `None` se l'ingrediente non c'è più o l'alimento non è più
+/// visibile.
+async fn load_ingredient_for_edit(
+    pool: &SqlitePool,
+    recipe_id: i64,
+    ingredient_id: i64,
+) -> Result<Option<(IngredientRecord, FoodChoice, UnitChoice)>> {
+    let Some(ingredient) = list_recipe_ingredients(pool, recipe_id)
+        .await?
+        .into_iter()
+        .find(|row| row.id == ingredient_id)
+    else {
+        return Ok(None);
+    };
+    let Some(food) = visible_food_choice(pool, ingredient.food_id).await? else {
+        return Ok(None);
+    };
+    let Some(unit) = unit_by_id(pool, ingredient.unit_id).await? else {
+        return Ok(None);
+    };
+    Ok(Some((ingredient, food, unit)))
+}
+
+/// Cambia quantità e unità di un ingrediente già presente.
+async fn update_recipe_ingredient_amount(
+    pool: &SqlitePool,
+    recipe_id: i64,
+    ingredient_id: i64,
+    quantity: f64,
+    unit_id: i64,
+) -> Result<()> {
+    let user_id = identity::current_actor()
+        .utente_id
+        .context("Utente non disponibile")?;
+    if !can_edit_recipe(pool, recipe_id, user_id).await? {
+        bail!("Non hai il permesso di modificare questa ricetta");
+    }
+    if !quantity.is_finite() || quantity <= 0.0 {
+        bail!("Quantità non valida");
+    }
+    let result = sqlx::query(
+        "UPDATE ricetta_ingredienti SET quantita = ?, unita_misura_id = ?, \
+         aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ','now') \
+         WHERE id = ? AND ricetta_id = ?",
+    )
+    .bind(quantity)
+    .bind(unit_id)
+    .bind(ingredient_id)
+    .bind(recipe_id)
+    .execute(pool)
+    .await
+    .context("Impossibile aggiornare l'ingrediente")?;
+    if result.rows_affected() != 1 {
+        bail!("Ingrediente non disponibile");
+    }
+    Ok(())
+}
+
+/// Ingredienti di una ricetta: una riga per ingrediente, con il nome che
+/// apre la modifica della quantità e il cestino accanto (chiesto da Alessio
+/// il 17 settembre 2026). Il testo non li elenca più (C1: erano già sui
+/// pulsanti); `notice` porta nella stessa schermata l'esito dell'ultima
+/// azione (C3).
 async fn show_manage_ingredients(
     bot: &Bot,
     chat_id: ChatId,
     pool: &SqlitePool,
     recipe_id: i64,
+    notice: Option<&str>,
 ) -> ResponseResult<()> {
     let actor = identity::current_actor();
     let Some(user_id) = actor.utente_id else {
@@ -3380,34 +3702,42 @@ async fn show_manage_ingredients(
         .await?;
         return Ok(());
     }
-    let ingredients = list_recipe_ingredients(pool, recipe_id)
-        .await
+    let mut text = notice
+        .map(|value| format!("{value}\n\n"))
         .unwrap_or_default();
-    let mut text = format!(
-        "🥕 Ingredienti ricetta\n\n{}",
-        result_label(ingredients.len() as i64)
-    );
-    for ingredient in &ingredients {
-        let product = ingredient
-            .product_label
-            .as_ref()
-            .map(|label| format!(" · 🛒 {label}"))
-            .unwrap_or_default();
-        text.push_str(&format!(
-            "\n• {} {} {}{}",
-            display_quantity(ingredient.quantity),
-            ingredient.unit_symbol,
-            ingredient.food_name,
-            product
-        ));
-    }
+    // Un errore di lettura non deve più sembrare "nessun ingrediente": è
+    // così che il difetto della colonna `note` è rimasto nascosto per tre
+    // settimane.
+    let ingredients = match list_recipe_ingredients(pool, recipe_id).await {
+        Ok(ingredients) => {
+            text.push_str(&format!(
+                "🥕 Ingredienti ricetta\n\n{}",
+                result_label(ingredients.len() as i64)
+            ));
+            if !ingredients.is_empty() {
+                text.push_str("\nTocca un ingrediente per cambiarne la quantità.");
+            }
+            ingredients
+        }
+        Err(error) => {
+            tracing::warn!(?error, recipe_id, "Ingredienti della ricetta non leggibili");
+            text.push_str("🥕 Ingredienti ricetta\n\n⚠️ Non riesco a leggere gli ingredienti.");
+            Vec::new()
+        }
+    };
     let mut rows = ingredients
         .iter()
         .map(|ingredient| {
-            vec![button(
-                format!("🗑 {}", ingredient.food_name),
-                format!("recipe:edit:irem:{recipe_id}:{}", ingredient.id),
-            )]
+            vec![
+                button(
+                    ingredient_button_label(ingredient),
+                    format!("recipe:edit:iq:{recipe_id}:{}", ingredient.id),
+                ),
+                button(
+                    "🗑",
+                    format!("recipe:edit:ix:ask:{recipe_id}:{}", ingredient.id),
+                ),
+            ]
         })
         .collect::<Vec<_>>();
     rows.push(vec![button(
@@ -4824,11 +5154,16 @@ async fn list_recipe_ingredients(
     pool: &SqlitePool,
     recipe_id: i64,
 ) -> Result<Vec<IngredientRecord>> {
+    // `ri.note AS notes`: senza l'alias la colonna si chiama `note` mentre il
+    // campo di `IngredientRecord` è `notes`, la lettura falliva sempre e --
+    // dato che chi chiama nascondeva l'errore -- ogni ricetta sembrava senza
+    // ingredienti. Trovato da Alessio collaudando il 17 settembre 2026; il
+    // difetto c'era dal 26 agosto (Step 7.2F.1).
     sqlx::query_as::<_, IngredientRecord>(
-        "SELECT ri.id, a.nome AS food_name, \
+        "SELECT ri.id, ri.alimento_id AS food_id, a.nome AS food_name, \
                 CASE WHEN p.id IS NULL THEN NULL ELSE p.marca || ' · ' || p.nome_commerciale END AS product_label, \
-                ri.quantita AS quantity, um.simbolo AS unit_symbol, \
-                ri.opzionale AS optional, ri.note \
+                ri.quantita AS quantity, ri.unita_misura_id AS unit_id, um.simbolo AS unit_symbol, \
+                ri.opzionale AS optional, ri.note AS notes \
          FROM ricetta_ingredienti ri \
          JOIN alimenti a ON a.id = ri.alimento_id \
          JOIN unita_misura um ON um.id = ri.unita_misura_id \
@@ -6786,11 +7121,127 @@ mod tests {
         assert!(joined.contains("🎥 1"));
     }
 
+    /// Ogni lettura delle ricette deve riuscire su una ricetta vera: il 17
+    /// settembre 2026 un alias mancante (`note` invece di `notes`) faceva
+    /// fallire in silenzio la lettura degli ingredienti. Qui si passa per
+    /// tutte, così un nome di colonna sbagliato rompe un test invece di
+    /// svuotare una schermata.
+    #[tokio::test]
+    async fn tutte_le_letture_di_una_ricetta_riescono() {
+        let pool = test_pool().await;
+        let user_id = create_user(&pool, "Chef", 1).await;
+        let food = base_food(&pool, 0).await;
+        let grams = unit(&pool, "g").await;
+        let draft = RecipeDraft {
+            name: "Ricetta da rileggere".to_string(),
+            servings: 2,
+            ingredients: vec![ingredient(&food, &grams, 150.0)],
+            steps: vec![DraftStep {
+                text: "Mescola".to_string(),
+                media: Vec::new(),
+            }],
+            visible_spaces: Vec::new(),
+        };
+        identity::with_actor(actor(user_id, 1, "Chef", false), async {
+            let recipe_id = save_recipe(&pool, 99, &draft).await.expect("salvataggio");
+
+            let ricette = list_visible_recipes(&pool, 0, 5).await.expect("elenco");
+            assert!(ricette.iter().any(|ricetta| ricetta.id == recipe_id));
+
+            let ingredienti = list_recipe_ingredients(&pool, recipe_id)
+                .await
+                .expect("ingredienti");
+            assert_eq!(ingredienti.len(), 1);
+            assert_eq!(ingredienti[0].food_id, food.id);
+            assert_eq!(ingredienti[0].quantity, 150.0);
+            assert_eq!(ingredienti[0].unit_symbol, "g");
+
+            let step = list_recipe_steps(&pool, recipe_id).await.expect("step");
+            assert_eq!(step.len(), 1);
+            list_step_media(&pool, step[0].id).await.expect("allegati");
+            list_units(&pool).await.expect("unità");
+            list_recipe_food_categories(&pool).await.expect("categorie");
+            list_recipe_permissions(&pool, recipe_id)
+                .await
+                .expect("permessi");
+            let (letto, cibo, unita) =
+                load_ingredient_for_edit(&pool, recipe_id, ingredienti[0].id)
+                    .await
+                    .expect("ingrediente da modificare")
+                    .expect("ingrediente presente");
+            assert_eq!(letto.id, ingredienti[0].id);
+            assert_eq!(cibo.id, food.id);
+            assert_eq!(unita.id, grams.id);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn quantita_e_unita_di_un_ingrediente_si_cambiano_solo_con_il_permesso() {
+        let pool = test_pool().await;
+        let user_id = create_user(&pool, "Chef", 1).await;
+        let altro_id = create_user(&pool, "Ospite", 1).await;
+        let food = base_food(&pool, 0).await;
+        let grams = unit(&pool, "g").await;
+        let kg = unit(&pool, "kg").await;
+        let draft = RecipeDraft {
+            name: "Ricetta da correggere".to_string(),
+            servings: 2,
+            ingredients: vec![ingredient(&food, &grams, 150.0)],
+            steps: vec![DraftStep {
+                text: "Mescola".to_string(),
+                media: Vec::new(),
+            }],
+            visible_spaces: Vec::new(),
+        };
+        let (recipe_id, ingredient_id) =
+            identity::with_actor(actor(user_id, 1, "Chef", false), async {
+                let recipe_id = save_recipe(&pool, 99, &draft).await.expect("salvataggio");
+                let ingredient_id = list_recipe_ingredients(&pool, recipe_id)
+                    .await
+                    .expect("ingredienti")[0]
+                    .id;
+                update_recipe_ingredient_amount(&pool, recipe_id, ingredient_id, 0.25, kg.id)
+                    .await
+                    .expect("modifica");
+                assert!(
+                    update_recipe_ingredient_amount(&pool, recipe_id, ingredient_id, 0.0, kg.id)
+                        .await
+                        .is_err(),
+                    "zero non è una quantità"
+                );
+                (recipe_id, ingredient_id)
+            })
+            .await;
+
+        identity::with_actor(actor(altro_id, 1, "Ospite", false), async {
+            assert!(
+                update_recipe_ingredient_amount(&pool, recipe_id, ingredient_id, 5.0, grams.id)
+                    .await
+                    .is_err(),
+                "chi non può modificare la ricetta non cambia gli ingredienti"
+            );
+        })
+        .await;
+
+        let letto: (f64, i64) = sqlx::query_as(
+            "SELECT quantita, unita_misura_id FROM ricetta_ingredienti WHERE id = ?",
+        )
+        .bind(ingredient_id)
+        .fetch_one(&pool)
+        .await
+        .expect("ingrediente");
+        assert_eq!(letto, (0.25, kg.id));
+    }
+
     #[test]
     fn callback_ricette_restano_sotto_il_limite_telegram() {
         let id = i64::MAX;
         let callbacks = [
-            format!("recipe:edit:irem:{id}:{id}"),
+            format!("recipe:edit:iq:{id}:{id}"),
+            format!("recipe:edit:ix:ask:{id}:{id}"),
+            format!("recipe:edit:ix:yes:{id}:{id}"),
+            format!("recipe:edit:iv:{id}"),
             format!("recipe:edit:pg:{id}:{id}"),
             format!("recipe:edit:p:{id}:{id}"),
             format!("recipe:edit:iu:{id}:{id}"),

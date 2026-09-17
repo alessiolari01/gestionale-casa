@@ -113,7 +113,10 @@ direbbe "hai la pasta" di una pasta già cucinata. Dettagli in
   scorte da soli, a orario passato. Se lo segni saltato tornano indietro.`
 - **`⏭ Segna come saltato`** dopo uno scarico automatico: gli ingredienti
   tornano esattamente com'erano (richiesta esplicita di Alessio). Dopo un
-  `🍳 Preparato`, no: il cibo è stato usato comunque.
+  `🍳 Preparato` il bot chiede "Gli ingredienti preparati li hai ancora?"
+  (dal 17 settembre, consegna A): `🥫 Sì, rimettili nelle scorte` li
+  restituisce e toglie il "preparato"; `🗑 No, usati o buttati` li lascia
+  tolti.
 - **`✏️ Modifica`** di un pasto che aveva già preso le sue scorte: tornano
   tutte, e se era preparato si riscalano con gli ingredienti nuovi. Per un
   pasto pianificato "sostituirlo con un altro" è proprio questo.
@@ -121,6 +124,52 @@ direbbe "hai la pasta" di una pasta già cucinata. Dettagli in
 Il lato "lista della spesa": un pasto le cui scorte sono già state scalate
 non chiede più niente alla lista, perché quegli ingredienti sono già stati
 usati.
+
+## Controllo delle scorte (consegna A, 17 settembre 2026)
+
+Prima di `🍳 Segna come preparato` e `✅ Segna come consumato` il bot
+controlla se in casa c'è tutto (`dispensa::mancanti_per_pasto`, senza
+toccare niente). Se manca qualcosa è un'eccezione, e va confermata:
+
+```
+⚠️ In casa non c'è tutto per questo pasto:
+• Pasta brisée: servono 200 g, ne hai 0 g
+```
+
+con `✅ Sì, li avevo comunque` (`planner:prepare:ok:` /
+`planner:complete:ok:`) e `❌ Annulla`. Confermando si scala quello che
+c'è, e la mancanza resta annotata sul pasto.
+
+Lo scarico automatico a orario passato non può chiedere niente a nessuno:
+prende quello che c'è, annota la mancanza (`planner_pasti.scorte_mancanti`)
+e lo dice all'apertura della lista e delle scorte ("⚠️ Pasti passati,
+ingredienti tolti dalle scorte da soli. In casa non c'era tutto: …"). Il
+dettaglio del pasto mostra "⚠️ In casa mancavano: …".
+
+## Riportare a pianificato (consegna A, 17 settembre 2026)
+
+Alessio ha segnato saltata una colazione per sbaglio e non poteva più
+tornare indietro: il trigger del 31 agosto bloccava il pasto saltato in
+tutto. Ora c'è **`↩️ Riporta a pianificato`**:
+
+- **su un pasto saltato** toglie il salto (le scorte eventualmente
+  restituite restano in casa: il pasto, di nuovo pianificato, le chiederà
+  alla lista o allo scarico come qualunque altro);
+- **su un pasto consumato**: se non era stato preparato, le scorte scalate
+  al consumo tornano in casa; se era preparato restano tolte (il cibo era
+  già cucinato) e il pasto torna "pianificato, preparato".
+
+La migration della consegna A ricrea i due trigger di congelamento: tutto il
+resto del pasto (ricetta, giorno, tipo, ordine) resta bloccato.
+
+## Icone e dettaglio (consegna A, 17 settembre 2026)
+
+- Nell'elenco del giorno un pasto preparato ha `🍳` (prima restava `○`).
+- Il dettaglio non ripete più il giorno della settimana (`📅 Mer 16 Set`),
+  e sui consumati dice "🍳 Era stato preparato prima" se lo era.
+- Scegliendo la ricetta di un pasto, i partecipanti ripartono con **il
+  proprio profilo già spuntato** (quello con `utente_collegato_id`
+  dell'utente), e se ne possono aggiungere altri.
 
 ## Sostituire un pasto consumato (17 settembre 2026)
 

@@ -335,6 +335,12 @@ Segnalate collaudando dal vivo le dieci correzioni sopra.
     — vedi "Eliminare un'assegnazione anche dalla schermata Giorno del
     planner" sopra.
 
+## Il tuo profilo in cima (consegna A, 17 settembre 2026)
+
+Nella scelta del profilo (`profili_visibili_pagina`) il profilo collegato
+all'utente (`utente_collegato_id`) sta in cima all'elenco e si riconosce da
+`⭐ nome`; gli altri seguono in ordine alfabetico.
+
 ## Tabelle
 
 ```text

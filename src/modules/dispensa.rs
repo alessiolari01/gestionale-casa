@@ -923,44 +923,14 @@ pub async fn scala_scorte_per_pasto(
         return Ok(0);
     }
 
-    let ingredienti: Vec<(i64, String, f64)> = sqlx::query_as(
-        "SELECT alimento_id, unita_simbolo_snapshot, quantita_finale_snapshot \
-         FROM planner_pasto_ingredienti_snapshot \
-         WHERE pasto_id = ? AND alimento_id IS NOT NULL \
-           AND quantita_finale_snapshot IS NOT NULL",
-    )
-    .bind(pasto_id)
-    .fetch_all(&mut *tx)
-    .await
-    .context("Impossibile leggere gli ingredienti del pasto")?;
-
-    // Stesso alimento per più profili: si somma prima, nell'unità-base.
-    let mut bisogni: Vec<(i64, String, f64)> = Vec::new();
-    for (alimento_id, unita, quantita) in ingredienti {
-        let (base, unita_base) = converti_in_base(quantita, &unita, mappa.get(&unita).copied());
-        match bisogni
-            .iter_mut()
-            .find(|(a, u, _)| *a == alimento_id && *u == unita_base)
-        {
-            Some((_, _, totale)) => *totale += base,
-            None => bisogni.push((alimento_id, unita_base, base)),
-        }
-    }
+    let bisogni = bisogni_del_pasto(&mut tx, pasto_id, &mappa).await?;
 
     let mut toccate = 0usize;
-    for (alimento_id, unita_base, mut da_prendere) in bisogni {
-        let mut candidati: Vec<Scorta> = sqlx::query_as(&format!(
-            "SELECT {COLONNE_SCORTA} FROM scorte \
-             WHERE spazio_id IS ? AND (alimento_id = ? OR prodotto_alimentare_id IN \
-                   (SELECT id FROM prodotti_alimentari WHERE alimento_id = ?))"
-        ))
-        .bind(spazio_id)
-        .bind(alimento_id)
-        .bind(alimento_id)
-        .fetch_all(&mut *tx)
-        .await
-        .context("Impossibile leggere le scorte da scalare")?;
-        ordina_per_scadenza(&mut candidati);
+    let mut mancanze: Vec<Mancanza> = Vec::new();
+    for bisogno in bisogni {
+        let unita_base = bisogno.unita_base.clone();
+        let mut da_prendere = bisogno.quantita;
+        let candidati = scorte_dell_alimento(&mut tx, spazio_id, bisogno.alimento_id).await?;
 
         for scorta in candidati {
             if da_prendere <= QUANTITA_TRASCURABILE {
@@ -1020,13 +990,25 @@ pub async fn scala_scorte_per_pasto(
             da_prendere -= presa_base;
             toccate += 1;
         }
+        if da_prendere > QUANTITA_TRASCURABILE {
+            mancanze.push(Mancanza {
+                nome: bisogno.nome.clone(),
+                serve: bisogno.quantita,
+                in_casa: bisogno.quantita - da_prendere,
+                unita: unita_base,
+            });
+        }
     }
 
+    // Quello che mancava resta scritto sul pasto: per uno scarico automatico
+    // non c'è nessuno a cui chiedere conferma, e il dettaglio del pasto lo
+    // mostra.
     sqlx::query(
         "UPDATE planner_pasti SET scorte_scalate_il = strftime('%Y-%m-%dT%H:%M:%fZ','now'), \
-         scorte_scalate_automaticamente = ? WHERE id = ?",
+         scorte_scalate_automaticamente = ?, scorte_mancanti = ? WHERE id = ?",
     )
     .bind(i64::from(automatico))
+    .bind((!mancanze.is_empty()).then(|| descrivi_mancanze(&mancanze)))
     .bind(pasto_id)
     .execute(&mut *tx)
     .await
@@ -1035,6 +1017,157 @@ pub async fn scala_scorte_per_pasto(
         .await
         .context("Impossibile salvare lo scarico delle scorte")?;
     Ok(toccate)
+}
+
+/// Un ingrediente di un pasto, sommato fra i partecipanti e nell'unità-base.
+struct Bisogno {
+    alimento_id: i64,
+    nome: String,
+    unita_base: String,
+    quantita: f64,
+}
+
+async fn bisogni_del_pasto(
+    conn: &mut SqliteConnection,
+    pasto_id: i64,
+    mappa: &MappaUnita,
+) -> anyhow::Result<Vec<Bisogno>> {
+    let ingredienti: Vec<(i64, String, String, f64)> = sqlx::query_as(
+        "SELECT alimento_id, alimento_nome_snapshot, unita_simbolo_snapshot, \
+                quantita_finale_snapshot \
+         FROM planner_pasto_ingredienti_snapshot \
+         WHERE pasto_id = ? AND alimento_id IS NOT NULL \
+           AND quantita_finale_snapshot IS NOT NULL \
+         ORDER BY id",
+    )
+    .bind(pasto_id)
+    .fetch_all(&mut *conn)
+    .await
+    .context("Impossibile leggere gli ingredienti del pasto")?;
+
+    // Stesso alimento per più profili: si somma prima.
+    let mut bisogni: Vec<Bisogno> = Vec::new();
+    for (alimento_id, nome, unita, quantita) in ingredienti {
+        let (base, unita_base) = converti_in_base(quantita, &unita, mappa.get(&unita).copied());
+        match bisogni
+            .iter_mut()
+            .find(|b| b.alimento_id == alimento_id && b.unita_base == unita_base)
+        {
+            Some(bisogno) => bisogno.quantita += base,
+            None => bisogni.push(Bisogno {
+                alimento_id,
+                nome,
+                unita_base,
+                quantita: base,
+            }),
+        }
+    }
+    Ok(bisogni)
+}
+
+/// Le confezioni di un alimento (anche dei suoi prodotti) in uno spazio, nell'ordine
+/// in cui si usano: prima quelle che scadono prima.
+async fn scorte_dell_alimento(
+    conn: &mut SqliteConnection,
+    spazio_id: Option<i64>,
+    alimento_id: i64,
+) -> anyhow::Result<Vec<Scorta>> {
+    let mut candidati: Vec<Scorta> = sqlx::query_as(&format!(
+        "SELECT {COLONNE_SCORTA} FROM scorte \
+         WHERE spazio_id IS ? AND (alimento_id = ? OR prodotto_alimentare_id IN \
+               (SELECT id FROM prodotti_alimentari WHERE alimento_id = ?))"
+    ))
+    .bind(spazio_id)
+    .bind(alimento_id)
+    .bind(alimento_id)
+    .fetch_all(&mut *conn)
+    .await
+    .context("Impossibile leggere le scorte dell'alimento")?;
+    ordina_per_scadenza(&mut candidati);
+    Ok(candidati)
+}
+
+/// Un ingrediente che in casa non basta.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Mancanza {
+    pub nome: String,
+    pub serve: f64,
+    pub in_casa: f64,
+    pub unita: String,
+}
+
+/// `Pasta brisée 200 g, Spaghetti 45 g` — quanto manca di ciascuno.
+pub fn descrivi_mancanze(mancanze: &[Mancanza]) -> String {
+    mancanze
+        .iter()
+        .map(|m| {
+            format!(
+                "{} {}",
+                m.nome,
+                formatta_quantita_leggibile(m.serve - m.in_casa, &m.unita)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Una riga per la conferma: `• Pasta brisée: servono 200 g, ne hai 0 g`.
+pub fn riga_mancanza(mancanza: &Mancanza) -> String {
+    format!(
+        "• {}: servono {}, ne hai {}",
+        mancanza.nome,
+        formatta_quantita_leggibile(mancanza.serve, &mancanza.unita),
+        formatta_quantita_leggibile(mancanza.in_casa, &mancanza.unita)
+    )
+}
+
+/// Cosa manca in casa per un pasto, senza toccare niente: il controllo
+/// prima di segnarlo preparato o consumato (chiesto da Alessio il 17
+/// settembre 2026 — se manca qualcosa è un'eccezione, e va confermata).
+/// Vuoto se c'è tutto, o se le scorte di questo pasto sono già state
+/// scalate (non c'è più niente da controllare).
+pub async fn mancanti_per_pasto(pool: &SqlitePool, pasto_id: i64) -> anyhow::Result<Vec<Mancanza>> {
+    let mappa = carica_mappa_unita(pool).await?;
+    let mut conn = pool
+        .acquire()
+        .await
+        .context("Impossibile aprire la connessione")?;
+    let stato: Option<(Option<String>, Option<i64>)> = sqlx::query_as(
+        "SELECT pp.scorte_scalate_il, p.spazio_id FROM planner_pasti pp \
+         JOIN planner_alimentari p ON p.id = pp.planner_id WHERE pp.id = ?",
+    )
+    .bind(pasto_id)
+    .fetch_optional(&mut *conn)
+    .await
+    .context("Impossibile leggere il pasto")?;
+    let Some((None, spazio_id)) = stato else {
+        return Ok(Vec::new());
+    };
+
+    let mut mancanze = Vec::new();
+    for bisogno in bisogni_del_pasto(&mut conn, pasto_id, &mappa).await? {
+        let disponibile: f64 = scorte_dell_alimento(&mut conn, spazio_id, bisogno.alimento_id)
+            .await?
+            .iter()
+            .filter_map(|scorta| {
+                let (quantita, unita) = converti_in_base(
+                    scorta.quantita,
+                    &scorta.unita_simbolo,
+                    mappa.get(&scorta.unita_simbolo).copied(),
+                );
+                (unita == bisogno.unita_base).then_some(quantita)
+            })
+            .sum();
+        if bisogno.quantita - disponibile > QUANTITA_TRASCURABILE {
+            mancanze.push(Mancanza {
+                nome: bisogno.nome,
+                serve: bisogno.quantita,
+                in_casa: disponibile.max(0.0),
+                unita: bisogno.unita_base,
+            });
+        }
+    }
+    Ok(mancanze)
 }
 
 /// Riga grezza di un prelievo da restituire.
@@ -1177,8 +1310,8 @@ pub async fn restituisci_scorte_pasto(
     }
 
     sqlx::query(
-        "UPDATE planner_pasti SET scorte_scalate_il = NULL, scorte_scalate_automaticamente = 0 \
-         WHERE id = ?",
+        "UPDATE planner_pasti SET scorte_scalate_il = NULL, scorte_scalate_automaticamente = 0, \
+         scorte_mancanti = NULL WHERE id = ?",
     )
     .bind(pasto_id)
     .execute(&mut *tx)
@@ -1200,11 +1333,13 @@ pub async fn restituisci_scorte_pasto(
 /// schermata che mostra le scorte o il fabbisogno (lista della spesa,
 /// scorte), che è l'unico momento in cui il risultato serve.
 ///
-/// Ritorna quanti pasti sono stati scaricati.
-pub async fn scala_pasti_scaduti(pool: &SqlitePool) -> anyhow::Result<usize> {
+/// Ritorna i pasti scaricati, con quello che mancava in casa per ciascuno:
+/// chi apre la schermata lo deve sapere, perché qui nessuno ha potuto
+/// confermare l'eccezione.
+pub async fn scala_pasti_scaduti(pool: &SqlitePool) -> anyhow::Result<Vec<PastoScaricato>> {
     let spazio_id = crate::identity::current_actor().spazio_id;
-    let pasti: Vec<i64> = sqlx::query_scalar(
-        "SELECT pp.id FROM planner_pasti pp \
+    let pasti: Vec<(i64, String, String)> = sqlx::query_as(
+        "SELECT pp.id, pp.tipo_pasto, pp.ricetta_nome_snapshot FROM planner_pasti pp \
          JOIN planner_alimentari p ON p.id = pp.planner_id \
          WHERE p.spazio_id = ? AND p.archiviato = 0 \
            AND pp.stato = 'pianificato' AND pp.saltato_il IS NULL \
@@ -1219,10 +1354,59 @@ pub async fn scala_pasti_scaduti(pool: &SqlitePool) -> anyhow::Result<usize> {
     .fetch_all(pool)
     .await
     .context("Impossibile cercare i pasti passati")?;
-    for pasto_id in &pasti {
-        scala_scorte_per_pasto(pool, *pasto_id, true).await?;
+    let mut scaricati = Vec::new();
+    for (pasto_id, tipo, ricetta) in pasti {
+        scala_scorte_per_pasto(pool, pasto_id, true).await?;
+        let mancanti: Option<String> =
+            sqlx::query_scalar("SELECT scorte_mancanti FROM planner_pasti WHERE id = ?")
+                .bind(pasto_id)
+                .fetch_one(pool)
+                .await
+                .context("Impossibile rileggere il pasto scaricato")?;
+        scaricati.push(PastoScaricato {
+            descrizione: format!("{} {}", etichetta_tipo_pasto(&tipo), ricetta),
+            mancanti,
+        });
     }
-    Ok(pasti.len())
+    Ok(scaricati)
+}
+
+/// Un pasto scaricato da solo a orario passato.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PastoScaricato {
+    pub descrizione: String,
+    pub mancanti: Option<String>,
+}
+
+/// L'avviso per chi apre una schermata dopo uno scarico automatico in cui
+/// mancava qualcosa. `None` se non mancava niente.
+pub fn avviso_scarichi(scaricati: &[PastoScaricato]) -> Option<String> {
+    let righe: Vec<String> = scaricati
+        .iter()
+        .filter_map(|pasto| {
+            pasto
+                .mancanti
+                .as_ref()
+                .map(|mancanti| format!("• {}: mancavano {mancanti}", pasto.descrizione))
+        })
+        .collect();
+    (!righe.is_empty()).then(|| {
+        format!(
+            "⚠️ Pasti passati, ingredienti tolti dalle scorte da soli. In casa non c'era tutto:\n{}",
+            righe.join("\n")
+        )
+    })
+}
+
+fn etichetta_tipo_pasto(tipo: &str) -> &'static str {
+    match tipo {
+        "colazione" => "Colazione ·",
+        "spuntino_mattina" => "Spuntino ·",
+        "pranzo" => "Pranzo ·",
+        "spuntino_pomeriggio" => "Merenda ·",
+        "cena" => "Cena ·",
+        _ => "Pasto ·",
+    }
 }
 
 /// Una ricetta con quanti dei suoi ingredienti ci sono già in casa.
@@ -2037,13 +2221,18 @@ async fn mostra_menu(
     avviso: Option<&str>,
 ) -> ResponseResult<()> {
     // Prima di contare, i pasti ormai passati si prendono la loro parte.
-    if let Err(errore) = scala_pasti_scaduti(pool).await {
+    let scarichi = scala_pasti_scaduti(pool).await.unwrap_or_else(|errore| {
         tracing::warn!(?errore, "Scarico dei pasti passati fallito");
-    }
+        Vec::new()
+    });
 
     let mut testo = String::new();
     if let Some(avviso) = avviso {
         testo.push_str(avviso);
+        testo.push_str("\n\n");
+    }
+    if let Some(avviso) = avviso_scarichi(&scarichi) {
+        testo.push_str(&avviso);
         testo.push_str("\n\n");
     }
     testo.push_str("🥫 Scorte\n\nQuello che hai già in casa.");
@@ -2768,7 +2957,10 @@ mod tests {
             // Pasto oggi alle 00:00: l'orario è già passato.
             let pasto = pasto_con(&pool, user_id, space_id, pasta, 250.0).await;
             let scaricati = scala_pasti_scaduti(&pool).await.expect("scarico");
-            assert_eq!(scaricati, 1);
+            assert_eq!(scaricati.len(), 1);
+            // C'era tutto: nessun avviso.
+            assert_eq!(scaricati[0].mancanti, None);
+            assert_eq!(avviso_scarichi(&scaricati), None);
 
             // 100 g dalla confezione che scade (finita, eliminata), 150 g
             // dall'altra, che resta in kg.
@@ -2794,6 +2986,165 @@ mod tests {
             assert_eq!(gruppi[0].prima_scadenza(), Some("2026-10-01"));
         })
         .await;
+    }
+
+    #[test]
+    fn le_mancanze_si_leggono_in_due_modi() {
+        let mancanze = vec![
+            Mancanza {
+                nome: "Pasta brisée".to_string(),
+                serve: 200.0,
+                in_casa: 0.0,
+                unita: "g".to_string(),
+            },
+            Mancanza {
+                nome: "Latte".to_string(),
+                serve: 1500.0,
+                in_casa: 1000.0,
+                unita: "ml".to_string(),
+            },
+        ];
+        assert_eq!(
+            descrivi_mancanze(&mancanze),
+            format!(
+                "Pasta brisée {}, Latte {}",
+                formatta_quantita_leggibile(200.0, "g"),
+                formatta_quantita_leggibile(500.0, "ml")
+            )
+        );
+        assert_eq!(
+            riga_mancanza(&mancanze[0]),
+            format!(
+                "• Pasta brisée: servono {}, ne hai {}",
+                formatta_quantita_leggibile(200.0, "g"),
+                formatta_quantita_leggibile(0.0, "g")
+            )
+        );
+
+        let scaricati = vec![
+            PastoScaricato {
+                descrizione: "Pranzo · Quiche".to_string(),
+                mancanti: Some("Pasta brisée 200 g".to_string()),
+            },
+            PastoScaricato {
+                descrizione: "Cena · Pasta".to_string(),
+                mancanti: None,
+            },
+        ];
+        let avviso = avviso_scarichi(&scaricati).expect("avviso");
+        assert!(avviso.contains("• Pranzo · Quiche: mancavano Pasta brisée 200 g"));
+        assert!(!avviso.contains("Cena"), "chi aveva tutto non compare");
+    }
+
+    #[tokio::test]
+    async fn quel_che_manca_si_controlla_prima_e_si_ricorda_dopo_lo_scarico() {
+        let pool = test_pool().await;
+        let (user_id, space_id) = utente_e_spazio(&pool).await;
+
+        crate::identity::with_actor(actor(user_id, space_id), async {
+            let pasta = alimento(&pool, "Pasta", "cereali").await;
+            aggiungi_scorta(
+                &pool,
+                Conservazione::Dispensa,
+                Some(IdentitaCatalogo::Alimento(pasta)),
+                "Pasta",
+                100.0,
+                "g",
+            )
+            .await
+            .unwrap();
+            let pasto = pasto_con(&pool, user_id, space_id, pasta, 250.0).await;
+
+            // Il controllo non tocca niente.
+            let mancanze = mancanti_per_pasto(&pool, pasto).await.expect("controllo");
+            assert_eq!(mancanze.len(), 1);
+            assert_eq!(mancanze[0].serve, 250.0);
+            assert_eq!(mancanze[0].in_casa, 100.0);
+            assert_eq!(
+                gruppi_del_luogo(&pool, Conservazione::Dispensa)
+                    .await
+                    .unwrap()[0]
+                    .quantita_base,
+                100.0
+            );
+
+            // Lo scarico automatico prende quello che c'è e annota il resto.
+            let scaricati = scala_pasti_scaduti(&pool).await.expect("scarico");
+            assert_eq!(scaricati.len(), 1);
+            let mancanti = scaricati[0].mancanti.clone().expect("mancava qualcosa");
+            assert!(mancanti.starts_with("Pasta "), "{mancanti}");
+            assert!(avviso_scarichi(&scaricati).is_some());
+            let annotato: Option<String> =
+                sqlx::query_scalar("SELECT scorte_mancanti FROM planner_pasti WHERE id = ?")
+                    .bind(pasto)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+            assert_eq!(annotato.as_deref(), Some(mancanti.as_str()));
+            assert!(gruppi_del_luogo(&pool, Conservazione::Dispensa)
+                .await
+                .unwrap()
+                .is_empty());
+            // A scorte già prese non c'è più niente da controllare.
+            assert!(mancanti_per_pasto(&pool, pasto).await.unwrap().is_empty());
+
+            // Restituire le scorte cancella anche l'annotazione.
+            restituisci_scorte_pasto(&pool, pasto, true)
+                .await
+                .expect("restituzione");
+            let annotato: Option<String> =
+                sqlx::query_scalar("SELECT scorte_mancanti FROM planner_pasti WHERE id = ?")
+                    .bind(pasto)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+            assert_eq!(annotato, None);
+        })
+        .await;
+    }
+
+    /// Migration della consegna A: da saltato o consumato si torna a
+    /// pianificato, ma il resto del pasto resta bloccato.
+    #[tokio::test]
+    async fn un_pasto_saltato_o_consumato_torna_pianificato_e_nient_altro() {
+        let pool = test_pool().await;
+        let (user_id, space_id) = utente_e_spazio(&pool).await;
+        let pasta = alimento(&pool, "Pasta", "cereali").await;
+        let pasto = pasto_con(&pool, user_id, space_id, pasta, 100.0).await;
+        let esegui = |sql: &'static str| {
+            let pool = pool.clone();
+            async move { sqlx::query(sql).bind(pasto).execute(&pool).await }
+        };
+        const SALTA: &str =
+            "UPDATE planner_pasti SET saltato_il = '2026-09-17T10:00:00Z' WHERE id = ?";
+        const RIPRISTINA: &str = "UPDATE planner_pasti SET saltato_il = NULL WHERE id = ?";
+        const CONSUMA: &str = "UPDATE planner_pasti SET stato = 'completato', \
+             completato_il = '2026-09-17T10:00:00Z' WHERE id = ?";
+        const RIAPRI: &str =
+            "UPDATE planner_pasti SET stato = 'pianificato', completato_il = NULL WHERE id = ?";
+        const CAMBIA: &str =
+            "UPDATE planner_pasti SET ricetta_nome_snapshot = 'Altra ricetta' WHERE id = ?";
+
+        esegui(SALTA).await.expect("saltato");
+        assert!(
+            esegui(CAMBIA).await.is_err(),
+            "un saltato non cambia ricetta"
+        );
+        assert!(
+            esegui("UPDATE planner_pasti SET saltato_il = '2026-09-18T10:00:00Z' WHERE id = ?")
+                .await
+                .is_err(),
+            "la data del salto non si riscrive"
+        );
+        esegui(RIPRISTINA).await.expect("di nuovo pianificato");
+
+        esegui(CONSUMA).await.expect("consumato");
+        assert!(
+            esegui(CAMBIA).await.is_err(),
+            "un consumato non cambia ricetta"
+        );
+        esegui(RIAPRI).await.expect("di nuovo pianificato");
+        esegui(CAMBIA).await.expect("un pianificato cambia ricetta");
     }
 
     #[tokio::test]

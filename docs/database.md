@@ -353,6 +353,36 @@ visibile (`ROW_NUMBER() OVER (PARTITION BY lista_id ...)`): sul database
 reale due voci avevano la stessa posizione e il riordino non riusciva a
 scambiarle. Da qui in avanti ci pensa `aggiorna_lista`.
 
+## Step 7.4quinquies: consegna A, esiti dei pasti e confezione presa (17 settembre 2026)
+
+`migrations/20260917180000_consegna_a_pasti_e_spesa.sql`. Comportamento in
+`docs/moduli/planner.md`, `docs/moduli/dispensa.md`,
+`docs/moduli/lista-spesa.md`.
+
+### Trigger dei pasti saltati e completati, ricreati
+`trg_planner_pasto_saltato_immutabile` blocca gli stessi campi di prima, ma
+su `saltato_il` ammette un solo cambiamento: toglierlo (tornare a
+pianificato). `trg_planner_pasto_completato_immutabile` non blocca più il
+cambio di `stato`: gli stati sono due, quindi l'unico cambio possibile è
+tornare a `pianificato`, e il CHECK della tabella impone di togliere anche
+`completato_il`. Ricetta, giorno, tipo e ordine restano bloccati in
+entrambi.
+
+### `planner_pasti.scorte_mancanti`
+Testo pronto da mostrare ("Pasta brisée 200 g, Sovracosce 125 g") con quel
+che mancava in casa quando il pasto ha preso le sue scorte. `NULL` se c'era
+tutto; si azzera restituendo le scorte.
+
+### `liste_spesa_voci`: `quantita_presa`, `unita_presa`, `prodotto_preso_id`
+Quanto si è preso davvero ("📦 Ho preso…") e, se scelta, la confezione
+(`ON DELETE SET NULL`). `quantita_presa` ha un CHECK `> 0`. Non sono nel
+trigger di congelamento delle voci comprate: si segnano dopo aver spuntato.
+
+### `liste_spesa_voci_archiviate.quantita_richiesta`
+Quanto serviva, quando si è preso altro: in quel caso `quantita`,
+`unita_simbolo` e `prodotto_alimentare_id` dell'archivio sono quelli della
+presa. `NULL` se si è presa la quantità in lista.
+
 ## Step 7.4bis: Turni e routine (prima fetta, 10 settembre 2026)
 
 Nuove tabelle di `migrations/20260910120000_turni_e_routine.sql`, dominio e
