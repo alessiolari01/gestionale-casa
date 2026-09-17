@@ -21,6 +21,7 @@ pub mod foto;
 pub mod lista_spesa;
 pub mod liste;
 pub mod luoghi;
+pub mod mercato;
 pub mod miglioramenti;
 pub mod novita;
 pub mod oggetti;

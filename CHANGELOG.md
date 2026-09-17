@@ -2,6 +2,39 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_CONSEGNA_B_20260917 -->
+# 17/09/2026 — Consegna B: negozi, prezzi, prodotti preferiti, codice a barre
+
+Concordata con Alessio dopo la consegna A e scritta lo stesso giorno. Una
+migration nuova (`migrations/20260917210000_consegna_b_negozi_e_prezzi.sql`)
+e un modulo nuovo (`src/modules/mercato.rs`). Stato e scelte in `STATO.md`,
+sezione 2duodecies; comportamento in `docs/moduli/mercato.md`.
+
+**Novità**
+
+- **Negozi**: 25 catene italiane già pronte, ed è l'utente a scegliere su
+  quali fare il confronto. Si può aggiungere un negozio proprio.
+- **Prezzi facoltativi**: voce per voce durante la spesa e totale dello
+  scontrino alla chiusura, indipendenti. Il prezzo al chilo compare da solo
+  quando si può calcolare.
+- **📊 Dove conviene**: la lista valutata nei negozi scelti, ordinata prima
+  per quante voci copre.
+- **⭐ Prodotti preferiti**, proposti per primi.
+- **🏷 Codice a barre** con Open Food Facts: crea il prodotto e segna la
+  confezione presa. **Open Prices** suggerisce un prezzo, senza registrarlo.
+- Il totale della spesa chiusa resta a database per il futuro modulo Soldi.
+
+**Ricette, le quattro correzioni chieste da Alessio**
+
+- esiti dentro la schermata invece che in un messaggio a parte (C3);
+- errori di lettura di step e allegati visibili, non più "nessuno step";
+- la conferma prima di eliminare un allegato c'era già;
+- **📝 Riscrivi tutto**: il procedimento in un messaggio solo, con conferma
+  perché sostituisce step e allegati.
+
+**Icone**: il pasto preparato passa da `🍳` a `🍲`; `🍳` resta la ricetta,
+che è il significato che aveva già in mezzo bot (C4).
+
 <!-- CHANGELOG_CONSEGNA_A_20260917 -->
 # 17/09/2026 — Consegna A: ingredienti delle ricette, esiti dei pasti reversibili, controllo delle scorte, "📦 Ho preso…"
 
@@ -16,7 +49,7 @@ Dal collaudo dal vivo di Alessio del giro precedente. Una migration nuova
   nascosto. C'era dal 26 agosto. Ora gli errori di lettura si vedono.
 - **Un pasto saltato restava saltato per sempre**: il trigger lo bloccava
   del tutto. Ora torna a pianificato, e così anche un pasto consumato.
-- **L'icona del pasto preparato non cambiava**: ora `🍳`.
+- **L'icona del pasto preparato non cambiava**: ora `🍲`.
 - **Giorno della settimana ripetuto** nelle intestazioni dopo C17.
 - **Preparato e consumato non controllavano le scorte.**
 

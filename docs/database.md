@@ -353,6 +353,42 @@ visibile (`ROW_NUMBER() OVER (PARTITION BY lista_id ...)`): sul database
 reale due voci avevano la stessa posizione e il riordino non riusciva a
 scambiarle. Da qui in avanti ci pensa `aggiorna_lista`.
 
+## Step 7.4sexies: consegna B, negozi e prezzi (17 settembre 2026)
+
+`migrations/20260917210000_consegna_b_negozi_e_prezzi.sql`. Comportamento in
+`docs/moduli/mercato.md`.
+
+### `negozi`
+Le catene comuni hanno `spazio_id NULL` (catalogo condiviso, come gli
+alimenti globali); un negozio creato da un utente appartiene al suo spazio.
+Due indici unique parziali tengono i nomi distinti nei due casi. La
+migration semina 25 catene diffuse in Italia.
+
+### `negozi_confronto`
+Quali negozi entrano nel confronto, **per utente**: la scelta è sua, non una
+lista imposta dal bot.
+
+### `prezzi_osservati`
+Un prezzo visto, legato a `negozio_id` più un alimento **o** un prodotto
+(CHECK: almeno uno dei due), in **centesimi interi** — i soldi non si
+arrotondano per sbaglio. `quantita`/`unita_simbolo` sono quelle della
+confezione pagata e servono al prezzo al chilo. `fonte` distingue `spesa`
+(visto da noi) da `open_prices` (suggerito da altri).
+
+### `liste_spesa.negozio_id`, `liste_spesa_voci.prezzo_centesimi`
+Il negozio della spesa in corso, e quanto è costata ogni voce. Il prezzo non
+è nel trigger di congelamento delle voci comprate: si segna dopo aver
+spuntato, come la presa.
+
+### `liste_spesa_chiusure.negozio_id`, `totale_centesimi`
+Dove si è fatta la spesa e quanto dice lo scontrino. Facoltativo: diventerà
+una transazione del modulo Soldi.
+
+### `prodotti_preferiti`
+Il prodotto preferito di un alimento, uno per utente (chiave primaria
+`utente_id, alimento_id`): il catalogo dei prodotti è condiviso, la
+preferenza no.
+
 ## Step 7.4quinquies: consegna A, esiti dei pasti e confezione presa (17 settembre 2026)
 
 `migrations/20260917180000_consegna_a_pasti_e_spesa.sql`. Comportamento in

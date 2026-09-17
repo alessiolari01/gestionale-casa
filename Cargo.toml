@@ -9,6 +9,10 @@ anyhow = "1"
 # dichiararlo diretto non aggiunge nulla al binario.
 chrono = { version = "0.4", default-features = false }
 dotenvy = "0.15"
+# Gia' nel grafo tramite teloxide-core: qui si aggiunge solo la feature
+# "json", per leggere Open Food Facts e Open Prices (consegna B).
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde_json = "1"
 sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
 teloxide = { version = "0.17", default-features = false, features = ["rustls", "ctrlc_handler"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "time", "signal"] }

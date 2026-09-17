@@ -615,6 +615,8 @@ dependencies = [
  "anyhow",
  "chrono",
  "dotenvy",
+ "reqwest",
+ "serde_json",
  "sqlx",
  "teloxide",
  "tokio",

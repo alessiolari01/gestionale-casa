@@ -445,6 +445,18 @@ così in casa entra quello che si è preso davvero.
 Le colonne della presa non sono nel trigger di congelamento: si segnano
 proprio dopo aver spuntato.
 
+## Negozio, prezzi e stima (consegna B, 17 settembre 2026)
+
+La lista mostra `🏪` con il negozio di questa spesa (o `🏪 Scegli negozio`)
+e, quando c'è qualcosa da comprare, `📊 Dove conviene`. Ogni voce può
+portare il prezzo pagato (`💶` nella schermata `📦`), che compare sul
+pulsante accanto alla quantità, e la lista riassume `💶 Segnato finora`.
+Chiudendo la spesa il bot chiede il totale dello scontrino, che si può
+saltare.
+
+Tutto il resto — negozi, prezzi per negozio, preferiti, codice a barre,
+Open Food Facts e Open Prices — è in `docs/moduli/mercato.md`.
+
 ## Accesso dal planner (16 settembre 2026)
 
 La schermata della settimana del planner ha un pulsante `🛒 Lista della

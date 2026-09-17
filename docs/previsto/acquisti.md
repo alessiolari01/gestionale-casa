@@ -8,7 +8,12 @@
 ---
 
 
-**Stato: RIMANDATO — specificato ora, implementazione successiva allo Step 7.**
+**Stato: RIMANDATO — ma una parte è già costruita.** Dal 17 settembre 2026
+(consegna B, `docs/moduli/mercato.md`) esistono i negozi, i prezzi visti
+durante la spesa con il loro storico per negozio, il confronto fra i negozi
+scelti dall'utente, i prodotti preferiti e la lettura del codice a barre da
+Open Food Facts. Restano futuri i volantini, i prezzi per singolo punto
+vendita e i prodotti non alimentari.
 
 Modulo trasversale per prodotti acquistabili, confezioni, negozi e prezzi base.
 Serve sia all'Alimentazione sia a beni/consumabili acquistati frequentemente.

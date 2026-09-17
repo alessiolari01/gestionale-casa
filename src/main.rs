@@ -1676,6 +1676,12 @@ async fn handle_authorized_callback(
         lista_spesa_sessions.clear_chat(chat_id.0);
     }
 
+    if data.starts_with("mercato:")
+        && modules::mercato::handle_callback(&bot, chat_id, &pool, data).await?
+    {
+        return respond(());
+    }
+
     if data.starts_with("dispensa:")
         || (data == "menu:main" && dispensa_sessions.has_active(chat_id.0))
     {

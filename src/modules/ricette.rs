@@ -39,6 +39,9 @@ const MEDIA_ROOT: &str = "data/media/ricette";
 const DRAFT_MEDIA_ROOT: &str = "data/media/ricette/_draft";
 const RECIPE_NAME_MAX: usize = 120;
 const STEP_TEXT_MAX: usize = 3500;
+/// Un procedimento riscritto tutto insieme: Telegram accetta 4096 caratteri
+/// per messaggio, e ogni step resta comunque entro `STEP_TEXT_MAX`.
+const PROCEDURE_TEXT_MAX: usize = 4000;
 const INGREDIENT_SEARCH_MAX: usize = 120;
 const RESOURCE_TYPE_RECIPE: &str = "ricetta";
 
@@ -174,6 +177,11 @@ enum RecipeConversationState {
     EditStepText {
         recipe_id: i64,
         step_id: Option<i64>,
+    },
+    /// Riscrittura di tutto il procedimento in un messaggio solo
+    /// (17 settembre 2026).
+    RewriteSteps {
+        recipe_id: i64,
     },
     EditStepPhoto {
         recipe_id: i64,
@@ -540,7 +548,7 @@ pub async fn handle_message(
                     step_index,
                 },
             );
-            show_step_media_menu(bot, msg.chat.id, &draft, step_index).await?;
+            show_step_media_menu(bot, msg.chat.id, &draft, step_index, None).await?;
             Ok(true)
         }
         RecipeConversationState::StepMedia { draft, step_index } => {
@@ -576,9 +584,14 @@ pub async fn handle_message(
                             step_index,
                         },
                     );
-                    bot.send_message(msg.chat.id, "✅ Foto aggiunta allo step.")
-                        .await?;
-                    show_step_media_menu(bot, msg.chat.id, &draft, step_index).await?;
+                    show_step_media_menu(
+                        bot,
+                        msg.chat.id,
+                        &draft,
+                        step_index,
+                        Some("✅ Foto aggiunta allo step."),
+                    )
+                    .await?;
                 }
                 Err(error) => {
                     tracing::warn!(?error, "Salvataggio foto step ricetta non riuscito");
@@ -615,9 +628,14 @@ pub async fn handle_message(
                             step_index,
                         },
                     );
-                    bot.send_message(msg.chat.id, "✅ Video aggiunto allo step.")
-                        .await?;
-                    show_step_media_menu(bot, msg.chat.id, &draft, step_index).await?;
+                    show_step_media_menu(
+                        bot,
+                        msg.chat.id,
+                        &draft,
+                        step_index,
+                        Some("✅ Video aggiunto allo step."),
+                    )
+                    .await?;
                 }
                 Err(error) => {
                     tracing::warn!(?error, "Salvataggio video step ricetta non riuscito");
@@ -886,9 +904,34 @@ pub async fn handle_message(
             match result {
                 Ok(()) => {
                     sessions.clear_chat(chat_id);
-                    bot.send_message(msg.chat.id, "✅ Procedimento aggiornato.")
+                    show_manage_steps(
+                        bot,
+                        msg.chat.id,
+                        pool,
+                        recipe_id,
+                        Some("✅ Procedimento aggiornato."),
+                    )
+                    .await?;
+                }
+                Err(error) => {
+                    bot.send_message(msg.chat.id, format!("⚠️ {error}"))
+                        .reply_markup(flow_keyboard(&format!("recipe:edit:steps:{recipe_id}")))
                         .await?;
-                    show_manage_steps(bot, msg.chat.id, pool, recipe_id).await?;
+                }
+            }
+            Ok(true)
+        }
+        RecipeConversationState::RewriteSteps { recipe_id } => {
+            let Some(text) = text_hint.and_then(|value| clean_text(value, PROCEDURE_TEXT_MAX))
+            else {
+                send_text_required(bot, msg.chat.id, "Scrivi il procedimento completo.").await?;
+                return Ok(true);
+            };
+            match replace_recipe_steps(pool, recipe_id, &text).await {
+                Ok(quanti) => {
+                    sessions.clear_chat(chat_id);
+                    let notice = format!("✅ Procedimento riscritto: {quanti} step.");
+                    show_manage_steps(bot, msg.chat.id, pool, recipe_id, Some(&notice)).await?;
                 }
                 Err(error) => {
                     bot.send_message(msg.chat.id, format!("⚠️ {error}"))
@@ -911,8 +954,15 @@ pub async fn handle_message(
                 Ok(()) => {
                     sessions.clear_chat(chat_id);
                     bot.delete_user_input(msg.chat.id, msg.id).await;
-                    bot.send_message(msg.chat.id, "✅ Foto aggiunta.").await?;
-                    show_step_manage(bot, msg.chat.id, pool, recipe_id, step_id).await?;
+                    show_step_manage(
+                        bot,
+                        msg.chat.id,
+                        pool,
+                        recipe_id,
+                        step_id,
+                        Some("✅ Foto aggiunta."),
+                    )
+                    .await?;
                 }
                 Err(error) => {
                     bot.send_message(msg.chat.id, format!("⚠️ {error}"))
@@ -937,8 +987,15 @@ pub async fn handle_message(
                 Ok(()) => {
                     sessions.clear_chat(chat_id);
                     bot.delete_user_input(msg.chat.id, msg.id).await;
-                    bot.send_message(msg.chat.id, "✅ Video aggiunto.").await?;
-                    show_step_manage(bot, msg.chat.id, pool, recipe_id, step_id).await?;
+                    show_step_manage(
+                        bot,
+                        msg.chat.id,
+                        pool,
+                        recipe_id,
+                        step_id,
+                        Some("✅ Video aggiunto."),
+                    )
+                    .await?;
                 }
                 Err(error) => {
                     bot.send_message(msg.chat.id, format!("⚠️ {error}"))
@@ -1102,7 +1159,7 @@ pub async fn handle_callback(
                         step_index,
                     },
                 );
-                show_step_media_menu(bot, chat_id, &draft, step_index).await?;
+                show_step_media_menu(bot, chat_id, &draft, step_index, None).await?;
             }
             _ => show_expired_flow(bot, chat_id).await?,
         },
@@ -2182,12 +2239,54 @@ async fn handle_edit_callback(
         }
         return Ok(());
     }
+    // Prima del prefisso generico `recipe:edit:steps:`, che altrimenti se lo
+    // mangerebbe.
+    if let Some(recipe_id) = data
+        .strip_prefix("recipe:edit:steps:rw:")
+        .and_then(parse_positive_i64_str)
+    {
+        sessions.clear_chat(chat_id.0);
+        // C16: riscrivere il procedimento cancella gli step di prima e i loro
+        // allegati, che non si recuperano.
+        bot.send_message(
+            chat_id,
+            "📝 Riscrivere tutto il procedimento?\n\nGli step di adesso vengono sostituiti,              e le loro foto e video eliminati definitivamente.",
+        )
+        .reply_markup(InlineKeyboardMarkup::new(vec![
+            vec![button(
+                "📝 Sì, riscrivo io",
+                format!("recipe:edit:steps:rw:go:{recipe_id}"),
+            )],
+            vec![
+                button("❌ Annulla", format!("recipe:edit:steps:{recipe_id}")),
+                button("🏠 Menù principale", "menu:main"),
+            ],
+        ]))
+        .await?;
+        return Ok(());
+    }
+    if let Some(recipe_id) = data
+        .strip_prefix("recipe:edit:steps:rw:go:")
+        .and_then(parse_positive_i64_str)
+    {
+        sessions.set(
+            chat_id.0,
+            RecipeConversationState::RewriteSteps { recipe_id },
+        );
+        bot.send_message(
+            chat_id,
+            "📝 Scrivi il procedimento completo in un messaggio solo.\n\nUn passaggio per riga,              oppure separati da una riga vuota. La numerazione la metto io.",
+        )
+        .reply_markup(flow_keyboard(&format!("recipe:edit:steps:{recipe_id}")))
+        .await?;
+        return Ok(());
+    }
     if let Some(recipe_id) = data
         .strip_prefix("recipe:edit:steps:")
         .and_then(parse_positive_i64_str)
     {
         sessions.clear_chat(chat_id.0);
-        show_manage_steps(bot, chat_id, pool, recipe_id).await?;
+        show_manage_steps(bot, chat_id, pool, recipe_id, None).await?;
         return Ok(());
     }
     if let Some(recipe_id) = data
@@ -2272,9 +2371,13 @@ async fn handle_edit_callback(
     if let Some(raw) = data.strip_prefix("recipe:edit:step:up:") {
         if let Some((recipe_id, step_id)) = parse_two_positive_ids(raw) {
             match move_recipe_step(pool, recipe_id, step_id, -1).await {
-                Ok(()) => show_manage_steps(bot, chat_id, pool, recipe_id).await?,
+                Ok(()) => {
+                    show_manage_steps(bot, chat_id, pool, recipe_id, Some("⬆️ Step spostato."))
+                        .await?
+                }
                 Err(error) => {
-                    bot.send_message(chat_id, format!("⚠️ {error}")).await?;
+                    let notice = format!("⚠️ {error}");
+                    show_manage_steps(bot, chat_id, pool, recipe_id, Some(&notice)).await?
                 }
             };
         } else {
@@ -2285,9 +2388,13 @@ async fn handle_edit_callback(
     if let Some(raw) = data.strip_prefix("recipe:edit:step:down:") {
         if let Some((recipe_id, step_id)) = parse_two_positive_ids(raw) {
             match move_recipe_step(pool, recipe_id, step_id, 1).await {
-                Ok(()) => show_manage_steps(bot, chat_id, pool, recipe_id).await?,
+                Ok(()) => {
+                    show_manage_steps(bot, chat_id, pool, recipe_id, Some("⬇️ Step spostato."))
+                        .await?
+                }
                 Err(error) => {
-                    bot.send_message(chat_id, format!("⚠️ {error}")).await?;
+                    let notice = format!("⚠️ {error}");
+                    show_manage_steps(bot, chat_id, pool, recipe_id, Some(&notice)).await?
                 }
             };
         } else {
@@ -2327,9 +2434,14 @@ async fn handle_edit_callback(
         if let Some((recipe_id, step_id)) = parse_two_positive_ids(raw) {
             match delete_recipe_step(pool, recipe_id, step_id).await {
                 Ok(()) => {
-                    bot.send_message(chat_id, "✅ Step eliminato e numerazione aggiornata.")
-                        .await?;
-                    show_manage_steps(bot, chat_id, pool, recipe_id).await?;
+                    show_manage_steps(
+                        bot,
+                        chat_id,
+                        pool,
+                        recipe_id,
+                        Some("✅ Step eliminato e numerazione aggiornata."),
+                    )
+                    .await?;
                 }
                 Err(error) => {
                     bot.send_message(chat_id, format!("⚠️ {error}"))
@@ -2347,7 +2459,7 @@ async fn handle_edit_callback(
     if let Some(raw) = data.strip_prefix("recipe:edit:step:") {
         if let Some((recipe_id, step_id)) = parse_two_positive_ids(raw) {
             sessions.clear_chat(chat_id.0);
-            show_step_manage(bot, chat_id, pool, recipe_id, step_id).await?;
+            show_step_manage(bot, chat_id, pool, recipe_id, step_id, None).await?;
         } else {
             show_invalid_action(bot, chat_id).await?;
         }
@@ -2381,8 +2493,15 @@ async fn handle_edit_callback(
         if let Some((recipe_id, media_id)) = parse_two_positive_ids(raw) {
             match delete_step_media(pool, recipe_id, media_id).await {
                 Ok(step_id) => {
-                    bot.send_message(chat_id, "✅ Allegato eliminato.").await?;
-                    show_step_manage(bot, chat_id, pool, recipe_id, step_id).await?;
+                    show_step_manage(
+                        bot,
+                        chat_id,
+                        pool,
+                        recipe_id,
+                        step_id,
+                        Some("✅ Allegato eliminato."),
+                    )
+                    .await?;
                 }
                 Err(error) => {
                     bot.send_message(chat_id, format!("⚠️ {error}")).await?;
@@ -3754,11 +3873,14 @@ async fn show_manage_ingredients(
     Ok(())
 }
 
+/// `notice` porta l'esito dell'ultima azione dentro questa schermata invece
+/// che in un messaggio a parte (C3, 17 settembre 2026).
 async fn show_manage_steps(
     bot: &Bot,
     chat_id: ChatId,
     pool: &SqlitePool,
     recipe_id: i64,
+    notice: Option<&str>,
 ) -> ResponseResult<()> {
     let actor = identity::current_actor();
     let Some(user_id) = actor.utente_id else {
@@ -3777,8 +3899,25 @@ async fn show_manage_steps(
         .await?;
         return Ok(());
     }
-    let steps = list_recipe_steps(pool, recipe_id).await.unwrap_or_default();
-    let mut text = format!("📝 Procedimento · {} step", steps.len());
+    // Un errore di lettura non deve sembrare "questa ricetta non ha step":
+    // è così che il difetto degli ingredienti è rimasto nascosto per tre
+    // settimane (17 settembre 2026).
+    let steps = match list_recipe_steps(pool, recipe_id).await {
+        Ok(steps) => steps,
+        Err(error) => {
+            tracing::warn!(?error, recipe_id, "Lettura degli step fallita");
+            bot.send_message(chat_id, "⚠️ Non riesco a leggere il procedimento.")
+                .reply_markup(back_home_keyboard(&format!("recipe:edit:menu:{recipe_id}")))
+                .await?;
+            return Ok(());
+        }
+    };
+    let mut text = String::new();
+    if let Some(notice) = notice {
+        text.push_str(notice);
+        text.push_str("\n\n");
+    }
+    text.push_str(&format!("📝 Procedimento · {} step", steps.len()));
     for step in &steps {
         let preview = truncate_chars(&step.text, 80);
         let media = media_summary(step.photo_count, step.video_count);
@@ -3796,10 +3935,16 @@ async fn show_manage_steps(
             )]
         })
         .collect::<Vec<_>>();
-    rows.push(vec![button(
-        "➕ Aggiungi step",
-        format!("recipe:edit:step:add:{recipe_id}"),
-    )]);
+    rows.push(vec![
+        button(
+            "➕ Aggiungi step",
+            format!("recipe:edit:step:add:{recipe_id}"),
+        ),
+        button(
+            "📝 Riscrivi tutto",
+            format!("recipe:edit:steps:rw:{recipe_id}"),
+        ),
+    ]);
     rows.push(vec![
         button(
             "📖 Anteprima completa",
@@ -3823,6 +3968,7 @@ async fn show_step_manage(
     pool: &SqlitePool,
     recipe_id: i64,
     step_id: i64,
+    notice: Option<&str>,
 ) -> ResponseResult<()> {
     let actor = identity::current_actor();
     let Some(user_id) = actor.utente_id else {
@@ -3849,8 +3995,27 @@ async fn show_step_manage(
             .await?;
         return Ok(());
     };
-    let media = list_step_media(pool, step_id).await.unwrap_or_default();
-    let mut text = format!("📝 Step {}\n\n{}", step.number, step.text);
+    let media = match list_step_media(pool, step_id).await {
+        Ok(media) => media,
+        Err(error) => {
+            tracing::warn!(?error, step_id, "Lettura degli allegati fallita");
+            bot.send_message(
+                chat_id,
+                "⚠️ Non riesco a leggere gli allegati di questo step.",
+            )
+            .reply_markup(back_home_keyboard(&format!(
+                "recipe:edit:steps:{recipe_id}"
+            )))
+            .await?;
+            return Ok(());
+        }
+    };
+    let mut text = String::new();
+    if let Some(notice) = notice {
+        text.push_str(notice);
+        text.push_str("\n\n");
+    }
+    text.push_str(&format!("📝 Step {}\n\n{}", step.number, step.text));
     if media.is_empty() {
         text.push_str("\n\n📎 Nessun allegato.");
     } else {
@@ -4188,6 +4353,7 @@ async fn show_step_media_menu(
     chat_id: ChatId,
     draft: &RecipeDraft,
     step_index: usize,
+    notice: Option<&str>,
 ) -> ResponseResult<()> {
     let Some(step) = draft.steps.get(step_index) else {
         show_expired_flow(bot, chat_id).await?;
@@ -4203,10 +4369,14 @@ async fn show_step_media_menu(
         .iter()
         .filter(|media| media.kind == "video")
         .count();
+    let intestazione = match notice {
+        Some(notice) => format!("{notice}\n\n"),
+        None => String::new(),
+    };
     bot.send_message(
         chat_id,
         format!(
-            "📝 Step {}\n\n{}\n\n📎 Allegati: 📷 {} · 🎥 {}\n\nFoto e video sono facoltativi e appartengono a questo specifico step.",
+            "{intestazione}📝 Step {}\n\n{}\n\n📎 Allegati: 📷 {} · 🎥 {}\n\nFoto e video sono facoltativi e appartengono a questo specifico step.",
             step_index + 1,
             step.text,
             photos,
@@ -5903,6 +6073,102 @@ async fn move_recipe_step(
     Ok(())
 }
 
+/// Divide un procedimento scritto tutto insieme in step (17 settembre
+/// 2026, chiesto da Alessio): righe vuote fra un passaggio e l'altro, o una
+/// riga per passaggio se righe vuote non ce ne sono. Toglie la numerazione
+/// che l'utente ha scritto a mano ("1.", "2)", "- ", "• "), perché i numeri
+/// li mette il bot. Ogni step resta entro `STEP_TEXT_MAX`.
+fn dividi_procedimento(testo: &str) -> Vec<String> {
+    let testo = testo.replace("\r\n", "\n");
+    let a_blocchi: Vec<&str> = testo.split("\n\n").collect();
+    let grezzi: Vec<&str> = if a_blocchi.iter().filter(|b| !b.trim().is_empty()).count() > 1 {
+        a_blocchi
+    } else {
+        testo.lines().collect()
+    };
+    grezzi
+        .into_iter()
+        .map(pulisci_numerazione)
+        .filter(|passo| !passo.is_empty())
+        // `STEP_TEXT_MAX - 1` perché `truncate_chars` aggiunge "…" quando
+        // taglia: così anche il passo tagliato resta entro il limite.
+        .map(|passo| truncate_chars(&passo, STEP_TEXT_MAX - 1))
+        .collect()
+}
+
+/// "3. Inforna" → "Inforna"; "- Mescola" → "Mescola".
+fn pulisci_numerazione(passo: &str) -> String {
+    let passo = passo.trim();
+    let senza_elenco = passo.trim_start_matches(['-', '*', '•', '–']).trim_start();
+    let cifre: String = senza_elenco
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    if !cifre.is_empty() && cifre.len() <= 3 {
+        let resto = &senza_elenco[cifre.len()..];
+        if let Some(resto) = resto
+            .strip_prefix('.')
+            .or_else(|| resto.strip_prefix(')'))
+            .or_else(|| resto.strip_prefix('-'))
+        {
+            return resto.trim().to_string();
+        }
+    }
+    senza_elenco.to_string()
+}
+
+/// Sostituisce **tutto** il procedimento con gli step nuovi: i vecchi step
+/// spariscono, e con loro i loro allegati (righe e file). Una ricetta deve
+/// restare con almeno uno step, quindi un testo che non produce nessun passo
+/// viene rifiutato prima di toccare qualcosa.
+async fn replace_recipe_steps(pool: &SqlitePool, recipe_id: i64, testo: &str) -> Result<usize> {
+    let user_id = identity::current_actor()
+        .utente_id
+        .context("Utente non disponibile")?;
+    if !can_edit_recipe(pool, recipe_id, user_id).await? {
+        bail!("Non hai il permesso di modificare questa ricetta");
+    }
+    let passi = dividi_procedimento(testo);
+    if passi.is_empty() {
+        bail!("Il procedimento non può essere vuoto");
+    }
+    let vecchi = list_recipe_steps(pool, recipe_id).await?;
+    let mut allegati = Vec::new();
+    for step in &vecchi {
+        allegati.extend(list_step_media(pool, step.id).await?);
+    }
+    let mut tx = pool
+        .begin()
+        .await
+        .context("Impossibile aprire la riscrittura del procedimento")?;
+    sqlx::query("DELETE FROM ricetta_step WHERE ricetta_id = ?")
+        .bind(recipe_id)
+        .execute(&mut *tx)
+        .await
+        .context("Impossibile togliere gli step vecchi")?;
+    for (indice, passo) in passi.iter().enumerate() {
+        sqlx::query("INSERT INTO ricetta_step (ricetta_id, numero, testo) VALUES (?, ?, ?)")
+            .bind(recipe_id)
+            .bind(indice as i64 + 1)
+            .bind(passo)
+            .execute(&mut *tx)
+            .await
+            .context("Impossibile scrivere il procedimento nuovo")?;
+    }
+    tx.commit()
+        .await
+        .context("Impossibile salvare il procedimento nuovo")?;
+    // I file solo dopo il commit: se la transazione fallisce, gli allegati
+    // sono ancora quelli buoni.
+    for item in allegati {
+        let path = PathBuf::from(item.path);
+        if path.exists() {
+            let _ = tokio::fs::remove_file(path).await;
+        }
+    }
+    Ok(passi.len())
+}
+
 async fn delete_recipe_step(pool: &SqlitePool, recipe_id: i64, step_id: i64) -> Result<()> {
     let user_id = identity::current_actor()
         .utente_id
@@ -7235,6 +7501,117 @@ mod tests {
     }
 
     #[test]
+    fn il_procedimento_scritto_tutto_insieme_si_divide_in_step() {
+        // Righe vuote: ogni blocco è un passaggio, anche se va a capo dentro.
+        assert_eq!(
+            dividi_procedimento("Scalda il forno\na 200 gradi\n\nInforna 20 minuti"),
+            vec!["Scalda il forno\na 200 gradi", "Inforna 20 minuti"]
+        );
+        // Senza righe vuote: una riga, un passaggio.
+        assert_eq!(
+            dividi_procedimento("Scalda il forno\nInforna\n\n"),
+            vec!["Scalda il forno", "Inforna"]
+        );
+        // La numerazione scritta a mano non finisce dentro il testo.
+        assert_eq!(
+            dividi_procedimento("1. Scalda il forno\n2) Inforna\n- Servi\n• Buon appetito"),
+            vec!["Scalda il forno", "Inforna", "Servi", "Buon appetito"]
+        );
+        // Un testo vuoto non produce step: la ricetta ne deve avere almeno uno.
+        assert!(dividi_procedimento("   \n\n  ").is_empty());
+        // Un passaggio lunghissimo viene accorciato, non perso.
+        let lungo = "a".repeat(STEP_TEXT_MAX + 500);
+        let passi = dividi_procedimento(&lungo);
+        assert_eq!(passi.len(), 1);
+        assert!(passi[0].chars().count() <= STEP_TEXT_MAX);
+    }
+
+    #[tokio::test]
+    async fn riscrivere_il_procedimento_sostituisce_step_e_allegati() {
+        let pool = test_pool().await;
+        let user_id = create_user(&pool, "Chef", 1).await;
+        let altro_id = create_user(&pool, "Ospite", 1).await;
+        let food = base_food(&pool, 0).await;
+        let grams = unit(&pool, "g").await;
+        let draft = RecipeDraft {
+            name: "Ricetta da riscrivere".to_string(),
+            servings: 2,
+            ingredients: vec![ingredient(&food, &grams, 150.0)],
+            steps: vec![
+                DraftStep {
+                    text: "Vecchio primo".to_string(),
+                    media: Vec::new(),
+                },
+                DraftStep {
+                    text: "Vecchio secondo".to_string(),
+                    media: Vec::new(),
+                },
+            ],
+            visible_spaces: Vec::new(),
+        };
+        let recipe_id = identity::with_actor(actor(user_id, 1, "Chef", false), async {
+            let recipe_id = save_recipe(&pool, 99, &draft).await.expect("salvataggio");
+            let step_id = list_recipe_steps(&pool, recipe_id).await.expect("step")[0].id;
+            sqlx::query(
+                "INSERT INTO ricetta_step_media (ricetta_step_id, tipo_media, percorso_file) \
+                 VALUES (?, 'foto', ?)",
+            )
+            .bind(step_id)
+            .bind("data/media/ricette/inesistente.jpg")
+            .execute(&pool)
+            .await
+            .expect("allegato");
+
+            let quanti =
+                replace_recipe_steps(&pool, recipe_id, "Nuovo primo\nNuovo secondo\nNuovo terzo")
+                    .await
+                    .expect("riscrittura");
+            assert_eq!(quanti, 3);
+            recipe_id
+        })
+        .await;
+
+        let step = identity::with_actor(actor(user_id, 1, "Chef", false), async {
+            list_recipe_steps(&pool, recipe_id).await.expect("step")
+        })
+        .await;
+        let testi: Vec<&str> = step.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(testi, vec!["Nuovo primo", "Nuovo secondo", "Nuovo terzo"]);
+        assert_eq!(
+            step.iter().map(|s| s.number).collect::<Vec<_>>(),
+            vec![1, 2, 3],
+            "la numerazione riparte da 1"
+        );
+        let allegati: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ricetta_step_media")
+            .fetch_one(&pool)
+            .await
+            .expect("allegati");
+        assert_eq!(allegati, 0, "gli allegati degli step vecchi se ne vanno");
+
+        identity::with_actor(actor(user_id, 1, "Chef", false), async {
+            assert!(
+                replace_recipe_steps(&pool, recipe_id, "   ").await.is_err(),
+                "un procedimento vuoto non si salva"
+            );
+        })
+        .await;
+        identity::with_actor(actor(altro_id, 1, "Ospite", false), async {
+            assert!(
+                replace_recipe_steps(&pool, recipe_id, "Mio").await.is_err(),
+                "chi non può modificare la ricetta non riscrive niente"
+            );
+        })
+        .await;
+        let quanti: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM ricetta_step WHERE ricetta_id = ?")
+                .bind(recipe_id)
+                .fetch_one(&pool)
+                .await
+                .expect("conteggio");
+        assert_eq!(quanti, 3, "i tentativi falliti non toccano niente");
+    }
+
+    #[test]
     fn callback_ricette_restano_sotto_il_limite_telegram() {
         let id = i64::MAX;
         let callbacks = [
@@ -7250,6 +7627,8 @@ mod tests {
             format!("recipe:edit:rev:{id}:{id}"),
             format!("recipe:edit:md:ask:{id}:{id}"),
             format!("recipe:edit:md:yes:{id}:{id}"),
+            format!("recipe:edit:steps:rw:{id}"),
+            format!("recipe:edit:steps:rw:go:{id}"),
             format!("recipe:edit:step:photo:{id}:{id}"),
             format!("recipe:edit:vis:toggle:{id}:{id}"),
             format!("recipe:edit:step:del:ask:{id}:{id}"),

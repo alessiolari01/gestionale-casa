@@ -357,7 +357,7 @@ impl PlannerMealRow {
         } else if self.prepared_at.is_some() {
             // 17 settembre 2026: un pasto preparato restava "○", come se
             // non fosse successo niente (visto da Alessio sul giorno).
-            "🍳"
+            "🍲"
         } else {
             "○"
         }
@@ -1017,7 +1017,7 @@ pub async fn handle_callback(
         if preparato_a_mano {
             bot.send_message(
                 chat_id,
-                "🍳 Questo pasto era già preparato.\n\nGli ingredienti preparati li hai ancora?",
+                "🍲 Questo pasto era già preparato.\n\nGli ingredienti preparati li hai ancora?",
             )
             .reply_markup(InlineKeyboardMarkup::new(vec![
                 vec![planner_button(
@@ -1106,7 +1106,7 @@ async fn planner_esegui_preparazione(
 ) -> ResponseResult<()> {
     let notice = match planner_prepare_meal(pool, meal_id).await {
         Ok(_) => {
-            "🍳 Pasto segnato come preparato: gli ingredienti sono usciti dalle scorte.".to_string()
+            "🍲 Pasto segnato come preparato: gli ingredienti sono usciti dalle scorte.".to_string()
         }
         Err(error) => format!("⚠️ {error}"),
     };
@@ -1970,7 +1970,7 @@ async fn planner_show_meal_detail(
         } else if meal.skipped_at.is_some() {
             "⏭ saltato"
         } else if meal.prepared_at.is_some() {
-            "🍳 preparato"
+            "🍲 preparato"
         } else {
             "○ pianificato"
         }
@@ -1982,7 +1982,7 @@ async fn planner_show_meal_detail(
     }
     // 17 settembre 2026: cosa è successo alle scorte di questo pasto.
     if meal.state == "completato" && meal.prepared_at.is_some() {
-        text.push_str("\n🍳 Era stato preparato prima");
+        text.push_str("\n🍲 Era stato preparato prima");
     }
     if meal.stock_used_at.is_some() {
         text.push_str(if meal.stock_used_automatically {
@@ -2027,7 +2027,7 @@ async fn planner_show_meal_detail(
         let mut riga = Vec::new();
         if meal.prepared_at.is_none() {
             riga.push(planner_button(
-                "🍳 Segna come preparato",
+                "🍲 Segna come preparato",
                 format!("planner:prepare:{}", meal.id),
             ));
         }
@@ -3447,7 +3447,7 @@ mod telegram_tests {
         let mut pasto = riga_pasto(OGGI, "pianificato", None, None, None);
         assert_eq!(pasto.marker(OGGI), "○");
         pasto.prepared_at = Some("2026-09-17T10:00:00Z".to_string());
-        assert_eq!(pasto.marker(OGGI), "🍳");
+        assert_eq!(pasto.marker(OGGI), "🍲");
         // Consumato e saltato restano più forti di "preparato".
         pasto.state = "completato".to_string();
         assert_eq!(pasto.marker(OGGI), "✅");

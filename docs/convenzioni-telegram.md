@@ -261,7 +261,12 @@ lo manda.
 | `✅` | fatto, confermato, consumato | ovunque |
 | `⏭` | saltato | ovunque |
 | `🔄` | da aggiornare | ovunque |
-| `🍳` | pasto preparato | planner (dal 17 settembre 2026) |
+| `🍲` | pasto preparato, non ancora consumato | planner (dal 17 settembre 2026) |
+| `📦` | quanto si è preso davvero | lista della spesa (consegna A) |
+| `💶` | prezzo | lista della spesa, mercato (consegna B) |
+| `🏪` | negozio | lista della spesa, mercato (consegna B) |
+| `🏷` | codice a barre | lista della spesa (consegna B) |
+| `🍳` | ricetta | ricette, planner, porzioni |
 | `⭐` | predefinito, il tuo | spazi, profili (nei turni: il tuo profilo, in cima) |
 | `👤` | mio / personale | proprietà dei contenuti |
 | `👥` | condiviso | proprietà dei contenuti |

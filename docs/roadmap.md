@@ -86,10 +86,9 @@ Prossimi blocchi funzionali, nell'ordine:
    scadenza;
 6. reminder/export Alimentazione.
 
-### Consegna B, concordata con Alessio il 17 settembre 2026
+### Consegna B — COSTRUITA il 17 settembre 2026
 
-Dopo la consegna A (`STATO.md`, sezione 2undecies), da scrivere in un giro a
-parte:
+Vedi `STATO.md` (sezione 2duodecies) e `docs/moduli/mercato.md`. Conteneva:
 
 - **negozi e prezzi**: prezzo registrabile durante la spesa e totale dello
   scontrino alla chiusura, entrambi facoltativi;

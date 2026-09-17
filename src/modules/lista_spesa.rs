@@ -1517,6 +1517,9 @@ pub struct ListaSpesa {
     /// oggi: da quel momento la lista non si sposta più in avanti da sola
     /// (vedi `intervallo_da_oggi`), e la schermata lo segnala.
     pub inizio_manuale: i64,
+    /// Il negozio di questa spesa (consegna B): i prezzi segnati mentre si
+    /// è dentro al supermercato si legano a lui.
+    pub negozio_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -1540,11 +1543,14 @@ pub struct VoceListaSpesa {
     pub unita_presa: Option<String>,
     #[allow(dead_code)]
     pub prodotto_preso_id: Option<i64>,
+    /// Quanto è costata davvero questa voce (consegna B), se l'hai segnato.
+    pub prezzo_centesimi: Option<i64>,
 }
 
 async fn trova_per_id(pool: &SqlitePool, id: i64) -> anyhow::Result<Option<ListaSpesa>> {
     sqlx::query_as(
-        "SELECT id, proprietario_utente_id, spazio_id, data_inizio, data_fine, inizio_manuale \
+        "SELECT id, proprietario_utente_id, spazio_id, data_inizio, data_fine, inizio_manuale, \
+                negozio_id \
          FROM liste_spesa WHERE id = ?",
     )
     .bind(id)
@@ -1557,7 +1563,8 @@ async fn trova_per_id(pool: &SqlitePool, id: i64) -> anyhow::Result<Option<Lista
 pub async fn trova_lista_attiva(pool: &SqlitePool) -> anyhow::Result<Option<ListaSpesa>> {
     let actor = crate::identity::current_actor();
     sqlx::query_as(
-        "SELECT id, proprietario_utente_id, spazio_id, data_inizio, data_fine, inizio_manuale \
+        "SELECT id, proprietario_utente_id, spazio_id, data_inizio, data_fine, inizio_manuale, \
+                negozio_id \
          FROM liste_spesa WHERE spazio_id = ? ORDER BY id LIMIT 1",
     )
     .bind(actor.spazio_id)
@@ -1679,7 +1686,7 @@ pub async fn carica_voci(pool: &SqlitePool, lista_id: i64) -> anyhow::Result<Vec
     sqlx::query_as(
         "SELECT id, origine, alimento_id, descrizione, quantita, unita_simbolo, comprato, \
                 ordinamento, prodotto_alimentare_id, quantita_presa, unita_presa, \
-                prodotto_preso_id \
+                prodotto_preso_id, prezzo_centesimi \
          FROM liste_spesa_voci WHERE lista_id = ? \
          ORDER BY ordinamento ASC, id ASC",
     )
@@ -3194,6 +3201,7 @@ struct VoceComprata {
     quantita_presa: Option<f64>,
     unita_presa: Option<String>,
     prodotto_preso_id: Option<i64>,
+    prezzo_centesimi: Option<i64>,
 }
 
 /// Quante voci sono segnate comprate: decide se "🧾 Chiudi la spesa" ha
@@ -3267,6 +3275,11 @@ async fn aggiunte_convertite(
 pub struct EsitoChiusura {
     pub archiviate: usize,
     pub entrate: Vec<(crate::modules::dispensa::Conservazione, usize)>,
+    /// La chiusura appena creata: serve a chiedere il totale dello
+    /// scontrino, che è facoltativo (consegna B).
+    pub chiusura_id: i64,
+    /// La somma dei prezzi segnati voce per voce, se ce n'era almeno uno.
+    pub speso_centesimi: Option<i64>,
 }
 
 /// Chiude la spesa: le voci comprate (generate o manuali) escono dalla lista
@@ -3287,7 +3300,8 @@ pub struct EsitoChiusura {
 pub async fn chiudi_spesa(pool: &SqlitePool, lista: &ListaSpesa) -> anyhow::Result<EsitoChiusura> {
     let comprate: Vec<VoceComprata> = sqlx::query_as(
         "SELECT origine, alimento_id, prodotto_alimentare_id, descrizione, quantita, \
-                unita_simbolo, comprato_il, quantita_presa, unita_presa, prodotto_preso_id \
+                unita_simbolo, comprato_il, quantita_presa, unita_presa, prodotto_preso_id, \
+                prezzo_centesimi \
          FROM liste_spesa_voci WHERE lista_id = ? AND comprato = 1 \
          ORDER BY ordinamento ASC, id ASC",
     )
@@ -3331,14 +3345,15 @@ pub async fn chiudi_spesa(pool: &SqlitePool, lista: &ListaSpesa) -> anyhow::Resu
         .context("Impossibile aprire la transazione")?;
     let chiusura_id = sqlx::query(
         "INSERT INTO liste_spesa_chiusure \
-         (lista_id, chiusa_da_utente_id, data_inizio, data_fine, voci_totali) \
-         VALUES (?, ?, ?, ?, ?)",
+         (lista_id, chiusa_da_utente_id, data_inizio, data_fine, voci_totali, negozio_id) \
+         VALUES (?, ?, ?, ?, ?, ?)",
     )
     .bind(lista.id)
     .bind(utente_id)
     .bind(&lista.data_inizio)
     .bind(&lista.data_fine)
     .bind(comprate.len() as i64)
+    .bind(lista.negozio_id)
     .execute(&mut *tx)
     .await
     .context("Impossibile registrare la chiusura della spesa")?
@@ -3354,8 +3369,8 @@ pub async fn chiudi_spesa(pool: &SqlitePool, lista: &ListaSpesa) -> anyhow::Resu
         sqlx::query(
             "INSERT INTO liste_spesa_voci_archiviate \
              (chiusura_id, origine, alimento_id, prodotto_alimentare_id, descrizione, \
-              quantita, unita_simbolo, comprato_il, quantita_richiesta) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+              quantita, unita_simbolo, comprato_il, quantita_richiesta, prezzo_centesimi) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(chiusura_id)
         .bind(&voce.origine)
@@ -3366,6 +3381,7 @@ pub async fn chiudi_spesa(pool: &SqlitePool, lista: &ListaSpesa) -> anyhow::Resu
         .bind(unita)
         .bind(&voce.comprato_il)
         .bind(richiesta)
+        .bind(voce.prezzo_centesimi)
         .execute(&mut *tx)
         .await
         .context("Impossibile archiviare una voce comprata")?;
@@ -3405,9 +3421,16 @@ pub async fn chiudi_spesa(pool: &SqlitePool, lista: &ListaSpesa) -> anyhow::Resu
         Vec::new()
     };
 
+    let speso: Option<i64> = comprate
+        .iter()
+        .filter_map(|voce| voce.prezzo_centesimi)
+        .sum::<i64>()
+        .into();
     Ok(EsitoChiusura {
         archiviate: comprate.len(),
         entrate,
+        chiusura_id,
+        speso_centesimi: speso.filter(|totale| *totale > 0),
     })
 }
 
@@ -5320,6 +5343,20 @@ enum ListaSpesaConversationState {
         voce_id: i64,
         unita_default: Option<String>,
     },
+    /// Consegna B: il nome di un negozio nuovo.
+    AwaitingNomeNegozio,
+    /// Consegna B: quanto è costata questa voce.
+    AwaitingPrezzo {
+        voce_id: i64,
+    },
+    /// Consegna B: il codice a barre di quello che si è preso.
+    AwaitingCodiceBarre {
+        voce_id: i64,
+    },
+    /// Consegna B: il totale dello scontrino, dopo la chiusura.
+    AwaitingTotaleSpesa {
+        chiusura_id: i64,
+    },
 }
 
 impl ListaSpesaSessionStore {
@@ -5761,6 +5798,104 @@ pub async fn handle_message(
                     .await?;
             }
         },
+        ListaSpesaConversationState::AwaitingNomeNegozio => {
+            match crate::modules::mercato::crea_negozio(pool, text).await {
+                Ok(negozio_id) => {
+                    sessions.clear_chat(chat_id);
+                    // Un negozio creato a mano serve subito: entra nel
+                    // confronto senza doverlo anche spuntare.
+                    if let Err(errore) =
+                        crate::modules::mercato::cambia_scelta(pool, negozio_id).await
+                    {
+                        tracing::warn!(?errore, negozio_id, "Scelta del negozio nuovo fallita");
+                    }
+                    crate::modules::mercato::mostra_negozi(
+                        bot,
+                        msg.chat.id,
+                        pool,
+                        Some("✅ Negozio aggiunto e messo nel confronto."),
+                    )
+                    .await?;
+                }
+                Err(errore) => {
+                    bot.send_message(msg.chat.id, format!("⚠️ {errore}"))
+                        .reply_markup(InlineKeyboardMarkup::new(vec![vec![
+                            button("❌ Annulla", "mercato:negozi"),
+                            button("🏠 Menù principale", "menu:main"),
+                        ]]))
+                        .await?;
+                }
+            }
+        }
+        ListaSpesaConversationState::AwaitingPrezzo { voce_id } => {
+            let Some(centesimi) = crate::modules::mercato::interpreta_prezzo(text) else {
+                mostra_presa(
+                    bot,
+                    msg.chat.id,
+                    pool,
+                    sessions,
+                    voce_id,
+                    Some("⚠️ Scrivi un prezzo, ad esempio 1,29."),
+                )
+                .await?;
+                return Ok(true);
+            };
+            let negozio = trova_lista_attiva(pool)
+                .await
+                .ok()
+                .flatten()
+                .and_then(|lista| lista.negozio_id);
+            let avviso = match registra_prezzo_voce(pool, voce_id, centesimi, negozio).await {
+                Ok(()) => {
+                    let euro = crate::modules::mercato::formatta_euro(centesimi);
+                    let euro = match riferimento_voce(pool, voce_id, centesimi).await {
+                        Some(riferimento) => format!("{euro} ({riferimento})"),
+                        None => euro,
+                    };
+                    match negozio {
+                        Some(_) => format!("✅ Segnato: {euro}."),
+                        None => format!(
+                            "✅ Segnato: {euro}.
+Scegli 🏪 il negozio e i prossimi prezzi entrano anche nel confronto."
+                        ),
+                    }
+                }
+                Err(errore) => {
+                    tracing::warn!(?errore, voce_id, "Registrazione prezzo fallita");
+                    "⚠️ Non riesco a segnare il prezzo.".to_string()
+                }
+            };
+            sessions.clear_chat(chat_id);
+            show_lista(bot, msg.chat.id, pool, Some(&avviso)).await?;
+        }
+        ListaSpesaConversationState::AwaitingCodiceBarre { voce_id } => {
+            sessions.clear_chat(chat_id);
+            leggi_codice_a_barre(bot, msg.chat.id, pool, sessions, voce_id, text).await?;
+        }
+        ListaSpesaConversationState::AwaitingTotaleSpesa { chiusura_id } => {
+            let Some(centesimi) = crate::modules::mercato::interpreta_prezzo(text) else {
+                bot.send_message(
+                    msg.chat.id,
+                    "⚠️ Scrivi il totale, ad esempio 43,20. Oppure salta.",
+                )
+                .reply_markup(totale_keyboard())
+                .await?;
+                return Ok(true);
+            };
+            sessions.clear_chat(chat_id);
+            let avviso = match registra_totale_chiusura(pool, chiusura_id, centesimi).await {
+                Ok(()) => format!(
+                    "✅ Totale della spesa: {}.
+Quando ci sarà la sezione Soldi diventerà una spesa registrata.",
+                    crate::modules::mercato::formatta_euro(centesimi)
+                ),
+                Err(errore) => {
+                    tracing::warn!(?errore, chiusura_id, "Salvataggio totale fallito");
+                    "⚠️ Non riesco a salvare il totale.".to_string()
+                }
+            };
+            show_lista(bot, msg.chat.id, pool, Some(&avviso)).await?;
+        }
         ListaSpesaConversationState::AwaitingQuantitaPresa {
             voce_id,
             unita_default,
@@ -5959,7 +6094,26 @@ pub async fn handle_callback(
                 {
                     messaggio.push_str(&format!("\nEntrate in casa: {entrate}."));
                 }
-                show_lista(bot, chat_id, pool, Some(&messaggio)).await?;
+                if let Some(speso) = esito.speso_centesimi {
+                    messaggio.push_str(&format!(
+                        "\nPrezzi segnati: {}.",
+                        crate::modules::mercato::formatta_euro(speso)
+                    ));
+                }
+                // Il totale dello scontrino è facoltativo (opzione "c"): si
+                // chiede una volta, e si può saltare.
+                sessions.set(
+                    chat_id.0,
+                    ListaSpesaConversationState::AwaitingTotaleSpesa {
+                        chiusura_id: esito.chiusura_id,
+                    },
+                );
+                messaggio.push_str(
+                    "\n\n🧾 Quant'è il totale dello scontrino? Scrivilo (es. 43,20), oppure salta.",
+                );
+                bot.send_message(chat_id, messaggio)
+                    .reply_markup(totale_keyboard())
+                    .await?;
             }
             Err(errore) => {
                 tracing::warn!(?errore, "Chiusura della spesa fallita");
@@ -6093,6 +6247,149 @@ pub async fn handle_callback(
                 .await?;
             }
         }
+        return Ok(true);
+    }
+    if data == "lista_spesa:negozio" {
+        let attuale = trova_lista_attiva(pool)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|lista| lista.negozio_id);
+        crate::modules::mercato::mostra_scelta_negozio_spesa(bot, chat_id, pool, attuale).await?;
+        return Ok(true);
+    }
+    if data == "lista_spesa:negozio:nuovo" {
+        attendi_nome_negozio(bot, chat_id, sessions).await?;
+        return Ok(true);
+    }
+    if let Some(raw) = data.strip_prefix("lista_spesa:negozio:set:") {
+        let Some(negozio_id) = raw.parse::<i64>().ok() else {
+            invalid(bot, chat_id).await?;
+            return Ok(true);
+        };
+        let lista = match trova_o_crea_lista_attiva(pool).await {
+            Ok(lista) => lista,
+            Err(errore) => {
+                tracing::warn!(?errore, "Lista non disponibile per il negozio");
+                invalid(bot, chat_id).await?;
+                return Ok(true);
+            }
+        };
+        let scelto = (negozio_id > 0).then_some(negozio_id);
+        let avviso = match imposta_negozio_lista(pool, lista.id, scelto).await {
+            Ok(()) => match scelto {
+                Some(id) => match crate::modules::mercato::negozio_per_id(pool, id).await {
+                    Ok(Some(negozio)) => format!("🏪 Spesa da {}.", negozio.nome),
+                    _ => "🏪 Negozio scelto.".to_string(),
+                },
+                None => "➖ Nessun negozio per questa spesa.".to_string(),
+            },
+            Err(errore) => {
+                tracing::warn!(?errore, "Scelta del negozio fallita");
+                "⚠️ Non riesco a scegliere il negozio.".to_string()
+            }
+        };
+        show_lista(bot, chat_id, pool, Some(&avviso)).await?;
+        return Ok(true);
+    }
+    if data == "lista_spesa:conviene" {
+        let lista = match trova_o_crea_lista_attiva(pool).await {
+            Ok(lista) => lista,
+            Err(errore) => {
+                tracing::warn!(?errore, "Lista non disponibile per il confronto");
+                invalid(bot, chat_id).await?;
+                return Ok(true);
+            }
+        };
+        let voci = carica_voci(pool, lista.id).await.unwrap_or_default();
+        let (stime, senza_prezzo) = stime_dei_negozi(pool, &voci)
+            .await
+            .unwrap_or_else(|errore| {
+                tracing::warn!(?errore, "Confronto fra negozi fallito");
+                (Vec::new(), voci.len())
+            });
+        crate::modules::mercato::mostra_confronto(bot, chat_id, &stime, senza_prezzo).await?;
+        return Ok(true);
+    }
+    if let Some(raw) = data.strip_prefix("lista_spesa:prezzo:") {
+        let Some(voce_id) = raw.parse::<i64>().ok().filter(|value| *value > 0) else {
+            invalid(bot, chat_id).await?;
+            return Ok(true);
+        };
+        sessions.set(
+            chat_id.0,
+            ListaSpesaConversationState::AwaitingPrezzo { voce_id },
+        );
+        bot.send_message(
+            chat_id,
+            "💶 Quanto è costato?
+
+Scrivi il prezzo pagato, ad esempio 1,29.",
+        )
+        .reply_markup(InlineKeyboardMarkup::new(vec![vec![
+            button("❌ Annulla", "lista_spesa:back"),
+            button("🏠 Menù principale", "menu:main"),
+        ]]))
+        .await?;
+        return Ok(true);
+    }
+    if let Some(raw) = data.strip_prefix("lista_spesa:ean:") {
+        let Some(voce_id) = raw.parse::<i64>().ok().filter(|value| *value > 0) else {
+            invalid(bot, chat_id).await?;
+            return Ok(true);
+        };
+        sessions.set(
+            chat_id.0,
+            ListaSpesaConversationState::AwaitingCodiceBarre { voce_id },
+        );
+        bot.send_message(
+            chat_id,
+            "🏷 Scrivi il codice a barre della confezione.
+
+Le cifre sotto le righe nere: lo cerco su Open Food Facts e segno la confezione che hai preso.",
+        )
+        .reply_markup(InlineKeyboardMarkup::new(vec![vec![
+            button("❌ Annulla", "lista_spesa:back"),
+            button("🏠 Menù principale", "menu:main"),
+        ]]))
+        .await?;
+        return Ok(true);
+    }
+    if data == "lista_spesa:totale:salta" {
+        sessions.clear_chat(chat_id.0);
+        show_lista(
+            bot,
+            chat_id,
+            pool,
+            Some("✅ Spesa chiusa senza totale: va benissimo."),
+        )
+        .await?;
+        return Ok(true);
+    }
+    if let Some(raw) = data.strip_prefix("lista_spesa:pref:") {
+        let parti: Vec<&str> = raw.split(':').collect();
+        let [voce, alimento, prodotto] = parti[..] else {
+            invalid(bot, chat_id).await?;
+            return Ok(true);
+        };
+        let (Some(voce_id), Some(alimento_id), Some(prodotto_id)) = (
+            voce.parse::<i64>().ok(),
+            alimento.parse::<i64>().ok(),
+            prodotto.parse::<i64>().ok(),
+        ) else {
+            invalid(bot, chat_id).await?;
+            return Ok(true);
+        };
+        let avviso =
+            match crate::modules::mercato::cambia_preferito(pool, alimento_id, prodotto_id).await {
+                Ok(true) => "⭐ Preferito: te lo propongo per primo.",
+                Ok(false) => "➖ Non è più il preferito.",
+                Err(errore) => {
+                    tracing::warn!(?errore, "Cambio preferito fallito");
+                    "⚠️ Non riesco a segnare il preferito."
+                }
+            };
+        mostra_presa(bot, chat_id, pool, sessions, voce_id, Some(avviso)).await?;
         return Ok(true);
     }
     if let Some(resto) = data.strip_prefix("lista_spesa:presa:f:") {
@@ -6861,6 +7158,8 @@ struct VocePresa {
     unita_simbolo: Option<String>,
     quantita_presa: Option<f64>,
     unita_presa: Option<String>,
+    prodotto_preso_id: Option<i64>,
+    prezzo_centesimi: Option<i64>,
 }
 
 /// "📦 Ho preso…": al supermercato la confezione raramente è quella
@@ -6877,7 +7176,7 @@ async fn mostra_presa(
 ) -> ResponseResult<()> {
     let voce: Option<VocePresa> = sqlx::query_as(
         "SELECT descrizione, alimento_id, prodotto_alimentare_id, quantita, unita_simbolo, \
-                quantita_presa, unita_presa \
+                quantita_presa, unita_presa, prodotto_preso_id, prezzo_centesimi \
          FROM liste_spesa_voci WHERE id = ?",
     )
     .bind(voce_id)
@@ -6898,7 +7197,7 @@ async fn mostra_presa(
         .await?;
         return Ok(());
     };
-    let confezioni = match voce.alimento_id {
+    let mut confezioni = match voce.alimento_id {
         Some(alimento_id) => confezioni_per_voce(pool, alimento_id, voce.prodotto_alimentare_id)
             .await
             .unwrap_or_else(|errore| {
@@ -6907,6 +7206,20 @@ async fn mostra_presa(
             }),
         None => Vec::new(),
     };
+    // Il preferito va in cima e si riconosce dalla stella (consegna B): "di
+    // questo alimento compro sempre quello".
+    let preferito = match voce.alimento_id {
+        Some(alimento_id) => crate::modules::mercato::preferito_di(pool, alimento_id)
+            .await
+            .unwrap_or_else(|errore| {
+                tracing::warn!(?errore, voce_id, "Lettura del preferito fallita");
+                None
+            }),
+        None => None,
+    };
+    if preferito.is_some() {
+        confezioni.sort_by_key(|confezione| Some(confezione.prodotto_id) != preferito);
+    }
     sessions.set(
         chat_id.0,
         ListaSpesaConversationState::AwaitingQuantitaPresa {
@@ -6945,10 +7258,25 @@ async fn mostra_presa(
     let mut rows: Vec<Vec<InlineKeyboardButton>> = confezioni
         .iter()
         .map(|confezione| {
-            vec![button(
-                confezione.etichetta.clone(),
+            let stella = if Some(confezione.prodotto_id) == preferito {
+                "⭐ "
+            } else {
+                ""
+            };
+            let mut riga = vec![button(
+                format!("{stella}{}", confezione.etichetta),
                 format!("lista_spesa:presa:f:{voce_id}:{}", confezione.token),
-            )]
+            )];
+            if let Some(alimento_id) = voce.alimento_id {
+                riga.push(button(
+                    "⭐",
+                    format!(
+                        "lista_spesa:pref:{voce_id}:{alimento_id}:{}",
+                        confezione.prodotto_id
+                    ),
+                ));
+            }
+            riga
         })
         .collect();
     if voce.quantita_presa.is_some() {
@@ -6957,6 +7285,23 @@ async fn mostra_presa(
             format!("lista_spesa:presa:reset:{voce_id}"),
         )]);
     }
+    // Consegna B: il prezzo di questa voce e il codice a barre di quello che
+    // si è preso davvero. Entrambi facoltativi.
+    let etichetta_prezzo = match voce.prezzo_centesimi {
+        Some(centesimi) => format!("💶 {}", crate::modules::mercato::formatta_euro(centesimi)),
+        None => "💶 Prezzo".to_string(),
+    };
+    let mut riga_extra = vec![button(
+        etichetta_prezzo,
+        format!("lista_spesa:prezzo:{voce_id}"),
+    )];
+    if voce.alimento_id.is_some() {
+        riga_extra.push(button(
+            "🏷 Codice a barre",
+            format!("lista_spesa:ean:{voce_id}"),
+        ));
+    }
+    rows.push(riga_extra);
     rows.push(vec![
         button("⬅️ Indietro", "lista_spesa:back"),
         button("🏠 Menù principale", "menu:main"),
@@ -6987,6 +7332,343 @@ async fn salva_presa(
         }
     };
     show_lista(bot, chat_id, pool, Some(&avviso)).await
+}
+
+/// Tastiera del totale dello scontrino: si può sempre saltare.
+fn totale_keyboard() -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![
+        vec![button("➖ Salta il totale", "lista_spesa:totale:salta")],
+        vec![button("🏠 Menù principale", "menu:main")],
+    ])
+}
+
+/// Legge un codice a barre con Open Food Facts e lo usa per la presa: se il
+/// catalogo non conosce quel prodotto lo crea sull'alimento della voce, poi
+/// segna la confezione come quantità presa. Se Open Prices conosce un
+/// prezzo, lo dice — come suggerimento di altri, non come prezzo visto.
+async fn leggi_codice_a_barre(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    sessions: &ListaSpesaSessionStore,
+    voce_id: i64,
+    testo: &str,
+) -> ResponseResult<()> {
+    use crate::modules::mercato;
+    let Some(ean) = mercato::codice_a_barre_valido(testo) else {
+        mostra_presa(
+            bot,
+            chat_id,
+            pool,
+            sessions,
+            voce_id,
+            Some("⚠️ Non sembra un codice a barre: sono 8, 12, 13 o 14 cifre."),
+        )
+        .await?;
+        return Ok(());
+    };
+    let alimento_id: Option<i64> =
+        sqlx::query_scalar("SELECT alimento_id FROM liste_spesa_voci WHERE id = ?")
+            .bind(voce_id)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten()
+            .flatten();
+    let Some(alimento_id) = alimento_id else {
+        mostra_presa(
+            bot,
+            chat_id,
+            pool,
+            sessions,
+            voce_id,
+            Some("⚠️ Questa voce non è legata a un alimento del catalogo."),
+        )
+        .await?;
+        return Ok(());
+    };
+
+    // Il catalogo prima della rete: se il prodotto c'è già, non si chiede
+    // niente a nessuno.
+    let gia_noto = mercato::prodotto_per_ean(pool, &ean).await.unwrap_or(None);
+    let (prodotto_id, descrizione, quantita, unita) = match gia_noto {
+        Some(prodotto_id) => {
+            let riga: Option<(String, String, f64, String)> = sqlx::query_as(
+                "SELECT p.marca, p.nome_commerciale, p.quantita_confezione, um.simbolo \
+                 FROM prodotti_alimentari p \
+                 JOIN unita_misura um ON um.id = p.unita_confezione_id WHERE p.id = ?",
+            )
+            .bind(prodotto_id)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten();
+            let Some((marca, nome, quantita, unita)) = riga else {
+                mostra_presa(
+                    bot,
+                    chat_id,
+                    pool,
+                    sessions,
+                    voce_id,
+                    Some("⚠️ Non riesco a leggere questo prodotto."),
+                )
+                .await?;
+                return Ok(());
+            };
+            (prodotto_id, format!("{marca} {nome}"), quantita, unita)
+        }
+        None => {
+            bot.send_message(chat_id, "🔎 Cerco il codice a barre…")
+                .await?;
+            let esterno = match mercato::cerca_su_open_food_facts(&ean).await {
+                Ok(Some(prodotto)) => prodotto,
+                Ok(None) => {
+                    mostra_presa(
+                        bot,
+                        chat_id,
+                        pool,
+                        sessions,
+                        voce_id,
+                        Some("🔎 Open Food Facts non conosce questo codice.\nScrivi la quantità a mano."),
+                    )
+                    .await?;
+                    return Ok(());
+                }
+                Err(errore) => {
+                    tracing::warn!(?errore, ean, "Lettura da Open Food Facts fallita");
+                    mostra_presa(
+                        bot,
+                        chat_id,
+                        pool,
+                        sessions,
+                        voce_id,
+                        Some("⚠️ Non riesco a raggiungere Open Food Facts adesso.\nScrivi la quantità a mano."),
+                    )
+                    .await?;
+                    return Ok(());
+                }
+            };
+            match mercato::crea_prodotto_da_esterno(pool, alimento_id, &esterno).await {
+                Ok(prodotto_id) => (
+                    prodotto_id,
+                    format!("{} {}", esterno.marca, esterno.nome),
+                    esterno.quantita,
+                    esterno.unita.clone(),
+                ),
+                Err(errore) => {
+                    tracing::warn!(?errore, ean, "Salvataggio prodotto da EAN fallito");
+                    mostra_presa(
+                        bot,
+                        chat_id,
+                        pool,
+                        sessions,
+                        voce_id,
+                        Some("⚠️ Ho letto il prodotto ma non riesco a salvarlo."),
+                    )
+                    .await?;
+                    return Ok(());
+                }
+            }
+        }
+    };
+
+    let mut avviso = match registra_presa(pool, voce_id, quantita, &unita, Some(prodotto_id)).await
+    {
+        Ok(()) => format!(
+            "✅ {descrizione}: presi {} {unita}.",
+            formatta_quantita(quantita)
+        ),
+        Err(errore) => {
+            tracing::warn!(?errore, voce_id, "Presa da codice a barre fallita");
+            "⚠️ Non riesco a segnare quello che hai preso.".to_string()
+        }
+    };
+    // Open Prices è un dato di altri: si propone, non si registra.
+    if let Ok(Some(centesimi)) = mercato::prezzo_su_open_prices(&ean).await {
+        avviso.push_str(&format!(
+            "\n💶 Su Open Prices altri l'hanno pagato {}: se è anche il tuo, segnalo con 💶 Prezzo.",
+            mercato::formatta_euro(centesimi)
+        ));
+    }
+    show_lista(bot, chat_id, pool, Some(&avviso)).await
+}
+
+/// Imposta (o toglie) il negozio di questa spesa.
+async fn imposta_negozio_lista(
+    pool: &SqlitePool,
+    lista_id: i64,
+    negozio_id: Option<i64>,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        "UPDATE liste_spesa SET negozio_id = ?, \
+         aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?",
+    )
+    .bind(negozio_id)
+    .bind(lista_id)
+    .execute(pool)
+    .await
+    .context("Impossibile scegliere il negozio della spesa")?;
+    Ok(())
+}
+
+/// Segna il prezzo pagato per una voce e lo registra nello storico del
+/// negozio di oggi, così la prossima volta la stima sa quanto costa.
+async fn registra_prezzo_voce(
+    pool: &SqlitePool,
+    voce_id: i64,
+    prezzo_centesimi: i64,
+    negozio_id: Option<i64>,
+) -> anyhow::Result<()> {
+    let voce: Option<VocePresa> = sqlx::query_as(
+        "SELECT descrizione, alimento_id, prodotto_alimentare_id, quantita, unita_simbolo, \
+                quantita_presa, unita_presa, prodotto_preso_id \
+         FROM liste_spesa_voci WHERE id = ?",
+    )
+    .bind(voce_id)
+    .fetch_optional(pool)
+    .await
+    .context("Impossibile rileggere la voce")?;
+    let voce = voce.context("Voce non trovata")?;
+    sqlx::query(
+        "UPDATE liste_spesa_voci SET prezzo_centesimi = ?, comprato = 1, \
+         comprato_il = COALESCE(comprato_il, strftime('%Y-%m-%dT%H:%M:%fZ','now')), \
+         aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?",
+    )
+    .bind(prezzo_centesimi)
+    .bind(voce_id)
+    .execute(pool)
+    .await
+    .context("Impossibile segnare il prezzo")?;
+    // Lo storico serve al confronto, e il confronto ha senso solo con un
+    // negozio: senza, il prezzo resta comunque sulla voce e sullo scontrino.
+    if let Some(negozio_id) = negozio_id {
+        let (quantita, unita) = match (voce.quantita_presa, voce.unita_presa.clone()) {
+            (Some(presa), Some(unita)) => (Some(presa), Some(unita)),
+            _ => (voce.quantita, voce.unita_simbolo.clone()),
+        };
+        crate::modules::mercato::registra_prezzo(
+            pool,
+            negozio_id,
+            voce.alimento_id,
+            voce.prodotto_preso_id.or(voce.prodotto_alimentare_id),
+            &voce.descrizione,
+            prezzo_centesimi,
+            quantita,
+            unita.as_deref(),
+            "spesa",
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+/// Quantità in lista e quantità presa, con le loro unità.
+type RigaQuantitaGrezza = (Option<f64>, Option<String>, Option<f64>, Option<String>);
+
+/// `5,00 € al kg` per una confezione da 500 g pagata 2,50 €: serve a capire
+/// se il prezzo è buono davvero. `None` quando la quantità non c'è o l'unità
+/// non si converte.
+async fn riferimento_voce(pool: &SqlitePool, voce_id: i64, centesimi: i64) -> Option<String> {
+    let riga: Option<RigaQuantitaGrezza> = sqlx::query_as(
+        "SELECT quantita, unita_simbolo, quantita_presa, unita_presa          FROM liste_spesa_voci WHERE id = ?",
+    )
+    .bind(voce_id)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten();
+    let (quantita, unita, presa, unita_presa) = riga?;
+    let (quantita, unita) = match (presa, unita_presa) {
+        (Some(presa), Some(unita)) => (Some(presa), Some(unita)),
+        _ => (quantita, unita),
+    };
+    let (per_riferimento, riferimento) =
+        crate::modules::mercato::prezzo_al_riferimento(centesimi, quantita, unita.as_deref())?;
+    Some(format!(
+        "{} al {riferimento}",
+        crate::modules::mercato::formatta_euro(per_riferimento)
+    ))
+}
+
+/// Salva il totale dello scontrino sulla chiusura appena fatta. È
+/// facoltativo (opzione "c" scelta da Alessio) e diventerà una transazione
+/// del modulo Soldi.
+async fn registra_totale_chiusura(
+    pool: &SqlitePool,
+    chiusura_id: i64,
+    totale_centesimi: i64,
+) -> anyhow::Result<()> {
+    sqlx::query("UPDATE liste_spesa_chiusure SET totale_centesimi = ? WHERE id = ?")
+        .bind(totale_centesimi)
+        .bind(chiusura_id)
+        .execute(pool)
+        .await
+        .context("Impossibile salvare il totale della spesa")?;
+    Ok(())
+}
+
+/// La stima della lista in ogni negozio scelto: per ogni voce l'ultimo
+/// prezzo visto lì, moltiplicato per quante confezioni servono non si sa,
+/// quindi si conta una volta sola — è una stima, e il testo lo dice.
+async fn stime_dei_negozi(
+    pool: &SqlitePool,
+    voci: &[VoceListaSpesa],
+) -> anyhow::Result<(Vec<crate::modules::mercato::StimaNegozio>, usize)> {
+    use crate::modules::mercato::{ultimo_prezzo, StimaNegozio};
+    let negozi = crate::modules::mercato::negozi_scelti(pool).await?;
+    let da_comprare: Vec<&VoceListaSpesa> = voci.iter().filter(|voce| voce.comprato == 0).collect();
+    let mut stime = Vec::new();
+    let mut coperte_da_qualcuno = vec![false; da_comprare.len()];
+    for negozio in negozi {
+        let mut totale = 0_i64;
+        let mut con_prezzo = 0_usize;
+        for (indice, voce) in da_comprare.iter().enumerate() {
+            let prezzo = ultimo_prezzo(
+                pool,
+                negozio.id,
+                voce.alimento_id,
+                voce.prodotto_alimentare_id,
+            )
+            .await?;
+            if let Some((centesimi, _, _)) = prezzo {
+                totale += centesimi;
+                con_prezzo += 1;
+                coperte_da_qualcuno[indice] = true;
+            }
+        }
+        if con_prezzo > 0 {
+            stime.push(StimaNegozio {
+                negozio_id: negozio.id,
+                nome: negozio.nome,
+                totale_centesimi: totale,
+                voci_con_prezzo: con_prezzo,
+                voci_totali: da_comprare.len(),
+            });
+        }
+    }
+    crate::modules::mercato::ordina_stime(&mut stime);
+    let senza_prezzo = coperte_da_qualcuno.iter().filter(|c| !**c).count();
+    Ok((stime, senza_prezzo))
+}
+
+/// Chiede il nome di un negozio nuovo. Vive qui, e non in `mercato`, perché
+/// la sessione di testo è quella della lista della spesa.
+async fn attendi_nome_negozio(
+    bot: &Bot,
+    chat_id: ChatId,
+    sessions: &ListaSpesaSessionStore,
+) -> ResponseResult<()> {
+    sessions.set(chat_id.0, ListaSpesaConversationState::AwaitingNomeNegozio);
+    bot.send_message(
+        chat_id,
+        "🏪 Come si chiama il negozio?\n\nAd esempio: Il fruttivendolo di via Roma.",
+    )
+    .reply_markup(InlineKeyboardMarkup::new(vec![vec![
+        button("❌ Annulla", "mercato:negozi"),
+        button("🏠 Menù principale", "menu:main"),
+    ]]))
+    .await?;
+    Ok(())
 }
 
 async fn show_lista(
@@ -7078,6 +7760,13 @@ async fn show_lista(
         })
         .is_some();
     let oggi = today(pool).await;
+    let negozio_nome = match lista.negozio_id {
+        Some(negozio_id) => crate::modules::mercato::negozio_per_id(pool, negozio_id)
+            .await
+            .unwrap_or_default()
+            .map(|negozio| negozio.nome),
+        None => None,
+    };
 
     let tutorial = tutorial_da_mostrare(pool).await;
 
@@ -7131,6 +7820,15 @@ async fn show_lista(
     if !eccessi.is_empty() {
         testo.push_str("\n⚠️ Hai già segnato più di quanto serve ora (vedi i pulsanti sotto).\n");
     }
+    // Consegna B: quanto è già stato segnato in questa spesa. Nessun prezzo
+    // registrato, nessuna riga in più: chi non usa i prezzi non li vede.
+    let segnato: i64 = voci.iter().filter_map(|voce| voce.prezzo_centesimi).sum();
+    if segnato > 0 {
+        testo.push_str(&format!(
+            "\n💶 Segnato finora: {}\n",
+            crate::modules::mercato::formatta_euro(segnato)
+        ));
+    }
 
     let mut rows: Vec<Vec<InlineKeyboardButton>> = Vec::new();
     for voce in &voci {
@@ -7165,9 +7863,13 @@ async fn show_lista(
             }
             _ => String::new(),
         };
+        let prezzo = match voce.prezzo_centesimi {
+            Some(centesimi) => format!(" · {}", crate::modules::mercato::formatta_euro(centesimi)),
+            None => String::new(),
+        };
         let mut riga = vec![button(
             format!(
-                "{icona} {}{quantita}{presa}{eccesso}",
+                "{icona} {}{quantita}{prezzo}{presa}{eccesso}",
                 liste::tronca(&voce.descrizione, 40)
             ),
             format!("lista_spesa:toggle:{}", voce.id),
@@ -7214,6 +7916,17 @@ async fn show_lista(
     accoppia(
         ce_un_resoconto.then(|| button("📋 Ultimi cambiamenti", "lista_spesa:modifiche")),
         None,
+    );
+    // Consegna B: dove si sta facendo la spesa e dove converrebbe farla.
+    accoppia(
+        Some(button(
+            match &negozio_nome {
+                Some(nome) => format!("🏪 {nome}"),
+                None => "🏪 Scegli negozio".to_string(),
+            },
+            "lista_spesa:negozio",
+        )),
+        (totale > 0).then(|| button("📊 Dove conviene", "lista_spesa:conviene")),
     );
     rows.push(vec![button(
         if automatico {

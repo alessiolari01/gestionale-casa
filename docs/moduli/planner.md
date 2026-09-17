@@ -100,11 +100,11 @@ anche toglierlo quando lo si mangia: altrimenti dopo una settimana il bot
 direbbe "hai la pasta" di una pasta già cucinata. Dettagli in
 `docs/moduli/dispensa.md`; qui quello che cambia nel planner.
 
-- **`🍳 Segna come preparato`** nel dettaglio di un pasto pianificato: gli
+- **`🍲 Segna come preparato`** nel dettaglio di un pasto pianificato: gli
   ingredienti escono dalle scorte in quel momento. **Non è un nuovo stato**:
   il pasto resta pianificato finché non lo si consuma (colonna
   `planner_pasti.preparato_il`), così i trigger di congelamento non
-  cambiano. Il dettaglio mostra `🍳 Preparato`.
+  cambiano. Il dettaglio mostra `🍲 preparato`.
 - **`✅ Segna come consumato`**: se il pasto non era stato preparato, le
   scorte si scalano adesso.
 - **Orario passato**: le scorte si scalano da sole, ma lo stato del pasto
@@ -113,7 +113,7 @@ direbbe "hai la pasta" di una pasta già cucinata. Dettagli in
   scorte da soli, a orario passato. Se lo segni saltato tornano indietro.`
 - **`⏭ Segna come saltato`** dopo uno scarico automatico: gli ingredienti
   tornano esattamente com'erano (richiesta esplicita di Alessio). Dopo un
-  `🍳 Preparato` il bot chiede "Gli ingredienti preparati li hai ancora?"
+  `🍲 Preparato` il bot chiede "Gli ingredienti preparati li hai ancora?"
   (dal 17 settembre, consegna A): `🥫 Sì, rimettili nelle scorte` li
   restituisce e toglie il "preparato"; `🗑 No, usati o buttati` li lascia
   tolti.
@@ -127,7 +127,7 @@ usati.
 
 ## Controllo delle scorte (consegna A, 17 settembre 2026)
 
-Prima di `🍳 Segna come preparato` e `✅ Segna come consumato` il bot
+Prima di `🍲 Segna come preparato` e `✅ Segna come consumato` il bot
 controlla se in casa c'è tutto (`dispensa::mancanti_per_pasto`, senza
 toccare niente). Se manca qualcosa è un'eccezione, e va confermata:
 
@@ -164,9 +164,9 @@ resto del pasto (ricetta, giorno, tipo, ordine) resta bloccato.
 
 ## Icone e dettaglio (consegna A, 17 settembre 2026)
 
-- Nell'elenco del giorno un pasto preparato ha `🍳` (prima restava `○`).
+- Nell'elenco del giorno un pasto preparato ha `🍲` (prima restava `○`).
 - Il dettaglio non ripete più il giorno della settimana (`📅 Mer 16 Set`),
-  e sui consumati dice "🍳 Era stato preparato prima" se lo era.
+  e sui consumati dice "🍲 Era stato preparato prima" se lo era.
 - Scegliendo la ricetta di un pasto, i partecipanti ripartono con **il
   proprio profilo già spuntato** (quello con `utente_collegato_id`
   dell'utente), e se ne possono aggiungere altri.

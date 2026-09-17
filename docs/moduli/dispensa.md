@@ -111,7 +111,7 @@ dopo una settimana direbbe "hai la pasta" di una pasta già mangiata. Le
 scorte si scalano **una volta sola per pasto**
 (`planner_pasti.scorte_scalate_il`), qualunque sia la strada:
 
-- **`🍳 Segna come preparato`** nel planner: è il momento in cui gli
+- **`🍲 Segna come preparato`** nel planner: è il momento in cui gli
   ingredienti escono davvero dal frigo (se prepari lunedì sera il pranzo di
   martedì, la pasta sparisce lunedì). Non è un nuovo stato del pasto: resta
   pianificato finché non lo si consuma;
@@ -134,7 +134,7 @@ Ogni prelievo resta in `scorte_movimenti`, e serve a **restituirlo**:
 
 - **pasto saltato dopo uno scarico automatico**: tutto torna esattamente
   com'era — stessa confezione, stesso posto, stessa scadenza (richiesta
-  esplicita di Alessio). Dopo uno scarico fatto a mano con `🍳 Preparato` il
+  esplicita di Alessio). Dopo uno scarico fatto a mano con `🍲 Preparato` il
   planner chiede se gli ingredienti preparati ci sono ancora (consegna A):
   sì li restituisce, no li lascia tolti;
 - **pasto consumato riportato a pianificato**: se non era preparato, torna
@@ -148,7 +148,7 @@ Ogni prelievo resta in `scorte_movimenti`, e serve a **restituirlo**:
 
 **Quando in casa non c'è abbastanza** (consegna A, 17 settembre 2026):
 
-- prima di `🍳 Preparato` e `✅ Consumato`, `mancanti_per_pasto` dice cosa
+- prima di `🍲 Preparato` e `✅ Consumato`, `mancanti_per_pasto` dice cosa
   manca senza toccare niente, e il planner chiede conferma;
 - lo scarico (a mano o automatico) prende quello che c'è e annota il resto
   in `planner_pasti.scorte_mancanti` (testo pronto, "Pasta brisée 200 g");

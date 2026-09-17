@@ -1744,7 +1744,7 @@ chiesto altro. Tutto discusso con lui prima di scrivere codice; dove ha detto
    totali per alimento, così spuntare e despuntare non producono rumore.
 3. **Destinazione per alimento**: scelta a mano per spazio, poi nome, poi
    categoria. Frutta decisa dopo una ricerca su come si conserva.
-4. **Scarico coi pasti**: `🍳 Segna come preparato` (colonna, non un nuovo
+4. **Scarico coi pasti**: `🍲 Segna come preparato` (colonna, non un nuovo
    stato), consumato, o da solo a orario passato; una volta sola per pasto;
    restituzione esatta se il pasto viene saltato dopo uno scarico
    automatico, o se viene modificato. Non c'è uno scheduler: il controllo
@@ -1819,7 +1819,7 @@ prodotti preferiti, codice a barre) è concordata ma non ancora scritta:
   bloccava tutto. Ora il pasto saltato o consumato torna a pianificato con
   `↩️ Riporta a pianificato`; il resto del pasto resta bloccato.
 - **L'icona del pasto preparato non cambiava** nell'elenco del giorno: ora
-  `🍳`.
+  `🍲`.
 - **Il giorno della settimana compariva due volte** in alcune intestazioni
   dopo C17: tolto.
 - **Nessun controllo delle scorte** segnando preparato o consumato: ora c'è.
@@ -1878,13 +1878,85 @@ provata prima su una copia; `applied_migrations=54` e `Gestionale Casa
 online` confermati nel log di avvio. **Collaudo dal vivo su Telegram da
 fare.**
 
+## 2duodecies. Consegna B: negozi, prezzi, preferiti, codice a barre (17 settembre 2026)
+
+Concordata con Alessio subito dopo la consegna A, e scritta nello stesso
+giorno su sua richiesta ("fai anche la consegna B"). Una migration nuova,
+`migrations/20260917210000_consegna_b_negozi_e_prezzi.sql`, e un modulo
+nuovo, `src/modules/mercato.rs`. Comportamento in `docs/moduli/mercato.md`.
+
+**Il principio, deciso con lui**: tutto facoltativo. Chi non usa i prezzi
+vede la lista della spesa di prima.
+
+**Costruito**:
+
+1. **Negozi**: le 25 catene diffuse in Italia arrivano con la migration (le
+   sette nominate da Alessio più le altre comuni); **è l'utente a scegliere
+   su quali fare il confronto**, come ha chiesto. Si può creare un negozio
+   proprio ("Il fruttivendolo di via Roma").
+2. **Prezzi** (opzione "c", scelta da lui): prezzo registrabile voce per
+   voce durante la spesa **e** totale dello scontrino alla chiusura,
+   indipendenti e saltabili. L'avviso riporta il prezzo al chilo o al litro.
+3. **Dove conviene**: la lista valutata con gli ultimi prezzi visti in ogni
+   negozio scelto, ordinata prima per quante voci copre e poi per totale.
+4. **Prodotti preferiti**: `⭐` sulla confezione, uno per alimento, proposto
+   per primo.
+5. **Codice a barre**: si scrive l'EAN, il bot lo cerca su **Open Food
+   Facts**, crea il prodotto sull'alimento della voce e segna la confezione
+   come quantità presa.
+6. **Open Prices**: l'ultimo prezzo segnato da altri, mostrato come
+   suggerimento da confermare, mai registrato da solo (`prezzi_osservati.fonte`).
+7. Il **totale della spesa chiusa** resta a database e diventerà una
+   transazione del futuro modulo Soldi, come approvato.
+
+**Scelte prese in autonomia**:
+
+- il confronto premia chi copre più voci prima del totale più basso: un
+  negozio con due prezzi su venti non deve "vincere";
+- un prezzo senza negozio scelto resta sulla voce ma non entra nelle stime,
+  e il bot lo dice invece di tacere;
+- un prodotto letto dal codice a barre con una quantità che non si capisce
+  ("una confezione") non viene creato;
+- il codice si valida prima di chiamare la rete; entrambe le fonti hanno 8
+  secondi di tempo e un messaggio proprio se non rispondono.
+
+**Le quattro correzioni alle ricette**, chieste da Alessio dopo la revisione
+che gli avevo riportato:
+
+1. gli esiti (`✅ Procedimento aggiornato.`, `✅ Foto aggiunta.`, `✅ Step
+   eliminato…`, `✅ Allegato eliminato.`, spostamenti) stanno **dentro** la
+   schermata, non più in un messaggio a parte (C3);
+2. gli errori di lettura di step e allegati si vedono ("⚠️ Non riesco a
+   leggere il procedimento."), invece di sembrare una ricetta vuota — è il
+   modo in cui il difetto degli ingredienti è rimasto nascosto tre settimane;
+3. la conferma prima di eliminare un allegato **c'era già** (C16): gliel'ho
+   detto invece di rifarla;
+4. **`📝 Riscrivi tutto`**: il procedimento si riscrive in un messaggio
+   solo, un passaggio per riga o separati da righe vuote, con la numerazione
+   scritta a mano tolta da sola. Cancella gli step di prima e i loro
+   allegati, quindi chiede conferma (C16).
+
+**Icona del pasto preparato**: era `🍳`, che però vuol dire "ricetta" in
+mezzo bot (menù Ricette, dettaglio del pasto, porzioni). Alessio ha lasciato
+scegliere: il preparato ora è **`🍲`**, e `🍳` resta la ricetta.
+
+16 nuovi test: 5 di dominio in `mercato` (prezzi, prezzo al chilo, ordine
+del confronto, quantità di Open Food Facts, codice a barre), 2 su database
+(negozi scelti, prezzi per negozio e preferiti), 2 nelle ricette
+(divisione del procedimento, riscrittura con permessi), più quelli della
+consegna A. Totale 437. Le fonti esterne non sono coperte da test: nessun
+test tocca la rete.
+
+**Collaudo dal vivo su Telegram da fare.**
+
 ## 3. Stato tecnico verificato
 
-- **54 migration** nel repository, tutte **applicate** al database reale
-  dell'S9: l'ultima (`20260917180000_consegna_a_pasti_e_spesa.sql`, sezione
-  2undecies) il 17 settembre 2026, verificato leggendo
+- **55 migration** nel repository. Applicate al database reale dell'S9 le
+  prime 54: l'ultima applicata è `20260917180000_consegna_a_pasti_e_spesa.sql`
+  (sezione 2undecies), il 17 settembre 2026, verificato leggendo
   `applied_migrations=54` nel log di avvio del bot dopo il deploy — non
-  dedotto. Né il secondo giro
+  dedotto. **Da applicare**:
+  `20260917210000_consegna_b_negozi_e_prezzi.sql` (sezione 2duodecies). Né il secondo giro
   di correzioni del 12 settembre 2026 (sezione 2septies) né le tre
   rifiniture del 13 settembre 2026 (sezione 2octies) avevano migration
   proprie: lavoravano su schema già esistente, confermato di nuovo
@@ -1892,7 +1964,8 @@ fare.**
 - pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa,
   punto 1 della sezione 6): `fmt`, `check --locked`,
   `clippy --all-targets --locked -- -D warnings`, `test --locked` —
-  **428 test** (419 prima della consegna A della sezione 2undecies,
+  **437 test** (428 dopo la consegna A e prima della consegna B della
+  sezione 2duodecies, 419 prima della consegna A,
   406 prima del giro della sezione 2decies, 391 prima della
   chiusura della spesa e delle scorte del 16 settembre 2026 — sezione
   2nonies —, 389 prima delle tre rifiniture
