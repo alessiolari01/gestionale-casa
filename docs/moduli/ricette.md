@@ -225,6 +225,24 @@ quando serve.
 Sono ricette di base: porzioni e quantità sono indicative e si correggono
 come qualunque altra ricetta.
 
+### Tornare indietro da una ricetta (18 settembre 2026)
+
+Una ricetta si apre da quattro strade: l'elenco (a una certa pagina), la
+ricerca per nome, la ricerca per ingredienti e le ricette "con quello che
+ho" delle scorte. Il bot ricorda per chat quale è stata l'ultima
+(`ProvenienzaRicetta`) e `⬅️ Indietro` nel dettaglio torna lì. Le ricerche
+si ricostruiscono con `recipe:back`, perché né il testo cercato né gli
+ingredienti scelti stanno nei 64 byte di un callback.
+
+### Ricette del catalogo e amministratore (18 settembre 2026)
+
+Le ricette del catalogo globale non hanno proprietario. L'amministratore di
+sistema le modifica come se fossero sue — nome, porzioni, ingredienti,
+procedimento, allegati, fonte — e le archivia, ma non le elimina: possono
+stare nei pasti già pianificati di qualcun altro. Visibilità e
+collaboratori non compaiono, perché le vede già chiunque. Gli altri utenti
+le leggono soltanto.
+
 ### Da dove viene la ricetta (18 settembre 2026)
 
 `🔗 Fonte della ricetta` nel menù di modifica: si incolla un link — il bot
@@ -238,6 +256,34 @@ Il dettaglio mostra `🔗 Ricetta di …` sotto la visibilità.
 passaggi di un sito dentro le proprie ricette è copiare materiale di altri:
 il meccanismo della fonte serve a dare il merito e a portare all'originale,
 non a sostituirlo.
+
+### Tastiere dei campi (18 settembre 2026)
+
+- **Creazione**: `❌ Annulla la ricetta` in una riga sua (butta via la
+  bozza), sotto `⬅️ Indietro | 💡 Migliora | 🏠 Menù principale` (il passo
+  prima).
+- **Modifica di una ricetta che esiste**, e ricerca: solo `❌ Annulla`, che
+  torna dove si era senza salvare, nella riga `❌ Annulla | 💡 Migliora |
+  🏠 Menù principale`. Prima si usava la tastiera della creazione, e
+  `❌ Annulla` rispondeva "Creazione ricetta annullata" anche modificando il
+  procedimento.
+
+### Allegati degli step (18 settembre 2026)
+
+Aprire un allegato manda **un messaggio solo**: la foto (o il video) con
+la didascalia e la riga di navigazione sotto. `⬅️ Indietro` torna allo step
+se l'allegato è stato aperto dalla modifica (`recipe:media:item:{id}:modifica`),
+alla procedura guidata altrimenti. Anche la conferma di eliminazione è la
+foto stessa, con la domanda come didascalia.
+
+### "📝 Riscrivi tutto": come si divide il testo
+
+Un passaggio per riga, oppure separati da una riga vuota, oppure tutto su
+una riga numerata in fila (`1. … 2) … 3) …`). La numerazione scritta a mano
+viene tolta e rifatta. Il testo passa da `clean_text_righe`, che toglie gli
+spazi doppi ma **tiene gli a-capo**: fino al 18 settembre 2026 passava da
+`clean_text`, che li riduceva a spazi, e ogni procedimento diventava un
+passaggio solo.
 
 ## Elenco, dettaglio e ricerca
 

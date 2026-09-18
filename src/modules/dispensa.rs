@@ -1894,6 +1894,9 @@ pub async fn handle_callback(
         } else {
             "dispensa:menu"
         };
+        // Aprendo una ricetta da qui, `⬅️ Indietro` deve tornare qui
+        // (18 settembre 2026), non all'elenco delle ricette.
+        crate::modules::ricette::ricorda_provenienza_scorte(chat_id.0, data);
         mostra_ricette_disponibili(bot, chat_id, pool, indietro).await?;
         return Ok(true);
     }

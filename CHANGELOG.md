@@ -2,6 +2,22 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_COLLAUDO_RICETTE_20260918 -->
+# 18/09/2026 — Dal collaudo delle ricette
+
+- **`⬅️ Indietro` dal dettaglio di una ricetta** torna alla pagina, alla
+  ricerca o alla schermata delle scorte da cui la si è aperta, non più
+  sempre alla prima pagina.
+- **L'amministratore modifica e archivia le ricette del catalogo
+  globale**; gli altri le leggono soltanto.
+- **Allegati degli step in un messaggio solo**, con `⬅️ Indietro` che torna
+  allo step da cui si sono aperti; anche la conferma di eliminazione sta
+  sotto la foto.
+- **Campi in modifica con il loro `❌ Annulla`**, non più quello della
+  creazione ("Creazione ricetta annullata" mentre si modificava).
+- **"📝 Riscrivi tutto" divide davvero in passaggi**: le righe non si
+  perdono più, e una riga numerata `1. … 2) … 3) …` si divide da sola.
+
 <!-- CHANGELOG_SENZA_QUANTITA_20260918 -->
 # 18/09/2026 — Voci del catalogo senza quantità
 

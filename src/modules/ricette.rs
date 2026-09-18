@@ -745,7 +745,7 @@ pub async fn handle_message(
                 }
                 Err(error) => {
                     bot.send_message(msg.chat.id, format!("⚠️ {error}"))
-                        .reply_markup(flow_keyboard(&format!("recipe:detail:{recipe_id}")))
+                        .reply_markup(edit_flow_keyboard(&format!("recipe:detail:{recipe_id}")))
                         .await?;
                 }
             }
@@ -758,7 +758,7 @@ pub async fn handle_message(
             };
             let Some(servings) = parse_positive_i64(text) else {
                 bot.send_message(msg.chat.id, "⚠️ Inserisci un numero intero positivo.")
-                    .reply_markup(flow_keyboard(&format!("recipe:detail:{recipe_id}")))
+                    .reply_markup(edit_flow_keyboard(&format!("recipe:detail:{recipe_id}")))
                     .await?;
                 return Ok(true);
             };
@@ -771,7 +771,7 @@ pub async fn handle_message(
                 }
                 Err(error) => {
                     bot.send_message(msg.chat.id, format!("⚠️ {error}"))
-                        .reply_markup(flow_keyboard(&format!("recipe:detail:{recipe_id}")))
+                        .reply_markup(edit_flow_keyboard(&format!("recipe:detail:{recipe_id}")))
                         .await?;
                 }
             }
@@ -925,14 +925,21 @@ pub async fn handle_message(
                 }
                 Err(error) => {
                     bot.send_message(msg.chat.id, format!("⚠️ {error}"))
-                        .reply_markup(flow_keyboard(&format!("recipe:edit:steps:{recipe_id}")))
+                        .reply_markup(edit_flow_keyboard(&format!(
+                            "recipe:edit:steps:{recipe_id}"
+                        )))
                         .await?;
                 }
             }
             Ok(true)
         }
         RecipeConversationState::RewriteSteps { recipe_id } => {
-            let Some(text) = text_hint.and_then(|value| clean_text(value, PROCEDURE_TEXT_MAX))
+            // `clean_text_righe`, non `clean_text`: quella riduce ogni spazio
+            // *e ogni a-capo* a uno spazio, e il procedimento arrivava alla
+            // divisione in step già tutto su una riga (trovato da Alessio il
+            // 18 settembre 2026, "1) … 2) …" su due righe diventava uno step).
+            let Some(text) =
+                text_hint.and_then(|value| clean_text_righe(value, PROCEDURE_TEXT_MAX))
             else {
                 send_text_required(bot, msg.chat.id, "Scrivi il procedimento completo.").await?;
                 return Ok(true);
@@ -945,7 +952,9 @@ pub async fn handle_message(
                 }
                 Err(error) => {
                     bot.send_message(msg.chat.id, format!("⚠️ {error}"))
-                        .reply_markup(flow_keyboard(&format!("recipe:edit:steps:{recipe_id}")))
+                        .reply_markup(edit_flow_keyboard(&format!(
+                            "recipe:edit:steps:{recipe_id}"
+                        )))
                         .await?;
                 }
             }
@@ -973,7 +982,7 @@ pub async fn handle_message(
                 }
                 Err(error) => {
                     bot.send_message(msg.chat.id, format!("⚠️ {error}"))
-                        .reply_markup(flow_keyboard(&format!("recipe:edit:menu:{recipe_id}")))
+                        .reply_markup(edit_flow_keyboard(&format!("recipe:edit:menu:{recipe_id}")))
                         .await?;
                 }
             }
@@ -982,7 +991,7 @@ pub async fn handle_message(
         RecipeConversationState::EditStepPhoto { recipe_id, step_id } => {
             if msg.photo().is_none() {
                 bot.send_message(msg.chat.id, "📷 Invia la foto da associare allo step.")
-                    .reply_markup(flow_keyboard(&format!(
+                    .reply_markup(edit_flow_keyboard(&format!(
                         "recipe:edit:step:{recipe_id}:{step_id}"
                     )))
                     .await?;
@@ -1004,7 +1013,7 @@ pub async fn handle_message(
                 }
                 Err(error) => {
                     bot.send_message(msg.chat.id, format!("⚠️ {error}"))
-                        .reply_markup(flow_keyboard(&format!(
+                        .reply_markup(edit_flow_keyboard(&format!(
                             "recipe:edit:step:{recipe_id}:{step_id}"
                         )))
                         .await?;
@@ -1015,7 +1024,7 @@ pub async fn handle_message(
         RecipeConversationState::EditStepVideo { recipe_id, step_id } => {
             if msg.video().is_none() {
                 bot.send_message(msg.chat.id, "🎥 Invia il video da associare allo step.")
-                    .reply_markup(flow_keyboard(&format!(
+                    .reply_markup(edit_flow_keyboard(&format!(
                         "recipe:edit:step:{recipe_id}:{step_id}"
                     )))
                     .await?;
@@ -1037,7 +1046,7 @@ pub async fn handle_message(
                 }
                 Err(error) => {
                     bot.send_message(msg.chat.id, format!("⚠️ {error}"))
-                        .reply_markup(flow_keyboard(&format!(
+                        .reply_markup(edit_flow_keyboard(&format!(
                             "recipe:edit:step:{recipe_id}:{step_id}"
                         )))
                         .await?;
@@ -1375,7 +1384,7 @@ pub async fn handle_callback(
         "recipe:search" => {
             sessions.set(chat_id.0, RecipeConversationState::SearchName);
             bot.send_message(chat_id, "🔎 Cerca ricetta\n\nScrivi una parte del nome.")
-                .reply_markup(flow_keyboard("recipe:menu"))
+                .reply_markup(edit_flow_keyboard("recipe:menu"))
                 .await?;
         }
         "recipe:find" => {
@@ -1459,6 +1468,25 @@ Scrivi il nome dell'alimento. Il filtro categoria, se attivo, viene mantenuto.",
                 .unwrap_or(0);
             sessions.clear_chat(chat_id.0);
             show_recipe_list(bot, chat_id, pool, page).await?;
+        }
+        "recipe:back" => {
+            sessions.clear_chat(chat_id.0);
+            match provenienza_di(chat_id.0) {
+                ProvenienzaRicetta::Elenco(pagina) => {
+                    show_recipe_list(bot, chat_id, pool, pagina).await?;
+                }
+                ProvenienzaRicetta::RicercaNome(query) => {
+                    show_recipe_name_search(bot, chat_id, pool, &query).await?;
+                }
+                ProvenienzaRicetta::RicercaIngredienti(selezionati) => {
+                    show_ingredient_search_results(bot, chat_id, pool, &selezionati).await?;
+                }
+                // Non ci si arriva: per le scorte il pulsante porta già al
+                // loro callback. Per sicurezza, l'elenco.
+                ProvenienzaRicetta::Scorte(_) => {
+                    show_recipe_list(bot, chat_id, pool, 0).await?;
+                }
+            }
         }
         _ if data.starts_with("recipe:detail:") => {
             if let Some(recipe_id) = data
@@ -1824,11 +1852,13 @@ Scrivi il nome dell'alimento. Il filtro categoria, se attivo, viene mantenuto.",
             }
         }
         _ if data.starts_with("recipe:media:item:") => {
-            if let Some(media_id) = data
-                .strip_prefix("recipe:media:item:")
-                .and_then(parse_positive_i64_str)
-            {
-                show_media_item(bot, chat_id, pool, media_id).await?;
+            let resto = data.strip_prefix("recipe:media:item:").unwrap_or_default();
+            let (id, da_modifica) = match resto.strip_suffix(":modifica") {
+                Some(id) => (id, true),
+                None => (resto, false),
+            };
+            if let Some(media_id) = parse_positive_i64_str(id) {
+                show_media_item(bot, chat_id, pool, media_id, da_modifica).await?;
             } else {
                 show_invalid_action(bot, chat_id).await?;
             }
@@ -1869,7 +1899,7 @@ async fn handle_edit_callback(
         if ensure_recipe_edit_ui(bot, chat_id, pool, recipe_id).await? {
             sessions.set(chat_id.0, RecipeConversationState::EditName { recipe_id });
             bot.send_message(chat_id, "✏️ Nome ricetta\n\nScrivi il nuovo nome.")
-                .reply_markup(flow_keyboard(&format!("recipe:edit:menu:{recipe_id}")))
+                .reply_markup(edit_flow_keyboard(&format!("recipe:edit:menu:{recipe_id}")))
                 .await?;
         }
         return Ok(());
@@ -1887,7 +1917,7 @@ async fn handle_edit_callback(
                 chat_id,
                 "👥 Porzioni base\n\nInvia il nuovo numero di porzioni.",
             )
-            .reply_markup(flow_keyboard(&format!("recipe:edit:menu:{recipe_id}")))
+            .reply_markup(edit_flow_keyboard(&format!("recipe:edit:menu:{recipe_id}")))
             .await?;
         }
         return Ok(());
@@ -1913,7 +1943,7 @@ async fn handle_edit_callback(
                 chat_id,
                 "🔎 Aggiungi ingrediente\n\nScrivi il nome dell'alimento.",
             )
-            .reply_markup(flow_keyboard(&format!(
+            .reply_markup(edit_flow_keyboard(&format!(
                 "recipe:edit:ingredients:{recipe_id}"
             )))
             .await?;
@@ -2348,7 +2378,7 @@ async fn handle_edit_callback(
             chat_id,
             "📝 Scrivi il procedimento completo in un messaggio solo.\n\nUn passaggio per riga, oppure separati da una riga vuota. La numerazione la metto io.",
         )
-        .reply_markup(flow_keyboard(&format!("recipe:edit:steps:{recipe_id}")))
+        .reply_markup(edit_flow_keyboard(&format!("recipe:edit:steps:{recipe_id}")))
         .await?;
         return Ok(());
     }
@@ -2377,7 +2407,9 @@ async fn handle_edit_callback(
                 chat_id,
                 format!("📝 Nuovo step {next}\n\nScrivi il testo dello step."),
             )
-            .reply_markup(flow_keyboard(&format!("recipe:edit:steps:{recipe_id}")))
+            .reply_markup(edit_flow_keyboard(&format!(
+                "recipe:edit:steps:{recipe_id}"
+            )))
             .await?;
         }
         return Ok(());
@@ -2393,7 +2425,7 @@ async fn handle_edit_callback(
                     },
                 );
                 bot.send_message(chat_id, "✏️ Modifica step\n\nScrivi il nuovo testo.")
-                    .reply_markup(flow_keyboard(&format!(
+                    .reply_markup(edit_flow_keyboard(&format!(
                         "recipe:edit:step:{recipe_id}:{step_id}"
                     )))
                     .await?;
@@ -2411,7 +2443,7 @@ async fn handle_edit_callback(
                     RecipeConversationState::EditStepPhoto { recipe_id, step_id },
                 );
                 bot.send_message(chat_id, "📷 Invia una foto da aggiungere allo step.")
-                    .reply_markup(flow_keyboard(&format!(
+                    .reply_markup(edit_flow_keyboard(&format!(
                         "recipe:edit:step:{recipe_id}:{step_id}"
                     )))
                     .await?;
@@ -2429,7 +2461,7 @@ async fn handle_edit_callback(
                     RecipeConversationState::EditStepVideo { recipe_id, step_id },
                 );
                 bot.send_message(chat_id, "🎥 Invia un video da aggiungere allo step.")
-                    .reply_markup(flow_keyboard(&format!(
+                    .reply_markup(edit_flow_keyboard(&format!(
                         "recipe:edit:step:{recipe_id}:{step_id}"
                     )))
                     .await?;
@@ -2540,29 +2572,9 @@ async fn handle_edit_callback(
     // dell'allegato dal disco, non solo la riga a database.
     if let Some(raw) = data.strip_prefix("recipe:edit:md:ask:") {
         if let Some((recipe_id, media_id)) = parse_two_positive_ids(raw) {
-            // Prima la foto (o il video), poi la domanda: si deve vedere
-            // cosa si sta per perdere, non solo la parola "allegato".
-            let descrizione = match anteprima_allegato(bot, chat_id, pool, media_id).await? {
-                Some(descrizione) => format!("\n\n{descrizione}"),
-                None => String::new(),
-            };
-            bot.send_message(
-                chat_id,
-                format!(
-                    "⚠️ Eliminare definitivamente questo allegato? Non si può recuperare.{descrizione}"
-                ),
-            )
-            .reply_markup(InlineKeyboardMarkup::new(vec![
-                vec![button(
-                    "🗑 Sì, elimina",
-                    format!("recipe:edit:md:yes:{recipe_id}:{media_id}"),
-                )],
-                vec![
-                    button("❌ Annulla", format!("recipe:edit:steps:{recipe_id}")),
-                    button("🏠 Menù principale", "menu:main"),
-                ],
-            ]))
-            .await?;
+            // Si vede cosa si sta per perdere, non solo la parola
+            // "allegato": la domanda sta sotto la foto stessa.
+            chiedi_eliminazione_allegato(bot, chat_id, pool, recipe_id, media_id).await?;
         } else {
             show_invalid_action(bot, chat_id).await?;
         }
@@ -3012,6 +3024,70 @@ async fn show_menu(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> ResponseRes
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Da dove si è aperta una ricetta (18 settembre 2026)
+// ---------------------------------------------------------------------------
+//
+// `⬅️ Indietro` dal dettaglio portava sempre alla prima pagina dell'elenco:
+// Alessio aveva trovato la sua ricetta a pagina 2 e, tornando indietro, si
+// ritrovava a pagina 1. Una ricetta si apre da quattro strade — l'elenco a
+// una certa pagina, la ricerca per nome, la ricerca per ingredienti, le
+// ricette con quello che c'è in casa — e le ricerche non si ricostruiscono da
+// un pulsante (il testo cercato non sta in 64 byte, gli ingredienti scelti
+// nemmeno). Quindi il bot se lo ricorda, per chat, come il planner ricorda se
+// ci si è arrivati dalla lista della spesa.
+
+#[derive(Debug, Clone)]
+enum ProvenienzaRicetta {
+    Elenco(i64),
+    RicercaNome(String),
+    RicercaIngredienti(Vec<FoodChoice>),
+    /// Il callback esatto della schermata "con quello che ho", che a sua
+    /// volta sa dove tornare.
+    Scorte(String),
+}
+
+fn provenienze() -> &'static std::sync::Mutex<std::collections::HashMap<i64, ProvenienzaRicetta>> {
+    static PROVENIENZE: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<i64, ProvenienzaRicetta>>,
+    > = std::sync::OnceLock::new();
+    PROVENIENZE.get_or_init(Default::default)
+}
+
+fn ricorda_provenienza(chat_id: i64, provenienza: ProvenienzaRicetta) {
+    provenienze()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(chat_id, provenienza);
+}
+
+fn provenienza_di(chat_id: i64) -> ProvenienzaRicetta {
+    provenienze()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(&chat_id)
+        .cloned()
+        .unwrap_or(ProvenienzaRicetta::Elenco(0))
+}
+
+/// Chiamata dalle scorte quando mostrano "ricette con quello che ho":
+/// `callback` è quello che riapre quella schermata.
+pub fn ricorda_provenienza_scorte(chat_id: i64, callback: &str) {
+    ricorda_provenienza(chat_id, ProvenienzaRicetta::Scorte(callback.to_string()));
+}
+
+/// Il callback di `⬅️ Indietro` nel dettaglio di una ricetta. Le ricerche
+/// passano da `recipe:back`, che le ricostruisce dalla memoria.
+fn callback_indietro_ricetta(chat_id: i64) -> String {
+    match provenienza_di(chat_id) {
+        ProvenienzaRicetta::Elenco(pagina) => format!("recipe:list:{pagina}"),
+        ProvenienzaRicetta::Scorte(callback) => callback,
+        ProvenienzaRicetta::RicercaNome(_) | ProvenienzaRicetta::RicercaIngredienti(_) => {
+            "recipe:back".to_string()
+        }
+    }
+}
+
 async fn show_recipe_list(
     bot: &Bot,
     chat_id: ChatId,
@@ -3022,6 +3098,7 @@ async fn show_recipe_list(
     let total = count_visible_recipes(pool).await.unwrap_or(0);
     let pages = page_count(total, RECIPE_LIST_PAGE_SIZE);
     let safe_page = if pages == 0 { 0 } else { page.min(pages - 1) };
+    ricorda_provenienza(chat_id.0, ProvenienzaRicetta::Elenco(safe_page));
     let rows = list_visible_recipes(pool, safe_page, RECIPE_LIST_PAGE_SIZE)
         .await
         .unwrap_or_default();
@@ -3259,7 +3336,7 @@ async fn show_recipe_detail(
         )]);
     }
     keyboard.push(vec![
-        button("⬅️ Indietro", "recipe:list:0"),
+        button("⬅️ Indietro", callback_indietro_ricetta(chat_id.0)),
         button("🏠 Menù principale", "menu:main"),
     ]);
 
@@ -3486,84 +3563,125 @@ async fn show_step_media(
     Ok(())
 }
 
-/// Manda l'allegato da solo, senza pulsanti: serve prima di una conferma di
-/// eliminazione, perché la domanda arrivi con davanti quello che sparisce.
-/// Ritorna la riga che descrive l'allegato, da mettere nella domanda.
-async fn anteprima_allegato(
+/// La conferma di eliminazione di un allegato, **in un solo messaggio**: la
+/// foto (o il video) con la domanda come didascalia e i pulsanti sotto. Prima
+/// arrivavano due messaggi — l'allegato e poi la domanda — e il primo si
+/// portava dietro un `💡 Migliora` suo (18 settembre 2026).
+async fn chiedi_eliminazione_allegato(
     bot: &Bot,
     chat_id: ChatId,
     pool: &SqlitePool,
+    recipe_id: i64,
     media_id: i64,
-) -> ResponseResult<Option<String>> {
-    let Some((media, _, step_number)) = visible_media(pool, media_id).await.unwrap_or(None) else {
-        return Ok(None);
+) -> ResponseResult<()> {
+    let tastiera = InlineKeyboardMarkup::new(vec![
+        vec![button(
+            "🗑 Sì, elimina",
+            format!("recipe:edit:md:yes:{recipe_id}:{media_id}"),
+        )],
+        vec![
+            button("❌ Annulla", format!("recipe:edit:steps:{recipe_id}")),
+            button("🏠 Menù principale", "menu:main"),
+        ],
+    ]);
+    let domanda = "⚠️ Eliminare definitivamente questo allegato? Non si può recuperare.";
+    let Some((media, _, step_number, _)) = visible_media(pool, media_id).await.unwrap_or(None)
+    else {
+        bot.send_message(chat_id, domanda)
+            .reply_markup(tastiera)
+            .await?;
+        return Ok(());
     };
     let icona = if media.kind == "foto" { "📷" } else { "🎥" };
     let descrizione = match media.caption.clone() {
         Some(caption) => format!("{icona} {caption} · step {step_number}"),
         None => format!("{icona} Allegato dello step {step_number}"),
     };
+    let didascalia = format!("{domanda}\n\n{descrizione}");
     let path = PathBuf::from(&media.path);
     if !path.exists() {
-        // Il file non c'è più sul telefono: la riga a database va comunque
-        // eliminata, e conviene dirlo invece di mandare una foto muta.
-        return Ok(Some(format!(
-            "{descrizione}\n⚠️ Il file non è più sul dispositivo."
-        )));
+        // Il file non c'è più sul telefono: la riga va eliminata lo stesso, e
+        // conviene dirlo invece di mandare un messaggio vuoto.
+        bot.send_message(
+            chat_id,
+            format!("{didascalia}\n⚠️ Il file non è più sul dispositivo."),
+        )
+        .reply_markup(tastiera)
+        .await?;
+        return Ok(());
     }
     if media.kind == "foto" {
         bot.send_photo(chat_id, InputFile::file(path))
-            .caption(descrizione.clone())
+            .caption(didascalia)
+            .reply_markup(tastiera)
             .await?;
     } else {
         bot.send_video(chat_id, InputFile::file(path))
-            .caption(descrizione.clone())
+            .caption(didascalia)
+            .reply_markup(tastiera)
             .await?;
     }
-    Ok(Some(descrizione))
+    Ok(())
 }
 
+/// Un allegato di uno step, **in un solo messaggio**: la foto (o il video)
+/// con la riga di navigazione sotto. Prima c'erano due messaggi — la foto e
+/// "📎 Allegato step" solo per portare i pulsanti — e `💡 Migliora` compariva
+/// due volte (18 settembre 2026).
+///
+/// `da_modifica`: aperto da Modifica → Procedimento → Step, e allora
+/// `⬅️ Indietro` torna a quello step; altrimenti dalla procedura guidata, e
+/// torna lì.
 async fn show_media_item(
     bot: &Bot,
     chat_id: ChatId,
     pool: &SqlitePool,
     media_id: i64,
+    da_modifica: bool,
 ) -> ResponseResult<()> {
-    let Some((media, recipe_id, step_number)) = visible_media(pool, media_id).await.unwrap_or(None)
+    let Some((media, recipe_id, step_number, step_id)) =
+        visible_media(pool, media_id).await.unwrap_or(None)
     else {
         bot.send_message(chat_id, "⚠️ Allegato non disponibile.")
             .reply_markup(recipe_menu_keyboard())
             .await?;
         return Ok(());
     };
-    let path = PathBuf::from(&media.path);
-    let caption = media
-        .caption
-        .clone()
-        .unwrap_or_else(|| format!("Step {step_number}"));
-    if path.exists() {
-        if media.kind == "foto" {
-            bot.send_photo(chat_id, InputFile::file(path))
-                .caption(caption)
-                .await?;
-        } else {
-            bot.send_video(chat_id, InputFile::file(path))
-                .caption(caption)
-                .await?;
-        }
+    let indietro = if da_modifica {
+        format!("recipe:edit:step:{recipe_id}:{step_id}")
     } else {
-        bot.send_message(chat_id, "⚠️ File allegato non trovato sul dispositivo.")
+        format!("recipe:guided:{recipe_id}:{}", step_number - 1)
+    };
+    let tastiera = InlineKeyboardMarkup::new(vec![vec![
+        button("⬅️ Indietro", indietro),
+        button("🏠 Menù principale", "menu:main"),
+    ]]);
+    let icona = if media.kind == "foto" { "📷" } else { "🎥" };
+    let didascalia = match media.caption.clone() {
+        Some(caption) => format!("{icona} {caption} · step {step_number}"),
+        None => format!("{icona} Step {step_number}"),
+    };
+    let path = PathBuf::from(&media.path);
+    if !path.exists() {
+        bot.send_message(
+            chat_id,
+            format!("{didascalia}\n\n⚠️ File allegato non trovato sul dispositivo."),
+        )
+        .reply_markup(tastiera)
+        .await?;
+        return Ok(());
+    }
+    if media.kind == "foto" {
+        bot.send_photo(chat_id, InputFile::file(path))
+            .caption(didascalia)
+            .reply_markup(tastiera)
+            .await?;
+    } else {
+        bot.send_video(chat_id, InputFile::file(path))
+            .caption(didascalia)
+            .reply_markup(tastiera)
             .await?;
     }
-    bot.send_message(chat_id, "📎 Allegato step")
-        .reply_markup(InlineKeyboardMarkup::new(vec![vec![
-            button(
-                "⬅️ Indietro",
-                format!("recipe:guided:{recipe_id}:{}", step_number - 1),
-            ),
-            button("🏠 Menù principale", "menu:main"),
-        ]]))
-        .await?;
     Ok(())
 }
 
@@ -3573,6 +3691,10 @@ async fn show_recipe_name_search(
     pool: &SqlitePool,
     query: &str,
 ) -> ResponseResult<()> {
+    ricorda_provenienza(
+        chat_id.0,
+        ProvenienzaRicetta::RicercaNome(query.to_string()),
+    );
     let rows = search_recipes_by_name(pool, query, RECIPE_SEARCH_LIMIT)
         .await
         .unwrap_or_default();
@@ -3702,6 +3824,10 @@ async fn show_ingredient_search_results(
     pool: &SqlitePool,
     selected: &[FoodChoice],
 ) -> ResponseResult<()> {
+    ricorda_provenienza(
+        chat_id.0,
+        ProvenienzaRicetta::RicercaIngredienti(selected.to_vec()),
+    );
     let ids = selected.iter().map(|food| food.id).collect::<Vec<_>>();
     let actor = identity::current_actor();
     let Some(user_id) = actor.utente_id else {
@@ -3831,6 +3957,16 @@ async fn show_edit_menu(
             ),
             button("🗑 Elimina", format!("recipe:edit:delete:ask:{recipe_id}")),
         ]);
+    } else if admin_on_global_recipe(pool, recipe_id, user_id)
+        .await
+        .unwrap_or(false)
+    {
+        // Una ricetta del catalogo si archivia, non si elimina: la stanno
+        // magari usando i pasti già pianificati di qualcun altro.
+        rows.push(vec![button(
+            "📦 Archivia",
+            format!("recipe:edit:archive:ask:{recipe_id}"),
+        )]);
     }
     rows.push(vec![
         button("⬅️ Indietro", format!("recipe:detail:{recipe_id}")),
@@ -4248,7 +4384,7 @@ async fn show_step_manage(
         rows.push(vec![
             button(
                 format!("{icon} Apri"),
-                format!("recipe:media:item:{}", item.id),
+                format!("recipe:media:item:{}:modifica", item.id),
             ),
             button(
                 "🗑 Rimuovi",
@@ -5397,6 +5533,39 @@ async fn recipe_visible_to_user(pool: &SqlitePool, recipe_id: i64, user_id: i64)
     .context("Impossibile verificare la visibilità ricetta")
 }
 
+/// Se l'utente è amministratore di sistema: è lui a curare il catalogo
+/// globale, come già per gli alimenti (`alimentazione::is_system_admin_user`).
+async fn is_system_admin(pool: &SqlitePool, user_id: i64) -> Result<bool> {
+    sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM utenti \
+         WHERE id = ? AND stato = 'attivo' AND ruolo_sistema = 'admin')",
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await
+    .context("Impossibile verificare il ruolo di sistema")
+}
+
+/// Una ricetta del catalogo globale, ancora attiva.
+async fn is_global_recipe(pool: &SqlitePool, recipe_id: i64) -> Result<bool> {
+    sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM ricette \
+         WHERE id = ? AND catalogo_globale = 1 AND archiviata = 0)",
+    )
+    .bind(recipe_id)
+    .fetch_one(pool)
+    .await
+    .context("Impossibile leggere la ricetta")
+}
+
+/// L'amministratore può modificare e archiviare le ricette del catalogo
+/// globale, che non hanno un proprietario: prima non poteva farlo nessuno,
+/// nemmeno lui (trovato da Alessio il 18 settembre 2026). Gli utenti normali
+/// continuano a poterle solo leggere.
+async fn admin_on_global_recipe(pool: &SqlitePool, recipe_id: i64, user_id: i64) -> Result<bool> {
+    Ok(is_global_recipe(pool, recipe_id).await? && is_system_admin(pool, user_id).await?)
+}
+
 async fn can_edit_recipe(pool: &SqlitePool, recipe_id: i64, user_id: i64) -> Result<bool> {
     let owner: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM ricette WHERE id = ? AND archiviata = 0 AND proprietario_utente_id = ?)",
@@ -5407,6 +5576,9 @@ async fn can_edit_recipe(pool: &SqlitePool, recipe_id: i64, user_id: i64) -> Res
     .await
     .context("Impossibile verificare la proprietà ricetta")?;
     if owner {
+        return Ok(true);
+    }
+    if admin_on_global_recipe(pool, recipe_id, user_id).await? {
         return Ok(true);
     }
     if !recipe_visible_to_user(pool, recipe_id, user_id).await? {
@@ -5600,12 +5772,12 @@ async fn visible_step_context(pool: &SqlitePool, step_id: i64) -> Result<Option<
     }
 }
 
-async fn visible_media(
-    pool: &SqlitePool,
-    media_id: i64,
-) -> Result<Option<(StepMediaRecord, i64, i64)>> {
-    let row = sqlx::query_as::<_, (i64, i64, String, String, Option<String>)>(
-        "SELECT s.ricetta_id, s.numero, m.tipo_media, m.percorso_file, m.descrizione \
+/// L'allegato visibile, con ricetta, numero dello step e id dello step.
+type AllegatoVisibile = (StepMediaRecord, i64, i64, i64);
+
+async fn visible_media(pool: &SqlitePool, media_id: i64) -> Result<Option<AllegatoVisibile>> {
+    let row = sqlx::query_as::<_, (i64, i64, i64, String, String, Option<String>)>(
+        "SELECT s.ricetta_id, s.numero, s.id, m.tipo_media, m.percorso_file, m.descrizione \
          FROM ricetta_step_media m JOIN ricetta_step s ON s.id = m.ricetta_step_id \
          WHERE m.id = ?",
     )
@@ -5613,7 +5785,7 @@ async fn visible_media(
     .fetch_optional(pool)
     .await
     .context("Impossibile leggere l'allegato")?;
-    let Some((recipe_id, step_number, kind, path, caption)) = row else {
+    let Some((recipe_id, step_number, step_id, kind, path, caption)) = row else {
         return Ok(None);
     };
     if visible_recipe(pool, recipe_id).await?.is_none() {
@@ -5628,6 +5800,7 @@ async fn visible_media(
         },
         recipe_id,
         step_number,
+        step_id,
     )))
 }
 
@@ -6269,19 +6442,69 @@ async fn move_recipe_step(
 fn dividi_procedimento(testo: &str) -> Vec<String> {
     let testo = testo.replace("\r\n", "\n");
     let a_blocchi: Vec<&str> = testo.split("\n\n").collect();
-    let grezzi: Vec<&str> = if a_blocchi.iter().filter(|b| !b.trim().is_empty()).count() > 1 {
-        a_blocchi
+    let mut grezzi: Vec<String> = if a_blocchi.iter().filter(|b| !b.trim().is_empty()).count() > 1 {
+        a_blocchi.into_iter().map(str::to_string).collect()
     } else {
-        testo.lines().collect()
+        testo.lines().map(str::to_string).collect()
     };
+    // Tutto su una riga ma numerato ("1. Scalda 2) Stendi 3) Inforna"): dal
+    // computer Invio manda il messaggio, e per andare a capo serve
+    // Maiusc+Invio, quindi è il modo più naturale di scriverlo (visto da
+    // Alessio il 18 settembre 2026).
+    let non_vuoti: Vec<&String> = grezzi
+        .iter()
+        .filter(|riga| !riga.trim().is_empty())
+        .collect();
+    if non_vuoti.len() == 1 {
+        if let Some(passi) = dividi_numerazione_in_riga(non_vuoti[0]) {
+            grezzi = passi;
+        }
+    }
     grezzi
-        .into_iter()
-        .map(pulisci_numerazione)
+        .iter()
+        .map(|passo| pulisci_numerazione(passo))
         .filter(|passo| !passo.is_empty())
         // `STEP_TEXT_MAX - 1` perché `truncate_chars` aggiunge "…" quando
         // taglia: così anche il passo tagliato resta entro il limite.
         .map(|passo| truncate_chars(&passo, STEP_TEXT_MAX - 1))
         .collect()
+}
+
+/// Divide una riga sola numerata in fila: `1. A 2) B 3) C` → `A`, `B`, `C`.
+/// I numeri devono partire da 1 ed essere consecutivi, seguiti da `.` o `)`
+/// e da uno spazio: così "a 200° 2 minuti" o "cuoci 2 volte" non spezzano
+/// niente. `None` se la riga non è fatta così.
+fn dividi_numerazione_in_riga(riga: &str) -> Option<Vec<String>> {
+    let riga = riga.trim();
+    let resto = riga
+        .strip_prefix("1.")
+        .or_else(|| riga.strip_prefix("1)"))?;
+    let mut passi = Vec::new();
+    let mut corrente = resto;
+    let mut numero = 2;
+    loop {
+        let marcatori = [format!(" {numero}) "), format!(" {numero}. ")];
+        let prossimo = marcatori
+            .iter()
+            .filter_map(|marcatore| {
+                corrente
+                    .find(marcatore.as_str())
+                    .map(|posizione| (posizione, marcatore.len()))
+            })
+            .min_by_key(|(posizione, _)| *posizione);
+        match prossimo {
+            Some((posizione, lunghezza)) => {
+                passi.push(corrente[..posizione].trim().to_string());
+                corrente = &corrente[posizione + lunghezza..];
+                numero += 1;
+            }
+            None => {
+                passi.push(corrente.trim().to_string());
+                break;
+            }
+        }
+    }
+    (passi.len() >= 2).then_some(passi)
 }
 
 /// "3. Inforna" → "Inforna"; "- Mescola" → "Mescola".
@@ -6663,12 +6886,15 @@ async fn archive_recipe(pool: &SqlitePool, recipe_id: i64) -> Result<()> {
     let user_id = identity::current_actor()
         .utente_id
         .context("Utente non disponibile")?;
+    let admin_globale = admin_on_global_recipe(pool, recipe_id, user_id).await?;
     let result = sqlx::query(
         "UPDATE ricette SET archiviata = 1, aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
-         WHERE id = ? AND proprietario_utente_id = ? AND archiviata = 0",
+         WHERE id = ? AND archiviata = 0 \
+           AND (proprietario_utente_id = ? OR (catalogo_globale = 1 AND ? = 1))",
     )
     .bind(recipe_id)
     .bind(user_id)
+    .bind(i64::from(admin_globale))
     .execute(pool)
     .await
     .context("Impossibile archiviare la ricetta")?;
@@ -6860,10 +7086,29 @@ fn ingredient_quantity_keyboard(
     ])
 }
 
+/// Tastiera della **creazione** di una ricetta: `⬅️ Indietro` torna al passo
+/// prima, `❌ Annulla` butta via tutta la bozza — due cose diverse, quindi
+/// due pulsanti. `❌ Annulla` sta sopra, così la riga di navigazione resta
+/// `⬅️ Indietro | 💡 Migliora | 🏠 Menù principale` (C3): con tre pulsanti
+/// nella stessa riga `💡 Migliora` finiva in una riga a parte.
 fn flow_keyboard(back_callback: &str) -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![
+        vec![button("❌ Annulla la ricetta", "recipe:new:cancel")],
+        vec![
+            button("⬅️ Indietro", back_callback),
+            button("🏠 Menù principale", "menu:main"),
+        ],
+    ])
+}
+
+/// Tastiera di un campo in **modifica** su una ricetta che esiste già: qui
+/// tornare indietro e annullare sono la stessa cosa (non si salva niente e
+/// si torna da dove si era), quindi un pulsante solo. Prima si usava
+/// `flow_keyboard`, e `❌ Annulla` rispondeva "Creazione ricetta annullata"
+/// anche mentre si modificava il procedimento (18 settembre 2026).
+fn edit_flow_keyboard(back_callback: &str) -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![vec![
-        button("⬅️ Indietro", back_callback),
-        button("❌ Annulla", "recipe:new:cancel"),
+        button("❌ Annulla", back_callback),
         button("🏠 Menù principale", "menu:main"),
     ]])
 }
@@ -6880,8 +7125,11 @@ fn button(text: impl Into<String>, callback: impl Into<String>) -> InlineKeyboar
 }
 
 async fn send_text_required(bot: &Bot, chat_id: ChatId, message: &str) -> ResponseResult<()> {
+    // Si usa sia creando sia modificando: `recipe:menu` chiude sessione e
+    // bozza in tutti e due i casi, mentre "Annulla la ricetta" avrebbe detto
+    // una cosa falsa a chi stava solo modificando.
     bot.send_message(chat_id, format!("⚠️ {message}"))
-        .reply_markup(flow_keyboard("recipe:menu"))
+        .reply_markup(edit_flow_keyboard("recipe:menu"))
         .await?;
     Ok(())
 }
@@ -6910,6 +7158,25 @@ fn first_command(text: &str) -> Option<&str> {
     }
     let token = trimmed.split_whitespace().next()?;
     token.split('@').next()
+}
+
+/// Come `clean_text`, ma tiene gli a-capo: ogni riga viene ripulita dagli
+/// spazi doppi, le righe restano righe. Serve dove la forma del testo conta,
+/// come il procedimento scritto tutto insieme.
+fn clean_text_righe(raw: &str, max_chars: usize) -> Option<String> {
+    let clean = raw
+        .replace("\r\n", "\n")
+        .lines()
+        .map(|riga| riga.split_whitespace().collect::<Vec<_>>().join(" "))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let clean = clean.trim().to_string();
+    let count = clean.chars().count();
+    if count == 0 || count > max_chars {
+        None
+    } else {
+        Some(clean)
+    }
 }
 
 fn clean_text(raw: &str, max_chars: usize) -> Option<String> {
@@ -7700,6 +7967,48 @@ mod tests {
     }
 
     #[test]
+    fn il_procedimento_passa_dalla_pulizia_senza_perdere_le_righe() {
+        // Esattamente la strada del bot: prima la pulizia, poi la divisione.
+        // Prima del 18 settembre 2026 la pulizia riduceva gli a-capo a spazi e
+        // questo testo diventava un solo step.
+        let arrivato = "1) ekfgbenfg\n2)   qndncv  ";
+        let pulito = clean_text_righe(arrivato, PROCEDURE_TEXT_MAX).expect("testo");
+        assert_eq!(dividi_procedimento(&pulito), vec!["ekfgbenfg", "qndncv"]);
+
+        // Tutto su una riga, numerato in fila.
+        let pulito =
+            clean_text_righe("1. cdbs 2) fsfnn 3) dfvnosfnv", PROCEDURE_TEXT_MAX).expect("testo");
+        assert_eq!(
+            dividi_procedimento(&pulito),
+            vec!["cdbs", "fsfnn", "dfvnosfnv"]
+        );
+        assert_eq!(
+            dividi_procedimento(
+                "1. Scalda il forno a 200° 2) stendi la pasta 3) inforna per 20 minuti"
+            ),
+            vec![
+                "Scalda il forno a 200°",
+                "stendi la pasta",
+                "inforna per 20 minuti"
+            ]
+        );
+        // Numeri che non sono una numerazione non spezzano niente.
+        assert_eq!(
+            dividi_procedimento("Cuoci 2 minuti e gira 3 volte"),
+            vec!["Cuoci 2 minuti e gira 3 volte"]
+        );
+        assert_eq!(
+            dividi_procedimento("1. Cuoci 2 minuti"),
+            vec!["Cuoci 2 minuti"]
+        );
+        // Un numero fuori ordine non vale come separatore.
+        assert_eq!(
+            dividi_procedimento("1. Primo 3) terzo"),
+            vec!["Primo 3) terzo"]
+        );
+    }
+
+    #[test]
     fn il_procedimento_scritto_tutto_insieme_si_divide_in_step() {
         // Righe vuote: ogni blocco è un passaggio, anche se va a capo dentro.
         assert_eq!(
@@ -7987,6 +8296,97 @@ mod tests {
         .await
         .expect("conteggio numerazione");
         assert_eq!(numerazione, 0);
+    }
+
+    /// Le ricette del catalogo globale: l'amministratore le modifica e le
+    /// archivia, un utente normale no (18 settembre 2026 — prima non poteva
+    /// nessuno, nemmeno l'amministratore).
+    #[tokio::test]
+    async fn l_amministratore_cura_le_ricette_globali_gli_altri_le_leggono() {
+        let pool = test_pool().await;
+        let admin_id = create_user(&pool, "Admin", 1).await;
+        let utente_id = create_user(&pool, "Utente", 1).await;
+        sqlx::query("UPDATE utenti SET ruolo_sistema = 'admin' WHERE id = ?")
+            .bind(admin_id)
+            .execute(&pool)
+            .await
+            .expect("promozione admin");
+        let frittata: i64 = sqlx::query_scalar(
+            "SELECT id FROM ricette WHERE catalogo_globale = 1 AND nome_normalizzato = 'frittata'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("frittata del catalogo");
+
+        identity::with_actor(actor(utente_id, 1, "Utente", false), async {
+            assert!(!can_edit_recipe(&pool, frittata, utente_id).await.unwrap());
+            assert!(update_recipe_servings(&pool, frittata, 6).await.is_err());
+            assert!(archive_recipe(&pool, frittata).await.is_err());
+        })
+        .await;
+
+        identity::with_actor(actor(admin_id, 1, "Admin", false), async {
+            assert!(can_edit_recipe(&pool, frittata, admin_id).await.unwrap());
+            update_recipe_servings(&pool, frittata, 3)
+                .await
+                .expect("l'amministratore cambia le porzioni");
+            update_recipe_name(&pool, frittata, "Frittata semplice")
+                .await
+                .expect("l'amministratore rinomina");
+        })
+        .await;
+        let (nome, porzioni, proprietario): (String, i64, Option<i64>) = sqlx::query_as(
+            "SELECT nome, porzioni_base, proprietario_utente_id FROM ricette WHERE id = ?",
+        )
+        .bind(frittata)
+        .fetch_one(&pool)
+        .await
+        .expect("rilettura");
+        assert_eq!((nome.as_str(), porzioni), ("Frittata semplice", 3));
+        assert_eq!(proprietario, None, "resta del catalogo, non diventa sua");
+
+        identity::with_actor(actor(admin_id, 1, "Admin", false), async {
+            archive_recipe(&pool, frittata)
+                .await
+                .expect("l'amministratore archivia");
+        })
+        .await;
+    }
+
+    /// `⬅️ Indietro` dal dettaglio torna da dove si è arrivati (18 settembre
+    /// 2026): prima portava sempre alla prima pagina dell'elenco.
+    #[test]
+    fn indietro_dal_dettaglio_torna_da_dove_si_arriva() {
+        // Chat inventate, così il test non si mischia con altri.
+        let chat = -9_001;
+        assert_eq!(callback_indietro_ricetta(chat), "recipe:list:0");
+
+        ricorda_provenienza(chat, ProvenienzaRicetta::Elenco(1));
+        assert_eq!(callback_indietro_ricetta(chat), "recipe:list:1");
+
+        ricorda_provenienza(chat, ProvenienzaRicetta::RicercaNome("pasta".to_string()));
+        assert_eq!(callback_indietro_ricetta(chat), "recipe:back");
+        ricorda_provenienza(chat, ProvenienzaRicetta::RicercaIngredienti(Vec::new()));
+        assert_eq!(callback_indietro_ricetta(chat), "recipe:back");
+
+        ricorda_provenienza_scorte(chat, "dispensa:ricette:r");
+        assert_eq!(callback_indietro_ricetta(chat), "dispensa:ricette:r");
+
+        // Ogni chat ha la sua strada.
+        assert_eq!(callback_indietro_ricetta(-9_002), "recipe:list:0");
+    }
+
+    #[test]
+    fn i_callback_nuovi_delle_ricette_restano_sotto_il_limite() {
+        let id = i64::MAX;
+        for callback in [
+            format!("recipe:media:item:{id}:modifica"),
+            "recipe:back".to_string(),
+            format!("recipe:edit:src:{id}"),
+            format!("recipe:edit:src:togli:{id}"),
+        ] {
+            assert!(callback.len() <= 64, "{callback}");
+        }
     }
 
     #[test]

@@ -2162,6 +2162,53 @@ scorte". D'accordo, con una rifinitura.
 telefono ferma il bot per una ventina di minuti. Va insieme alle correzioni
 che usciranno dal collaudo.
 
+## 2septdecies. Dal collaudo delle ricette (18 settembre 2026)
+
+Alessio ha collaudato la parte ricette e ha dato il via a correggere tutto
+insieme. Nessuna migration.
+
+1. **`⬅️ Indietro` dal dettaglio di una ricetta tornava sempre alla prima
+   pagina dell'elenco**, anche aprendo la ricetta da pagina 2, da una
+   ricerca o dalle ricette "con quello che ho". Ora il bot ricorda per chat
+   da dove si è arrivati (`ProvenienzaRicetta`: pagina dell'elenco, ricerca
+   per nome, ricerca per ingredienti, scorte) e ci torna; le ricerche si
+   ricostruiscono con `recipe:back`, perché il testo cercato non sta in un
+   callback.
+2. **Nessuno poteva modificare le ricette del catalogo globale, nemmeno
+   l'amministratore**: non hanno proprietario, e il permesso guardava solo
+   quello. Ora l'amministratore di sistema le modifica (nome, porzioni,
+   ingredienti, procedimento, allegati, fonte) e le **archivia**; non le
+   elimina, perché possono stare nei pasti già pianificati di altri. Gli
+   utenti normali le leggono soltanto, come prima.
+3. **Vedere un allegato di uno step**: prima arrivavano due messaggi — la
+   foto e "📎 Allegato step" solo per i pulsanti — con `💡 Migliora` due
+   volte, e `⬅️ Indietro` portava alla procedura guidata anche aprendo la
+   foto dalla modifica. Ora è un messaggio solo (la foto con la riga di
+   navigazione sotto) e Indietro torna allo step da cui la si è aperta. Lo
+   stesso per la conferma di eliminazione: la domanda sta sotto la foto.
+4. **Tastiere dei campi in modifica**: usavano quella della creazione, con
+   tre pulsanti in riga (`💡 Migliora` finiva sotto) e un `❌ Annulla` che
+   rispondeva "Creazione ricetta annullata" anche mentre si modificava il
+   procedimento. Ora in modifica c'è solo `❌ Annulla` (che torna dove si
+   era) e la riga è `❌ Annulla | 💡 Migliora | 🏠 Menù principale`; nella
+   creazione `❌ Annulla la ricetta` sta sopra e la riga di navigazione resta
+   intera.
+5. **"📝 Riscrivi tutto" metteva tutto in un passaggio solo**, anche
+   scrivendo un passaggio per riga: la pulizia del testo (`clean_text`)
+   riduceva gli a-capo a spazi prima della divisione. I test non se ne
+   accorgevano perché passavano il testo direttamente alla divisione. Ora
+   c'è `clean_text_righe`, che tiene le righe, e un test che passa dalla
+   stessa strada del bot. In più, un procedimento scritto **su una riga
+   sola ma numerato** (`1. Scalda 2) Stendi 3) Inforna`) si divide lì — dal
+   computer Invio manda il messaggio, quindi è il modo naturale di
+   scriverlo. Solo numeri in fila da 1, seguiti da `.` o `)`: "200°" o
+   "cuoci 2 minuti" non spezzano niente.
+
+4 nuovi test (provenienza, amministratore sulle ricette globali, divisione
+con pulizia e numerazione in riga, callback nuovi). Totale 455.
+
+**Collaudo dal vivo su Telegram da fare.**
+
 ## 3. Stato tecnico verificato
 
 - **60 migration** nel repository, tutte **applicate** al database reale
@@ -2176,7 +2223,8 @@ che usciranno dal collaudo.
 - pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa,
   punto 1 della sezione 6): `fmt`, `check --locked`,
   `clippy --all-targets --locked -- -D warnings`, `test --locked` —
-  **451 test** (450 prima della sezione 2sexdecies, 448 prima del giro
+  **455 test** (451 prima della sezione 2septdecies, 450 prima della
+  sezione 2sexdecies, 448 prima del giro
   della sezione 2quindecies, 445 prima
   del giro della sezione 2quaterdecies, 437 prima
   del giro della sezione 2terdecies, 428 dopo la
