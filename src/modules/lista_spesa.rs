@@ -7824,6 +7824,13 @@ async fn mostra_presa(
         testo.push_str(&format!(
             "\nTocca la confezione che hai preso, oppure scrivi quanto hai preso ({esempio})."
         ));
+        // Il significato della stella, che da sola non si capiva (Alessio,
+        // 19 settembre 2026).
+        if voce.alimento_id.is_some() {
+            testo.push_str(
+                "\n☆ accanto a una confezione la rende la tua preferita: te la propongo per prima.",
+            );
+        }
     }
 
     let mut rows: Vec<Vec<InlineKeyboardButton>> = confezioni
@@ -7839,8 +7846,14 @@ async fn mostra_presa(
                 format!("lista_spesa:presa:f:{voce_id}:{}", confezione.token),
             )];
             if let Some(alimento_id) = voce.alimento_id {
+                // La stella dice lo stato: vuota se non è la preferita, piena
+                // se lo è. Era sempre piena, e non si capiva a cosa servisse.
                 riga.push(button(
-                    "⭐",
+                    if Some(confezione.prodotto_id) == preferito {
+                        "⭐"
+                    } else {
+                        "☆"
+                    },
                     format!(
                         "lista_spesa:pref:{voce_id}:{alimento_id}:{}",
                         confezione.prodotto_id

@@ -2214,6 +2214,49 @@ di avvio.
 
 **Collaudo dal vivo su Telegram da fare.**
 
+## 2octodecies. Allegati nella procedura guidata, sostituire un pasto, archiviare da amministratore (19 settembre 2026)
+
+Dal collaudo di Alessio (ricette e primi punti del planner), via libera a
+fare tutto insieme. Nessuna migration.
+
+1. **Procedura guidata con gli allegati nello step**: se uno step ha foto o
+   video, la schermata *è* l'allegato, con il testo dello step come
+   didascalia. I video partono da soli e **ricominciano in loop**: Telegram
+   lo fa solo con le animazioni, che sono mute — per una ricetta conta
+   vedere il gesto. Con più allegati `◀️ 📎 1/3 ▶️` li scorre (in tondo);
+   gli step si cambiano con `⏪ Step 2/5 ⏩`, frecce diverse perché sono due
+   cose diverse. Testo troppo lungo per una didascalia (oltre 900
+   caratteri) o file sparito: la schermata resta di testo, come prima.
+2. **`📦 Archivia` bloccato per l'amministratore** su una ricetta del
+   catalogo: il menù lo mostrava, ma il controllo che scatta premendolo
+   (`ensure_recipe_owner_ui`) accettava solo il proprietario. Ora
+   l'archiviazione ha il suo controllo (`can_archive_recipe`); l'eliminazione
+   resta al proprietario, con il messaggio giusto ("eliminare", non più
+   "archiviare").
+3. **Una foto con i pulsanti è una schermata**: prima il bot la trattava
+   come allegato di passaggio, e la schermata di prima restava sopra.
+   `ContextRequest::come_schermata` la fa sostituire alla precedente come
+   ogni altra, e sotto la foto la navigazione è a sole icone `⬅️ | 💡 | 🏠`
+   — i pulsanti sono larghi quanto la foto, e con le parole venivano
+   tagliati.
+4. **Righe dei pasti con un'icona sola**, quella dello stato: `🍲 ☕
+   Colazione` metteva due icone attaccate e l'occhio non sapeva quale
+   guardare. Il tipo di pasto resta scritto per esteso; `🍲` resta.
+5. **Sostituire un pasto**: `🔁 Sostituisci` ora c'è **prima** di mangiare
+   (da preparare e preparato) e porta dritti alla scelta della ricetta; se
+   il pasto era preparato chiede prima se gli ingredienti ci sono ancora (sì
+   → tornano in casa; no → restano tolti ma non sono più del pasto,
+   `dispensa::dimentica_scarico_pasto`). Dopo aver mangiato il pulsante si
+   chiama `✏️ Ho mangiato altro`: non si sostituisce, si corregge. Alessio
+   proponeva di toglierlo sul consumato; gliel'ho sconsigliato perché
+   correggere cosa si è mangiato è proprio il caso per cui era nato.
+6. **La stellina del preferito** non si capiva: ora è `☆` se la confezione
+   non è la preferita e `⭐` se lo è, con una riga che spiega a cosa serve.
+
+4 nuovi test. Totale 458.
+
+**Collaudo dal vivo su Telegram da fare.**
+
 ## 3. Stato tecnico verificato
 
 - **60 migration** nel repository, tutte **applicate** al database reale
@@ -2228,7 +2271,8 @@ di avvio.
 - pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa,
   punto 1 della sezione 6): `fmt`, `check --locked`,
   `clippy --all-targets --locked -- -D warnings`, `test --locked` —
-  **455 test** (451 prima della sezione 2septdecies, 450 prima della
+  **458 test** (455 prima della sezione 2octodecies, 451 prima della
+  sezione 2septdecies, 450 prima della
   sezione 2sexdecies, 448 prima del giro
   della sezione 2quindecies, 445 prima
   del giro della sezione 2quaterdecies, 437 prima

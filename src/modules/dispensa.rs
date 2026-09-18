@@ -491,6 +491,33 @@ pub async fn destinazione_per(
 /// l'utente (`true`) o l'ha dedotto il bot da nome e categoria (`false`).
 /// Serve alla sezione Alimenti, dove il posto si vede e si cambia prima
 /// ancora di avere la roba in casa (chiesto da Alessio il 18 settembre 2026).
+/// Il pasto aveva preso le sue scorte, ma quegli ingredienti sono stati
+/// usati o buttati e il pasto cambia piatto (19 settembre 2026, "🔁
+/// Sostituisci" su un pasto preparato). Le scorte restano tolte — la roba
+/// non c'è più — ma i movimenti non sono più di questo pasto, e il pasto
+/// torna a poter prendere le scorte del piatto nuovo.
+pub async fn dimentica_scarico_pasto(pool: &SqlitePool, pasto_id: i64) -> anyhow::Result<()> {
+    let mut tx = pool
+        .begin()
+        .await
+        .context("Impossibile aprire la transazione")?;
+    sqlx::query("DELETE FROM scorte_movimenti WHERE pasto_id = ? AND restituito_il IS NULL")
+        .bind(pasto_id)
+        .execute(&mut *tx)
+        .await
+        .context("Impossibile staccare i movimenti dal pasto")?;
+    sqlx::query(
+        "UPDATE planner_pasti SET preparato_il = NULL, scorte_scalate_il = NULL, \
+         scorte_scalate_automaticamente = 0, scorte_mancanti = NULL WHERE id = ?",
+    )
+    .bind(pasto_id)
+    .execute(&mut *tx)
+    .await
+    .context("Impossibile azzerare lo scarico del pasto")?;
+    tx.commit().await.context("Impossibile salvare")?;
+    Ok(())
+}
+
 pub async fn destinazione_alimento(
     pool: &SqlitePool,
     alimento_id: i64,
@@ -3204,6 +3231,57 @@ mod tests {
         );
         esegui(RIAPRI).await.expect("di nuovo pianificato");
         esegui(CAMBIA).await.expect("un pianificato cambia ricetta");
+    }
+
+    /// "🔁 Sostituisci" su un pasto preparato, ingredienti usati o buttati
+    /// (19 settembre 2026): le scorte restano tolte, ma il pasto torna libero
+    /// di prendere quelle del piatto nuovo.
+    #[tokio::test]
+    async fn uno_scarico_dimenticato_lascia_le_scorte_tolte_e_libera_il_pasto() {
+        let pool = test_pool().await;
+        let (user_id, space_id) = utente_e_spazio(&pool).await;
+
+        crate::identity::with_actor(actor(user_id, space_id), async {
+            let pasta = alimento(&pool, "Pasta", "cereali").await;
+            aggiungi_scorta(
+                &pool,
+                Conservazione::Dispensa,
+                Some(IdentitaCatalogo::Alimento(pasta)),
+                "Pasta",
+                500.0,
+                "g",
+            )
+            .await
+            .unwrap();
+            let pasto = pasto_con(&pool, user_id, space_id, pasta, 200.0).await;
+            assert!(scala_scorte_per_pasto(&pool, pasto, false).await.unwrap() > 0);
+            sqlx::query(
+                "UPDATE planner_pasti SET preparato_il = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?",
+            )
+            .bind(pasto)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+            dimentica_scarico_pasto(&pool, pasto).await.expect("dimentica");
+
+            let rimaste = gruppi_del_luogo(&pool, Conservazione::Dispensa).await.unwrap();
+            assert_eq!(rimaste[0].quantita_base, 300.0, "la roba usata non torna");
+            let (preparato, scalato): (Option<String>, Option<String>) = sqlx::query_as(
+                "SELECT preparato_il, scorte_scalate_il FROM planner_pasti WHERE id = ?",
+            )
+            .bind(pasto)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            assert_eq!((preparato, scalato), (None, None));
+            // Restituire adesso non rimette niente: i movimenti non sono più
+            // di questo pasto.
+            assert_eq!(restituisci_scorte_pasto(&pool, pasto, false).await.unwrap(), 0);
+            // E il pasto può prendere di nuovo le sue scorte.
+            assert!(scala_scorte_per_pasto(&pool, pasto, false).await.unwrap() > 0);
+        })
+        .await;
     }
 
     #[tokio::test]

@@ -2,6 +2,21 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_GUIDATA_SOSTITUISCI_20260919 -->
+# 19/09/2026 — Allegati nella procedura guidata, sostituire un pasto
+
+- **Procedura guidata**: lo step con una foto o un video la mostra subito,
+  con il testo come didascalia; i video girano in loop (senza audio), e più
+  allegati si scorrono con `◀️ 1/3 ▶️`.
+- **`🔁 Sostituisci` prima di mangiare**, con la domanda sugli ingredienti
+  se il pasto era già preparato; dopo, `✏️ Ho mangiato altro`.
+- **Righe dei pasti con un'icona sola**, quella dello stato.
+- **Foto con i pulsanti**: sostituiscono la schermata di prima invece di
+  restarle sotto, e la navigazione sotto la foto è `⬅️ | 💡 | 🏠`.
+- **`📦 Archivia`** funziona per l'amministratore sulle ricette del
+  catalogo.
+- **Stellina del preferito**: `☆` / `⭐` e una riga che spiega a cosa serve.
+
 <!-- CHANGELOG_COLLAUDO_RICETTE_20260918 -->
 # 18/09/2026 — Dal collaudo delle ricette
 

@@ -276,6 +276,19 @@ se l'allegato è stato aperto dalla modifica (`recipe:media:item:{id}:modifica`)
 alla procedura guidata altrimenti. Anche la conferma di eliminazione è la
 foto stessa, con la domanda come didascalia.
 
+### Procedura guidata con gli allegati (19 settembre 2026)
+
+Uno step con foto o video si mostra **con l'allegato**: la schermata è la
+foto (o il video), con il testo dello step come didascalia e i pulsanti
+sotto. I video si mandano come animazione, quindi partono da soli e
+**girano in loop**, senza audio. Con più allegati `◀️ 📎 1/3 ▶️` li scorre
+in tondo senza cambiare step; gli step si cambiano con `⏪ Step 2/5 ⏩`
+(`✅` sull'ultimo). Sotto la foto la navigazione è `⬅️ | 💡 | 🏠`.
+
+Oltre 900 caratteri il testo non sta in una didascalia: lo step resta una
+schermata di testo con `📎 Vedi foto/video dello step`. Lo stesso se il file
+non è più sul telefono.
+
 ### "📝 Riscrivi tutto": come si divide il testo
 
 Un passaggio per riga, oppure separati da una riga vuota, oppure tutto su

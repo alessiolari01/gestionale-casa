@@ -18,7 +18,7 @@ use std::{
 
 use sqlx::SqlitePool;
 use teloxide::{
-    payloads::{SendMessage, SendPhoto, SendVideo},
+    payloads::{SendAnimation, SendMessage, SendPhoto, SendVideo},
     prelude::Requester,
     requests::{HasPayload, Output, Payload, Request},
     types::{
@@ -469,6 +469,27 @@ impl ContextBot {
         )
     }
 
+    /// Un video mandato come animazione: parte da solo e **ricomincia in
+    /// loop**, ma senza audio. È così che Telegram fa girare in loop un video
+    /// (19 settembre 2026, procedura guidata delle ricette).
+    pub fn send_animation<C>(
+        &self,
+        chat_id: C,
+        animation: InputFile,
+    ) -> ContextRequest<<TelegramBot as Requester>::SendAnimation>
+    where
+        C: Into<Recipient>,
+    {
+        ContextRequest::new(
+            self.inner.send_animation(chat_id, animation),
+            self.contexts.clone(),
+            self.inner.clone(),
+            OutputMode::TransientMedia,
+            true,
+            self.pool.clone(),
+        )
+    }
+
     pub fn send_video<C>(
         &self,
         chat_id: C,
@@ -590,6 +611,27 @@ impl ImprovePayload for SendPhoto {
     }
 }
 
+impl ImprovePayload for SendAnimation {
+    fn chat_id(&self) -> &Recipient {
+        &self.chat_id
+    }
+
+    fn context_text(&self) -> String {
+        self.caption
+            .clone()
+            .unwrap_or_else(|| "🎥 Video del gestionale".to_string())
+    }
+
+    fn reply_markup_mut(&mut self) -> &mut Option<ReplyMarkup> {
+        &mut self.reply_markup
+    }
+
+    fn prepend_text(&mut self, avviso: &str) {
+        let base = self.caption.clone().unwrap_or_default();
+        self.caption = Some(format!("{avviso}\n\n{base}"));
+    }
+}
+
 impl ImprovePayload for SendVideo {
     fn chat_id(&self) -> &Recipient {
         &self.chat_id
@@ -625,6 +667,10 @@ pub(crate) struct ContextRequest<R> {
     mode: OutputMode,
     include_improve: bool,
     pool: SqlitePool,
+    /// Riga di navigazione a sole icone (`⬅️ | 💡 | 🏠`): sotto una foto i
+    /// pulsanti sono larghi quanto la foto, e con le parole venivano tagliati
+    /// ("Indietr…", "Miglior…") — visto da Alessio il 19 settembre 2026.
+    compatta: bool,
 }
 
 impl<R> ContextRequest<R> {
@@ -643,7 +689,19 @@ impl<R> ContextRequest<R> {
             mode,
             include_improve,
             pool,
+            compatta: false,
         }
+    }
+
+    /// Una foto o un video che porta i pulsanti di navigazione **è** una
+    /// schermata: sostituisce la precedente come ogni altra, invece di
+    /// restarle sotto come un allegato di passaggio (prima si vedevano due
+    /// schermate una sopra l'altra). E la sua riga di navigazione è a sole
+    /// icone, perché sotto una foto lo spazio è poco.
+    pub fn come_schermata(mut self) -> Self {
+        self.mode = OutputMode::Ui;
+        self.compatta = true;
+        self
     }
 }
 
@@ -667,9 +725,15 @@ where
             .contexts
             .create_snapshot(chat_id.0, &context_text, original_keyboard);
         let improve = InlineKeyboardButton::callback(
-            "💡 Migliora".to_string(),
+            if self.compatta {
+                "💡"
+            } else {
+                "💡 Migliora"
+            }
+            .to_string(),
             format!("improve:context:{token}"),
         );
+        let compatta = self.compatta;
 
         let markup = payload.reply_markup_mut();
         match markup.take() {
@@ -681,7 +745,7 @@ where
             None => {}
             Some(ReplyMarkup::InlineKeyboard(mut keyboard)) => {
                 if self.include_improve {
-                    inserisci_migliora(&mut keyboard, improve);
+                    inserisci_migliora(&mut keyboard, improve, compatta);
                 }
                 self.contexts.remember_callback_labels(chat_id.0, &keyboard);
                 *markup = Some(ReplyMarkup::InlineKeyboard(keyboard));
@@ -982,7 +1046,11 @@ fn punta_al_menu(button: &InlineKeyboardButton) -> bool {
 ///   2026 su "🗑️ Rimuovi voci" della lista della spesa, e il difetto era di
 ///   ogni schermata costruita così);
 /// - nessuna delle due: Migliora va in una riga sua.
-fn inserisci_migliora(keyboard: &mut InlineKeyboardMarkup, improve: InlineKeyboardButton) {
+fn inserisci_migliora(
+    keyboard: &mut InlineKeyboardMarkup,
+    improve: InlineKeyboardButton,
+    compatta: bool,
+) {
     if let Some(row) = keyboard
         .inline_keyboard
         .iter_mut()
@@ -1010,7 +1078,12 @@ fn inserisci_migliora(keyboard: &mut InlineKeyboardMarkup, improve: InlineKeyboa
     {
         row.push(improve);
         row.push(InlineKeyboardButton::callback(
-            "🏠 Menù principale".to_string(),
+            if compatta {
+                "🏠"
+            } else {
+                "🏠 Menù principale"
+            }
+            .to_string(),
             "menu:main".to_string(),
         ));
         return;
@@ -1045,6 +1118,18 @@ mod tests {
     }
 
     #[test]
+    fn sotto_una_foto_la_navigazione_e_a_sole_icone() {
+        let mut keyboard = InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
+            "⬅️".to_string(),
+            "x:back".to_string(),
+        )]]);
+        let migliora =
+            InlineKeyboardButton::callback("💡".to_string(), "improve:context:1".to_string());
+        inserisci_migliora(&mut keyboard, migliora, true);
+        assert_eq!(etichette(&keyboard), vec![vec!["⬅️", "💡", "🏠"]]);
+    }
+
+    #[test]
     fn la_riga_di_navigazione_e_sempre_indietro_migliora_menu() {
         // Caso normale: Indietro e Menù già in riga.
         let mut keyboard = InlineKeyboardMarkup::new(vec![vec![
@@ -1054,7 +1139,7 @@ mod tests {
                 "menu:main".to_string(),
             ),
         ]]);
-        inserisci_migliora(&mut keyboard, migliora());
+        inserisci_migliora(&mut keyboard, migliora(), false);
         assert_eq!(
             etichette(&keyboard),
             vec![vec!["⬅️ Indietro", "💡 Migliora", "🏠 Menù principale"]]
@@ -1072,7 +1157,7 @@ mod tests {
                 "x:back".to_string(),
             )],
         ]);
-        inserisci_migliora(&mut keyboard, migliora());
+        inserisci_migliora(&mut keyboard, migliora(), false);
         assert_eq!(
             etichette(&keyboard),
             vec![
@@ -1090,7 +1175,7 @@ mod tests {
             "✅ Sì".to_string(),
             "x:ok".to_string(),
         )]]);
-        inserisci_migliora(&mut keyboard, migliora());
+        inserisci_migliora(&mut keyboard, migliora(), false);
         assert_eq!(
             etichette(&keyboard),
             vec![vec!["✅ Sì".to_string()], vec!["💡 Migliora".to_string()]]

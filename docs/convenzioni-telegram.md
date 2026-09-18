@@ -262,6 +262,18 @@ un `⬅️` da solo e nessun Menù principale. Prima, in quel caso, Migliora
 finiva in una riga a parte e il Menù mancava — Alessio l'ha visto su
 `🗑️ Rimuovi voci`, ma valeva per ogni schermata costruita così.
 
+#### Sotto una foto (19 settembre 2026)
+
+Una foto o un video con i pulsanti di navigazione è una **schermata**:
+sostituisce la precedente (`ContextRequest::come_schermata`), invece di
+restarle sotto come un allegato di passaggio. Sotto una foto i pulsanti
+sono larghi quanto la foto, quindi la riga di navigazione è a sole icone —
+`⬅️ | 💡 | 🏠`, stesso ordine e stesso significato — e le altre azioni vanno
+una per riga.
+
+Nelle righe di un elenco c'è **un'icona di stato sola**: accanto a un'altra
+icona (il tipo di pasto) le due si confondevano.
+
 ### C4. Un simbolo, un significato
 
 | simbolo | significato | dove |

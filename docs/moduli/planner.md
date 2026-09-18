@@ -171,7 +171,25 @@ resto del pasto (ricetta, giorno, tipo, ordine) resta bloccato.
   proprio profilo già spuntato** (quello con `utente_collegato_id`
   dell'utente), e se ne possono aggiungere altri.
 
-## Sostituire un pasto consumato (17 settembre 2026)
+## Sostituire un pasto (19 settembre 2026)
+
+| stato | pulsante | cosa fa |
+|---|---|---|
+| da preparare | `🔁 Sostituisci` | dritti alla scelta della ricetta nuova (giorno, tipo, orario restano) |
+| preparato | `🔁 Sostituisci` | prima chiede se gli ingredienti preparati ci sono ancora, poi come sopra |
+| consumato | `✏️ Ho mangiato altro` | corregge quello che si è segnato (sotto) |
+| saltato | — | c'è `↩️ Riporta a pianificato` |
+
+Su un pasto preparato: "sì" rimette gli ingredienti nelle scorte e il pasto
+torna da preparare; "no, usati o buttati" li lascia tolti ma stacca i
+movimenti dal pasto (`dispensa::dimentica_scarico_pasto`), così il piatto
+nuovo prenderà i suoi. `✏️ Modifica` resta per orario, partecipanti e tipo.
+
+Nell'elenco del giorno ogni pasto ha **un'icona sola**, quella dello stato:
+`🍲 Colazione · Frittata`. Con anche l'icona del tipo (`🍲 ☕`) le due
+stavano attaccate e si confondevano.
+
+## Correggere un pasto consumato (17 settembre 2026)
 
 Chiesto da Alessio: "avevo pianificato la pasta, ho mangiato la pizza". Un
 pasto consumato resta congelato, ma nel suo dettaglio c'è **`🔁 Sostituisci`**:

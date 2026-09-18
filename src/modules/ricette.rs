@@ -1834,9 +1834,9 @@ Scrivi il nome dell'alimento. Il filtro categoria, se attivo, viene mantenuto.",
         }
         _ if data.starts_with("recipe:guided:") => {
             let raw = data.strip_prefix("recipe:guided:").unwrap_or_default();
-            if let Some((recipe_id, page)) = parse_recipe_page(raw) {
+            if let Some((recipe_id, page, allegato)) = parse_guided_position(raw) {
                 sessions.clear_chat(chat_id.0);
-                show_guided_step(bot, chat_id, pool, recipe_id, page).await?;
+                show_guided_step(bot, chat_id, pool, recipe_id, page, allegato).await?;
             } else {
                 show_invalid_action(bot, chat_id).await?;
             }
@@ -2897,7 +2897,7 @@ async fn handle_edit_callback(
         .strip_prefix("recipe:edit:archive:ask:")
         .and_then(parse_positive_i64_str)
     {
-        if ensure_recipe_owner_ui(bot, chat_id, pool, recipe_id).await? {
+        if ensure_recipe_archive_ui(bot, chat_id, pool, recipe_id).await? {
             bot.send_message(chat_id, "⚠️ Archiviare questa ricetta? Non comparirà più negli elenchi normali, ma i dati restano nel database.")
                 .reply_markup(InlineKeyboardMarkup::new(vec![
                     vec![button("📦 Archivia", format!("recipe:edit:archive:yes:{recipe_id}"))],
@@ -3396,12 +3396,23 @@ async fn show_full_procedure(
     Ok(())
 }
 
+/// Uno step della procedura guidata. Dal 19 settembre 2026, se lo step ha
+/// foto o video, **si vede subito**: la schermata è l'allegato stesso, con il
+/// testo dello step come didascalia (chiesto da Alessio). Un video parte da
+/// solo e ricomincia in loop — Telegram lo fa solo con le animazioni, che
+/// sono mute: per una ricetta conta vedere il gesto. Con più allegati li si
+/// scorre con `◀️ 1/3 ▶️` senza perdere lo step.
+///
+/// Se il testo è troppo lungo per una didascalia, o il file non è più sul
+/// telefono, la schermata resta di testo con il pulsante per vedere gli
+/// allegati, come prima.
 async fn show_guided_step(
     bot: &Bot,
     chat_id: ChatId,
     pool: &SqlitePool,
     recipe_id: i64,
     page: i64,
+    allegato: usize,
 ) -> ResponseResult<()> {
     let Some(recipe) = visible_recipe(pool, recipe_id).await.unwrap_or(None) else {
         bot.send_message(chat_id, "⚠️ Ricetta non disponibile.")
@@ -3421,18 +3432,63 @@ async fn show_guided_step(
     }
     let page = page.clamp(0, steps.len() as i64 - 1);
     let step = &steps[page as usize];
-    let media = media_summary(step.photo_count, step.video_count);
-    let mut text = format!(
-        "👨‍🍳 Procedura guidata\n{}\n\nStep {}/{}\n\n{}",
+    let totale = steps.len() as i64;
+    let testo_step = format!(
+        "👨‍🍳 {}\nStep {}/{}\n\n{}",
         recipe.name,
         page + 1,
-        steps.len(),
+        totale,
         step.text
     );
+
+    let allegati = if step.photo_count + step.video_count > 0 {
+        list_step_media(pool, step.id)
+            .await
+            .unwrap_or_else(|error| {
+                tracing::warn!(
+                    ?error,
+                    step_id = step.id,
+                    "Allegati dello step non leggibili"
+                );
+                Vec::new()
+            })
+    } else {
+        Vec::new()
+    };
+
+    if !allegati.is_empty() && testo_step.chars().count() <= DIDASCALIA_MAX {
+        let indice = allegato.min(allegati.len() - 1);
+        let media = &allegati[indice];
+        let path = PathBuf::from(&media.path);
+        if path.exists() {
+            let tastiera = guided_media_keyboard(recipe_id, page, totale, indice, allegati.len());
+            if media.kind == "foto" {
+                bot.send_photo(chat_id, InputFile::file(path))
+                    .caption(testo_step)
+                    .reply_markup(tastiera)
+                    .come_schermata()
+                    .await?;
+            } else {
+                bot.send_animation(chat_id, InputFile::file(path))
+                    .caption(testo_step)
+                    .reply_markup(tastiera)
+                    .come_schermata()
+                    .await?;
+            }
+            return Ok(());
+        }
+        tracing::warn!(
+            media_id = media.id,
+            "File dell'allegato non trovato: step in testo"
+        );
+    }
+
+    // Schermata di testo: nessun allegato, testo troppo lungo o file mancante.
+    let mut text = testo_step;
+    let media = media_summary(step.photo_count, step.video_count);
     if !media.is_empty() {
         text.push_str(&format!("\n\n{media}"));
     }
-
     let mut keyboard = Vec::new();
     if step.photo_count + step.video_count > 0 {
         keyboard.push(vec![button(
@@ -3447,11 +3503,8 @@ async fn show_guided_step(
             format!("recipe:guided:{recipe_id}:{}", page - 1),
         ));
     }
-    nav.push(button(
-        format!("{}/{}", page + 1, steps.len()),
-        "recipe:noop",
-    ));
-    if page + 1 < steps.len() as i64 {
+    nav.push(button(format!("{}/{}", page + 1, totale), "recipe:noop"));
+    if page + 1 < totale {
         nav.push(button(
             "Step successivo ➡️",
             format!("recipe:guided:{recipe_id}:{}", page + 1),
@@ -3475,6 +3528,70 @@ async fn show_guided_step(
         .reply_markup(InlineKeyboardMarkup::new(keyboard))
         .await?;
     Ok(())
+}
+
+/// Pulsanti sotto l'allegato di uno step. Sotto una foto lo spazio è poco,
+/// quindi etichette corte:
+/// - `◀️ 📷 1/3 ▶️` per scorrere gli allegati (solo se più di uno, e gira in
+///   tondo);
+/// - `⏪ Step 2/5 ⏩` per gli step (`✅` sull'ultimo) — frecce diverse da
+///   quelle degli allegati, perché sono due cose diverse;
+/// - `⬅️ | 💡 | 🏠`, come ogni riga di navigazione sotto una foto.
+fn guided_media_keyboard(
+    recipe_id: i64,
+    page: i64,
+    totale_step: i64,
+    indice: usize,
+    totale_allegati: usize,
+) -> InlineKeyboardMarkup {
+    let mut rows = Vec::new();
+    if totale_allegati > 1 {
+        let precedente = (indice + totale_allegati - 1) % totale_allegati;
+        let successivo = (indice + 1) % totale_allegati;
+        rows.push(vec![
+            button(
+                "◀️",
+                format!("recipe:guided:{recipe_id}:{page}:{precedente}"),
+            ),
+            button(
+                format!("📎 {}/{totale_allegati}", indice + 1),
+                "recipe:noop",
+            ),
+            button(
+                "▶️",
+                format!("recipe:guided:{recipe_id}:{page}:{successivo}"),
+            ),
+        ]);
+    }
+    let mut step = Vec::new();
+    if page > 0 {
+        step.push(button(
+            "⏪",
+            format!("recipe:guided:{recipe_id}:{}", page - 1),
+        ));
+    }
+    step.push(button(
+        format!("Step {}/{totale_step}", page + 1),
+        "recipe:noop",
+    ));
+    if page + 1 < totale_step {
+        step.push(button(
+            "⏩",
+            format!("recipe:guided:{recipe_id}:{}", page + 1),
+        ));
+    } else {
+        step.push(button("✅", format!("recipe:guided:finish:{recipe_id}")));
+    }
+    rows.push(step);
+    rows.push(vec![button(
+        "📖 Tutto",
+        format!("recipe:complete:{recipe_id}"),
+    )]);
+    rows.push(vec![
+        button("⬅️", format!("recipe:detail:{recipe_id}")),
+        button("🏠", "menu:main"),
+    ]);
+    InlineKeyboardMarkup::new(rows)
 }
 
 async fn show_guided_finished(
@@ -3584,6 +3701,19 @@ async fn chiedi_eliminazione_allegato(
             button("🏠 Menù principale", "menu:main"),
         ],
     ]);
+    // Sotto la foto lo spazio è poco: ognuno nella sua riga, e la navigazione
+    // a sole icone (`come_schermata`).
+    let tastiera_foto = InlineKeyboardMarkup::new(vec![
+        vec![button(
+            "🗑 Sì, elimina",
+            format!("recipe:edit:md:yes:{recipe_id}:{media_id}"),
+        )],
+        vec![button(
+            "❌ Annulla",
+            format!("recipe:edit:steps:{recipe_id}"),
+        )],
+        vec![button("🏠", "menu:main")],
+    ]);
     let domanda = "⚠️ Eliminare definitivamente questo allegato? Non si può recuperare.";
     let Some((media, _, step_number, _)) = visible_media(pool, media_id).await.unwrap_or(None)
     else {
@@ -3613,12 +3743,14 @@ async fn chiedi_eliminazione_allegato(
     if media.kind == "foto" {
         bot.send_photo(chat_id, InputFile::file(path))
             .caption(didascalia)
-            .reply_markup(tastiera)
+            .reply_markup(tastiera_foto)
+            .come_schermata()
             .await?;
     } else {
         bot.send_video(chat_id, InputFile::file(path))
             .caption(didascalia)
-            .reply_markup(tastiera)
+            .reply_markup(tastiera_foto)
+            .come_schermata()
             .await?;
     }
     Ok(())
@@ -3652,9 +3784,11 @@ async fn show_media_item(
     } else {
         format!("recipe:guided:{recipe_id}:{}", step_number - 1)
     };
+    // Sotto una foto i pulsanti sono larghi quanto la foto: solo icone,
+    // stesso ordine e stesso significato di ogni altra riga di navigazione.
     let tastiera = InlineKeyboardMarkup::new(vec![vec![
-        button("⬅️ Indietro", indietro),
-        button("🏠 Menù principale", "menu:main"),
+        button("⬅️", indietro.clone()),
+        button("🏠", "menu:main"),
     ]]);
     let icona = if media.kind == "foto" { "📷" } else { "🎥" };
     let didascalia = match media.caption.clone() {
@@ -3663,11 +3797,12 @@ async fn show_media_item(
     };
     let path = PathBuf::from(&media.path);
     if !path.exists() {
+        // Senza foto è una schermata di testo: la navigazione per esteso.
         bot.send_message(
             chat_id,
             format!("{didascalia}\n\n⚠️ File allegato non trovato sul dispositivo."),
         )
-        .reply_markup(tastiera)
+        .reply_markup(back_home_keyboard(&indietro))
         .await?;
         return Ok(());
     }
@@ -3675,11 +3810,13 @@ async fn show_media_item(
         bot.send_photo(chat_id, InputFile::file(path))
             .caption(didascalia)
             .reply_markup(tastiera)
+            .come_schermata()
             .await?;
     } else {
         bot.send_video(chat_id, InputFile::file(path))
             .caption(didascalia)
             .reply_markup(tastiera)
+            .come_schermata()
             .await?;
     }
     Ok(())
@@ -5652,6 +5789,50 @@ async fn ensure_recipe_manage_ui(
     }
 }
 
+async fn is_recipe_owner(pool: &SqlitePool, recipe_id: i64, user_id: i64) -> bool {
+    sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM ricette WHERE id = ? AND archiviata = 0 AND proprietario_utente_id = ?)",
+    )
+    .bind(recipe_id)
+    .bind(user_id)
+    .fetch_one(pool)
+    .await
+    .unwrap_or(false)
+}
+
+/// Chi può archiviare: il proprietario, oppure l'amministratore se la
+/// ricetta è del catalogo globale. È lo stesso permesso di `archive_recipe`,
+/// controllato anche **prima** della conferma: il 18 settembre 2026 il menù
+/// mostrava `📦 Archivia` all'amministratore ma questo controllo lo fermava
+/// con "Solo il proprietario può archiviare".
+async fn can_archive_recipe(pool: &SqlitePool, recipe_id: i64, user_id: i64) -> bool {
+    is_recipe_owner(pool, recipe_id, user_id).await
+        || admin_on_global_recipe(pool, recipe_id, user_id)
+            .await
+            .unwrap_or(false)
+}
+
+async fn ensure_recipe_archive_ui(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    recipe_id: i64,
+) -> ResponseResult<bool> {
+    let user_id = identity::current_actor().utente_id.unwrap_or_default();
+    if can_archive_recipe(pool, recipe_id, user_id).await {
+        return Ok(true);
+    }
+    bot.send_message(
+        chat_id,
+        "🔒 Solo il proprietario può archiviare la ricetta.",
+    )
+    .reply_markup(back_home_keyboard(&format!("recipe:detail:{recipe_id}")))
+    .await?;
+    Ok(false)
+}
+
+/// L'eliminazione definitiva resta solo al proprietario: una ricetta del
+/// catalogo si archivia, non si elimina, perché può stare nei pasti di altri.
 async fn ensure_recipe_owner_ui(
     bot: &Bot,
     chat_id: ChatId,
@@ -5659,25 +5840,14 @@ async fn ensure_recipe_owner_ui(
     recipe_id: i64,
 ) -> ResponseResult<bool> {
     let user_id = identity::current_actor().utente_id.unwrap_or_default();
-    let owner: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM ricette WHERE id = ? AND archiviata = 0 AND proprietario_utente_id = ?)",
-    )
-    .bind(recipe_id)
-    .bind(user_id)
-    .fetch_one(pool)
-    .await
-    .unwrap_or(false);
-    if owner {
-        Ok(true)
-    } else {
-        bot.send_message(
-            chat_id,
-            "🔒 Solo il proprietario può archiviare la ricetta.",
-        )
+    if is_recipe_owner(pool, recipe_id, user_id).await {
+        return Ok(true);
+    }
+    // Prima diceva "archiviare" anche quando si provava a eliminare.
+    bot.send_message(chat_id, "🔒 Solo il proprietario può eliminare la ricetta.")
         .reply_markup(back_home_keyboard(&format!("recipe:detail:{recipe_id}")))
         .await?;
-        Ok(false)
-    }
+    Ok(false)
 }
 
 async fn list_recipe_ingredients(
@@ -7227,16 +7397,25 @@ fn parse_two_positive_ids(raw: &str) -> Option<(i64, i64)> {
     }
 }
 
-fn parse_recipe_page(raw: &str) -> Option<(i64, i64)> {
+/// `{ricetta}:{step}` oppure `{ricetta}:{step}:{allegato}` — l'allegato
+/// (da 0) serve a scorrere foto e video dello step nella procedura guidata.
+fn parse_guided_position(raw: &str) -> Option<(i64, i64, usize)> {
     let mut parts = raw.split(':');
     let recipe_id = parts.next().and_then(parse_positive_i64_str)?;
     let page = parts.next().and_then(parse_nonnegative_i64)?;
+    let allegato = match parts.next() {
+        Some(valore) => usize::try_from(parse_nonnegative_i64(valore)?).ok()?,
+        None => 0,
+    };
     if parts.next().is_some() {
-        None
-    } else {
-        Some((recipe_id, page))
+        return None;
     }
+    Some((recipe_id, page, allegato))
 }
+
+/// Oltre questa lunghezza il testo di uno step non sta nella didascalia di
+/// una foto (Telegram ne accetta 1024 caratteri, e c'è anche l'intestazione).
+const DIDASCALIA_MAX: usize = 900;
 
 fn toggle_id(values: &mut Vec<i64>, target: i64) {
     if let Some(index) = values.iter().position(|value| *value == target) {
@@ -8320,6 +8499,7 @@ mod tests {
 
         identity::with_actor(actor(utente_id, 1, "Utente", false), async {
             assert!(!can_edit_recipe(&pool, frittata, utente_id).await.unwrap());
+            assert!(!can_archive_recipe(&pool, frittata, utente_id).await);
             assert!(update_recipe_servings(&pool, frittata, 6).await.is_err());
             assert!(archive_recipe(&pool, frittata).await.is_err());
         })
@@ -8327,6 +8507,13 @@ mod tests {
 
         identity::with_actor(actor(admin_id, 1, "Admin", false), async {
             assert!(can_edit_recipe(&pool, frittata, admin_id).await.unwrap());
+            // Il controllo che scatta premendo `📦 Archivia`, prima della
+            // conferma: è qui che l'amministratore veniva fermato.
+            assert!(can_archive_recipe(&pool, frittata, admin_id).await);
+            assert!(
+                !is_recipe_owner(&pool, frittata, admin_id).await,
+                "eliminare no"
+            );
             update_recipe_servings(&pool, frittata, 3)
                 .await
                 .expect("l'amministratore cambia le porzioni");
@@ -8387,6 +8574,70 @@ mod tests {
         ] {
             assert!(callback.len() <= 64, "{callback}");
         }
+    }
+
+    /// Procedura guidata con gli allegati nello step (19 settembre 2026).
+    #[test]
+    fn la_procedura_guidata_scorre_allegati_e_step() {
+        assert_eq!(parse_guided_position("7:2"), Some((7, 2, 0)));
+        assert_eq!(parse_guided_position("7:2:1"), Some((7, 2, 1)));
+        assert_eq!(parse_guided_position("7:2:1:9"), None);
+        assert_eq!(parse_guided_position("7"), None);
+
+        let etichette = |tastiera: &InlineKeyboardMarkup| -> Vec<Vec<(String, String)>> {
+            tastiera
+                .inline_keyboard
+                .iter()
+                .map(|riga| {
+                    riga.iter()
+                        .map(|pulsante| {
+                            let dati = match &pulsante.kind {
+                                teloxide::types::InlineKeyboardButtonKind::CallbackData(d) => {
+                                    d.clone()
+                                }
+                                _ => String::new(),
+                            };
+                            (pulsante.text.clone(), dati)
+                        })
+                        .collect()
+                })
+                .collect()
+        };
+
+        // Tre allegati, siamo sul primo: ◀️ gira in tondo all'ultimo.
+        let tastiera = etichette(&guided_media_keyboard(7, 1, 5, 0, 3));
+        assert_eq!(
+            tastiera[0][0],
+            ("◀️".to_string(), "recipe:guided:7:1:2".to_string())
+        );
+        assert_eq!(tastiera[0][1].0, "📎 1/3");
+        assert_eq!(
+            tastiera[0][2],
+            ("▶️".to_string(), "recipe:guided:7:1:1".to_string())
+        );
+        // Gli step hanno frecce diverse da quelle degli allegati.
+        assert_eq!(
+            tastiera[1][0],
+            ("⏪".to_string(), "recipe:guided:7:0".to_string())
+        );
+        assert_eq!(
+            tastiera[1][2],
+            ("⏩".to_string(), "recipe:guided:7:2".to_string())
+        );
+        // Navigazione a icone, come sotto ogni foto.
+        let ultima = tastiera.last().unwrap();
+        assert_eq!(ultima[0].0, "⬅️");
+        assert_eq!(ultima[1].0, "🏠");
+
+        // Un allegato solo: niente riga per scorrerli. Ultimo step: ✅.
+        let tastiera = etichette(&guided_media_keyboard(7, 4, 5, 0, 1));
+        assert_eq!(tastiera[0][0].0, "⏪");
+        assert_eq!(tastiera[0].last().unwrap().0, "✅");
+
+        // Id della ricetta al massimo, 999 step e 99 allegati: oltre non ha
+        // senso una ricetta.
+        let callback = format!("recipe:guided:{}:999:99", i64::MAX);
+        assert!(callback.len() <= 64, "{callback}");
     }
 
     #[test]
