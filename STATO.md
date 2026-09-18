@@ -2129,6 +2129,11 @@ Due segnalazioni di Alessio da uno screenshot di `🗑️ Rimuovi voci`.
 
 2 nuovi test. Totale 450.
 
+**Distribuito sull'S9 il 18 settembre 2026** (commit `3ba439a`): CI verde,
+450 test e clippy verdi anche sul telefono, nessuna migration nuova
+(`applied_migrations=60` invariato), `Gestionale Casa online` nel log di
+avvio.
+
 **Collaudo dal vivo su Telegram da fare.**
 
 ## 3. Stato tecnico verificato
