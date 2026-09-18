@@ -2158,9 +2158,8 @@ scorte". D'accordo, con una rifinitura.
 
 1 nuovo test (senza presa fuori dalle scorte, con presa dentro). Totale 451.
 
-**Non ancora sull'S9**: Alessio sta collaudando, e l'aggiornamento del
-telefono ferma il bot per una ventina di minuti. Va insieme alle correzioni
-che usciranno dal collaudo.
+**Distribuito sull'S9 il 18 settembre 2026** insieme alla sezione
+2septdecies (commit `0859c28`).
 
 ## 2septdecies. Dal collaudo delle ricette (18 settembre 2026)
 
@@ -2206,6 +2205,12 @@ insieme. Nessuna migration.
 
 4 nuovi test (provenienza, amministratore sulle ricette globali, divisione
 con pulizia e numerazione in riga, callback nuovi). Totale 455.
+
+**Distribuito sull'S9 il 18 settembre 2026** (commit `0859c28`), insieme
+alla sezione 2sexdecies che aspettava la fine del collaudo delle ricette:
+CI verde, 455 test e clippy verdi anche sul telefono, nessuna migration
+nuova (`applied_migrations=60` invariato), `Gestionale Casa online` nel log
+di avvio.
 
 **Collaudo dal vivo su Telegram da fare.**
 
