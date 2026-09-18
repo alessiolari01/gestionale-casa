@@ -1792,6 +1792,50 @@ pub async fn aggiungi_voce_manuale(
     Ok(id)
 }
 
+/// Un alimento o un prodotto del catalogo messo in lista **senza quantità**
+/// (18 settembre 2026, chiesto da Alessio): "mi serve la pasta, non so
+/// quanta". Diventa una voce a sé, legata al catalogo — così `📦 Ho preso…`
+/// ne riconosce le confezioni — ma fuori dal calcolo del fabbisogno, che
+/// senza un numero non saprebbe cosa sommare.
+///
+/// Alla chiusura non entra nelle scorte (non si sa quanta ne entra), a meno
+/// che si segni con `📦` quanto se ne è preso: allora entra quella.
+pub async fn aggiungi_catalogo_senza_quantita(
+    pool: &SqlitePool,
+    lista_id: i64,
+    identita: IdentitaCatalogo,
+    descrizione: &str,
+) -> anyhow::Result<i64> {
+    let (alimento_id, prodotto_id) = match identita {
+        IdentitaCatalogo::Alimento(id) => (Some(id), None),
+        IdentitaCatalogo::Prodotto(id) => {
+            let alimento: Option<i64> =
+                sqlx::query_scalar("SELECT alimento_id FROM prodotti_alimentari WHERE id = ?")
+                    .bind(id)
+                    .fetch_optional(pool)
+                    .await
+                    .context("Impossibile leggere il prodotto")?;
+            (alimento, Some(id))
+        }
+    };
+    let ordinamento = prossimo_ordinamento(pool, lista_id).await?;
+    let id = sqlx::query(
+        "INSERT INTO liste_spesa_voci \
+         (lista_id, origine, alimento_id, prodotto_alimentare_id, descrizione, ordinamento) \
+         VALUES (?, 'manuale', ?, ?, ?, ?)",
+    )
+    .bind(lista_id)
+    .bind(alimento_id)
+    .bind(prodotto_id)
+    .bind(descrizione)
+    .bind(ordinamento)
+    .execute(pool)
+    .await
+    .context("Impossibile aggiungere la voce")?
+    .last_insert_rowid();
+    Ok(id)
+}
+
 /// Segna/toglie il flag comprato per una riga intera (non quantità
 /// parziale, deciso con Alessio). Il trigger a database impedisce di
 /// toccare gli altri campi mentre `comprato = 1`; il toggle stesso resta
@@ -4550,6 +4594,73 @@ mod db_tests {
         .await;
     }
 
+    /// Voce del catalogo senza quantità (18 settembre 2026): resta fuori
+    /// dalle scorte, a meno che con 📦 si segni quanto se ne è preso.
+    #[tokio::test]
+    async fn una_voce_del_catalogo_senza_quantita_entra_in_casa_solo_con_la_presa() {
+        let pool = test_pool().await;
+        let user_id = create_user(&pool, "Alessio").await;
+        let space_id = create_space(&pool, "Casa").await;
+        add_membership(&pool, space_id, user_id).await;
+        let pasta = create_alimento_globale(&pool, "Pasta").await;
+        let farina = create_alimento_globale(&pool, "Farina").await;
+
+        crate::identity::with_actor(actor(user_id, space_id, "Alessio"), async {
+            let lista = trova_o_crea_lista_attiva(&pool).await.expect("lista");
+            let senza_presa = aggiungi_catalogo_senza_quantita(
+                &pool,
+                lista.id,
+                IdentitaCatalogo::Alimento(pasta),
+                "Pasta",
+            )
+            .await
+            .expect("pasta");
+            let con_presa = aggiungi_catalogo_senza_quantita(
+                &pool,
+                lista.id,
+                IdentitaCatalogo::Alimento(farina),
+                "Farina",
+            )
+            .await
+            .expect("farina");
+
+            let voci = carica_voci(&pool, lista.id).await.expect("voci");
+            assert_eq!(voci.len(), 2);
+            assert!(voci.iter().all(|voce| voce.quantita.is_none()));
+            assert!(
+                voci.iter().all(|voce| voce.alimento_id.is_some()),
+                "restano legate al catalogo"
+            );
+            // Un refresh non le tocca: non sono righe del planner.
+            aggiorna_lista(&pool, &lista).await.expect("refresh");
+            assert_eq!(carica_voci(&pool, lista.id).await.unwrap().len(), 2);
+
+            imposta_comprato(&pool, senza_presa, true)
+                .await
+                .expect("spunta");
+            registra_presa(&pool, con_presa, 1.0, "kg", None)
+                .await
+                .expect("presa");
+            chiudi_spesa(&pool, &lista).await.expect("chiusura");
+
+            let scorte_pasta: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM scorte WHERE alimento_id = ?")
+                    .bind(pasta)
+                    .fetch_one(&pool)
+                    .await
+                    .expect("scorte pasta");
+            assert_eq!(scorte_pasta, 0, "senza quantità non entra in casa");
+            let scorte_farina: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM scorte WHERE alimento_id = ?")
+                    .bind(farina)
+                    .fetch_one(&pool)
+                    .await
+                    .expect("scorte farina");
+            assert_eq!(scorte_farina, 1, "con la presa segnata sì");
+        })
+        .await;
+    }
+
     #[tokio::test]
     async fn eccessi_comprati_segnala_un_pasto_tolto_dal_planner() {
         let pool = test_pool().await;
@@ -5731,6 +5842,21 @@ fn annulla_keyboard() -> InlineKeyboardMarkup {
         button("❌ Annulla", "lista_spesa:add:cancel"),
         button("🏠 Menù principale", "menu:main"),
     ]])
+}
+
+/// Come `quantita_keyboard`, ma per una voce del catalogo (18 settembre
+/// 2026): anche lì si può non sapere quanta ne serve.
+fn quantita_catalogo_keyboard() -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![
+        vec![button(
+            "➖ Senza quantità",
+            "lista_spesa:add:catalogo:senza",
+        )],
+        vec![
+            button("❌ Annulla", "lista_spesa:add:cancel"),
+            button("🏠 Menù principale", "menu:main"),
+        ],
+    ])
 }
 
 fn quantita_keyboard() -> InlineKeyboardMarkup {
@@ -6940,7 +7066,7 @@ Lo leggo io, poi lo cerco su Open Food Facts e segno la confezione che hai preso
                     chat_id,
                     testo_scelta_quantita_catalogo(&nome, unita_default.as_deref()),
                 )
-                .reply_markup(annulla_keyboard())
+                .reply_markup(quantita_catalogo_keyboard())
                 .await?;
             }
             Ok(None) => {
@@ -6973,7 +7099,7 @@ Lo leggo io, poi lo cerco su Open Food Facts e segno la confezione che hai preso
                     chat_id,
                     testo_scelta_quantita_catalogo(&descrizione, Some(&unita_default)),
                 )
-                .reply_markup(annulla_keyboard())
+                .reply_markup(quantita_catalogo_keyboard())
                 .await?;
             }
             Ok(None) => {
@@ -6984,6 +7110,37 @@ Lo leggo io, poi lo cerco su Open Food Facts e segno la confezione che hai preso
                 invalid(bot, chat_id).await?;
             }
         }
+        return Ok(true);
+    }
+    if data == "lista_spesa:add:catalogo:senza" {
+        let Some(ListaSpesaConversationState::AwaitingQuantitaCatalogo {
+            identita,
+            descrizione,
+            ..
+        }) = sessions.get(chat_id.0)
+        else {
+            expired(bot, chat_id).await?;
+            return Ok(true);
+        };
+        sessions.clear_chat(chat_id.0);
+        let avviso = match trova_o_crea_lista_attiva(pool).await {
+            Ok(lista) => {
+                match aggiungi_catalogo_senza_quantita(pool, lista.id, identita, &descrizione)
+                    .await
+                {
+                    Ok(_) => "✅ Voce aggiunta senza quantità.\nNon entra nelle scorte, a meno che con 📦 non segni quanto ne hai preso.".to_string(),
+                    Err(errore) => {
+                        tracing::warn!(?errore, "Aggiunta dal catalogo senza quantità fallita");
+                        "⚠️ Non riesco a salvare la voce.".to_string()
+                    }
+                }
+            }
+            Err(errore) => {
+                tracing::warn!(?errore, "Lista non disponibile");
+                "⚠️ Non riesco a salvare la voce.".to_string()
+            }
+        };
+        show_lista(bot, chat_id, pool, Some(&avviso)).await?;
         return Ok(true);
     }
     if data == "lista_spesa:add:cancel" {
@@ -8299,8 +8456,10 @@ async fn show_lista(
             ),
             format!("lista_spesa:toggle:{}", voce.id),
         )];
-        // "📦 Ho preso…" solo dove c'è una quantità da correggere.
-        if voce.quantita.is_some() {
+        // "📦 Ho preso…" dove c'è una quantità da correggere, e sulle voci del
+        // catalogo senza quantità: è da lì che si dice quanto se ne è preso, e
+        // solo così entrano nelle scorte (18 settembre 2026).
+        if voce.quantita.is_some() || voce.alimento_id.is_some() {
             riga.push(button("📦", format!("lista_spesa:presa:{}", voce.id)));
         }
         rows.push(riga);

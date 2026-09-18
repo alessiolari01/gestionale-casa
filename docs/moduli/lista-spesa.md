@@ -457,6 +457,23 @@ saltare.
 Tutto il resto — negozi, prezzi per negozio, preferiti, codice a barre,
 Open Food Facts e Open Prices — è in `docs/moduli/mercato.md`.
 
+## Dal catalogo senza quantità (18 settembre 2026)
+
+Dopo aver scelto un alimento o un prodotto dal catalogo, `➖ Senza quantità`
+lo mette in lista senza numero (`aggiungi_catalogo_senza_quantita`). È una
+voce `manuale` legata al catalogo — `alimento_id` e, per un prodotto,
+`prodotto_alimentare_id` — quindi:
+
+- non entra nel calcolo del fabbisogno e un refresh non la tocca;
+- si rimuove come le altre voci aggiunte a mano (anche con `🗑️ Rimuovi
+  tutte`);
+- ha `📦`, perché è legata al catalogo: segnando quanto se ne è preso, alla
+  chiusura entra nelle scorte con quella quantità; **senza, non entra**
+  (`dispensa::ingresso_da_chiusura` salta le voci senza quantità).
+
+Una voce senza quantità non si somma a una riga del planner dello stesso
+alimento: compaiono due righe, perché una non ha un numero da sommare.
+
 ## Rimuovere tutte le aggiunte (18 settembre 2026)
 
 In `🗑️ Rimuovi voci`, con almeno due voci, c'è `🗑️ Rimuovi tutte (N)`:

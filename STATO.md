@@ -2136,6 +2136,32 @@ avvio.
 
 **Collaudo dal vivo su Telegram da fare.**
 
+## 2sexdecies. Voci del catalogo senza quantità (18 settembre 2026)
+
+Chiesto da Alessio: "dai la possibilità di mettere senza quantità anche
+quando si cerca un prodotto vero; senza quantità non venga contata nelle
+scorte". D'accordo, con una rifinitura.
+
+- Scegliendo un alimento o un prodotto dal catalogo c'è `➖ Senza quantità`,
+  come già per le voci libere. La voce resta **legata al catalogo** ma è una
+  riga a sé (`origine = 'manuale'`, con `alimento_id` e
+  `prodotto_alimentare_id`): fuori dal calcolo del fabbisogno, che senza un
+  numero non saprebbe cosa sommare.
+- **Alla chiusura non entra nelle scorte** — era già la regola per ogni voce
+  senza quantità (`dispensa::ingresso_da_chiusura` le salta).
+- **La rifinitura**: su queste voci resta `📦`, così se al supermercato la
+  confezione la prendi davvero puoi dire quanto (o fotografarne il codice a
+  barre), e allora entra in casa quella quantità.
+- **Il limite, detto**: se il planner chiede già 200 g di pasta e aggiungi
+  "Pasta" senza quantità, in lista ci sono due righe. Non si possono
+  sommare, perché una delle due non ha un numero.
+
+1 nuovo test (senza presa fuori dalle scorte, con presa dentro). Totale 451.
+
+**Non ancora sull'S9**: Alessio sta collaudando, e l'aggiornamento del
+telefono ferma il bot per una ventina di minuti. Va insieme alle correzioni
+che usciranno dal collaudo.
+
 ## 3. Stato tecnico verificato
 
 - **60 migration** nel repository, tutte **applicate** al database reale
@@ -2150,7 +2176,8 @@ avvio.
 - pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa,
   punto 1 della sezione 6): `fmt`, `check --locked`,
   `clippy --all-targets --locked -- -D warnings`, `test --locked` —
-  **450 test** (448 prima del giro della sezione 2quindecies, 445 prima
+  **451 test** (450 prima della sezione 2sexdecies, 448 prima del giro
+  della sezione 2quindecies, 445 prima
   del giro della sezione 2quaterdecies, 437 prima
   del giro della sezione 2terdecies, 428 dopo la
   consegna A e prima della consegna B della sezione 2duodecies, 419 prima

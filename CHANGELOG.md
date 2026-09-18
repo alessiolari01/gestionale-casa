@@ -2,6 +2,15 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_SENZA_QUANTITA_20260918 -->
+# 18/09/2026 — Voci del catalogo senza quantità
+
+- Scegliendo un alimento o un prodotto dal catalogo c'è anche
+  `➖ Senza quantità`. La voce resta legata al catalogo ma non entra nelle
+  scorte alla chiusura, a meno che con `📦` si segni quanto se ne è preso.
+- Limite: una voce senza quantità non si somma a quella del planner dello
+  stesso alimento, quindi compaiono due righe.
+
 <!-- CHANGELOG_NAVIGAZIONE_RIMUOVI_20260918 -->
 # 18/09/2026 — Riga di navigazione ovunque, "rimuovi tutte" nella lista
 
