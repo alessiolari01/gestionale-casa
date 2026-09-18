@@ -2092,14 +2092,24 @@ perché il resto del bot conta su quell'invariante.
 avviso, prodotti non alimentari nel catalogo, categorie non doppie. Totale
 447.
 
+**25 ricette classiche nel catalogo globale** (risposta 1, opzione a):
+spaghetti al pomodoro, pasta al pesto, risotto ai funghi, frittata, pizza in
+teglia, pollo al forno… Ingredienti **e** passaggi sono scritti da me, con
+parole mie, su piatti di tradizione: non sono copiati da GialloZafferano né
+da altri siti, che è esattamente quello che l'opzione (a) chiedeva di
+evitare. `fonte_url` resta vuoto — non ho modo di verificare l'indirizzo di
+una pagina di quel sito, e un link morto è peggio di nessun link: il link lo
+aggiunge Alessio con `🔗 Fonte della ricetta`, che mostra il pulsante.
+
 **Collaudo dal vivo su Telegram da fare.**
 
 ## 3. Stato tecnico verificato
 
-- **59 migration** nel repository. Applicate al database reale dell'S9 le
+- **60 migration** nel repository. Applicate al database reale dell'S9 le
   prime 58 (sezione 2terdecies), il 18 settembre 2026, verificato leggendo
   `applied_migrations=58` nel log di avvio del bot dopo il deploy — non
-  dedotto. **Da applicare**: `20260918140000_catalogo_esteso.sql`. Né il secondo giro
+  dedotto. **Da applicare**: `20260918140000_catalogo_esteso.sql` e
+  `20260918150000_ricette_classiche.sql`. Né il secondo giro
   di correzioni del 12 settembre 2026 (sezione 2septies) né le tre
   rifiniture del 13 settembre 2026 (sezione 2octies) avevano migration
   proprie: lavoravano su schema già esistente, confermato di nuovo
@@ -2107,7 +2117,7 @@ avviso, prodotti non alimentari nel catalogo, categorie non doppie. Totale
 - pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa,
   punto 1 della sezione 6): `fmt`, `check --locked`,
   `clippy --all-targets --locked -- -D warnings`, `test --locked` —
-  **447 test** (445 prima del giro della sezione 2quaterdecies, 437 prima
+  **448 test** (445 prima del giro della sezione 2quaterdecies, 437 prima
   del giro della sezione 2terdecies, 428 dopo la
   consegna A e prima della consegna B della sezione 2duodecies, 419 prima
   della consegna A,

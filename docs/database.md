@@ -375,6 +375,18 @@ alimentari — un test verifica l'invariante. Le voci nuove le ricevono a
 `verificare`; quelle di casa e igiene portano la nota "Non è un alimento",
 perché lì la domanda non ha senso.
 
+## Step 7.4nonies: ricette classiche nel catalogo (18 settembre 2026)
+
+`migrations/20260918150000_ricette_classiche.sql`. Venticinque ricette di
+base nel catalogo globale (`ricette.catalogo_globale = 1`, quindi senza
+proprietario), ognuna con i suoi ingredienti collegati agli alimenti del
+catalogo e il procedimento in `ricetta_step`.
+
+`fonte_nome` vale `Catalogo del bot` e `fonte_url` resta **vuoto**: il testo
+è scritto dal modello, non copiato, e nessun indirizzo viene inventato. Un
+test verifica che nessuna ricetta del catalogo abbia un link e che non ce ne
+siano di incomplete.
+
 ## Step 7.4septies: legenda, prodotti di marca, fonte delle ricette (18 settembre 2026)
 
 Tre migration dal collaudo di Alessio.

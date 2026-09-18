@@ -16,6 +16,9 @@ in `STATO.md`, sezione 2quaterdecies.
 - **Catalogo esteso**: 67 voci e 157 prodotti in più (247 in tutto), con le
   categorie nuove **🧼 Casa e pulizia** e **🧴 Igiene personale** —
   detersivi, carta igienica, dentifricio, lattine, succhi, surgelati.
+- **25 ricette classiche** nel catalogo globale, con ingredienti e passaggi
+  scritti dal bot: niente testo copiato da siti altrui, e nessun link
+  inventato — quello lo aggiunge l'utente con `🔗 Fonte della ricetta`.
 - I test non contano più gli alimenti a uno a uno: il catalogo cresce.
 
 <!-- CHANGELOG_COLLAUDO_AB_20260918 -->

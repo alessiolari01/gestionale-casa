@@ -7339,11 +7339,20 @@ mod tests {
         let rows = search_by_ingredients(&pool, &[food_a.id, food_b.id], user_id, 1, false, 10)
             .await
             .expect("ricerca OR");
-        assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0].recipe_id, recipe_a);
-        assert_eq!(rows[0].matched_ingredients, 2);
-        assert_eq!(rows[1].recipe_id, recipe_b);
-        assert_eq!(rows[1].matched_ingredients, 1);
+        // Il catalogo globale puo' contenere altre ricette con gli stessi
+        // alimenti (le classiche del 18 settembre 2026): qui contano le due
+        // create dal test, il loro ordine e quante corrispondenze hanno.
+        let posizione_a = rows
+            .iter()
+            .position(|row| row.recipe_id == recipe_a)
+            .expect("ricetta A fra i risultati");
+        let posizione_b = rows
+            .iter()
+            .position(|row| row.recipe_id == recipe_b)
+            .expect("ricetta B fra i risultati");
+        assert!(posizione_a < posizione_b, "prima chi ne ha di piu'");
+        assert_eq!(rows[posizione_a].matched_ingredients, 2);
+        assert_eq!(rows[posizione_b].matched_ingredients, 1);
     }
 
     #[tokio::test]
@@ -7599,7 +7608,9 @@ mod tests {
         identity::with_actor(actor(user_id, 1, "Chef", false), async {
             let recipe_id = save_recipe(&pool, 99, &draft).await.expect("salvataggio");
 
-            let ricette = list_visible_recipes(&pool, 0, 5).await.expect("elenco");
+            // Il catalogo globale porta gia' 25 ricette classiche: la mia sta
+            // in qualche pagina, non per forza nella prima.
+            let ricette = list_visible_recipes(&pool, 0, 500).await.expect("elenco");
             assert!(ricette.iter().any(|ricetta| ricetta.id == recipe_id));
 
             let ingredienti = list_recipe_ingredients(&pool, recipe_id)
@@ -7932,6 +7943,50 @@ mod tests {
         .await
         .expect("conteggio rotti");
         assert_eq!(rotti, 0);
+    }
+
+    /// Le ricette classiche del catalogo (18 settembre 2026): devono esserci,
+    /// essere complete e non contenere testo copiato da nessun sito — il
+    /// campo `fonte_url` resta vuoto proprio per questo.
+    #[tokio::test]
+    async fn le_ricette_classiche_arrivano_col_catalogo() {
+        let pool = test_pool().await;
+        let quante: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM ricette WHERE catalogo_globale = 1")
+                .fetch_one(&pool)
+                .await
+                .expect("conteggio ricette");
+        assert!(quante >= 25, "ricette classiche mancanti: {quante}");
+
+        // Una ricetta senza ingredienti o senza procedimento non serve a
+        // niente: qui non ce ne devono essere.
+        let vuote: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM ricette r WHERE r.catalogo_globale = 1 \
+             AND (NOT EXISTS (SELECT 1 FROM ricetta_ingredienti i WHERE i.ricetta_id = r.id) \
+                  OR NOT EXISTS (SELECT 1 FROM ricetta_step s WHERE s.ricetta_id = r.id))",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("conteggio incomplete");
+        assert_eq!(vuote, 0, "una ricetta del catalogo è incompleta");
+
+        let con_link: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM ricette WHERE catalogo_globale = 1 AND fonte_url IS NOT NULL",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("conteggio link");
+        assert_eq!(con_link, 0, "nessun link inventato");
+
+        // La numerazione degli step parte da 1 e non salta.
+        let numerazione: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM ricette r WHERE r.catalogo_globale = 1 \
+             AND (SELECT MIN(numero) FROM ricetta_step s WHERE s.ricetta_id = r.id) <> 1",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("conteggio numerazione");
+        assert_eq!(numerazione, 0);
     }
 
     #[test]

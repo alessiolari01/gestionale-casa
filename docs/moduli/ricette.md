@@ -208,6 +208,23 @@ dettaglio e la gestione scrivono "⚠️ Non riesco a leggere gli
 ingredienti." e lasciano una riga nel log, e un test passa da tutte le
 letture di una ricetta vera.
 
+## Ricette classiche già nel catalogo (18 settembre 2026)
+
+Il catalogo globale contiene venticinque ricette di base — pomodoro, pesto,
+risotto ai funghi, frittata, pizza in teglia, pollo al forno, minestrone… —
+con ingredienti collegati al catalogo alimenti e procedimento in passaggi
+brevi.
+
+**Da dove viene quel testo**: l'ha scritto il modello, con parole sue, su
+piatti di tradizione. Non è copiato da GialloZafferano né da altri siti:
+Alessio ha scelto proprio questa strada (opzione "a" del 18 settembre 2026),
+perché i procedimenti di un sito sono di quel sito. Le ricette portano
+`🔗 Ricetta di Catalogo del bot` e **nessun link**, che si aggiunge a mano
+quando serve.
+
+Sono ricette di base: porzioni e quantità sono indicative e si correggono
+come qualunque altra ricetta.
+
 ### Da dove viene la ricetta (18 settembre 2026)
 
 `🔗 Fonte della ricetta` nel menù di modifica: si incolla un link — il bot
