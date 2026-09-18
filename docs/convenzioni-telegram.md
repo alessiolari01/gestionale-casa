@@ -253,6 +253,15 @@ al testo del **prossimo** messaggio tracciato mandato lì
 (`ContextRequest::send`), una sola volta, qualunque sia la funzione che
 lo manda.
 
+#### C3, garantita dal codice (18 settembre 2026)
+
+La riga `⬅️ Indietro | 💡 Migliora | 🏠 Menù principale` non dipende più
+solo da chi scrive la schermata: `context_bot::inserisci_migliora`, che
+aggiunge `💡 Migliora` a ogni messaggio, completa da solo una riga che ha
+un `⬅️` da solo e nessun Menù principale. Prima, in quel caso, Migliora
+finiva in una riga a parte e il Menù mancava — Alessio l'ha visto su
+`🗑️ Rimuovi voci`, ma valeva per ogni schermata costruita così.
+
 ### C4. Un simbolo, un significato
 
 | simbolo | significato | dove |

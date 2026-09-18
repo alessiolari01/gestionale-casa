@@ -457,6 +457,15 @@ saltare.
 Tutto il resto — negozi, prezzi per negozio, preferiti, codice a barre,
 Open Food Facts e Open Prices — è in `docs/moduli/mercato.md`.
 
+## Rimuovere tutte le aggiunte (18 settembre 2026)
+
+In `🗑️ Rimuovi voci`, con almeno due voci, c'è `🗑️ Rimuovi tutte (N)`:
+toglie le voci scritte a mano **e** gli alimenti e prodotti aggiunti dal
+catalogo (`rimuovi_tutte_le_aggiunte`, in una transazione), dopo una
+conferma C16 che dice quante sono. Le righe dei pasti pianificati restano,
+e la lista si ricalcola subito — senza le aggiunte, torna al solo
+fabbisogno del planner.
+
 ## Foto del codice a barre (18 settembre 2026)
 
 `📦 Ho preso…` → `🏷 Codice a barre` accetta **una foto** oltre alle cifre.

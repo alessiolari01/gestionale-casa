@@ -2,6 +2,18 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_NAVIGAZIONE_RIMUOVI_20260918 -->
+# 18/09/2026 — Riga di navigazione ovunque, "rimuovi tutte" nella lista
+
+- **La riga `⬅️ Indietro | 💡 Migliora | 🏠 Menù principale` ora è
+  garantita dappertutto**: una schermata che aveva solo `⬅️ Indietro` si
+  ritrovava `💡 Migliora` in una riga sotto e nessun Menù principale. Il
+  difetto era di tutte le schermate costruite così; ora si corregge da solo
+  nel punto che aggiunge `💡 Migliora`.
+- **`🗑️ Rimuovi tutte`** nella lista della spesa: via in un colpo le voci
+  scritte a mano e quelle aggiunte dal catalogo, con conferma; restano le
+  voci dei pasti pianificati.
+
 <!-- CHANGELOG_CATALOGO_PREZZI_20260918 -->
 # 18/09/2026 — Elenco dei prodotti, prezzi con data e storico, catalogo esteso
 

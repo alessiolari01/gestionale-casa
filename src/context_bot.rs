@@ -681,41 +681,7 @@ where
             None => {}
             Some(ReplyMarkup::InlineKeyboard(mut keyboard)) => {
                 if self.include_improve {
-                    if let Some(row) = keyboard.inline_keyboard.iter_mut().rev().find(|row| {
-                        row.iter().any(|button| {
-                            matches!(
-                                &button.kind,
-                                InlineKeyboardButtonKind::CallbackData(data) if data == "menu:main"
-                            )
-                        })
-                    }) {
-                        if row.len() < 3 {
-                            // `rposition` e non `position`: quando una riga
-                            // contiene sia `⬅️ Indietro` sia `🏠 Menù
-                            // principale` ed entrambi puntano a `menu:main`,
-                            // cercando dall'inizio si trovava l'Indietro e
-                            // `💡 Migliora` finiva davanti a tutto. Da qui
-                            // venivano le righe `Migliora | Indietro | Menù`
-                            // di Alimentazione e Storico, diverse da ogni
-                            // altra schermata. Il pulsante del menù e'
-                            // l'ultimo della riga: si cerca dal fondo.
-                            let menu_index = row
-                                .iter()
-                                .rposition(|button| {
-                                    matches!(
-                                        &button.kind,
-                                        InlineKeyboardButtonKind::CallbackData(data)
-                                            if data == "menu:main"
-                                    )
-                                })
-                                .unwrap_or(row.len());
-                            row.insert(menu_index, improve);
-                        } else {
-                            keyboard.inline_keyboard.push(vec![improve]);
-                        }
-                    } else {
-                        keyboard.inline_keyboard.push(vec![improve]);
-                    }
+                    inserisci_migliora(&mut keyboard, improve);
                 }
                 self.contexts.remember_callback_labels(chat_id.0, &keyboard);
                 *markup = Some(ReplyMarkup::InlineKeyboard(keyboard));
@@ -998,6 +964,60 @@ fn humanize_callback(data: &str) -> String {
     label.to_string()
 }
 
+fn punta_al_menu(button: &InlineKeyboardButton) -> bool {
+    matches!(
+        &button.kind,
+        InlineKeyboardButtonKind::CallbackData(data) if data == "menu:main"
+    )
+}
+
+/// Mette `💡 Migliora` nella riga di navigazione, così che la riga sia
+/// sempre `⬅️ Indietro | 💡 Migliora | 🏠 Menù principale` (C3).
+///
+/// Tre casi:
+/// - c'è già un `🏠 Menù principale`: Migliora va subito prima;
+/// - c'è solo `⬅️ Indietro` da solo in una riga, senza Menù: Migliora **e**
+///   il Menù principale si aggiungono lì. Prima Migliora finiva in una riga
+///   a parte e il Menù mancava del tutto (visto da Alessio il 18 settembre
+///   2026 su "🗑️ Rimuovi voci" della lista della spesa, e il difetto era di
+///   ogni schermata costruita così);
+/// - nessuna delle due: Migliora va in una riga sua.
+fn inserisci_migliora(keyboard: &mut InlineKeyboardMarkup, improve: InlineKeyboardButton) {
+    if let Some(row) = keyboard
+        .inline_keyboard
+        .iter_mut()
+        .rev()
+        .find(|row| row.iter().any(punta_al_menu))
+    {
+        if row.len() < 3 {
+            // `rposition` e non `position`: quando una riga contiene sia
+            // `⬅️ Indietro` sia `🏠 Menù principale` ed entrambi puntano a
+            // `menu:main`, cercando dall'inizio si trovava l'Indietro e
+            // `💡 Migliora` finiva davanti a tutto. Il pulsante del menù è
+            // l'ultimo della riga: si cerca dal fondo.
+            let menu_index = row.iter().rposition(punta_al_menu).unwrap_or(row.len());
+            row.insert(menu_index, improve);
+        } else {
+            keyboard.inline_keyboard.push(vec![improve]);
+        }
+        return;
+    }
+    if let Some(row) = keyboard
+        .inline_keyboard
+        .iter_mut()
+        .rev()
+        .find(|row| row.len() == 1 && row[0].text.starts_with("⬅️"))
+    {
+        row.push(improve);
+        row.push(InlineKeyboardButton::callback(
+            "🏠 Menù principale".to_string(),
+            "menu:main".to_string(),
+        ));
+        return;
+    }
+    keyboard.inline_keyboard.push(vec![improve]);
+}
+
 fn truncate(value: &str, max_chars: usize) -> String {
     let mut chars = value.chars();
     let prefix: String = chars.by_ref().take(max_chars).collect();
@@ -1011,6 +1031,71 @@ fn truncate(value: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn etichette(keyboard: &InlineKeyboardMarkup) -> Vec<Vec<String>> {
+        keyboard
+            .inline_keyboard
+            .iter()
+            .map(|row| row.iter().map(|button| button.text.clone()).collect())
+            .collect()
+    }
+
+    fn migliora() -> InlineKeyboardButton {
+        InlineKeyboardButton::callback("💡 Migliora".to_string(), "improve:context:1".to_string())
+    }
+
+    #[test]
+    fn la_riga_di_navigazione_e_sempre_indietro_migliora_menu() {
+        // Caso normale: Indietro e Menù già in riga.
+        let mut keyboard = InlineKeyboardMarkup::new(vec![vec![
+            InlineKeyboardButton::callback("⬅️ Indietro".to_string(), "x:back".to_string()),
+            InlineKeyboardButton::callback(
+                "🏠 Menù principale".to_string(),
+                "menu:main".to_string(),
+            ),
+        ]]);
+        inserisci_migliora(&mut keyboard, migliora());
+        assert_eq!(
+            etichette(&keyboard),
+            vec![vec!["⬅️ Indietro", "💡 Migliora", "🏠 Menù principale"]]
+        );
+
+        // Solo Indietro (il difetto del 18 settembre 2026): si completa la
+        // riga invece di aggiungerne una sotto, e il Menù arriva da solo.
+        let mut keyboard = InlineKeyboardMarkup::new(vec![
+            vec![InlineKeyboardButton::callback(
+                "🗑 Voce".to_string(),
+                "x:del".to_string(),
+            )],
+            vec![InlineKeyboardButton::callback(
+                "⬅️ Indietro".to_string(),
+                "x:back".to_string(),
+            )],
+        ]);
+        inserisci_migliora(&mut keyboard, migliora());
+        assert_eq!(
+            etichette(&keyboard),
+            vec![
+                vec!["🗑 Voce".to_string()],
+                vec![
+                    "⬅️ Indietro".to_string(),
+                    "💡 Migliora".to_string(),
+                    "🏠 Menù principale".to_string()
+                ],
+            ]
+        );
+
+        // Nessuna navigazione: Migliora in una riga sua.
+        let mut keyboard = InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
+            "✅ Sì".to_string(),
+            "x:ok".to_string(),
+        )]]);
+        inserisci_migliora(&mut keyboard, migliora());
+        assert_eq!(
+            etichette(&keyboard),
+            vec![vec!["✅ Sì".to_string()], vec!["💡 Migliora".to_string()]]
+        );
+    }
 
     #[test]
     fn avviso_in_coda_si_consuma_una_sola_volta() {

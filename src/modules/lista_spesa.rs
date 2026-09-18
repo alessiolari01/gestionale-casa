@@ -2520,6 +2520,35 @@ pub async fn rimuovi_voce_manuale(pool: &SqlitePool, voce_id: i64) -> anyhow::Re
     Ok(())
 }
 
+/// Toglie in un colpo solo tutto ciò che è stato messo in lista a mano: le
+/// voci scritte a mano e le aggiunte dal catalogo (alimenti e prodotti).
+/// Restano le righe dei pasti pianificati, che le gestisce il planner.
+/// Chiesto da Alessio il 18 settembre 2026, per svuotare una lista fatta a
+/// mano senza toccare voce per voce. Ritorna quante voci ha tolto.
+pub async fn rimuovi_tutte_le_aggiunte(pool: &SqlitePool, lista_id: i64) -> anyhow::Result<usize> {
+    let mut tx = pool
+        .begin()
+        .await
+        .context("Impossibile aprire la transazione")?;
+    let manuali =
+        sqlx::query("DELETE FROM liste_spesa_voci WHERE lista_id = ? AND origine = 'manuale'")
+            .bind(lista_id)
+            .execute(&mut *tx)
+            .await
+            .context("Impossibile togliere le voci scritte a mano")?
+            .rows_affected();
+    let dal_catalogo = sqlx::query("DELETE FROM liste_spesa_aggiunte_catalogo WHERE lista_id = ?")
+        .bind(lista_id)
+        .execute(&mut *tx)
+        .await
+        .context("Impossibile togliere le aggiunte dal catalogo")?
+        .rows_affected();
+    tx.commit()
+        .await
+        .context("Impossibile salvare la rimozione")?;
+    Ok((manuali + dal_catalogo) as usize)
+}
+
 /// Rimuove un'aggiunta dal catalogo: smette di contribuire ai refresh
 /// successivi. Non tocca da sola la riga `generato` già in lista (che un
 /// refresh esplicito potrebbe ridurre o far sparire, secondo il fabbisogno
@@ -4456,6 +4485,71 @@ mod db_tests {
         .await;
     }
 
+    /// "🗑️ Rimuovi tutte" (18 settembre 2026): via le voci scritte a mano e
+    /// le aggiunte dal catalogo, in un colpo; la riga del pasto pianificato
+    /// resta, e torna al solo fabbisogno del planner.
+    #[tokio::test]
+    async fn rimuovi_tutte_toglie_le_aggiunte_e_lascia_i_pasti() {
+        let pool = test_pool().await;
+        let user_id = create_user(&pool, "Alessio").await;
+        let space_id = create_space(&pool, "Casa").await;
+        add_membership(&pool, space_id, user_id).await;
+        let alimento_pasta = create_alimento_globale(&pool, "Pasta").await;
+
+        crate::identity::with_actor(actor(user_id, space_id, "Alessio"), async {
+            let lista = trova_o_crea_lista_attiva(&pool).await.expect("lista");
+            cambia_intervallo(&pool, lista.id, "2026-09-01", "2026-09-07", true)
+                .await
+                .expect("intervallo");
+            let lista = trova_lista_attiva(&pool).await.unwrap().unwrap();
+            let planner_id =
+                create_planner(&pool, user_id, space_id, "2026-09-01", "2026-09-07").await;
+            create_meal_with_ingredient(
+                &pool,
+                planner_id,
+                "2026-09-02",
+                "pianificato",
+                None,
+                None,
+                Some(alimento_pasta),
+                "Pasta",
+                "g",
+                Some(200.0),
+            )
+            .await;
+            aggiungi_voce_manuale(&pool, lista.id, "Detersivo", None, None)
+                .await
+                .expect("manuale");
+            aggiungi_voce_manuale(&pool, lista.id, "Pane", Some(1.0), Some("pz"))
+                .await
+                .expect("manuale 2");
+            aggiungi_da_catalogo(
+                &pool,
+                lista.id,
+                IdentitaCatalogo::Alimento(alimento_pasta),
+                "Pasta",
+                50.0,
+                "g",
+            )
+            .await
+            .expect("aggiunta catalogo");
+            aggiorna_lista(&pool, &lista).await.expect("refresh");
+            assert_eq!(voci_rimovibili(&pool, lista.id).await.unwrap().len(), 3);
+
+            let tolte = rimuovi_tutte_le_aggiunte(&pool, lista.id)
+                .await
+                .expect("rimozione");
+            assert_eq!(tolte, 3);
+            assert!(voci_rimovibili(&pool, lista.id).await.unwrap().is_empty());
+
+            aggiorna_lista(&pool, &lista).await.expect("refresh dopo");
+            let voci = carica_voci(&pool, lista.id).await.expect("voci");
+            assert_eq!(voci.len(), 1, "resta solo la riga del pasto");
+            assert_eq!(voci[0].quantita, Some(200.0), "senza più i 50 g aggiunti");
+        })
+        .await;
+    }
+
     #[tokio::test]
     async fn eccessi_comprati_segnala_un_pasto_tolto_dal_planner() {
         let pool = test_pool().await;
@@ -6356,6 +6450,62 @@ pub async fn handle_callback(
     // Punto 9 del collaudo dell'11 settembre 2026 / C16: conferma esplicita
     // prima di un'eliminazione definitiva -- prima si eseguiva subito al
     // primo tocco.
+    if data == "lista_spesa:remove:all:ask" {
+        let quante = match trova_o_crea_lista_attiva(pool).await {
+            Ok(lista) => voci_rimovibili(pool, lista.id)
+                .await
+                .map(|voci| voci.len())
+                .unwrap_or(0),
+            Err(_) => 0,
+        };
+        let (_, markup) =
+            conferma_eliminazione_markup("", "lista_spesa:remove:all:yes", "lista_spesa:remove");
+        // C16, con il conto: si vede quante voci spariscono, e che quelle
+        // dei pasti restano.
+        bot.send_message(
+            chat_id,
+            format!("⚠️ Eliminare tutte le {quante} voci aggiunte a mano o dal catalogo? Non si può recuperare.\n\nLe voci dei pasti pianificati restano."),
+        )
+        .reply_markup(markup)
+        .await?;
+        return Ok(true);
+    }
+    if data == "lista_spesa:remove:all:yes" {
+        let esito = match trova_o_crea_lista_attiva(pool).await {
+            Ok(lista) => match rimuovi_tutte_le_aggiunte(pool, lista.id).await {
+                Ok(quante) => {
+                    // Le aggiunte dal catalogo contribuivano al fabbisogno:
+                    // si ricalcola subito, come per la rimozione di una sola.
+                    if let Err(errore) = aggiorna_e_registra(pool, &lista, true).await {
+                        tracing::warn!(?errore, "Aggiornamento dopo la rimozione di tutte fallito");
+                    }
+                    Ok(quante)
+                }
+                Err(errore) => Err(errore),
+            },
+            Err(errore) => Err(errore),
+        };
+        match esito {
+            Ok(quante) => {
+                let avviso = format!(
+                    "✅ Tolte {quante} {}.",
+                    if quante == 1 { "voce" } else { "voci" }
+                );
+                show_lista(bot, chat_id, pool, Some(&avviso)).await?;
+            }
+            Err(errore) => {
+                tracing::warn!(?errore, "Rimozione di tutte le voci fallita");
+                show_lista_rimuovi(
+                    bot,
+                    chat_id,
+                    pool,
+                    Some("⚠️ Non riesco a togliere le voci."),
+                )
+                .await?;
+            }
+        }
+        return Ok(true);
+    }
     if let Some(raw_id) = data.strip_prefix("lista_spesa:remove:ask:manuale:") {
         let Some(voce_id) = raw_id.parse::<i64>().ok().filter(|value| *value > 0) else {
             invalid(bot, chat_id).await?;
@@ -7251,7 +7401,18 @@ async fn show_lista_rimuovi(
             )]
         })
         .collect();
-    rows.push(vec![button("⬅️ Indietro", "lista_spesa:back")]);
+    // Con una voce sola "tutte" e "questa" sono la stessa cosa: il pulsante
+    // comparirebbe per niente (C8).
+    if voci.len() > 1 {
+        rows.push(vec![button(
+            format!("🗑️ Rimuovi tutte ({})", voci.len()),
+            "lista_spesa:remove:all:ask",
+        )]);
+    }
+    rows.push(vec![
+        button("⬅️ Indietro", "lista_spesa:back"),
+        button("🏠 Menù principale", "menu:main"),
+    ]);
 
     bot.send_message(chat_id, testo)
         .reply_markup(InlineKeyboardMarkup::new(rows))

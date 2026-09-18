@@ -2108,6 +2108,29 @@ e `Gestionale Casa online` confermati nel log di avvio.
 
 **Collaudo dal vivo su Telegram da fare.**
 
+## 2quindecies. Riga di navigazione ovunque, "rimuovi tutte" nella lista (18 settembre 2026)
+
+Due segnalazioni di Alessio da uno screenshot di `🗑️ Rimuovi voci`.
+
+- **La riga `⬅️ Indietro | 💡 Migliora | 🏠 Menù principale` non era
+  rispettata**: la schermata aveva solo `⬅️ Indietro`, e il bot, che mette
+  `💡 Migliora` accanto al Menù principale, non trovandolo lo metteva in una
+  riga a parte — e il Menù mancava del tutto. **Il difetto non era di una
+  schermata sola** ma di ognuna costruita così. Corretto nel punto che
+  inserisce `💡 Migliora` (`context_bot::inserisci_migliora`): se una
+  schermata ha un `⬅️` da solo nella sua riga e nessun Menù principale, la
+  riga viene completata con `💡 Migliora` e `🏠 Menù principale`. Vale per
+  tutto il bot, con un test sui tre casi.
+- **`🗑️ Rimuovi tutte (N)`** nella schermata `🗑️ Rimuovi voci`: toglie in
+  un colpo le voci scritte a mano **e** gli alimenti e prodotti aggiunti a
+  mano dal catalogo (precisazione di Alessio), con conferma C16 che dice
+  quante voci spariscono. Le righe dei pasti pianificati restano, e la
+  lista si ricalcola subito. Compare solo con almeno due voci (C8).
+
+2 nuovi test. Totale 450.
+
+**Collaudo dal vivo su Telegram da fare.**
+
 ## 3. Stato tecnico verificato
 
 - **60 migration** nel repository, tutte **applicate** al database reale
@@ -2122,7 +2145,8 @@ e `Gestionale Casa online` confermati nel log di avvio.
 - pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa,
   punto 1 della sezione 6): `fmt`, `check --locked`,
   `clippy --all-targets --locked -- -D warnings`, `test --locked` —
-  **448 test** (445 prima del giro della sezione 2quaterdecies, 437 prima
+  **450 test** (448 prima del giro della sezione 2quindecies, 445 prima
+  del giro della sezione 2quaterdecies, 437 prima
   del giro della sezione 2terdecies, 428 dopo la
   consegna A e prima della consegna B della sezione 2duodecies, 419 prima
   della consegna A,
