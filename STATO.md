@@ -2027,16 +2027,29 @@ negozio rinominato e tolto, lettura del codice da immagine, navigazione dei
 campi oggetto, divisione del procedimento, fonte di una ricetta, prodotti
 seminati. Totale 445.
 
+**Distribuito sull'S9 il 18 settembre 2026** (commit `8286d72`): CI verde
+(run #149 sul codice, più il commit del linker), 445 test e clippy verdi
+anche sul telefono, backup del database creato
+(`gestionale_pre_20260918_021633.db`), le tre migration provate prima su una
+copia; `applied_migrations=58` e `Gestionale Casa online` confermati nel log
+di avvio.
+
+**Il telefono si è fermato una volta durante questo deploy**, ed è un fatto
+da ricordare: `LLVM ERROR: out of memory` collegando
+`rxing-one-d-proc-derive`. Un `cargo:rustc-link-arg` emesso da `build.rs`
+vale solo per il crate che lo dichiara, quindi i **proc-macro** non
+ricevevano `-Wl,--threads=1`. Risolto con `.cargo/config.toml` (rustflags per
+il target Android) e `[profile.dev.build-override]`, che toglie le
+informazioni di debug anche a proc-macro e build script.
+
 **Collaudo dal vivo su Telegram da fare.**
 
 ## 3. Stato tecnico verificato
 
-- **58 migration** nel repository. Applicate al database reale dell'S9 le
-  prime 55: l'ultima applicata è
-  `20260917210000_consegna_b_negozi_e_prezzi.sql` (sezione 2duodecies), il
-  17 settembre 2026, verificato leggendo `applied_migrations=55` nel log di
-  avvio del bot dopo il deploy — non dedotto. **Da applicare**: le tre della
-  sezione 2terdecies. Né il secondo giro
+- **58 migration** nel repository, tutte **applicate** al database reale
+  dell'S9: le ultime tre (sezione 2terdecies) il 18 settembre 2026,
+  verificato leggendo `applied_migrations=58` nel log di avvio del bot dopo
+  il deploy — non dedotto. Né il secondo giro
   di correzioni del 12 settembre 2026 (sezione 2septies) né le tre
   rifiniture del 13 settembre 2026 (sezione 2octies) avevano migration
   proprie: lavoravano su schema già esistente, confermato di nuovo
