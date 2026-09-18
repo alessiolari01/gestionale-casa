@@ -67,6 +67,15 @@ pub fn shift_date(date: &str, days: i64) -> Option<String> {
     format_iso(shifted)
 }
 
+/// Quanti giorni separano due date ISO (`dopo - prima`). `None` se una
+/// delle due non è una data: serve a dire da quanto tempo si conosce un
+/// prezzo (18 settembre 2026).
+pub fn giorni_tra(prima: &str, dopo: &str) -> Option<i64> {
+    let prima = parse_date(prima)?;
+    let dopo = parse_date(dopo)?;
+    Some((dopo - prima).num_days())
+}
+
 /// Lunedì della settimana che contiene la data.
 pub fn week_start_for_date(date: &str) -> Option<String> {
     let parsed = parse_date(date)?;
@@ -140,6 +149,16 @@ pub fn data_leggibile(value: &str, anno_corrente: i32) -> String {
 /// lo conosce solo SQLite. La differenza esiste solo fra le 23 e mezzanotte
 /// del 31 dicembre, e l'effetto sarebbe mostrare o nascondere l'anno su una
 /// data: non vale una query per ogni data mostrata.
+/// Oggi secondo l'orologio della macchina che tiene il database — che e'
+/// il telefono, non il fuso di chi guarda. Sta qui perche' lo chiedono piu'
+/// moduli (18 settembre 2026).
+pub async fn oggi_locale(pool: &sqlx::SqlitePool) -> String {
+    sqlx::query_scalar("SELECT date('now','localtime')")
+        .fetch_one(pool)
+        .await
+        .unwrap_or_else(|_| "9999-12-31".to_string())
+}
+
 pub fn anno_corrente() -> i32 {
     let secondi = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

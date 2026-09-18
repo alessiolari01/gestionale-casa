@@ -526,6 +526,103 @@ pub async fn crea_prodotto_da_esterno(
     Ok(id)
 }
 
+/// Un prezzo visto per un prodotto o un alimento, con quando e dove.
+#[derive(Debug, Clone, PartialEq, FromRow)]
+pub struct PrezzoStorico {
+    pub prezzo_centesimi: i64,
+    pub quantita: Option<f64>,
+    pub unita_simbolo: Option<String>,
+    pub fonte: String,
+    pub rilevato_il: String,
+    pub negozio: String,
+}
+
+/// Da quanti giorni si conosce questo prezzo. `None` se la data non si
+/// legge: meglio non dire niente che dire un numero inventato.
+pub fn giorni_da(rilevato_il: &str, oggi: &str) -> Option<i64> {
+    let giorni =
+        crate::modules::calendario::giorni_tra(&rilevato_il[..10.min(rilevato_il.len())], oggi)?;
+    Some(giorni.max(0))
+}
+
+/// Oltre questi giorni un prezzo è "vecchio" e conviene ricontrollarlo:
+/// chiesto da Alessio il 18 settembre 2026, "così da rendersi conto se è
+/// tanto tempo che è meglio verificare il prezzo".
+pub const GIORNI_PREZZO_VECCHIO: i64 = 30;
+
+/// `1,29 € · Lidl · Gio 17 Set` e, se è passato troppo tempo,
+/// `⚠️ da verificare`.
+pub fn riga_prezzo(prezzo: &PrezzoStorico, oggi: &str, anno_corrente: i32) -> String {
+    let mut riga = format!(
+        "{} · {} · {}",
+        formatta_euro(prezzo.prezzo_centesimi),
+        prezzo.negozio,
+        crate::modules::calendario::data_leggibile(
+            &prezzo.rilevato_il[..10.min(prezzo.rilevato_il.len())],
+            anno_corrente
+        )
+    );
+    if let Some((per_riferimento, riferimento)) = prezzo_al_riferimento(
+        prezzo.prezzo_centesimi,
+        prezzo.quantita,
+        prezzo.unita_simbolo.as_deref(),
+    ) {
+        riga.push_str(&format!(
+            " · {} al {riferimento}",
+            formatta_euro(per_riferimento)
+        ));
+    }
+    if prezzo.fonte == "open_prices" {
+        riga.push_str(" · da Open Prices");
+    }
+    if giorni_da(&prezzo.rilevato_il, oggi).is_some_and(|giorni| giorni > GIORNI_PREZZO_VECCHIO) {
+        riga.push_str("\n⚠️ vecchio, conviene ricontrollarlo");
+    }
+    riga
+}
+
+/// Lo storico dei prezzi di un prodotto: tutti quelli visti, dal più
+/// recente. Un prezzo non si cancella mai da solo — serve proprio a vedere
+/// com'è cambiato.
+pub async fn storico_prezzi_prodotto(
+    pool: &SqlitePool,
+    prodotto_id: i64,
+    limite: i64,
+) -> anyhow::Result<Vec<PrezzoStorico>> {
+    sqlx::query_as(
+        "SELECT p.prezzo_centesimi, p.quantita, p.unita_simbolo, p.fonte, p.rilevato_il, \
+                n.nome AS negozio \
+         FROM prezzi_osservati p JOIN negozi n ON n.id = p.negozio_id \
+         WHERE p.prodotto_alimentare_id = ? \
+         ORDER BY p.rilevato_il DESC, p.id DESC LIMIT ?",
+    )
+    .bind(prodotto_id)
+    .bind(limite)
+    .fetch_all(pool)
+    .await
+    .context("Impossibile leggere lo storico dei prezzi")
+}
+
+/// Lo stesso, per un alimento generico (prezzi segnati senza prodotto).
+pub async fn storico_prezzi_alimento(
+    pool: &SqlitePool,
+    alimento_id: i64,
+    limite: i64,
+) -> anyhow::Result<Vec<PrezzoStorico>> {
+    sqlx::query_as(
+        "SELECT p.prezzo_centesimi, p.quantita, p.unita_simbolo, p.fonte, p.rilevato_il, \
+                n.nome AS negozio \
+         FROM prezzi_osservati p JOIN negozi n ON n.id = p.negozio_id \
+         WHERE p.alimento_id = ? AND p.prodotto_alimentare_id IS NULL \
+         ORDER BY p.rilevato_il DESC, p.id DESC LIMIT ?",
+    )
+    .bind(alimento_id)
+    .bind(limite)
+    .fetch_all(pool)
+    .await
+    .context("Impossibile leggere lo storico dei prezzi")
+}
+
 // ---------------------------------------------------------------------------
 // Fonti esterne (Open Food Facts, Open Prices)
 // ---------------------------------------------------------------------------
@@ -1036,6 +1133,37 @@ mod tests {
         // confronto inventato.
         assert_eq!(prezzo_al_riferimento(250, None, Some("g")), None);
         assert_eq!(prezzo_al_riferimento(250, Some(2.0), Some("mazzo")), None);
+    }
+
+    #[test]
+    fn un_prezzo_dice_quando_e_dove_e_avvisa_se_e_vecchio() {
+        let prezzo = PrezzoStorico {
+            prezzo_centesimi: 129,
+            quantita: Some(500.0),
+            unita_simbolo: Some("g".to_string()),
+            fonte: "spesa".to_string(),
+            rilevato_il: "2026-09-10T18:00:00.000Z".to_string(),
+            negozio: "Lidl".to_string(),
+        };
+        let riga = riga_prezzo(&prezzo, "2026-09-18", 2026);
+        assert!(riga.starts_with("1,29 € · Lidl · Gio 10 Set"), "{riga}");
+        assert!(riga.contains("2,58 € al kg"), "{riga}");
+        assert!(!riga.contains("vecchio"), "otto giorni non sono tanti");
+
+        // Passato un mese conviene ricontrollarlo (chiesto da Alessio).
+        let riga = riga_prezzo(&prezzo, "2026-11-01", 2026);
+        assert!(
+            riga.contains("⚠️ vecchio, conviene ricontrollarlo"),
+            "{riga}"
+        );
+        assert_eq!(giorni_da(&prezzo.rilevato_il, "2026-09-18"), Some(8));
+
+        // Un prezzo di altri lo dice.
+        let suggerito = PrezzoStorico {
+            fonte: "open_prices".to_string(),
+            ..prezzo
+        };
+        assert!(riga_prezzo(&suggerito, "2026-09-18", 2026).contains("da Open Prices"));
     }
 
     #[test]

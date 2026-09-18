@@ -2,6 +2,22 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_CATALOGO_PREZZI_20260918 -->
+# 18/09/2026 — Elenco dei prodotti, prezzi con data e storico, catalogo esteso
+
+Dalle risposte di Alessio alle domande aperte. Una migration nuova. Dettagli
+in `STATO.md`, sezione 2quaterdecies.
+
+- **🛒 Prodotti commerciali** nel menù Alimenti: l'elenco dei soli prodotti,
+  con ricerca per marca, nome o alimento.
+- **Prezzi con la data**: ogni prezzo dice quando e dove è stato visto, e
+  dopo un mese avvisa che conviene ricontrollarlo. `💶 Prezzi visti` nel
+  prodotto tiene lo storico; la schermata `📦 Ho preso…` mostra l'ultimo.
+- **Catalogo esteso**: 67 voci e 157 prodotti in più (247 in tutto), con le
+  categorie nuove **🧼 Casa e pulizia** e **🧴 Igiene personale** —
+  detersivi, carta igienica, dentifricio, lattine, succhi, surgelati.
+- I test non contano più gli alimenti a uno a uno: il catalogo cresce.
+
 <!-- CHANGELOG_COLLAUDO_AB_20260918 -->
 # 18/09/2026 — Dal collaudo di A e B: prezzo che non si salvava, legenda, foto del codice a barre
 

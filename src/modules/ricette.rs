@@ -7875,7 +7875,37 @@ mod tests {
         .fetch_one(&pool)
         .await
         .expect("conteggio");
-        assert!(quanti >= 80, "seminati troppi pochi prodotti: {quanti}");
+        assert!(quanti >= 240, "seminati troppi pochi prodotti: {quanti}");
+
+        // Anche la roba che non si mangia (18 settembre 2026): carta
+        // igienica, detersivi, dentifricio. Stessa lista della spesa, stesse
+        // scorte.
+        let non_alimentari: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM prodotti_alimentari p              JOIN alimenti a ON a.id = p.alimento_id              JOIN alimento_categorie ac ON ac.alimento_id = a.id              JOIN categorie_alimento c ON c.id = ac.categoria_id              WHERE c.codice IN ('casa', 'igiene')",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("conteggio non alimentari");
+        assert!(
+            non_alimentari >= 30,
+            "mancano i prodotti per la casa: {non_alimentari}"
+        );
+        let carta: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM alimenti WHERE nome_normalizzato = 'carta igienica'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("carta igienica");
+        assert_eq!(carta, 1);
+        // Le voci nuove hanno una categoria sola, non due (la migration
+        // toglie quella messa dal trigger prima di mettere la sua).
+        let doppie: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM (SELECT alimento_id FROM alimento_categorie              GROUP BY alimento_id HAVING COUNT(*) > 1)",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("categorie doppie");
+        assert_eq!(doppie, 0, "un alimento con due categorie");
 
         let con_ean: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM prodotti_alimentari WHERE codice_ean IS NOT NULL",

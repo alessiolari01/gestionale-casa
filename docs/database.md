@@ -353,6 +353,28 @@ visibile (`ROW_NUMBER() OVER (PARTITION BY lista_id ...)`): sul database
 reale due voci avevano la stessa posizione e il riordino non riusciva a
 scambiarle. Da qui in avanti ci pensa `aggiorna_lista`.
 
+## Step 7.4octies: catalogo esteso, anche non alimentare (18 settembre 2026)
+
+`migrations/20260918140000_catalogo_esteso.sql`.
+
+### Categorie `casa` e `igiene`
+Due categorie nuove in `categorie_alimento`, con
+`conservazione_predefinita = 'dispensa'`. Le voci non alimentari (carta
+igienica, detersivi, dentifricio) stanno nello stesso catalogo degli
+alimenti: lista della spesa e scorte funzionano identiche, e separarle
+avrebbe voluto dire duplicare due moduli interi per niente.
+
+### 67 voci e 157 prodotti in più
+Stesse regole della prima migration di prodotti: nessun codice a barre e
+nessun prezzo inventati, `verificato = 0`, e un `NOT EXISTS` che evita i
+doppioni.
+
+### Compatibilità alimentare delle voci nuove
+Ogni alimento del catalogo globale deve avere **tutte** le etichette
+alimentari — un test verifica l'invariante. Le voci nuove le ricevono a
+`verificare`; quelle di casa e igiene portano la nota "Non è un alimento",
+perché lì la domanda non ha senso.
+
 ## Step 7.4septies: legenda, prodotti di marca, fonte delle ricette (18 settembre 2026)
 
 Tre migration dal collaudo di Alessio.

@@ -7467,6 +7467,35 @@ async fn mostra_presa(
     if let (Some(valore), Some(unita)) = (voce.quantita_presa, &voce.unita_presa) {
         testo.push_str(&format!("Presi: {} {unita}.\n", formatta_quantita(valore)));
     }
+    // L'ultimo prezzo visto per questa roba, con la data: al supermercato
+    // serve proprio a sapere se quello sullo scaffale e' buono (18 settembre
+    // 2026). Se e' vecchio, la riga lo dice.
+    let storico = match (
+        voce.prodotto_preso_id.or(voce.prodotto_alimentare_id),
+        voce.alimento_id,
+    ) {
+        (Some(prodotto_id), _) => {
+            crate::modules::mercato::storico_prezzi_prodotto(pool, prodotto_id, 1).await
+        }
+        (None, Some(alimento_id)) => {
+            crate::modules::mercato::storico_prezzi_alimento(pool, alimento_id, 1).await
+        }
+        _ => Ok(Vec::new()),
+    };
+    if let Some(ultimo) = storico.unwrap_or_default().first() {
+        let oggi = today(pool).await;
+        testo.push_str(&format!(
+            "
+💶 Ultimo prezzo: {}
+",
+            crate::modules::mercato::riga_prezzo(
+                ultimo,
+                &oggi,
+                crate::modules::calendario::anno_corrente()
+            )
+        ));
+    }
+
     let esempio = match &voce.unita_simbolo {
         Some(unita) => format!("es. 300, in {unita}"),
         None => "es. 300 g".to_string(),

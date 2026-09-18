@@ -2044,12 +2044,62 @@ informazioni di debug anche a proc-macro e build script.
 
 **Collaudo dal vivo su Telegram da fare.**
 
+## 2quaterdecies. Prodotti in elenco, prezzi con data e storico, catalogo esteso (18 settembre 2026)
+
+Dalle risposte di Alessio alle domande aperte della sezione 2terdecies, più
+la richiesta di vedere i soli prodotti commerciali. Una migration nuova,
+`20260918140000_catalogo_esteso.sql`.
+
+**Costruito**:
+
+1. **`🛒 Prodotti commerciali`** nel menù Alimenti: l'elenco dei soli
+   prodotti, paginato (C6) e con ricerca per marca, nome o alimento. Prima
+   si potevano vedere solo entrando in un alimento alla volta.
+2. **Prezzi con la data e lo storico** (risposta 2): ogni prezzo mostra
+   quando e dove è stato visto (`1,29 € · Lidl · Gio 10 Set · 2,58 € al kg`)
+   e, dopo 30 giorni, `⚠️ vecchio, conviene ricontrollarlo`. Nel prodotto
+   c'è `💶 Prezzi visti` con gli ultimi dieci; nella schermata `📦 Ho
+   preso…` compare l'ultimo prezzo, che è dove serve davvero. Lo storico non
+   si cancella: `prezzi_osservati` tiene tutto.
+3. **Catalogo esteso** (risposta 4): 67 voci nuove e 157 prodotti in più
+   (247 in tutto), comprese due categorie nuove — **🧼 Casa e pulizia** e
+   **🧴 Igiene personale** — con detersivi, carta igienica, dentifricio,
+   lattine, succhi, surgelati e snack. Le voci non alimentari stanno nello
+   stesso catalogo di proposito: lista della spesa e scorte le trattano
+   esattamente come il cibo, e prima un detersivo si poteva solo riscrivere
+   a mano ogni volta.
+
+**Le risposte di Alessio, e cosa ne è seguito**:
+
+- **(1) Ricette da GialloZafferano: opzione (a)** — nome, link e ingredienti
+  scritti da noi, senza il loro procedimento. Il meccanismo della fonte c'è
+  già; il seme delle ricette classiche è **ancora da fare**.
+- **(2) Prezzi**: fatto quello che si può senza raschiare i siti dei
+  supermercati — inserimento a mano, data, storico, avviso quando il prezzo
+  invecchia, e Open Prices come suggerimento sui codici a barre letti.
+- **(3) Codici a barre dei prodotti seminati**: **non li ho**, e inventarli
+  sarebbe un dato falso. Si riempiono fotografando la confezione.
+- **(4) Più prodotti**: fatto, e continuerà a crescere.
+- **(5) Merge su `main`**: si aspetta la fine del collaudo.
+
+**Una lezione dai test**: quattro test fissavano il numero esatto di
+alimenti (421) e di categorie (12). Ora guardano che il catalogo base ci sia
+tutto (`>=`), perché il catalogo è fatto per crescere. E le voci nuove
+ricevono tutte le etichette di compatibilità alimentare a `verificare`,
+perché il resto del bot conta su quell'invariante.
+
+4 nuovi test: elenco e ricerca dei prodotti, riga del prezzo con data e
+avviso, prodotti non alimentari nel catalogo, categorie non doppie. Totale
+447.
+
+**Collaudo dal vivo su Telegram da fare.**
+
 ## 3. Stato tecnico verificato
 
-- **58 migration** nel repository, tutte **applicate** al database reale
-  dell'S9: le ultime tre (sezione 2terdecies) il 18 settembre 2026,
-  verificato leggendo `applied_migrations=58` nel log di avvio del bot dopo
-  il deploy — non dedotto. Né il secondo giro
+- **59 migration** nel repository. Applicate al database reale dell'S9 le
+  prime 58 (sezione 2terdecies), il 18 settembre 2026, verificato leggendo
+  `applied_migrations=58` nel log di avvio del bot dopo il deploy — non
+  dedotto. **Da applicare**: `20260918140000_catalogo_esteso.sql`. Né il secondo giro
   di correzioni del 12 settembre 2026 (sezione 2septies) né le tre
   rifiniture del 13 settembre 2026 (sezione 2octies) avevano migration
   proprie: lavoravano su schema già esistente, confermato di nuovo
@@ -2057,7 +2107,8 @@ informazioni di debug anche a proc-macro e build script.
 - pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa,
   punto 1 della sezione 6): `fmt`, `check --locked`,
   `clippy --all-targets --locked -- -D warnings`, `test --locked` —
-  **445 test** (437 prima del giro della sezione 2terdecies, 428 dopo la
+  **447 test** (445 prima del giro della sezione 2quaterdecies, 437 prima
+  del giro della sezione 2terdecies, 428 dopo la
   consegna A e prima della consegna B della sezione 2duodecies, 419 prima
   della consegna A,
   406 prima del giro della sezione 2decies, 391 prima della

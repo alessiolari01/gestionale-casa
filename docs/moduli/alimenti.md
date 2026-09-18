@@ -92,6 +92,24 @@ di avere la roba in casa — chiesto da Alessio il 18 settembre 2026.
 `↩️ Decidi tu per me` toglie il posto fisso e rimette in mano al bot la
 scelta per nome e categoria (`docs/moduli/dispensa.md`).
 
+## Elenco dei soli prodotti commerciali (18 settembre 2026)
+
+`🛒 Prodotti commerciali` nel menù Alimenti: l'elenco dei prodotti di marca,
+cinque per pagina (C6), ognuno con marca, nome, formato e — a capo —
+l'alimento a cui è attaccato. `🔎 Cerca prodotto` filtra per marca, nome del
+prodotto o nome dell'alimento.
+
+Prima esisteva solo `🛒 Prodotti associati` dentro un alimento: con
+duecentocinquanta prodotti nel catalogo serviva un modo per vederli tutti.
+
+## Voci non alimentari (18 settembre 2026)
+
+Il catalogo contiene anche quello che non si mangia — carta igienica,
+detersivi, dentifricio — nelle categorie `🧼 Casa e pulizia` e `🧴 Igiene
+personale`. Stanno qui di proposito: lista della spesa, scorte e prezzi
+funzionano identici, e un modulo separato avrebbe duplicato tutto per
+niente.
+
 ## Prodotti e formati
 
 Un alimento può avere più prodotti commerciali; ogni prodotto può avere più formati acquistabili. Il prodotto conserva identità commerciale/nutrizione, il formato conserva quantità/unità/barcode.

@@ -135,6 +135,24 @@ Cosa c'è e cosa no, detto chiaro anche qui:
 - **nessun prezzo**: i prezzi cambiano per negozio e per settimana, e si
   segnano facendo la spesa.
 
+## Quando è stato visto un prezzo (18 settembre 2026)
+
+Un prezzo senza data non serve: quello di marzo non dice niente a settembre.
+Ogni prezzo mostra **quando** e **dove** è stato visto, più il prezzo al
+chilo quando si può calcolare:
+
+```
+1,29 € · Lidl · Gio 10 Set · 2,58 € al kg
+```
+
+Dopo **30 giorni** (`mercato::GIORNI_PREZZO_VECCHIO`) la riga aggiunge
+`⚠️ vecchio, conviene ricontrollarlo`. Un prezzo arrivato da Open Prices lo
+dice sempre.
+
+Lo **storico** è in `prezzi_osservati` e non si cancella: `💶 Prezzi visti`
+nella scheda di un prodotto mostra gli ultimi dieci, e la schermata
+`📦 Ho preso…` mostra l'ultimo, che è dove serve mentre si fa la spesa.
+
 ## Rete assente
 
 Entrambe le fonti hanno 8 secondi di tempo e un errore proprio: "non riesco
