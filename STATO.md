@@ -2415,8 +2415,11 @@ Nuovo modulo `src/modules/impostazioni.rs`, migration 64
 
 6 nuovi test. Totale 469.
 
-**Distribuzione sull'S9 da fare.** **Collaudo dal vivo su Telegram da
-fare.**
+**Distribuito sull'S9 il 24 settembre 2026** (commit `d502cab`, insieme alle
+correzioni della sezione 2unvicies): `funzioni_spente` creata e vuota, cioe'
+tutto acceso per tutti, com'e' giusto che parta.
+
+**Collaudo dal vivo su Telegram da fare.**
 
 ## 2unvicies. Dal collaudo di d806846: dieci correzioni (24 settembre 2026)
 
@@ -2482,19 +2485,22 @@ messaggio nuovo.
 
 2 nuovi test. Totale 471.
 
-**Distribuzione sull'S9 da fare.** **Collaudo dal vivo su Telegram da
-fare.**
+**Distribuito sull'S9 il 24 settembre 2026** (commit `d502cab`, insieme alle
+impostazioni della sezione 2vicies): CI verde (run #164), 471 test e clippy
+verdi anche sul telefono, le due migration provate prima su una copia e poi
+applicate (`applied_migrations=65`, era 63), `Gestionale Casa online`.
+Verificato leggendo il database reale: latte e panna in `ml`, miele in `g`,
+yogurt ancora in `g` come doveva restare.
+
+**Collaudo dal vivo su Telegram da fare.**
 
 ## 3. Stato tecnico verificato
 
-- **65 migration** nel repository. Le prime **63** sono **applicate** al
-  database reale dell'S9: le ultime tre (formati base mancanti, prezzi
-  all'ora locale, `ridotta_chiusura_id` — sezione 2novodecies) il 24
-  settembre 2026, verificato leggendo `applied_migrations=63` nel log di
-  avvio del bot dopo il deploy — non dedotto. Le due nuove
-  (`funzioni_spente` della sezione 2vicies e le unità predefinite della
-  sezione 2unvicies) sono **in attesa del deploy**: dopo l'aggiornamento
-  dell'S9 il log deve dire `applied_migrations=65`.
+- **65 migration** nel repository, tutte **applicate** al database reale
+  dell'S9: le ultime due (`funzioni_spente` della sezione 2vicies e le unità
+  predefinite della sezione 2unvicies) il 24 settembre 2026, verificato
+  leggendo `applied_migrations=65` nel log di avvio del bot dopo il deploy —
+  non dedotto.
   Né il secondo giro
   di correzioni del 12 settembre 2026 (sezione 2septies) né le tre
   rifiniture del 13 settembre 2026 (sezione 2octies) avevano migration
