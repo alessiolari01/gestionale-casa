@@ -2,6 +2,44 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_COLLAUDO_E26_20260924 -->
+# 24/09/2026 — Dal collaudo E–26: sedici punti tra bug, migliorie e testi
+
+- **Codice a barre scritto a mano**: se quel prodotto esiste già il bot lo
+  riusa e gli attacca il codice, invece di rifiutare il salvataggio.
+- **Formati disponibili: 0**: i prodotti seminati dalle migration non
+  avevano il loro formato base. Migration nuova che li riallinea.
+- **"Dove conviene" dopo la spesa**: le stime dei negozi guardano tutte le
+  voci, anche quelle già spuntate, e non dicono più "non ho prezzi".
+- **Prezzo con la data di oggi** (era quella di ieri, ora UTC) e
+  **quantità con la virgola**: `0,99 €`, non `0.99 €`.
+- **Aggiunte già comprate**: alla chiusura della spesa si chiudono anche
+  quando si è comprato meno di quanto chiedevano — la lista mostra il netto
+  delle scorte, quindi restavano vive per sempre e pesavano sul fabbisogno.
+- **Campi di oggetti e prezzi** con i loro pulsanti anche nei passaggi
+  incatenati (marca → modello, data → prezzo, prezzo → venditore) e negli
+  errori.
+- **Voci della lista su due righe**, per non farsi tagliare i pulsanti:
+  nome sopra, quantità · confezione · prezzo sotto.
+- **"Voce aggiunta"** ora spiega perché la lista può restare vuota (ne hai
+  già abbastanza in casa, oppure ne restavano da comprare X).
+- **"Ho mangiato altro"** chiede se gli ingredienti preparati ci sono
+  ancora, invece di rimettere le scorte da solo.
+- **Sostituire un pasto** non richiede di nuovo profili e orario: si sceglie
+  la ricetta e si salva.
+- **Lo stesso alimento non si sparpaglia**: la roba nuova va dove sta già
+  quella di prima, e la sua scheda dice `🏠 Ne hai anche in …`.
+- **Stellina del preferito** e la sua spiegazione solo con più di una
+  confezione.
+- **Testi**: "1 voce comprata va nell'archivio", "Pasto segnato come
+  consumato" (senza "e congelato"), niente `➕ Nuovo oggetto` ripetuto.
+- **Chiudendo la spesa, di un'aggiunta comprata a metà decide chi fa la
+  spesa**: resta con quel che manca e il bot chiede se lasciarla in lista.
+- **`🗄 Ricette archiviate` con `♻️ Ripristina`**: archiviare non è più una
+  porta a senso unico.
+- **Tre prezzi già registrati** avevano la data indietro di un giorno (erano
+  stati scritti in UTC): riportati all'ora locale.
+
 <!-- CHANGELOG_GUIDATA_SOSTITUISCI_20260919 -->
 # 19/09/2026 — Allegati nella procedura guidata, sostituire un pasto
 

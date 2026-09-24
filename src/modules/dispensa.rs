@@ -454,6 +454,26 @@ pub async fn destinazione_per(
         }
     }
 
+    // Dove quella roba sta già: se in casa c'è altro parmigiano, il nuovo va
+    // insieme a quello invece di finire in un posto diverso perché ci è
+    // arrivato da un'altra strada. Una scorta esistente è una scelta fatta,
+    // anche quando non è stata dichiarata con "📌 Mettilo sempre qui".
+    if let Some(alimento) = alimento_id {
+        let dove_sta_gia: Option<String> = sqlx::query_scalar(
+            "SELECT conservazione FROM scorte \
+             WHERE spazio_id = ? AND alimento_id = ? \
+             ORDER BY aggiornato_il DESC, id DESC LIMIT 1",
+        )
+        .bind(spazio_id)
+        .bind(alimento)
+        .fetch_optional(&mut *conn)
+        .await
+        .context("Impossibile vedere dove sta già questo alimento")?;
+        if let Some(dove) = dove_sta_gia.as_deref().and_then(Conservazione::da_token) {
+            return Ok(dove);
+        }
+    }
+
     if let Some(dove) = conservazione_da_nome(descrizione) {
         return Ok(dove);
     }
@@ -491,6 +511,39 @@ pub async fn destinazione_per(
 /// l'utente (`true`) o l'ha dedotto il bot da nome e categoria (`false`).
 /// Serve alla sezione Alimenti, dove il posto si vede e si cambia prima
 /// ancora di avere la roba in casa (chiesto da Alessio il 18 settembre 2026).
+/// Lo stesso alimento negli **altri** posti, già sommato per posto. Serve a
+/// dire "in frigo ne hai altri 200 g" mentre si guarda quello in dispensa:
+/// senza, il parmigiano finito in tre posti diversi non si contava più
+/// (Alessio, collaudo del 23 settembre 2026, punto 12).
+pub async fn altrove_in_casa(
+    pool: &SqlitePool,
+    scorta_id: i64,
+) -> anyhow::Result<Vec<(Conservazione, f64, String)>> {
+    let spazio_id = crate::identity::current_actor().spazio_id;
+    let righe: Vec<(String, f64, String)> = sqlx::query_as(
+        "SELECT altre.conservazione, SUM(altre.quantita), altre.unita_simbolo \
+         FROM scorte questa \
+         JOIN scorte altre ON altre.spazio_id = questa.spazio_id \
+           AND altre.alimento_id IS NOT NULL \
+           AND altre.alimento_id = questa.alimento_id \
+           AND altre.conservazione <> questa.conservazione \
+         WHERE questa.id = ? AND questa.spazio_id = ? \
+         GROUP BY altre.conservazione, altre.unita_simbolo \
+         ORDER BY altre.conservazione",
+    )
+    .bind(scorta_id)
+    .bind(spazio_id)
+    .fetch_all(pool)
+    .await
+    .context("Impossibile vedere lo stesso alimento negli altri posti")?;
+    Ok(righe
+        .into_iter()
+        .filter_map(|(conservazione, quantita, unita)| {
+            Conservazione::da_token(&conservazione).map(|dove| (dove, quantita, unita))
+        })
+        .collect())
+}
+
 /// Il pasto aveva preso le sue scorte, ma quegli ingredienti sono stati
 /// usati o buttati e il pasto cambia piatto (19 settembre 2026, "🔁
 /// Sostituisci" su un pasto preparato). Le scorte restano tolte — la roba
@@ -2508,6 +2561,22 @@ async fn mostra_scorta(
             None => "📅 Nessuna scadenza".to_string(),
         }
     ));
+    // Lo stesso alimento può stare anche altrove: qui si vede, invece di
+    // doverlo cercare in tre posti (23 settembre 2026).
+    let altrove = altrove_in_casa(pool, scorta_id).await.unwrap_or_default();
+    if !altrove.is_empty() {
+        let righe: Vec<String> = altrove
+            .iter()
+            .map(|(dove, quantita, unita)| {
+                format!(
+                    "{} {}",
+                    dove.etichetta(),
+                    formatta_quantita_leggibile(*quantita, unita)
+                )
+            })
+            .collect();
+        testo.push_str(&format!("\n\n🏠 Ne hai anche in {}", righe.join(", ")));
+    }
 
     let mut rows = vec![
         vec![button("✏️ Quantità", format!("dispensa:qty:{scorta_id}"))],
@@ -2709,7 +2778,8 @@ mod tests {
             info,
         );
         let etichetta = etichetta_gruppo(&due[0]);
-        assert!(etichetta.starts_with("Pasta · 1.5 kg\n📅 prima scadenza "));
+        // Virgola, come si scrive in italiano (23 settembre 2026).
+        assert!(etichetta.starts_with("Pasta · 1,5 kg\n📅 prima scadenza "));
         assert!(etichetta.ends_with("· 2 confezioni"));
     }
 
@@ -3280,6 +3350,80 @@ mod tests {
             assert_eq!(restituisci_scorte_pasto(&pool, pasto, false).await.unwrap(), 0);
             // E il pasto può prendere di nuovo le sue scorte.
             assert!(scala_scorte_per_pasto(&pool, pasto, false).await.unwrap() > 0);
+        })
+        .await;
+    }
+
+    /// Collaudo del 23 settembre 2026, punto 12: lo stesso alimento non deve
+    /// sparpagliarsi. Se in casa ce n'è già, la roba nuova va dove sta
+    /// quella, e dalla sua scheda si vede dov'è il resto.
+    #[tokio::test]
+    async fn la_roba_nuova_va_dove_sta_gia_quella_di_prima() {
+        let pool = test_pool().await;
+        let (user_id, space_id) = utente_e_spazio(&pool).await;
+
+        crate::identity::with_actor(actor(user_id, space_id), async {
+            // "Latte intero" per categoria andrebbe in frigo.
+            let latte = alimento(&pool, "Latte intero", "latticini").await;
+            let mut conn = pool.acquire().await.unwrap();
+            assert_eq!(
+                destinazione_per(&mut conn, space_id, Some(latte), None, "Latte intero")
+                    .await
+                    .unwrap(),
+                Conservazione::Frigo
+            );
+            drop(conn);
+
+            // Ma se una scorta è già in freezer, la roba nuova la raggiunge.
+            let in_freezer = aggiungi_scorta(
+                &pool,
+                Conservazione::Freezer,
+                Some(IdentitaCatalogo::Alimento(latte)),
+                "Latte intero",
+                1000.0,
+                "ml",
+            )
+            .await
+            .expect("scorta in freezer");
+            let mut conn = pool.acquire().await.unwrap();
+            assert_eq!(
+                destinazione_per(&mut conn, space_id, Some(latte), None, "Latte intero")
+                    .await
+                    .unwrap(),
+                Conservazione::Freezer,
+                "va dove sta già"
+            );
+            drop(conn);
+
+            // La scelta a mano resta più forte di tutto.
+            imposta_destinazione(&pool, Some(latte), None, Conservazione::Dispensa)
+                .await
+                .expect("scelta");
+            let mut conn = pool.acquire().await.unwrap();
+            assert_eq!(
+                destinazione_per(&mut conn, space_id, Some(latte), None, "Latte intero")
+                    .await
+                    .unwrap(),
+                Conservazione::Dispensa
+            );
+            drop(conn);
+
+            // La scheda di una scorta dice dov'è il resto.
+            assert!(altrove_in_casa(&pool, in_freezer).await.unwrap().is_empty());
+            aggiungi_scorta(
+                &pool,
+                Conservazione::Frigo,
+                Some(IdentitaCatalogo::Alimento(latte)),
+                "Latte intero",
+                500.0,
+                "ml",
+            )
+            .await
+            .expect("scorta in frigo");
+            let altrove = altrove_in_casa(&pool, in_freezer).await.unwrap();
+            assert_eq!(altrove.len(), 1);
+            assert_eq!(altrove[0].0, Conservazione::Frigo);
+            assert_eq!(altrove[0].1, 500.0);
         })
         .await;
     }

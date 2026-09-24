@@ -2262,13 +2262,114 @@ avvio.
 
 **Collaudo dal vivo su Telegram da fare.**
 
+## 2novodecies. Dal collaudo E–26: sedici punti (24 settembre 2026)
+
+Report di Alessio (`Collaudo_Gestionale_Casa_problemi_e_migliorie.docx`,
+build S9 commit `6c59bf3`, prove da E a 26), via libera esplicito a
+implementarli tutti. Una migration nuova, di soli dati (la 61ª).
+
+### Bug
+
+1. **Codice a barre scritto a mano che non si salvava**: il prodotto da
+   creare esisteva già nel catalogo seminato, e l'indice unico su
+   (alimento, marca, nome, quantità, unità) faceva fallire l'inserimento in
+   silenzio. Ora `crea_prodotto_da_esterno` cerca prima un prodotto uguale:
+   se c'è, gli attacca il codice a barre (quando non ne ha uno) e lo riusa.
+   Un prodotto in meno da creare, e il codice finisce dove serve.
+2. **"Dove conviene" diceva "non ho ancora prezzi"** appena si spuntava
+   qualcosa: `stime_dei_negozi` guardava solo le voci non comprate, e a
+   spesa quasi finita non restava niente da stimare. Ora guarda tutte le
+   voci della lista — il confronto fra negozi riguarda la spesa intera, non
+   quel che manca.
+3. **"Formati disponibili: 0"** sui prodotti del catalogo: le due migration
+   di seeding scrivevano `prodotti_alimentari` ma non
+   `formati_prodotto_alimentare`, mentre il bot, quando crea un prodotto,
+   scrive entrambe. Migration `20260924090000_formati_base_mancanti.sql`
+   per i dati già presenti, e `assicura_formato_base` chiamata sia alla
+   creazione sia al riuso perché non succeda più.
+4. **Campi prezzo e venditore con il solo `💡 Migliora`**: i tre prompt
+   incatenati degli oggetti (marca → modello, data → prezzo, prezzo →
+   venditore) e i messaggi d'errore mandavano la schermata senza la
+   tastiera del campo. Ora ce l'hanno tutti, e gli errori non nominano più
+   i pulsanti (C1).
+5. **Prezzo registrato con la data di ieri**: `rilevato_il` usava l'ora
+   UTC, che dopo mezzanotte in Italia è ancora il giorno prima. Ora
+   `localtime`.
+6. **`0.99 €` invece di `0,99 €`**: `formatta_quantita` scriveva i decimali
+   col punto.
+7. **Voce fantasma che pesava sul fabbisogno**: "Rimuovi voci" mostrava
+   aggiunte già comprate, perché si chiudevano solo se il comprato copriva
+   l'intera quantità chiesta. Ma la lista mostra il **netto** delle scorte,
+   quindi il comprato è quasi sempre inferiore: nessuna aggiunta si
+   chiudeva mai. Ora basta aver comprato qualcosa di quell'identità.
+
+### Migliorie
+
+8. **Pulsanti tagliati** nella lista: le voci ora stanno su due righe —
+   nome (tagliato a 40 caratteri) sopra, `quantità · 📦 confezione · 💶
+   prezzo` sotto. Stessa cosa per le confezioni: nome sopra, formato sotto.
+9. **"Voce aggiunta" con la lista che restava vuota**: ora il messaggio
+   dice perché (in casa ce n'è già abbastanza, oppure ne restano X da
+   comprare), invece di far dubitare che il salvataggio sia riuscito.
+10. **`✏️ Ho mangiato altro` rimetteva le scorte da solo**: ora chiede se
+    gli ingredienti preparati ci sono ancora, come già faceva
+    `🔁 Sostituisci`.
+11. **Sostituire richiedeva di nuovo profili e orario**: una sostituzione
+    cambia la ricetta, non il resto. Nuovo flag `sostituzione` nel draft
+    del planner: scelta la ricetta, si salva.
+12. **Lo stesso alimento in tre posti**: se in casa ce n'è già,
+    `destinazione_per` manda la roba nuova dove sta quella di prima (la
+    scelta a mano resta più forte), e la scheda di una scorta dice
+    `🏠 Ne hai anche in …`.
+13. **Spiegazione della stellina con una confezione sola**: `☆`/`⭐` e la
+    riga che li spiega compaiono solo quando le confezioni sono più di una.
+
+### Testi
+
+14. "1 voce comprata **vanno** nell'archivio" → singolare e plurale giusti.
+15. "Pasto segnato come consumato **e congelato**" → il congelamento non
+    c'entrava.
+16. `➕ Nuovo oggetto` ripetuto nel testo e sul pulsante (C1).
+
+### Le risposte di Alessio, lo stesso giorno
+
+Quattro domande lasciate aperte, tre hanno prodotto altro lavoro.
+
+1. **La regola del punto 7 era troppo grossolana**, e Alessio ha scelto la
+   domanda. Ora un'aggiunta si chiude da sola solo se si è comprato **almeno
+   quanto chiedeva**; se se n'è comprato meno, resta con quel che manca e
+   dopo la chiusura il bot chiede "Le lascio in lista?" (`✅ Sì, lasciale` /
+   `🗑 No, toglile`). La colonna `ridotta_chiusura_id` (migration 63) dice
+   quali aggiunte ha ridotto quella chiusura, così "no" toglie esattamente
+   quelle.
+2. **`🏠 Ne hai anche in …` resta com'è**: compare sempre.
+3. **Controllo del database reale dell'S9** (in sola lettura, via SSH):
+   nessun prodotto doppio e nessun alimento doppio — la correzione del punto
+   1 vale da qui in avanti e non c'è niente da fondere. Sono venute fuori
+   due cose invece: **243 prodotti su 244 senza formato base** (li sistema la
+   migration 61) e **tre prezzi con la data indietro di un giorno**, scritti
+   in UTC prima della correzione del punto 5 — li riporta all'ora locale la
+   migration 62.
+4. **`🗄 Ricette archiviate` con `♻️ Ripristina`**: fatto. Il pulsante compare
+   nel menù delle ricette solo quando ce n'è almeno una, con il numero
+   accanto; si vedono solo le proprie (l'amministratore vede anche quelle del
+   catalogo globale), e ripristinare chiede lo stesso permesso che serviva
+   per archiviare. Prima l'archiviazione era una porta a senso unico.
+
+5 nuovi test in tutto. Totale 463.
+
+**Distribuzione sull'S9 da fare.** **Collaudo dal vivo su Telegram da
+fare.**
+
 ## 3. Stato tecnico verificato
 
-- **60 migration** nel repository, tutte **applicate** al database reale
-  dell'S9: le ultime due (catalogo esteso e ricette classiche, sezione
-  2quaterdecies) il 18 settembre 2026, verificato leggendo
-  `applied_migrations=60` nel log di avvio del bot dopo il deploy — non
-  dedotto. Né il secondo giro
+- **63 migration** nel repository. Le prime **60** sono **applicate** al
+  database reale dell'S9, verificato leggendo `applied_migrations=60` nel
+  log di avvio del bot dopo il deploy — non dedotto. Le tre nuove della
+  sezione 2novodecies (formati base mancanti, prezzi all'ora locale,
+  `ridotta_chiusura_id`) sono **in attesa del deploy**: dopo l'aggiornamento
+  dell'S9 il log deve dire `applied_migrations=63`.
+  Né il secondo giro
   di correzioni del 12 settembre 2026 (sezione 2septies) né le tre
   rifiniture del 13 settembre 2026 (sezione 2octies) avevano migration
   proprie: lavoravano su schema già esistente, confermato di nuovo
@@ -2276,7 +2377,8 @@ avvio.
 - pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa,
   punto 1 della sezione 6): `fmt`, `check --locked`,
   `clippy --all-targets --locked -- -D warnings`, `test --locked` —
-  **458 test** (455 prima della sezione 2octodecies, 451 prima della
+  **463 test** (458 prima della sezione 2novodecies, 455 prima della
+  sezione 2octodecies, 451 prima della
   sezione 2septdecies, 450 prima della
   sezione 2sexdecies, 448 prima del giro
   della sezione 2quindecies, 445 prima

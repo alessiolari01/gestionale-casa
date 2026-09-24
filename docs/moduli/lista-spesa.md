@@ -514,6 +514,51 @@ proprio dal planner, `📅 Planner` ci torna e basta: senza questa regola
 lista → planner → lista → planner diventava un giro senza fine, perché
 ognuno dei due avrebbe ricordato di arrivare dall'altro.
 
+## Dal collaudo E–26 (24 settembre 2026)
+
+- **Voci su due righe.** Il nome (tagliato a 40 caratteri) sta sopra,
+  `quantità · 📦 confezione · 💶 prezzo` sotto: su una riga sola Telegram
+  tagliava il pulsante e il prezzo spariva. Le confezioni seguono la stessa
+  forma, nome sopra e formato sotto.
+- **Decimali con la virgola**: `1,5 kg`, `0,99 €`.
+- **La stellina del preferito** (`☆` / `⭐`) e la riga che la spiega
+  compaiono solo quando le confezioni sono più di una: con una sola non c'è
+  niente da preferire.
+- **`✅ Voce aggiunta` spiega la lista che resta vuota.** Aggiungendo dal
+  catalogo qualcosa di cui in casa ce n'è già abbastanza, la lista mostra il
+  netto e quindi non cambia: adesso il messaggio dice perché ("in casa ne
+  hai già abbastanza", oppure "in lista ne restano X"), invece di lasciare
+  il dubbio che il salvataggio non sia riuscito (`spiega_aggiunta`).
+- **Le aggiunte comprate si chiudono davvero.** `aggiunte_coperte_dalla_spesa`
+  pretendeva che il comprato coprisse l'intera quantità chiesta; ma la lista
+  mostra il netto delle scorte, quindi il comprato è quasi sempre inferiore
+  e nessuna aggiunta si chiudeva mai: restava viva, ricompariva in
+  `🗑 Rimuovi voci` e pesava sul fabbisogno del giro dopo. Ora basta aver
+  comprato qualcosa di quell'identità e unità; se di quell'alimento non si è
+  comprato niente, l'aggiunta resta — è una richiesta non ancora servita.
+- **Testo di chiusura**: "1 voce comprata va nell'archivio e sparisce dalla
+  lista", al plurale solo quando serve.
+
+### Di un'aggiunta comprata a metà decide chi fa la spesa
+
+La prima versione della correzione chiudeva l'aggiunta appena si comprava
+**qualcosa** di quell'identità: toglieva la voce fantasma, ma decideva al
+posto dell'utente (chiesti 2 kg di pasta, comprati 500 g, aggiunta chiusa).
+Dal 24 settembre 2026 la regola è in tre casi:
+
+| comprato | cosa succede |
+|---|---|
+| ≥ di quanto chiedeva | l'aggiunta si chiude, silenziosamente |
+| < di quanto chiedeva | resta con quel che manca, e il bot chiede "Le lascio in lista?" |
+| niente di quell'identità | resta com'è: è una richiesta non ancora servita |
+
+Il residuo arriva nell'unità di aggregazione (g, ml) e viene riportato in
+proporzione nell'unità scritta dall'utente: "1,5 kg" diventa "0,5 kg", non
+"500 g". Le aggiunte ridotte da una chiusura portano il suo
+`ridotta_chiusura_id`, così `🗑 No, toglile` toglie quelle e nessun'altra —
+anche se nel frattempo ne è stata aggiunta un'altra a mano. La domanda arriva
+**prima** di quella sul totale dello scontrino, che resta l'ultima cosa.
+
 ## Schermate
 
 **Principale** — intervallo (con le date leggibili, `Mer 17 Set → Mar 23

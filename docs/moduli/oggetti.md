@@ -308,6 +308,14 @@ Alessio dal vivo sulla data di acquisto.
 (C8). I comandi `/salta` e `/rimuovi` continuano a funzionare. Il testo non
 nomina più i pulsanti (C1).
 
+**24 settembre 2026 — anche nei passaggi incatenati e negli errori.** Tre
+punti sfuggivano: marca → modello, data di acquisto → prezzo, prezzo →
+venditore mandavano la schermata del campo successivo senza la sua tastiera
+(la si vedeva col solo `💡 Migliora`), e lo stesso facevano i messaggi
+d'errore di data, prezzo, valore stimato e nome. Ora passano tutti da
+`field_keyboard`. Con l'elenco vuoto il testo dice cosa fare senza
+ripetere il pulsante: "Creane uno con ➕ Nuovo oggetto" (C8, C1).
+
 ## Comandi
 
 | Azione | Pulsante | Comando |

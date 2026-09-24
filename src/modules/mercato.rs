@@ -376,11 +376,15 @@ pub async fn registra_prezzo(
         "Un prezzo senza alimento né prodotto non si può confrontare"
     );
     let user_id = crate::identity::current_actor().utente_id;
+    // `localtime`: il valore di default della colonna è in UTC, e un prezzo
+    // segnato dopo le due di notte (ora italiana) risultava del giorno prima
+    // (Alessio, collaudo del 23 settembre 2026). La data di un prezzo è
+    // quella del giorno in cui si è fatta la spesa, nel fuso di chi la fa.
     sqlx::query(
         "INSERT INTO prezzi_osservati \
          (negozio_id, alimento_id, prodotto_alimentare_id, descrizione, prezzo_centesimi, \
-          quantita, unita_simbolo, fonte, utente_id) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          quantita, unita_simbolo, fonte, utente_id, rilevato_il) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%f','now','localtime'))",
     )
     .bind(negozio_id)
     .bind(alimento_id)
@@ -503,6 +507,41 @@ pub async fn crea_prodotto_da_esterno(
     } else {
         prodotto.marca.trim().to_string()
     };
+
+    // Quel prodotto può già essere nel catalogo, con lo stesso formato ma
+    // senza codice a barre: i 247 seminati sono tutti così. Inserirlo di
+    // nuovo violava l'indice unico, e l'utente vedeva solo "Ho letto il
+    // prodotto ma non riesco a salvarlo" (Alessio, collaudo del 23 settembre
+    // 2026). Si riusa quello che c'è e gli si attacca il codice.
+    let esistente: Option<i64> = sqlx::query_scalar(
+        "SELECT id FROM prodotti_alimentari \
+         WHERE alimento_id = ? AND marca_normalizzata = ? \
+           AND nome_commerciale_normalizzato = ? AND quantita_confezione = ? \
+           AND unita_confezione_id = ? AND attivo = 1 LIMIT 1",
+    )
+    .bind(alimento_id)
+    .bind(marca.to_lowercase())
+    .bind(prodotto.nome.to_lowercase())
+    .bind(prodotto.quantita)
+    .bind(unita_id)
+    .fetch_optional(pool)
+    .await
+    .context("Impossibile cercare il prodotto nel catalogo")?;
+    if let Some(id) = esistente {
+        sqlx::query(
+            "UPDATE prodotti_alimentari SET codice_ean = ?, \
+             aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ','now') \
+             WHERE id = ? AND codice_ean IS NULL",
+        )
+        .bind(&prodotto.ean)
+        .bind(id)
+        .execute(pool)
+        .await
+        .context("Impossibile salvare il codice a barre sul prodotto")?;
+        assicura_formato_base(pool, id).await?;
+        return Ok(id);
+    }
+
     let id = sqlx::query(
         "INSERT INTO prodotti_alimentari \
          (alimento_id, marca, marca_normalizzata, nome_commerciale, \
@@ -523,7 +562,29 @@ pub async fn crea_prodotto_da_esterno(
     .await
     .context("Impossibile salvare il prodotto letto dal codice a barre")?
     .last_insert_rowid();
+    assicura_formato_base(pool, id).await?;
     Ok(id)
+}
+
+/// Il formato base di un prodotto sta in due posti: sul prodotto e nella
+/// tabella dei formati. Chi crea un prodotto deve scrivere tutti e due,
+/// altrimenti la sua scheda dice "Formati disponibili: 0".
+async fn assicura_formato_base(pool: &SqlitePool, prodotto_id: i64) -> anyhow::Result<()> {
+    sqlx::query(
+        "INSERT INTO formati_prodotto_alimentare \
+         (prodotto_alimentare_id, quantita_confezione, unita_confezione_id, codice_ean) \
+         SELECT p.id, p.quantita_confezione, p.unita_confezione_id, p.codice_ean \
+         FROM prodotti_alimentari p \
+         WHERE p.id = ? AND NOT EXISTS ( \
+             SELECT 1 FROM formati_prodotto_alimentare f \
+             WHERE f.prodotto_alimentare_id = p.id \
+         )",
+    )
+    .bind(prodotto_id)
+    .execute(pool)
+    .await
+    .context("Impossibile creare il formato base del prodotto")?;
+    Ok(())
 }
 
 /// Un prezzo visto per un prodotto o un alimento, con quando e dove.

@@ -44,8 +44,11 @@ La lista mostra `💶 Segnato finora: …` solo se almeno un prezzo c'è.
 
 ## Dove conviene
 
-`📊 Dove conviene` valuta le voci **ancora da comprare** con l'ultimo
-prezzo visto in ciascun negozio scelto:
+`📊 Dove conviene` valuta **tutte le voci della lista** con l'ultimo prezzo
+visto in ciascun negozio scelto. Fino al 24 settembre 2026 guardava solo
+quelle ancora da comprare, e a spesa quasi finita rispondeva "non ho ancora
+prezzi": il confronto fra negozi riguarda la spesa intera, non quel che
+manca da mettere nel carrello.
 
 ```
 📊 Dove conviene
@@ -105,6 +108,18 @@ codice, oppure si scrivono le cifre sotto le righe nere.
 
 Se la quantità dichiarata non si capisce (`"una confezione"`), il prodotto
 non si crea: meglio chiedere all'utente che inventare una quantità.
+
+**Un prodotto uguale si riusa, non si duplica (24 settembre 2026).** Il
+catalogo seminato dalle migration ha già centinaia di prodotti senza codice
+a barre: scrivendo a mano il codice di uno di quelli, l'inserimento urtava
+l'indice unico su (alimento, marca, nome commerciale, quantità, unità) e il
+salvataggio falliva senza spiegazioni. Ora `crea_prodotto_da_esterno` cerca
+prima un prodotto identico: se lo trova gli attacca il `codice_ean` (solo
+se non ne aveva uno) e lo riusa. In entrambi i casi chiama
+`assicura_formato_base`, perché un prodotto senza righe in
+`formati_prodotto_alimentare` mostra "Formati disponibili: 0" pur avendo la
+sua quantità — era il caso di tutti i prodotti seminati, riallineati dalla
+migration `20260924090000_formati_base_mancanti.sql`.
 
 ## Open Prices — suggerimento, non prezzo
 

@@ -387,6 +387,54 @@ catalogo e il procedimento in `ricetta_step`.
 test verifica che nessuna ricetta del catalogo abbia un link e che non ce ne
 siano di incomplete.
 
+## Step 7.4decies: formati base mancanti (24 settembre 2026)
+
+`migrations/20260924090000_formati_base_mancanti.sql`, la **61ª**.
+
+Nessuna colonna nuova: è una migration di **dati**. Un prodotto creato dal
+bot (`mercato::create_product_association`) scrive due righe — il prodotto in
+`prodotti_alimentari` e il suo formato iniziale in
+`formati_prodotto_alimentare`. Le due migration che hanno seminato il
+catalogo (`20260918120000_prodotti_marche_note.sql` e
+`20260918140000_catalogo_esteso.sql`) scrivevano solo la prima, quindi la
+scheda di quei prodotti diceva "Formati disponibili: 0 · Nessun formato
+disponibile" mentre l'elenco e il `📦` della lista mostravano "500 g" letto
+dal prodotto: due verità diverse sullo stesso prodotto.
+
+La migration inserisce un formato base (quantità, unità e codice a barre del
+prodotto) per ogni prodotto **attivo** che non ne ha nessuno, con il solito
+`NOT EXISTS` che la rende innocua se rigirata su un database già a posto.
+Da qui in avanti il disallineamento non si ripresenta: `assicura_formato_base`
+in `src/modules/mercato.rs` è chiamata sia quando un prodotto si crea sia
+quando se ne riusa uno esistente.
+
+## Step 7.4undecies: prezzi all'ora locale (24 settembre 2026)
+
+`migrations/20260924100000_prezzi_ora_locale.sql`, la **62ª**. Anche questa
+è una migration di dati.
+
+`prezzi_osservati.rilevato_il` aveva come default l'ora **UTC**, che in
+Italia dopo le 22:00 è ancora il giorno prima: un prezzo segnato alle 00:48
+del 23 settembre risultava "visto il 22 Set". Il codice è stato corretto
+(`mercato::registra_prezzo` scrive `localtime`), ma le righe già nel
+database restavano sbagliate — tre, sull'S9, tutte indietro di un giorno.
+La migration le riporta all'ora locale, e tocca solo quelle che finiscono
+per `Z`: rigirandola, non troverebbe più niente da fare.
+
+## Step 7.4duodecies: `liste_spesa_aggiunte_catalogo.ridotta_chiusura_id` (24 settembre 2026)
+
+`migrations/20260924110000_aggiunte_ridotte_chiusura.sql`, la **63ª**.
+
+Colonna nullable che punta a `liste_spesa_chiusure(id)`. Chiudendo la spesa,
+un'aggiunta dal catalogo di cui si è comprato **meno** di quanto chiedeva
+non sparisce e non resta intera: viene ridotta a quel che manca e marcata
+con la chiusura che l'ha ridotta. Serve al pulsante `🗑 No, toglile`, che
+deve togliere esattamente le aggiunte di quella chiusura e nessun'altra —
+un'aggiunta fatta nel frattempo non c'entra niente.
+
+`NULL` per tutte le altre, comprese quelle già in lista: non sono mai state
+ridotte da nessuna chiusura.
+
 ## Step 7.4septies: legenda, prodotti di marca, fonte delle ricette (18 settembre 2026)
 
 Tre migration dal collaudo di Alessio.

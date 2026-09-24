@@ -363,6 +363,26 @@ compatibilità dagli ingredienti:
 Le etichette sono un supporto gestionale e non sostituiscono la verifica delle
 etichette reali in caso di allergie/intolleranze.
 
+## Ricette archiviate e ripristino (24 settembre 2026)
+
+`📦 Archivia` toglie una ricetta dagli elenchi senza cancellarla: serve
+perché una ricetta può stare nei pasti già consumati di altri, e quella
+storia non si riscrive. Fino al 24 settembre 2026 era però una porta a senso
+unico — archiviata, la ricetta spariva e non c'era più modo di rivederla.
+
+`🗄 Ricette archiviate` nel menù delle ricette apre l'elenco (5 per pagina,
+C6) e compare **solo se ce n'è almeno una**, con il numero accanto: un
+pulsante che porta a una schermata vuota è rumore. Si vedono soltanto le
+proprie; l'amministratore vede anche quelle del catalogo globale, come per
+`📦 Archivia`. Aprendone una si legge il nome e si conferma con
+`♻️ Ripristina`; dopo, `🍳 Aprila` porta dritti alla ricetta tornata negli
+elenchi, con i suoi ingredienti e il suo procedimento — non è una copia
+nuova, è la stessa riga con `archiviata = 0`.
+
+Ripristinare chiede lo stesso permesso che serviva per archiviare
+(`restore_recipe` ripete la condizione di `archive_recipe`): chi non poteva
+archiviare non può nemmeno disfare.
+
 ## Permessi e condivisione
 
 - proprietario: modifica e gestione;

@@ -635,6 +635,26 @@ vedono.
 
 ---
 
+### C19. L'etichetta di un pulsante con dei dettagli va a capo
+
+Trovato da Alessio nel collaudo del 23 settembre 2026: nella lista della
+spesa i pulsanti delle voci arrivavano tagliati, e la parte persa era sempre
+la fine — proprio il prezzo e la confezione, cioè il motivo per cui erano
+stati aggiunti. Telegram non manda a capo da solo: quello che non ci sta
+sparisce, senza avviso.
+
+**Regola**: se un pulsante porta un nome più dei suoi dettagli, il nome sta
+sulla prima riga (tagliato a ~40 caratteri se serve) e i dettagli sulla
+seconda, uniti da `·`. Vale per le voci della lista
+(`nome` / `quantità · 📦 confezione · 💶 prezzo`) e per le confezioni
+(`marca e nome` / `quantità unità`).
+
+È la sorella di C15 — che manda a capo le parti **opzionali** di
+un'etichetta — applicata al caso in cui a stare stretta è la riga intera.
+Un pulsante di sola azione (`✅ Conferma`) resta su una riga.
+
+---
+
 ## Parte 3 — Come si applica
 
 Una convenzione che vale solo per il codice nuovo non serve a niente. L'ordine

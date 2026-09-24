@@ -185,6 +185,14 @@ torna da preparare; "no, usati o buttati" li lascia tolti ma stacca i
 movimenti dal pasto (`dispensa::dimentica_scarico_pasto`), così il piatto
 nuovo prenderà i suoi. `✏️ Modifica` resta per orario, partecipanti e tipo.
 
+**Dal 24 settembre 2026 una sostituzione chiede solo la ricetta.** Prima
+riportava per intero la procedura del pasto nuovo — profili, porzioni,
+orario — cose che nella sostituzione non cambiano mai: il draft porta il
+flag `sostituzione`, e scelta la ricetta si salva. Anche
+`✏️ Ho mangiato altro` ora passa dalla domanda sugli ingredienti
+(`planner:replace:keep:` / `planner:replace:used:`): prima rimetteva le
+scorte da solo, e chi aveva già cucinato se le ritrovava contate due volte.
+
 Nell'elenco del giorno ogni pasto ha **un'icona sola**, quella dello stato:
 `🍲 Colazione · Frittata`. Con anche l'icona del tipo (`🍲 ☕`) le due
 stavano attaccate e si confondevano.

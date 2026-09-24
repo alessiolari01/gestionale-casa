@@ -74,7 +74,9 @@ Prossimi blocchi funzionali, nell'ordine:
    vedi `STATO.md` e `docs/moduli/lista-spesa.md`. **Dal 16 settembre 2026**
    ha anche la chiusura della spesa (archivio di ciò che si è comprato),
    l'intervallo che parte sempre almeno da oggi e l'accesso diretto dal
-   planner;
+   planner. **Dal 24 settembre 2026**, dal collaudo E–26: voci su due righe
+   perché i pulsanti non si taglino, aggiunte già comprate che si chiudono
+   davvero, "dove conviene" che guarda tutta la lista;
 5. **Scorte: dispensa, frigo e freezer** — prima fetta il 16 settembre
    2026, secondo giro il 17 dopo il collaudo dal vivo
    (`src/modules/dispensa.rs`): ogni cosa entra nel suo posto chiudendo la
@@ -83,7 +85,8 @@ Prossimi blocchi funzionali, nell'ordine:
    ricette si cercano con quello che c'è. Collaudo dal vivo del secondo giro
    da fare. Restano fuori, documentate in `docs/previsto/dispensa.md`:
    quantità realmente comprata con il formato della confezione, avvisi di
-   scadenza;
+   scadenza. **Dal 24 settembre 2026** la roba nuova va dove sta già quella
+   di prima e la scheda di una scorta dice dov'è il resto;
 6. reminder/export Alimentazione.
 
 ### Consegna B — COSTRUITA il 17 settembre 2026
@@ -101,10 +104,15 @@ Vedi `STATO.md` (sezione 2duodecies) e `docs/moduli/mercato.md`. Conteneva:
 - il **totale della spesa chiusa** conservato per diventare una transazione
   del futuro modulo Soldi.
 
-### Domande aperte dal collaudo del 18 settembre 2026
+### Domande del collaudo del 18 settembre 2026 — RISPOSTE E FATTO
 
-Chieste ad Alessio, risposta ancora da raccogliere. Finché non risponde, non
-si fa niente di tutto questo:
+Alessio ha risposto lo stesso giorno e il lavoro è stato fatto (sezione
+2quaterdecies di `STATO.md`): **(a)** per le ricette — nome, ingredienti e
+link, procedimento scritto da noi, niente testo copiato; **prezzi a mano con
+la data e lo storico per ogni prodotto**, più quel che si riesce a leggere
+dalle fonti aperte; **codici a barre messi dove già disponibili**; **catalogo
+allargato** (centinaia di prodotti e formati). Restano qui le tre domande
+com'erano poste, perché spiegano le scelte:
 
 - **Ricette da GialloZafferano.** Importare i loro procedimenti vuol dire
   copiare testi protetti da diritto d'autore, e i loro termini d'uso non lo

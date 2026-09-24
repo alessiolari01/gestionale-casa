@@ -1319,14 +1319,16 @@ async fn apply_field_input(
             } else {
                 bot.send_message(
                     chat_id,
-                    "Il nome non può essere vuoto e deve restare entro 120 caratteri. Riprova oppure premi ⏭ Salta per mantenere quello attuale.",
+                    "⚠️ Il nome non può essere vuoto e deve restare entro 120 caratteri.",
                 )
+                .reply_markup(field_keyboard(DraftField::Name, &draft))
                 .await?;
             }
         }
         DraftField::Brand => {
             draft.brand = clean_optional(input, 120);
             let prompt = field_prompt(DraftField::Model, &draft);
+            let keyboard = field_keyboard(DraftField::Model, &draft);
             sessions.set(
                 raw_chat_id,
                 ConversationState::EditingObject {
@@ -1334,7 +1336,9 @@ async fn apply_field_input(
                     field: Some(DraftField::Model),
                 },
             );
-            bot.send_message(chat_id, prompt).await?;
+            bot.send_message(chat_id, prompt)
+                .reply_markup(keyboard)
+                .await?;
         }
         DraftField::Model => {
             draft.model = clean_optional(input, 120);
@@ -1348,6 +1352,7 @@ async fn apply_field_input(
             Some(date) => {
                 draft.purchase_date = Some(date);
                 let prompt = field_prompt(DraftField::PurchasePrice, &draft);
+                let keyboard = field_keyboard(DraftField::PurchasePrice, &draft);
                 sessions.set(
                     raw_chat_id,
                     ConversationState::EditingObject {
@@ -1355,13 +1360,16 @@ async fn apply_field_input(
                         field: Some(DraftField::PurchasePrice),
                     },
                 );
-                bot.send_message(chat_id, prompt).await?;
+                bot.send_message(chat_id, prompt)
+                    .reply_markup(keyboard)
+                    .await?;
             }
             None => {
                 bot.send_message(
                     chat_id,
-                    "Data non valida. Usa GG/MM/AAAA oppure AAAA-MM-GG. Esempio: 14/05/2025.\nPremi ⏭ Salta per non modificare il valore.",
+                    "⚠️ Data non valida. Usa GG/MM/AAAA oppure AAAA-MM-GG, per esempio 14/05/2025.",
                 )
+                .reply_markup(field_keyboard(DraftField::PurchaseDate, &draft))
                 .await?;
             }
         },
@@ -1369,6 +1377,7 @@ async fn apply_field_input(
             Some(cents) => {
                 draft.purchase_price_cents = Some(cents);
                 let prompt = field_prompt(DraftField::Seller, &draft);
+                let keyboard = field_keyboard(DraftField::Seller, &draft);
                 sessions.set(
                     raw_chat_id,
                     ConversationState::EditingObject {
@@ -1376,13 +1385,16 @@ async fn apply_field_input(
                         field: Some(DraftField::Seller),
                     },
                 );
-                bot.send_message(chat_id, prompt).await?;
+                bot.send_message(chat_id, prompt)
+                    .reply_markup(keyboard)
+                    .await?;
             }
             None => {
                 bot.send_message(
                     chat_id,
-                    "Prezzo non valido. Esempi validi: 89,90 oppure 89.90 oppure 89.\nPremi ⏭ Salta per non modificare il valore.",
+                    "⚠️ Prezzo non valido. Per esempio 89,90 oppure 89.",
                 )
+                .reply_markup(field_keyboard(DraftField::PurchasePrice, &draft))
                 .await?;
             }
         },
@@ -1406,8 +1418,9 @@ async fn apply_field_input(
             None => {
                 bot.send_message(
                     chat_id,
-                    "Valore non valido. Esempi validi: 250 oppure 250,00.\nPremi ⏭ Salta per non modificare il valore.",
+                    "⚠️ Valore non valido. Per esempio 250 oppure 250,00.",
                 )
+                .reply_markup(field_keyboard(DraftField::EstimatedValue, &draft))
                 .await?;
             }
         },
@@ -1644,7 +1657,7 @@ async fn send_object_list(
             if objects.is_empty() {
                 bot.send_message(
                     chat_id,
-                    "📋 Non ci sono ancora oggetti registrati.\n\nPuoi crearne uno con ➕ Nuovo oggetto oppure usa il pulsante ➕ Nuovo oggetto.",
+                    "📋 Non ci sono ancora oggetti registrati.\n\nCreane uno con ➕ Nuovo oggetto.",
                 )
                 .reply_markup(objects_menu_keyboard())
                 .await?;

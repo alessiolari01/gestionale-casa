@@ -1461,6 +1461,14 @@ Scrivi il nome dell'alimento. Il filtro categoria, se attivo, viene mantenuto.",
                 show_ingredient_search_results(bot, chat_id, pool, &selected).await?;
             }
         }
+        _ if data.starts_with("recipe:archived:") => {
+            let page = data
+                .strip_prefix("recipe:archived:")
+                .and_then(parse_nonnegative_i64)
+                .unwrap_or(0);
+            sessions.clear_chat(chat_id.0);
+            show_archived_recipes(bot, chat_id, pool, page).await?;
+        }
         _ if data.starts_with("recipe:list:") => {
             let page = data
                 .strip_prefix("recipe:list:")
@@ -2894,6 +2902,58 @@ async fn handle_edit_callback(
         return Ok(());
     }
     if let Some(recipe_id) = data
+        .strip_prefix("recipe:restore:ask:")
+        .and_then(parse_positive_i64_str)
+    {
+        let nome: String =
+            sqlx::query_scalar("SELECT nome FROM ricette WHERE id = ? AND archiviata = 1")
+                .bind(recipe_id)
+                .fetch_optional(pool)
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+        bot.send_message(
+            chat_id,
+            format!("♻️ {nome}\n\nTorna negli elenchi come prima, con i suoi ingredienti e il suo procedimento."),
+        )
+        .reply_markup(InlineKeyboardMarkup::new(vec![
+            vec![button(
+                "♻️ Ripristina",
+                format!("recipe:restore:yes:{recipe_id}"),
+            )],
+            vec![
+                button("⬅️ Indietro", "recipe:archived:0"),
+                button("🏠 Menù principale", "menu:main"),
+            ],
+        ]))
+        .await?;
+        return Ok(());
+    }
+    if let Some(recipe_id) = data
+        .strip_prefix("recipe:restore:yes:")
+        .and_then(parse_positive_i64_str)
+    {
+        match restore_recipe(pool, recipe_id).await {
+            Ok(()) => {
+                sessions.clear_chat(chat_id.0);
+                bot.send_message(chat_id, "✅ Ricetta ripristinata.")
+                    .reply_markup(InlineKeyboardMarkup::new(vec![
+                        vec![button("🍳 Aprila", format!("recipe:detail:{recipe_id}"))],
+                        vec![
+                            button("⬅️ Indietro", "recipe:archived:0"),
+                            button("🏠 Menù principale", "menu:main"),
+                        ],
+                    ]))
+                    .await?;
+            }
+            Err(error) => {
+                bot.send_message(chat_id, format!("⚠️ {error}")).await?;
+            }
+        }
+        return Ok(());
+    }
+    if let Some(recipe_id) = data
         .strip_prefix("recipe:edit:archive:ask:")
         .and_then(parse_positive_i64_str)
     {
@@ -3011,6 +3071,15 @@ async fn show_menu(bot: &Bot, chat_id: ChatId, pool: &SqlitePool) -> ResponseRes
             "recipe:invite:list",
         )]);
     }
+    // Compare solo se c'è davvero qualcosa da riprendere: un pulsante che
+    // porta a una schermata vuota è rumore.
+    let archiviate = count_archived_recipes(pool).await.unwrap_or(0);
+    if archiviate > 0 {
+        rows.push(vec![button(
+            format!("🗄 Ricette archiviate ({archiviate})"),
+            "recipe:archived:0",
+        )]);
+    }
     rows.push(vec![
         button("⬅️ Indietro", "food:menu"),
         button("🏠 Menù principale", "menu:main"),
@@ -3086,6 +3155,58 @@ fn callback_indietro_ricetta(chat_id: i64) -> String {
             "recipe:back".to_string()
         }
     }
+}
+
+/// Le ricette archiviate, con il pulsante per riprenderle. Prima
+/// l'archiviazione era una porta a senso unico: la ricetta spariva dagli
+/// elenchi e non c'era più modo di rivederla (chiesto da Alessio il 24
+/// settembre 2026).
+async fn show_archived_recipes(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    page: i64,
+) -> ResponseResult<()> {
+    let page = page.max(0);
+    let total = count_archived_recipes(pool).await.unwrap_or(0);
+    let pages = page_count(total, RECIPE_LIST_PAGE_SIZE);
+    let safe_page = if pages == 0 { 0 } else { page.min(pages - 1) };
+    let rows = list_archived_recipes(pool, safe_page, RECIPE_LIST_PAGE_SIZE)
+        .await
+        .unwrap_or_default();
+
+    let mut text = liste::intestazione("🗄 Ricette archiviate", total, safe_page);
+    if rows.is_empty() {
+        // C8: una schermata vuota dice cosa fare per riempirla.
+        text.push_str("\n\nNessuna ricetta archiviata. Una ricetta ci finisce dalla sua schermata, con 📦 Archivia.");
+    } else {
+        text.push_str("\n\nSono fuori dagli elenchi, ma ci sono ancora.");
+    }
+
+    let mut keyboard: Vec<Vec<teloxide::types::InlineKeyboardButton>> = rows
+        .iter()
+        .map(|(id, nome)| {
+            vec![button(
+                format!("🍳 {nome}"),
+                format!("recipe:restore:ask:{id}"),
+            )]
+        })
+        .collect();
+    if let Some(riga) =
+        liste::riga_paginazione_da_totale(safe_page, total, "recipe:noop", |pagina| {
+            format!("recipe:archived:{pagina}")
+        })
+    {
+        keyboard.push(riga);
+    }
+    keyboard.push(vec![
+        button("⬅️ Indietro", "recipe:menu"),
+        button("🏠 Menù principale", "menu:main"),
+    ]);
+    bot.send_message(chat_id, text)
+        .reply_markup(InlineKeyboardMarkup::new(keyboard))
+        .await?;
+    Ok(())
 }
 
 async fn show_recipe_list(
@@ -7052,6 +7173,74 @@ async fn cleanup_recipe_media_files(recipe_id: i64, paths: &[String]) {
     let _ = tokio::fs::remove_dir_all(PathBuf::from(MEDIA_ROOT).join(recipe_id.to_string())).await;
 }
 
+/// Quante ricette archiviate può riprendere chi sta guardando: le sue,
+/// più quelle del catalogo globale se è amministratore. Le ricette
+/// archiviate da altri non si vedono nemmeno.
+async fn count_archived_recipes(pool: &SqlitePool) -> Result<i64> {
+    let user_id = identity::current_actor()
+        .utente_id
+        .context("Utente non disponibile")?;
+    let admin = is_system_admin(pool, user_id).await.unwrap_or(false);
+    sqlx::query_scalar(
+        "SELECT COUNT(*) FROM ricette \
+         WHERE archiviata = 1 \
+           AND (proprietario_utente_id = ? OR (catalogo_globale = 1 AND ? = 1))",
+    )
+    .bind(user_id)
+    .bind(i64::from(admin))
+    .fetch_one(pool)
+    .await
+    .context("Impossibile contare le ricette archiviate")
+}
+
+async fn list_archived_recipes(
+    pool: &SqlitePool,
+    page: i64,
+    limit: i64,
+) -> Result<Vec<(i64, String)>> {
+    let user_id = identity::current_actor()
+        .utente_id
+        .context("Utente non disponibile")?;
+    let admin = is_system_admin(pool, user_id).await.unwrap_or(false);
+    sqlx::query_as(
+        "SELECT id, nome FROM ricette \
+         WHERE archiviata = 1 \
+           AND (proprietario_utente_id = ? OR (catalogo_globale = 1 AND ? = 1)) \
+         ORDER BY nome COLLATE NOCASE, id LIMIT ? OFFSET ?",
+    )
+    .bind(user_id)
+    .bind(i64::from(admin))
+    .bind(limit)
+    .bind(page.max(0) * limit)
+    .fetch_all(pool)
+    .await
+    .context("Impossibile leggere le ricette archiviate")
+}
+
+/// Riporta una ricetta archiviata negli elenchi. Stesso permesso di
+/// `archive_recipe`: chi ha potuto archiviare può disfare.
+async fn restore_recipe(pool: &SqlitePool, recipe_id: i64) -> Result<()> {
+    let user_id = identity::current_actor()
+        .utente_id
+        .context("Utente non disponibile")?;
+    let admin = is_system_admin(pool, user_id).await.unwrap_or(false);
+    let result = sqlx::query(
+        "UPDATE ricette SET archiviata = 0, aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
+         WHERE id = ? AND archiviata = 1 \
+           AND (proprietario_utente_id = ? OR (catalogo_globale = 1 AND ? = 1))",
+    )
+    .bind(recipe_id)
+    .bind(user_id)
+    .bind(i64::from(admin))
+    .execute(pool)
+    .await
+    .context("Impossibile ripristinare la ricetta")?;
+    if result.rows_affected() != 1 {
+        bail!("Ricetta non disponibile o non di tua proprietà");
+    }
+    Ok(())
+}
+
 async fn archive_recipe(pool: &SqlitePool, recipe_id: i64) -> Result<()> {
     let user_id = identity::current_actor()
         .utente_id
@@ -8536,6 +8725,50 @@ mod tests {
             archive_recipe(&pool, frittata)
                 .await
                 .expect("l'amministratore archivia");
+        })
+        .await;
+    }
+
+    /// Archiviare era una porta a senso unico. Dal 24 settembre 2026 le
+    /// ricette archiviate hanno la loro schermata e si riprendono da lì, con
+    /// lo stesso permesso che serviva per archiviarle.
+    #[tokio::test]
+    async fn una_ricetta_archiviata_si_riprende_da_chi_poteva_archiviarla() {
+        let pool = test_pool().await;
+        let padrone_id = create_user(&pool, "Alessio", 1).await;
+        let altro_id = create_user(&pool, "Altro", 1).await;
+
+        let ricetta = identity::with_actor(actor(padrone_id, 1, "Alessio", false), async {
+            let ricetta: i64 = sqlx::query_scalar(
+                "INSERT INTO ricette                  (proprietario_utente_id, nome, nome_normalizzato, porzioni_base)                  VALUES (?, 'Pasta al forno', 'pasta al forno', 4) RETURNING id",
+            )
+            .bind(padrone_id)
+            .fetch_one(&pool)
+            .await
+            .expect("ricetta");
+            assert_eq!(count_archived_recipes(&pool).await.unwrap(), 0);
+            archive_recipe(&pool, ricetta).await.expect("archiviata");
+            assert_eq!(count_archived_recipes(&pool).await.unwrap(), 1);
+            let elenco = list_archived_recipes(&pool, 0, 5).await.expect("elenco");
+            assert_eq!(elenco, vec![(ricetta, "Pasta al forno".to_string())]);
+            ricetta
+        })
+        .await;
+
+        // Un altro utente non la vede nemmeno, e non può riprenderla.
+        identity::with_actor(actor(altro_id, 1, "Altro", false), async {
+            assert_eq!(count_archived_recipes(&pool).await.unwrap(), 0);
+            assert!(restore_recipe(&pool, ricetta).await.is_err());
+        })
+        .await;
+
+        identity::with_actor(actor(padrone_id, 1, "Alessio", false), async {
+            restore_recipe(&pool, ricetta).await.expect("ripristinata");
+            assert_eq!(count_archived_recipes(&pool).await.unwrap(), 0);
+            // Torna negli elenchi normali, non come copia nuova.
+            assert!(visible_recipe(&pool, ricetta).await.unwrap().is_some());
+            // Due ripristini di fila: il secondo non trova più niente da fare.
+            assert!(restore_recipe(&pool, ricetta).await.is_err());
         })
         .await;
     }

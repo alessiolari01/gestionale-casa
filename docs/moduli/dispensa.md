@@ -63,6 +63,21 @@ nell'elenco delle eccezioni per la dispensa: seguono la categoria "verdura".
 Le mele sono nella frutta da frigo. Chi vuole un altro posto può usare
 `📌 Mettilo sempre qui`.
 
+## Lo stesso alimento non si sparpaglia (24 settembre 2026)
+
+Nel collaudo del 23 settembre lo stesso alimento era finito in tre posti
+diversi a seconda di come era entrato (dalla spesa, a mano, da un pasto).
+Due rimedi:
+
+- **`destinazione_per` guarda dove quella roba sta già.** Subito dopo la
+  scelta a mano (`📌 Mettilo sempre qui`, che resta la più forte) e prima
+  del nome e della categoria, cerca l'ultima scorta di quell'alimento nello
+  spazio: se c'è, la roba nuova la raggiunge. Una scorta esistente è una
+  scelta fatta, anche quando nessuno l'ha dichiarata.
+- **La scheda di una scorta dice dov'è il resto**: `🏠 Ne hai anche in
+  🧊 Freezer 200 g` (`altrove_in_casa`, somma per posto e unità, solo gli
+  **altri** posti).
+
 ## Una riga per alimento, con le sue confezioni (17 settembre 2026)
 
 Trovato da Alessio collaudando: due `Pasta sfoglia · 500 g` comparivano come

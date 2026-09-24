@@ -297,6 +297,11 @@ struct PlannerDraft {
     // la pasta, ho mangiato la pizza"). Al salvataggio il vecchio sparisce
     // restituendo le sue scorte, e il nuovo nasce già consumato.
     sostituisce: Option<i64>,
+    // 23 settembre 2026: "🔁 Sostituisci" su un pasto non ancora mangiato
+    // cambia solo il piatto, quindi dopo la ricetta si salva subito, senza
+    // richiedere profili e orario che sono già quelli di prima (Alessio:
+    // "sostituire un pasto richiede di nuovo profili e orario").
+    sostituzione: bool,
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -718,29 +723,69 @@ pub async fn handle_callback(
         }
         return Ok(true);
     }
+    if let Some(raw_id) = data.strip_prefix("planner:replace:keep:") {
+        let Some(meal_id) = planner_positive_i64(raw_id) else {
+            planner_invalid(bot, chat_id).await?;
+            return Ok(true);
+        };
+        // Gli ingredienti preparati ci sono ancora: al salvataggio il pasto
+        // vecchio li restituisce, come fa sempre.
+        planner_avvia_correzione(bot, chat_id, pool, meal_id).await?;
+        return Ok(true);
+    }
+    if let Some(raw_id) = data.strip_prefix("planner:replace:used:") {
+        let Some(meal_id) = planner_positive_i64(raw_id) else {
+            planner_invalid(bot, chat_id).await?;
+            return Ok(true);
+        };
+        // Usati o buttati: si staccano i movimenti dal pasto, così quando il
+        // vecchio sparisce non rimette in casa niente.
+        if let Err(error) = crate::modules::dispensa::dimentica_scarico_pasto(pool, meal_id).await {
+            tracing::warn!(
+                ?error,
+                meal_id,
+                "Scarico non staccato prima della correzione"
+            );
+        }
+        planner_avvia_correzione(bot, chat_id, pool, meal_id).await?;
+        return Ok(true);
+    }
     if let Some(raw_id) = data.strip_prefix("planner:replace:") {
         let Some(meal_id) = planner_positive_i64(raw_id) else {
             planner_invalid(bot, chat_id).await?;
             return Ok(true);
         };
-        match planner_load_replace_draft(pool, meal_id).await {
-            Ok(Some(draft)) => {
-                let date = draft.date.clone();
-                planner_set_draft(chat_id.0, draft);
-                planner_show_type_picker(
-                    bot,
-                    chat_id,
-                    &date,
-                    Some("✏️ Ho mangiato altro — scegli cosa hai mangiato davvero"),
-                )
-                .await?;
-            }
-            _ => {
-                bot.send_message(chat_id, "⚠️ Si può sostituire solo un pasto consumato.")
-                    .reply_markup(planner_nav_markup("planner:menu"))
-                    .await?;
-            }
+        // Se il pasto era stato preparato, gli ingredienti erano già usciti
+        // dalle scorte: correggendo il pasto tornavano in casa senza chiedere
+        // niente, anche se erano stati cucinati (Alessio, 23 settembre 2026).
+        let preparato = planner_load_meal_detail(pool, meal_id)
+            .await
+            .ok()
+            .flatten()
+            .is_some_and(|meal| meal.prepared_at.is_some());
+        if preparato {
+            bot.send_message(
+                chat_id,
+                "🍲 Questo pasto era stato preparato.\n\nGli ingredienti preparati li hai ancora?",
+            )
+            .reply_markup(InlineKeyboardMarkup::new(vec![
+                vec![planner_button(
+                    "🥫 Sì, rimettili nelle scorte",
+                    format!("planner:replace:keep:{meal_id}"),
+                )],
+                vec![planner_button(
+                    "🗑 No, usati o buttati",
+                    format!("planner:replace:used:{meal_id}"),
+                )],
+                vec![
+                    planner_button("❌ Annulla", format!("planner:view:{meal_id}")),
+                    planner_button("🏠 Menù principale", "menu:main"),
+                ],
+            ]))
+            .await?;
+            return Ok(true);
         }
+        planner_avvia_correzione(bot, chat_id, pool, meal_id).await?;
         return Ok(true);
     }
     if let Some(mese) = data.strip_prefix("planner:cal:") {
@@ -788,6 +833,7 @@ pub async fn handle_callback(
                 ignora_avviso_turno: false,
                 orario_in_attesa: false,
                 sostituisce: None,
+                sostituzione: false,
             },
         );
         planner_show_type_picker(bot, chat_id, date, None).await?;
@@ -891,6 +937,13 @@ pub async fn handle_callback(
             return Ok(true);
         };
         match planner_visible_recipe(pool, recipe_id).await {
+            Ok(Some(_)) if draft.sostituzione => {
+                // Sostituzione: cambia il piatto e basta. Profili e orario
+                // restano quelli del pasto di prima.
+                draft.recipe_id = Some(recipe_id);
+                planner_set_draft(chat_id.0, draft);
+                planner_commit_save(bot, chat_id, pool).await?;
+            }
             Ok(Some(_)) => {
                 draft.recipe_id = Some(recipe_id);
                 // Il proprio profilo parte già spuntato (chiesto da Alessio
@@ -1219,7 +1272,7 @@ async fn planner_esegui_consumo(
             {
                 tracing::warn!(?error, meal_id, "Scarico scorte al consumo fallito");
             }
-            "✅ Pasto segnato come consumato e congelato.".to_string()
+            "✅ Pasto segnato come consumato.".to_string()
         }
         Err(error) => format!("⚠️ {error}"),
     };
@@ -2897,6 +2950,7 @@ async fn planner_load_edit_draft(
         ignora_avviso_turno: true,
         orario_in_attesa: false,
         sostituisce: None,
+        sostituzione: false,
     }))
 }
 
@@ -2934,6 +2988,7 @@ async fn planner_load_replace_draft(
         ignora_avviso_turno: true,
         orario_in_attesa: false,
         sostituisce: Some(meal_id),
+        sostituzione: false,
     }))
 }
 
@@ -3003,6 +3058,36 @@ async fn planner_riallinea_scorte_dopo_modifica(
     Ok(())
 }
 
+/// Corregge un pasto già consumato ("✏️ Ho mangiato altro"): si sceglie il
+/// pasto mangiato davvero, e al salvataggio il vecchio sparisce restituendo
+/// le sue scorte.
+async fn planner_avvia_correzione(
+    bot: &PlannerBot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    meal_id: i64,
+) -> ResponseResult<()> {
+    match planner_load_replace_draft(pool, meal_id).await {
+        Ok(Some(draft)) => {
+            let date = draft.date.clone();
+            planner_set_draft(chat_id.0, draft);
+            planner_show_type_picker(
+                bot,
+                chat_id,
+                &date,
+                Some("✏️ Ho mangiato altro — scegli cosa hai mangiato davvero"),
+            )
+            .await
+        }
+        _ => {
+            bot.send_message(chat_id, "⚠️ Si può correggere solo un pasto consumato.")
+                .reply_markup(planner_nav_markup("planner:menu"))
+                .await?;
+            Ok(())
+        }
+    }
+}
+
 /// Sostituisce il piatto di un pasto non ancora mangiato: stesso giorno,
 /// tipo e orario, si sceglie solo la ricetta nuova. Passa dalla modifica
 /// (`planner_load_edit_draft`), che al salvataggio riallinea le scorte.
@@ -3015,6 +3100,7 @@ async fn planner_avvia_sostituzione(
     match planner_load_edit_draft(pool, meal_id).await {
         Ok(Some(mut draft)) => {
             draft.recipe_id = None;
+            draft.sostituzione = true;
             planner_set_draft(chat_id.0, draft);
             planner_show_recipe_picker(bot, chat_id, pool, 0).await
         }
