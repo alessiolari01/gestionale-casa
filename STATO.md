@@ -2527,6 +2527,14 @@ contesto.
 
 1 nuovo test. Totale 472.
 
+**Distribuito sull'S9 il 25 settembre 2026** (commit `00a500e`): CI verde
+(run #165), 472 test e clippy verdi anche sul telefono, nessuna migration
+nuova (`applied_migrations=65` invariato). **Bot verificato attivo**:
+processo vivo, `Gestionale Casa online` nel log, zero `panicked`.
+
+**Da riprovare dal vivo**: premere il pulsante di una schermata vecchia --
+e' il gesto che faceva cadere il bot.
+
 ## 3. Stato tecnico verificato
 
 - **65 migration** nel repository, tutte **applicate** al database reale
