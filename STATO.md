@@ -2358,17 +2358,25 @@ Quattro domande lasciate aperte, tre hanno prodotto altro lavoro.
 
 5 nuovi test in tutto. Totale 463.
 
-**Distribuzione sull'S9 da fare.** **Collaudo dal vivo su Telegram da
-fare.**
+**Distribuito sull'S9 il 24 settembre 2026** (commit `d806846`): CI verde
+(run #162), 463 test e clippy verdi anche sul telefono, le tre migration
+provate prima su una copia del database e poi applicate
+(`applied_migrations=63` nel log di avvio, era 60), `Gestionale Casa online`.
+Le due migration di dati hanno fatto quello che dovevano, verificato
+leggendo il database reale: **244 formati** di prodotto, nessun prodotto
+attivo senza il suo formato base (erano 243 su 244 a mancare), e i tre
+prezzi ora portano la data del **23 settembre**, il giorno in cui Alessio li
+ha davvero segnati.
+
+**Collaudo dal vivo su Telegram da fare.**
 
 ## 3. Stato tecnico verificato
 
-- **63 migration** nel repository. Le prime **60** sono **applicate** al
-  database reale dell'S9, verificato leggendo `applied_migrations=60` nel
-  log di avvio del bot dopo il deploy — non dedotto. Le tre nuove della
-  sezione 2novodecies (formati base mancanti, prezzi all'ora locale,
-  `ridotta_chiusura_id`) sono **in attesa del deploy**: dopo l'aggiornamento
-  dell'S9 il log deve dire `applied_migrations=63`.
+- **63 migration** nel repository, tutte **applicate** al database reale
+  dell'S9: le ultime tre (formati base mancanti, prezzi all'ora locale,
+  `ridotta_chiusura_id` — sezione 2novodecies) il 24 settembre 2026,
+  verificato leggendo `applied_migrations=63` nel log di avvio del bot dopo
+  il deploy — non dedotto.
   Né il secondo giro
   di correzioni del 12 settembre 2026 (sezione 2septies) né le tre
   rifiniture del 13 settembre 2026 (sezione 2octies) avevano migration
