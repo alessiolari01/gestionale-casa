@@ -635,23 +635,40 @@ vedono.
 
 ---
 
-### C19. L'etichetta di un pulsante con dei dettagli va a capo
+### C19. Un'etichetta di pulsante sta su una riga corta, il resto va nel testo
 
 Trovato da Alessio nel collaudo del 23 settembre 2026: nella lista della
 spesa i pulsanti delle voci arrivavano tagliati, e la parte persa era sempre
-la fine — proprio il prezzo e la confezione, cioè il motivo per cui erano
-stati aggiunti. Telegram non manda a capo da solo: quello che non ci sta
-sparisce, senza avviso.
+la fine — proprio il prezzo e la confezione, cioè il motivo per cui quella
+voce era stata presa.
 
-**Regola**: se un pulsante porta un nome più dei suoi dettagli, il nome sta
-sulla prima riga (tagliato a ~40 caratteri se serve) e i dettagli sulla
-seconda, uniti da `·`. Vale per le voci della lista
-(`nome` / `quantità · 📦 confezione · 💶 prezzo`) e per le confezioni
-(`marca e nome` / `quantità unità`).
+**Il primo tentativo era sbagliato.** Il 23 settembre avevo scritto questa
+convenzione come "il nome sulla prima riga, i dettagli sulla seconda", con un
+`\n` dentro l'etichetta. **Telegram non manda a capo le etichette dei
+pulsanti**: il `\n` viene ignorato, su Desktop resta una riga sola, e taglia
+esattamente come prima. Alessio l'ha riprovato il 24 e non era cambiato
+niente (punti A1 e A3 del suo collaudo). Le due cose vere sono che un
+pulsante ha una riga sola e che quello che non ci sta sparisce senza avviso.
+
+**Regola**: l'etichetta di un pulsante sta comodamente in **una riga corta** —
+in pratica 25-30 caratteri, emoji comprese — e porta solo quello che serve a
+riconoscere e premere: l'icona di stato, il nome tagliato, al più la
+quantità. Tutto il resto (prezzo segnato, confezione presa, avvisi) va nel
+**testo del messaggio**, dove lo spazio non manca, come una riga per ogni
+voce che ne ha bisogno.
+
+Quando due pulsanti si distinguono per un dettaglio, quel dettaglio va
+**davanti**, non in fondo: le confezioni si scrivono `500 g · Parmareggio
+Parmigiano…`, perché è il formato che le distingue, ed è la fine che si
+perde.
+
+Non è in contrasto con C1 (il testo non ripete i pulsanti): il testo non
+rifà l'elenco, aggiunge quello che sul pulsante non entra. Se una voce non ha
+niente in più, non compare nel testo.
 
 È la sorella di C15 — che manda a capo le parti **opzionali** di
-un'etichetta — applicata al caso in cui a stare stretta è la riga intera.
-Un pulsante di sola azione (`✅ Conferma`) resta su una riga.
+un'etichetta nel testo — applicata ai pulsanti, dove andare a capo non si
+può.
 
 ---
 

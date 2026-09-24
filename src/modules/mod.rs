@@ -18,6 +18,7 @@ pub mod contenitori;
 pub mod dispensa;
 pub mod distribuzione;
 pub mod foto;
+pub mod impostazioni;
 pub mod lista_spesa;
 pub mod liste;
 pub mod luoghi;

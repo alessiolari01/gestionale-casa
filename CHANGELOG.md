@@ -2,6 +2,52 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_COLLAUDO_D806846_20260924 -->
+# 24/09/2026 — Dal collaudo di d806846: dieci correzioni
+
+- **Le ricette archiviate si aprono e si ripristinano**: il loro pulsante
+  non arrivava a chi lo gestisce e rispondeva "Azione Ricette non
+  disponibile". E il menù mostrato subito dopo l'archiviazione ha di nuovo
+  `🗄 Ricette archiviate`, con il numero aggiornato.
+- **"Ne restano X" adesso è il numero che si legge in lista.** Il residuo
+  dopo la spesa si calcola come lo calcola la lista — sulle scorte di quel
+  momento — invece che con un conto suo: niente più "restano 590 g" con 10 g
+  in lista, e se non manca niente il bot non chiede più niente.
+- **"Voce aggiunta" somma tutte le righe di quell'alimento**, invece di
+  leggerne una sola.
+- **Pulsanti su una riga corta, dettagli nel testo**: Telegram non manda a
+  capo le etichette dei pulsanti, quindi prezzo e confezione ora stanno nel
+  messaggio e non si perdono. Le confezioni mostrano il formato **davanti**
+  al nome, perché è quello che le distingue.
+- **`⬅️ Indietro` sostituendo un pasto** torna al pasto, non alla creazione
+  di un pasto nuovo; e dal dettaglio di un prodotto commerciale torna
+  all'elenco da cui si è arrivati, **pagina compresa**.
+- **Riga di navigazione** anche su "Le lascio in lista?" e sulla domanda del
+  totale dello scontrino, e `❌ Annulla` nella ricerca di un oggetto, dove il
+  testo lo prometteva senza che ci fosse.
+- **Latte e panna si misurano in millilitri, il miele in grammi**; in lista
+  "1,5 l" resta "1,5 l" e non diventa "1500 ml".
+- **"Rimuovi voci" dice quali voci non si vedono in lista** perché in casa ce
+  n'è già abbastanza, e l'avviso sull'eccesso dice **quali** voci riguarda.
+- **"1 voce non ha ancora nessun prezzo"**, al singolare.
+
+<!-- CHANGELOG_IMPOSTAZIONI_20260924 -->
+# 24/09/2026 — ⚙️ Impostazioni: ogni funzione si può spegnere
+
+- **Nuova sezione ⚙️ Impostazioni** nel menù principale. Si spengono le
+  sezioni (Alimentazione, Ricette, Profili alimentari, Planner, Lista della
+  spesa, Scorte, Turni, Prezzi, Oggetti, Luoghi, Storico) e quello che il
+  bot fa da solo (la spesa chiusa che entra in casa, i pasti che scalano le
+  scorte, la lista che si aggiorna, la legenda).
+- **Spegnere spegne davvero**: senza le Scorte la spesa non entra in casa, i
+  pasti non scalano niente e **la lista della spesa smette di sottrarre
+  quello che c'è in dispensa** — una lista dimezzata da scorte che nessuno
+  aggiorna sarebbe peggio che nessuna lista.
+- **I dati restano**: spegnere non cancella niente e riaccendendo si ritrova
+  tutto dov'era.
+- **Anche i pulsanti delle schermate vecchie** di una funzione spenta
+  rispondono "è spento", invece di aprirla lo stesso.
+
 <!-- CHANGELOG_COLLAUDO_E26_20260924 -->
 # 24/09/2026 — Dal collaudo E–26: sedici punti tra bug, migliorie e testi
 

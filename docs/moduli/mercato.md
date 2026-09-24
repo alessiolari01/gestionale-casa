@@ -61,7 +61,14 @@ manca da mettere nel carrello.
 L'ordine premette chi copre **più voci**, e solo dopo guarda il totale: un
 negozio che conosce un prodotto su cinque non può vincere perché la sua
 somma è piccola. Il testo dice sempre che è una stima sui prezzi visti da
-noi, non un listino.
+noi, non un listino, e da che cosa è fatta: **ogni riga della lista** vale
+l'ultimo prezzo visto in quel negozio, e le righe senza prezzo restano fuori
+dal totale.
+
+Due righe diverse possono pescare lo stesso prezzo: un prezzo segnato su un
+prodotto di marca vale anche per la riga generica del suo alimento, perché è
+la stima migliore che abbiamo. Il totale conta quindi entrambe le righe, che
+è quello che si pagherebbe comprandole tutte e due.
 
 ## Totale dello scontrino
 

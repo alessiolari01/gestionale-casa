@@ -5025,23 +5025,40 @@ async fn alimentation_menu_keyboard(pool: &SqlitePool) -> InlineKeyboardMarkup {
     // principale -- la stessa correzione già fatta per l'allegato video dei
     // miglioramenti.
     let badge_lista_spesa = badge_lista_spesa(pool).await;
-    InlineKeyboardMarkup::new(vec![
-        vec![button("🥕 Alimenti", "food:foods")],
-        vec![button("🍳 Ricette", "recipe:menu")],
-        vec![button("👥 Profili alimentari", "foodprof:menu")],
+    // Le voci spente in ⚙️ Impostazioni non compaiono (24 settembre 2026).
+    // 🥕 Alimenti non si spegne: è il catalogo da cui dipendono tutte le
+    // altre, e senza non resterebbe niente da mostrare qui.
+    let funzioni = crate::modules::impostazioni::funzioni(pool).await;
+    use crate::modules::impostazioni::Funzione;
+    let mut righe = vec![vec![button("🥕 Alimenti", "food:foods")]];
+    if funzioni.attiva(Funzione::Ricette) {
+        righe.push(vec![button("🍳 Ricette", "recipe:menu")]);
+    }
+    if funzioni.attiva(Funzione::ProfiliAlimentari) {
+        righe.push(vec![button("👥 Profili alimentari", "foodprof:menu")]);
+    }
+    if funzioni.attiva(Funzione::Planner) {
         // `:alimentazione` dice al planner che si arriva da qui, così il suo
         // `⬅️ Indietro` torna qui anche se prima ci si era passati dalla
         // lista della spesa (C3).
-        vec![button(
+        righe.push(vec![button(
             "📅 Planner alimentare",
             "planner:menu:alimentazione",
-        )],
-        vec![button(
+        )]);
+    }
+    if funzioni.attiva(Funzione::ListaSpesa) {
+        righe.push(vec![button(
             crate::modules::novita::etichetta_con_badge("🛒 Lista della spesa", badge_lista_spesa),
             "lista_spesa:menu",
-        )],
-        vec![button("🥫 Scorte", "dispensa:menu")],
-        vec![button("📋 Turni e routine", "turni:menu")],
+        )]);
+    }
+    if funzioni.attiva(Funzione::Scorte) {
+        righe.push(vec![button("🥫 Scorte", "dispensa:menu")]);
+    }
+    if funzioni.attiva(Funzione::Turni) {
+        righe.push(vec![button("📋 Turni e routine", "turni:menu")]);
+    }
+    righe.push(
         // Deciso il 7 settembre 2026: anche se `⬅️ Indietro` porterebbe
         // esattamente dove porta `🏠 Menù principale`, resta comunque
         // visibile a sinistra -- Alessio si aspetta "indietro" sempre
@@ -5051,7 +5068,8 @@ async fn alimentation_menu_keyboard(pool: &SqlitePool) -> InlineKeyboardMarkup {
             button("⬅️ Indietro", "menu:main"),
             button("🏠 Menù principale", "menu:main"),
         ],
-    ])
+    );
+    InlineKeyboardMarkup::new(righe)
 }
 
 /// Vero se il badge "🆕" va mostrato per la lista della spesa (novità
@@ -5694,6 +5712,9 @@ struct ProductCatalogRecord {
     id: i64,
     brand: String,
     product_name: String,
+    /// Letto dalla query ma non piu' mostrato sul pulsante dell'elenco: sta
+    /// nel dettaglio, dove c'e' spazio (24 settembre 2026).
+    #[allow(dead_code)]
     food_name: String,
     package_quantity: f64,
     unit_symbol: String,
@@ -5842,17 +5863,19 @@ async fn send_product_catalog(
         );
     }
 
+    // Una riga sola e corta: Telegram non manda a capo le etichette dei
+    // pulsanti, e il "\n🥕 alimento" che c'era qui non si vedeva -- si
+    // vedeva solo il taglio (collaudo del 24 settembre 2026, A1). L'alimento
+    // collegato resta nel dettaglio, dove c'è spazio.
     let mut rows: Vec<Vec<InlineKeyboardButton>> = products
         .iter()
         .map(|product| {
             vec![button(
                 format!(
-                    "{} {} · {} {}\n🥕 {}",
-                    product.brand,
-                    liste::tronca(&product.product_name, 30),
+                    "{} · {} {}",
+                    liste::tronca(&format!("{} {}", product.brand, product.product_name), 26),
                     display_quantity(product.package_quantity),
                     product.unit_symbol,
-                    liste::tronca(&product.food_name, 28)
                 ),
                 format!("food:product:view:{}", product.id),
             )]
@@ -5863,6 +5886,8 @@ async fn send_product_catalog(
         Some(query) => format!("food:products:cerca:{query}:"),
         None => "food:products:all:".to_string(),
     };
+    // Da qui si torna qui, pagina compresa.
+    ricorda_elenco_prodotti(chat_id.0, format!("{base}{page}"));
     if let Some(riga) = liste::riga_paginazione_da_totale(page, totale, "food:noop", |pagina| {
         format!("{base}{pagina}")
     }) {
@@ -5914,6 +5939,8 @@ async fn send_food_products(
         }
     };
     let can_edit = can_edit_food_current(pool, food_id).await.unwrap_or(false);
+    // Aprendo un prodotto da qui, "Indietro" torna qui.
+    ricorda_elenco_prodotti(chat_id.0, format!("food:products:{food_id}"));
 
     let text = if products.is_empty() {
         format!(
@@ -7151,7 +7178,7 @@ async fn send_product_detail(
             product_formats_summary(&formats),
         ),
     )
-    .reply_markup(product_detail_keyboard(&product, can_edit))
+    .reply_markup(product_detail_keyboard(&product, can_edit, chat_id.0))
     .await?;
     Ok(())
 }
@@ -7580,7 +7607,45 @@ fn food_products_keyboard(
     InlineKeyboardMarkup::new(rows)
 }
 
-fn product_detail_keyboard(product: &ProductRecord, can_edit: bool) -> InlineKeyboardMarkup {
+/// Da quale elenco di prodotti si è aperto un prodotto, per chat.
+///
+/// `⬅️ Indietro` dal dettaglio tornava sempre ai "Prodotti associati"
+/// dell'alimento, quindi chi era a pagina 2 dell'elenco generale si
+/// ritrovava in un altro elenco e poi a pagina 1 (Alessio, collaudo del 24
+/// settembre 2026, L1). Stessa soluzione gia' usata per le ricette: il
+/// callback dell'elenco non sta in 64 byte insieme al resto, quindi il bot
+/// se lo ricorda.
+fn provenienza_prodotti() -> &'static std::sync::Mutex<std::collections::HashMap<i64, String>> {
+    static PROVENIENZA: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<i64, String>>,
+    > = std::sync::OnceLock::new();
+    PROVENIENZA.get_or_init(Default::default)
+}
+
+fn ricorda_elenco_prodotti(chat_id: i64, callback: String) {
+    provenienza_prodotti()
+        .lock()
+        .unwrap_or_else(|avvelenato| avvelenato.into_inner())
+        .insert(chat_id, callback);
+}
+
+/// Dove torna `⬅️ Indietro` dal dettaglio di un prodotto: l'elenco da cui
+/// lo si è aperto, oppure -- se il bot non se lo ricorda piu' -- i prodotti
+/// del suo alimento, che è il posto dove il prodotto sicuramente c'è.
+fn indietro_da_prodotto(chat_id: i64, food_id: i64) -> String {
+    provenienza_prodotti()
+        .lock()
+        .unwrap_or_else(|avvelenato| avvelenato.into_inner())
+        .get(&chat_id)
+        .cloned()
+        .unwrap_or_else(|| format!("food:products:{food_id}"))
+}
+
+fn product_detail_keyboard(
+    product: &ProductRecord,
+    can_edit: bool,
+    chat_id: i64,
+) -> InlineKeyboardMarkup {
     let format_label = if product.format_count == 1 {
         "📦 Formati (1)".to_string()
     } else {
@@ -7607,7 +7672,10 @@ fn product_detail_keyboard(product: &ProductRecord, can_edit: bool) -> InlineKey
         )]);
     }
     rows.push(vec![
-        button("⬅️ Indietro", format!("food:products:{}", product.food_id)),
+        button(
+            "⬅️ Indietro",
+            indietro_da_prodotto(chat_id, product.food_id),
+        ),
         button("🏠 Menù principale", "menu:main"),
     ]);
     InlineKeyboardMarkup::new(rows)
@@ -7989,6 +8057,35 @@ fn parse_positive_id(raw: &str) -> Option<i64> {
 mod tests {
     use super::*;
     use sqlx::sqlite::SqlitePoolOptions;
+
+    /// Il latte si compra a millilitri e il miele a grammi: il catalogo
+    /// proponeva il contrario, perche' andava dietro alla categoria invece
+    /// che a come quella roba si vende (Alessio, collaudo del 24 settembre
+    /// 2026).
+    #[tokio::test]
+    async fn i_liquidi_si_misurano_a_millilitri_e_il_miele_a_grammi() {
+        let pool = test_pool().await;
+        let unita = |nome: &'static str| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_scalar::<_, String>(
+                    "SELECT u.simbolo FROM alimenti a \
+                     JOIN unita_misura u ON u.id = a.unita_predefinita_id \
+                     WHERE a.nome_normalizzato = ? AND a.catalogo_globale = 1",
+                )
+                .bind(nome)
+                .fetch_one(&pool)
+                .await
+                .expect(nome)
+            }
+        };
+        assert_eq!(unita("latte intero").await, "ml");
+        assert_eq!(unita("latte scremato").await, "ml");
+        assert_eq!(unita("panna da cucina").await, "ml");
+        assert_eq!(unita("miele").await, "g");
+        // Lo yogurt invece si vende a peso, e resta com'era.
+        assert_eq!(unita("yogurt bianco").await, "g");
+    }
 
     async fn test_pool() -> SqlitePool {
         let pool = SqlitePoolOptions::new()

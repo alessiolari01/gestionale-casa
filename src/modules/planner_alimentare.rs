@@ -1847,7 +1847,15 @@ async fn planner_show_recipe_picker(
         })
         .collect();
     rows.push(planner_pagination("planner:recipes", page, pages));
-    rows.push(planner_global_nav(&format!("planner:add:{}", draft.date)));
+    // Sostituendo un pasto, "Indietro" torna a quel pasto. Prima portava
+    // sempre a "planner:add:", cioe' alla creazione di un pasto nuovo: si
+    // usciva dalla sostituzione dentro un'altra procedura, senza capire
+    // perche' (Alessio, collaudo del 24 settembre 2026, L1).
+    let indietro = match (draft.sostituzione, draft.meal_id) {
+        (true, Some(meal_id)) => format!("planner:view:{meal_id}"),
+        _ => format!("planner:add:{}", draft.date),
+    };
+    rows.push(planner_global_nav(&indietro));
 
     bot.send_message(
         chat_id,

@@ -435,6 +435,45 @@ un'aggiunta fatta nel frattempo non c'entra niente.
 `NULL` per tutte le altre, comprese quelle già in lista: non sono mai state
 ridotte da nessuna chiusura.
 
+## Step 7.4terdecies: `funzioni_spente` (24 settembre 2026)
+
+`migrations/20260924190000_funzioni_spegnibili.sql`, la **64ª**. Vedi
+`docs/moduli/impostazioni.md`.
+
+```
+funzioni_spente (utente_id, funzione, spenta_il)
+PRIMARY KEY (utente_id, funzione)
+```
+
+**Una riga per ogni funzione spenta**: l'assenza vuol dire accesa. È la
+scelta che evita di popolare la tabella per gli utenti già esistenti e che
+fa nascere accesa per tutti ogni funzione aggiunta in futuro, senza altre
+migration.
+
+La chiave (`scorte`, `lista_spesa`, `planner`…) è quella dell'enum
+`impostazioni::Funzione` e **non cambia mai**: cambiarla riaccenderebbe di
+colpo una funzione che qualcuno aveva spento.
+
+Le tre preferenze che esistevano prima — `dispensa_ingresso_automatico`,
+`lista_spesa_aggiornamento_automatico` e `mostra_legenda` in
+`preferenze_utente` — **non** sono state spostate qui: la schermata delle
+impostazioni legge e scrive quelle colonne. Un fatto in un posto solo.
+
+## Step 7.4quaterdecies: unità predefinite dei liquidi (24 settembre 2026)
+
+`migrations/20260924200000_unita_predefinite_liquidi.sql`, la **65ª**.
+Migration di dati, nessuna colonna nuova.
+
+Sei alimenti del catalogo globale avevano l'unità predefinita sbagliata,
+perché seguiva la categoria invece di come quella roba si vende: latte e
+panna proposti in grammi (stanno con i latticini, che per il resto si
+pesano), miele proposto in millilitri (sta con gli oli). Scrivendo "1,5 l" di
+latte la lista rispondeva in grammi.
+
+Tocca solo il catalogo globale e solo dove l'unità è ancora quella sbagliata:
+un alimento già corretto a mano resta com'è. Lo yogurt non è toccato — si
+vende a peso davvero.
+
 ## Step 7.4septies: legenda, prodotti di marca, fonte delle ricette (18 settembre 2026)
 
 Tre migration dal collaudo di Alessio.

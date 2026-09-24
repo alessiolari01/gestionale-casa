@@ -1871,7 +1871,11 @@ Scrivi il nome dell'alimento. Il filtro categoria, se attivo, viene mantenuto.",
                 show_invalid_action(bot, chat_id).await?;
             }
         }
-        _ if data.starts_with("recipe:edit:") => {
+        // `recipe:restore:` viaggia con `recipe:edit:` perché è gestito dalla
+        // stessa funzione. Senza questa riga i pulsanti delle ricette
+        // archiviate finivano nel ramo finale, e rispondevano "Azione Ricette
+        // non disponibile" (Alessio, collaudo del 24 settembre 2026, I3).
+        _ if data.starts_with("recipe:edit:") || data.starts_with("recipe:restore:") => {
             handle_edit_callback(bot, chat_id, pool, sessions, data).await?;
         }
         _ if data.starts_with("recipe:invite:") => {
@@ -2974,8 +2978,11 @@ async fn handle_edit_callback(
         match archive_recipe(pool, recipe_id).await {
             Ok(()) => {
                 sessions.clear_chat(chat_id.0);
+                // Il menù vero, non quello fisso: subito dopo l'archiviazione
+                // deve già esserci "🗄 Ricette archiviate" con il numero
+                // aggiornato (Alessio, collaudo del 24 settembre 2026, I2).
                 bot.send_message(chat_id, "✅ Ricetta archiviata.")
-                    .reply_markup(recipe_menu_keyboard())
+                    .reply_markup(menu_keyboard_aggiornata(pool).await)
                     .await?;
             }
             Err(error) => {
@@ -7317,6 +7324,27 @@ fn ingredient_query_state(
         }) => (selected, category_filter),
         _ => (Vec::new(), None),
     }
+}
+
+/// Il menù delle ricette con dentro, se ce ne sono, "🗄 Ricette
+/// archiviate". La versione fissa (`recipe_menu_keyboard`) resta per le
+/// schermate d'errore, dove non c'è niente da contare.
+async fn menu_keyboard_aggiornata(pool: &SqlitePool) -> InlineKeyboardMarkup {
+    let archiviate = count_archived_recipes(pool).await.unwrap_or(0);
+    if archiviate == 0 {
+        return recipe_menu_keyboard();
+    }
+    let mut righe = recipe_menu_keyboard().inline_keyboard;
+    // Sopra la riga di navigazione, che resta ultima (C3).
+    let posizione = righe.len().saturating_sub(1);
+    righe.insert(
+        posizione,
+        vec![button(
+            format!("🗄 Ricette archiviate ({archiviate})"),
+            "recipe:archived:0",
+        )],
+    );
+    InlineKeyboardMarkup::new(righe)
 }
 
 fn recipe_menu_keyboard() -> InlineKeyboardMarkup {

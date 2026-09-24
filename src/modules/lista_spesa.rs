@@ -2893,6 +2893,16 @@ async fn fabbisogno_al_netto_delle_scorte(
     lista: &ListaSpesa,
 ) -> anyhow::Result<Vec<VoceGenerata>> {
     let grezze = fresche_grezze(pool, lista).await?;
+    // Con le Scorte spente non si sottrae niente: quei numeri sarebbero
+    // fermi all'ultima volta che qualcuno li ha aggiornati, e la lista
+    // arriverebbe dimezzata senza un motivo visibile
+    // (Alessio, 24 settembre 2026).
+    if !crate::modules::impostazioni::funzioni(pool)
+        .await
+        .attiva(crate::modules::impostazioni::Funzione::Scorte)
+    {
+        return Ok(grezze);
+    }
     let mappa_unita = carica_mappa_unita(pool).await?;
     let scorte = scorte_disponibili(pool, lista, &mappa_unita).await?;
     Ok(sottrai_scorte(grezze, &scorte))
@@ -3402,6 +3412,170 @@ async fn aggiunte_convertite(
         .collect())
 }
 
+/// Di quello che ogni aggiunta dal catalogo chiedeva, quanto ne manca
+/// ancora **adesso**: la stessa sottrazione che fa la lista
+/// (`sottrai_scorte`), sulle scorte di questo momento.
+///
+/// È il numero che l'utente legge in lista, e quindi l'unico che il bot puo'
+/// dire senza contraddirsi. La prima versione faceva un conto suo -- chiesto
+/// meno comprato, senza guardare la dispensa -- e usciva con "restano 590 g"
+/// mentre la lista ne chiedeva 10, e con la domanda che compariva anche
+/// quando non mancava niente (Alessio, collaudo del 24 settembre 2026, punti
+/// C1, C3 e C5).
+///
+/// Ritorna `(id dell'aggiunta, quanto manca, unita')` nell'unita' con cui
+/// l'aggiunta e' scritta -- "0,5 kg", non "500 g" -- e salta quelle che non
+/// mancano piu'.
+async fn residui_delle_aggiunte(
+    pool: &SqlitePool,
+    lista: &ListaSpesa,
+    mappa_unita: &HashMap<String, InfoUnita>,
+) -> anyhow::Result<Vec<(i64, f64, String)>> {
+    let grezze: Vec<RigaAggiuntaConIdGrezza> = sqlx::query_as(
+        "SELECT id, alimento_id, prodotto_alimentare_id, descrizione_snapshot, \
+                quantita, unita_simbolo \
+         FROM liste_spesa_aggiunte_catalogo WHERE lista_id = ? ORDER BY id",
+    )
+    .bind(lista.id)
+    .fetch_all(pool)
+    .await
+    .context("Impossibile leggere le aggiunte dal catalogo")?;
+
+    // Ogni aggiunta diventa una richiesta come le altre, nell'unita' di
+    // aggregazione: e' `sottrai_scorte` che sa dare la precedenza ai prodotti
+    // specifici sulle scorte generiche, e rifarlo qui a mano vorrebbe dire
+    // due regole diverse per la stessa cosa.
+    let mut richieste = Vec::new();
+    let mut origine = Vec::new();
+    for (id, alimento_id, prodotto_id, nome, quantita, unita_simbolo) in grezze {
+        let (in_base, unita_base) = converti_in_base(
+            quantita,
+            &unita_simbolo,
+            mappa_unita.get(&unita_simbolo).copied(),
+        );
+        richieste.push(VoceGenerata {
+            alimento_id,
+            prodotto_id,
+            nome,
+            quantita: in_base,
+            unita_simbolo: unita_base,
+        });
+        origine.push((id, quantita, unita_simbolo, in_base));
+    }
+
+    let scorte = scorte_disponibili(pool, lista, mappa_unita).await?;
+    let rimaste = sottrai_scorte(richieste.clone(), &scorte);
+
+    // `sottrai_scorte` tiene l'ordine e toglie solo le righe azzerate: si
+    // cammina sulle due liste in parallelo.
+    let mut residui = Vec::new();
+    let mut prossima = rimaste.into_iter().peekable();
+    for (richiesta, (id, quantita_scritta, unita_scritta, in_base)) in richieste.iter().zip(origine)
+    {
+        let manca = match prossima.peek() {
+            Some(rimasta)
+                if identita_voce(rimasta) == identita_voce(richiesta)
+                    && rimasta.unita_simbolo == richiesta.unita_simbolo =>
+            {
+                let manca = rimasta.quantita;
+                prossima.next();
+                manca
+            }
+            _ => 0.0,
+        };
+        if manca <= TOLLERANZA_QUANTITA {
+            continue;
+        }
+        let residuo = if in_base > 0.0 {
+            quantita_scritta * manca / in_base
+        } else {
+            quantita_scritta
+        };
+        residui.push((id, residuo, unita_scritta));
+    }
+    Ok(residui)
+}
+
+/// Che fine fanno le aggiunte dal catalogo quando la spesa si chiude.
+///
+/// Quelle che non mancano piu' si chiudono in silenzio: la richiesta e'
+/// servita. Quelle che mancano ancora restano **com'erano** -- la quantita'
+/// non si tocca, ci pensa la lista a mostrarne il netto -- e vengono marcate
+/// con questa chiusura, cosi' "🗑 No, toglile" toglie esattamente quelle.
+///
+/// Senza le Scorte accese non c'e' nessuna dispensa da guardare: allora vale
+/// la regola vecchia, cioe' aver comprato qualcosa di quell'identita' chiude
+/// la richiesta. Altrimenti nessuna aggiunta si chiuderebbe mai, e
+/// tornerebbero le voci fantasma del collaudo del 23 settembre.
+async fn sistema_le_aggiunte(
+    pool: &SqlitePool,
+    lista: &ListaSpesa,
+    chiusura_id: i64,
+    comprate_generate: &[VoceGenerata],
+) -> anyhow::Result<Vec<AggiuntaRidotta>> {
+    let mappa_unita = carica_mappa_unita(pool).await?;
+    let scorte_accese = crate::modules::impostazioni::funzioni(pool)
+        .await
+        .attiva(crate::modules::impostazioni::Funzione::Scorte);
+
+    let da_chiudere: Vec<i64>;
+    let mut ridotte = Vec::new();
+    if scorte_accese {
+        let residui = residui_delle_aggiunte(pool, lista, &mappa_unita).await?;
+        let ancora_vive: Vec<i64> = residui.iter().map(|(id, _, _)| *id).collect();
+        let tutte: Vec<(i64, String)> = sqlx::query_as(
+            "SELECT id, descrizione_snapshot FROM liste_spesa_aggiunte_catalogo \
+             WHERE lista_id = ? ORDER BY id",
+        )
+        .bind(lista.id)
+        .fetch_all(pool)
+        .await
+        .context("Impossibile leggere le aggiunte dal catalogo")?;
+        da_chiudere = tutte
+            .iter()
+            .map(|(id, _)| *id)
+            .filter(|id| !ancora_vive.contains(id))
+            .collect();
+        for (id, quanto, unita) in residui {
+            let nome = tutte
+                .iter()
+                .find(|(altro, _)| *altro == id)
+                .map(|(_, nome)| nome.clone())
+                .unwrap_or_default();
+            sqlx::query(
+                "UPDATE liste_spesa_aggiunte_catalogo SET ridotta_chiusura_id = ? WHERE id = ?",
+            )
+            .bind(chiusura_id)
+            .bind(id)
+            .execute(pool)
+            .await
+            .context("Impossibile segnare un'aggiunta rimasta a meta'")?;
+            ridotte.push(AggiuntaRidotta {
+                nome,
+                quantita: quanto,
+                unita_simbolo: unita,
+            });
+        }
+    } else {
+        let aggiunte = aggiunte_convertite(pool, lista.id, &mappa_unita).await?;
+        let esito = aggiunte_coperte_dalla_spesa(&aggiunte, comprate_generate);
+        da_chiudere = esito
+            .chiuse
+            .into_iter()
+            .chain(esito.ridotte.into_iter().map(|(id, _)| id))
+            .collect();
+    }
+
+    for id in da_chiudere {
+        sqlx::query("DELETE FROM liste_spesa_aggiunte_catalogo WHERE id = ?")
+            .bind(id)
+            .execute(pool)
+            .await
+            .context("Impossibile togliere un'aggiunta dal catalogo gia' comprata")?;
+    }
+    Ok(ridotte)
+}
+
 /// Cosa ha prodotto una chiusura: quante voci sono finite nell'archivio e
 /// quante sono entrate in casa, per luogo (vuoto se l'ingresso automatico è
 /// spento o se nessuna voce era collegata al catalogo).
@@ -3480,10 +3654,6 @@ pub async fn chiudi_spesa(pool: &SqlitePool, lista: &ListaSpesa) -> anyhow::Resu
             })
         })
         .collect();
-    let mappa_unita = carica_mappa_unita(pool).await?;
-    let aggiunte = aggiunte_convertite(pool, lista.id, &mappa_unita).await?;
-    let esito_aggiunte = aggiunte_coperte_dalla_spesa(&aggiunte, &comprate_generate);
-
     let utente_id = crate::identity::current_actor().utente_id;
 
     let mut tx = pool
@@ -3540,53 +3710,6 @@ pub async fn chiudi_spesa(pool: &SqlitePool, lista: &ListaSpesa) -> anyhow::Resu
         .await
         .context("Impossibile togliere le voci comprate dalla lista")?;
 
-    for aggiunta_id in &esito_aggiunte.chiuse {
-        sqlx::query("DELETE FROM liste_spesa_aggiunte_catalogo WHERE id = ?")
-            .bind(aggiunta_id)
-            .execute(&mut *tx)
-            .await
-            .context("Impossibile togliere un'aggiunta dal catalogo già comprata")?;
-    }
-
-    // Di queste si e' comprato meno di quanto chiedevano: restano, ridotte a
-    // quel che manca. La quantita' residua arriva nell'unita' di
-    // aggregazione (g, ml), mentre la riga e' scritta nell'unita' scelta
-    // dall'utente (kg, l): si riporta in proporzione, cosi' "1,5 kg" diventa
-    // "0,5 kg" e non "500 g".
-    let mut ridotte = Vec::new();
-    for (aggiunta_id, manca) in &esito_aggiunte.ridotte {
-        let Some(convertita) = aggiunte.iter().find(|a| a.id == *aggiunta_id) else {
-            continue;
-        };
-        let (nome, quantita_grezza, unita_grezza): (String, f64, String) = sqlx::query_as(
-            "SELECT descrizione_snapshot, quantita, unita_simbolo              FROM liste_spesa_aggiunte_catalogo WHERE id = ?",
-        )
-        .bind(aggiunta_id)
-        .fetch_one(&mut *tx)
-        .await
-        .context("Impossibile leggere un'aggiunta dal catalogo")?;
-        let proporzione = if convertita.riga.quantita > 0.0 {
-            manca / convertita.riga.quantita
-        } else {
-            1.0
-        };
-        let residua = quantita_grezza * proporzione;
-        sqlx::query(
-            "UPDATE liste_spesa_aggiunte_catalogo              SET quantita = ?, ridotta_chiusura_id = ? WHERE id = ?",
-        )
-        .bind(residua)
-        .bind(chiusura_id)
-        .bind(aggiunta_id)
-        .execute(&mut *tx)
-        .await
-        .context("Impossibile ridurre un'aggiunta dal catalogo comprata a metà")?;
-        ridotte.push(AggiuntaRidotta {
-            nome,
-            quantita: residua,
-            unita_simbolo: unita_grezza,
-        });
-    }
-
     tx.commit()
         .await
         .context("Impossibile salvare la chiusura della spesa")?;
@@ -3605,6 +3728,17 @@ pub async fn chiudi_spesa(pool: &SqlitePool, lista: &ListaSpesa) -> anyhow::Resu
         }
     } else {
         Vec::new()
+    };
+
+    // Le aggiunte dal catalogo si sistemano **dopo** che la merce e' entrata
+    // in casa: quel che manca ancora si legge sulle scorte di adesso,
+    // esattamente come fa la lista.
+    let ridotte = match sistema_le_aggiunte(pool, lista, chiusura_id, &comprate_generate).await {
+        Ok(ridotte) => ridotte,
+        Err(errore) => {
+            tracing::warn!(?errore, "Aggiunte dal catalogo non sistemate");
+            Vec::new()
+        }
     };
 
     let speso: Option<i64> = comprate
@@ -4774,13 +4908,14 @@ mod db_tests {
 
     /// Il caso del collaudo del 23 settembre 2026 (punti 6 e 7): si chiedono
     /// 500 g, in casa ce ne sono 300, quindi in lista ne compaiono 200. Presi
-    /// quei 200 e chiusa la spesa, l'aggiunta non deve restare viva com'era:
-    /// prima restava intera (il comprato non copriva i 500 richiesti),
+    /// quei 200 e chiusa la spesa, la richiesta e' servita per intero -- in
+    /// casa ce ne sono 500 -- e l'aggiunta si chiude senza chiedere niente.
+    ///
+    /// Prima restava viva (il comprato non copriva i 500 richiesti),
     /// invisibile nella lista vuota ma ancora contata nel fabbisogno e ancora
-    /// elencata in "🗑️ Rimuovi voci". Ora resta solo per i 300 che
-    /// mancano, ed è l'utente a dire se tenerla.
+    /// elencata in "Rimuovi voci".
     #[tokio::test]
-    async fn una_aggiunta_comprata_a_meta_resta_solo_per_quel_che_manca() {
+    async fn una_aggiunta_servita_dalla_spesa_si_chiude_senza_chiedere() {
         let pool = test_pool().await;
         let user_id = create_user(&pool, "Alessio").await;
         let space_id = create_space(&pool, "Casa").await;
@@ -4819,26 +4954,18 @@ mod db_tests {
                 .expect("comprato");
 
             let esito = chiudi_spesa(&pool, &lista).await.expect("chiusura");
-
-            // Dei 500 g chiesti se ne sono comprati 200 (gli altri 300 erano
-            // in casa): l'aggiunta resta con i 300 che mancano, e il bot
-            // chiede se lasciarla. Non pesa comunque sul fabbisogno, perché
-            // in casa ora ce ne sono 500.
-            assert_eq!(esito.ridotte.len(), 1);
+            assert!(
+                esito.ridotte.is_empty(),
+                "non manca piu' niente: niente da chiedere"
+            );
+            assert!(
+                voci_rimovibili(&pool, lista.id).await.unwrap().is_empty(),
+                "niente voci fantasma in Rimuovi voci"
+            );
             aggiorna_lista(&pool, &lista).await.expect("refresh dopo");
             assert!(
                 carica_voci(&pool, lista.id).await.unwrap().is_empty(),
-                "l'aggiunta ridotta non fa ricomparire la voce"
-            );
-
-            // "No, toglile": sparisce anche da 🗑️ Rimuovi voci, che era il
-            // posto in cui Alessio si ritrovava le voci fantasma.
-            togli_aggiunte_ridotte(&pool, esito.chiusura_id)
-                .await
-                .expect("rimozione");
-            assert!(
-                voci_rimovibili(&pool, lista.id).await.unwrap().is_empty(),
-                "niente voci fantasma in 🗑️ Rimuovi voci"
+                "l'aggiunta non pesa piu' sul fabbisogno"
             );
         })
         .await;
@@ -5259,11 +5386,99 @@ mod db_tests {
         .await;
     }
 
-    /// Scelta di Alessio del 24 settembre 2026: di un'aggiunta comprata a
-    /// metà non si decide al posto suo. Resta con quel che manca, e il bot
-    /// chiede se lasciarla; "no" la toglie.
+    /// Il messaggio dell'aggiunta deve dire lo stesso numero che si legge in
+    /// lista. Aggiungendo due volte lo stesso alimento la lista mostra due
+    /// righe, e il bot ne leggeva una sola: diceva "ne restano 10 g" con 210
+    /// g sotto gli occhi (Alessio, collaudo del 24 settembre 2026, C1).
     #[tokio::test]
-    async fn un_aggiunta_comprata_a_meta_resta_con_quel_che_manca() {
+    async fn il_messaggio_dell_aggiunta_dice_quanto_se_ne_vede_in_lista() {
+        let pool = test_pool().await;
+        let user_id = create_user(&pool, "Alessio").await;
+        let space_id = create_space(&pool, "Casa").await;
+        add_membership(&pool, space_id, user_id).await;
+
+        crate::identity::with_actor(actor(user_id, space_id, "Alessio"), async {
+            let lista = trova_o_crea_lista_attiva(&pool).await.expect("lista");
+            let alimento = create_alimento_globale(&pool, "Parmigiano").await;
+            crate::modules::dispensa::aggiungi_scorta(
+                &pool,
+                crate::modules::dispensa::Conservazione::Frigo,
+                Some(IdentitaCatalogo::Alimento(alimento)),
+                "Parmigiano",
+                590.0,
+                "g",
+            )
+            .await
+            .expect("scorta");
+
+            // Primo giro: 800 g chiesti, 590 in casa, 210 da comprare.
+            aggiungi_da_catalogo(
+                &pool,
+                lista.id,
+                IdentitaCatalogo::Alimento(alimento),
+                "Parmigiano",
+                800.0,
+                "g",
+            )
+            .await
+            .expect("aggiunta");
+            aggiorna_lista(&pool, &lista).await.expect("refresh");
+            let messaggio = spiega_aggiunta(
+                &pool,
+                lista.id,
+                IdentitaCatalogo::Alimento(alimento),
+                800.0,
+                "g",
+            )
+            .await;
+            assert!(
+                messaggio.contains("210 g"),
+                "il messaggio deve dire 210 g: {messaggio}"
+            );
+
+            // Di un altro alimento in casa ce n'e' gia' abbastanza: la lista
+            // non chiede niente, e il messaggio lo spiega invece di far
+            // dubitare del salvataggio.
+            let riso = create_alimento_globale(&pool, "Riso").await;
+            crate::modules::dispensa::aggiungi_scorta(
+                &pool,
+                crate::modules::dispensa::Conservazione::Dispensa,
+                Some(IdentitaCatalogo::Alimento(riso)),
+                "Riso",
+                1000.0,
+                "g",
+            )
+            .await
+            .expect("scorta di riso");
+            aggiungi_da_catalogo(
+                &pool,
+                lista.id,
+                IdentitaCatalogo::Alimento(riso),
+                "Riso",
+                100.0,
+                "g",
+            )
+            .await
+            .expect("aggiunta riso");
+            aggiorna_lista(&pool, &lista).await.expect("refresh");
+            let messaggio = spiega_aggiunta(
+                &pool,
+                lista.id,
+                IdentitaCatalogo::Alimento(riso),
+                100.0,
+                "g",
+            )
+            .await;
+            assert!(messaggio.contains("abbastanza"), "{messaggio}");
+        })
+        .await;
+    }
+
+    /// Scelta di Alessio del 24 settembre 2026: di quello che si e' chiesto
+    /// e non si e' ancora comprato non si decide al posto suo. Il numero che
+    /// il bot dice e' lo stesso che si legge in lista.
+    #[tokio::test]
+    async fn di_quel_che_manca_ancora_il_bot_chiede_cosa_farne() {
         let pool = test_pool().await;
         let user_id = create_user(&pool, "Alessio").await;
         let space_id = create_space(&pool, "Casa").await;
@@ -5273,55 +5488,52 @@ mod db_tests {
             let lista = trova_o_crea_lista_attiva(&pool).await.expect("lista");
             let alimento = create_alimento_globale(&pool, "Parmigiano").await;
 
-            // Se ne chiedono 500 g, ma in casa ce ne sono già 300: la lista
-            // ne chiede 200, che si comprano tutti.
+            // Se ne chiedono 800 g con la casa vuota: la lista li chiede
+            // tutti.
             aggiungi_da_catalogo(
                 &pool,
                 lista.id,
                 IdentitaCatalogo::Alimento(alimento),
                 "Parmigiano",
-                500.0,
+                800.0,
                 "g",
             )
             .await
             .expect("aggiunta");
-            crate::modules::dispensa::aggiungi_scorta(
-                &pool,
-                crate::modules::dispensa::Conservazione::Frigo,
-                Some(IdentitaCatalogo::Alimento(alimento)),
-                "Parmigiano",
-                300.0,
-                "g",
-            )
-            .await
-            .expect("scorta");
             aggiorna_lista(&pool, &lista).await.expect("refresh");
+
+            // Al negozio se ne prendono solo 500 (il pulsante "Ho preso").
             let voce = carica_voci(&pool, lista.id)
                 .await
                 .expect("voci")
                 .into_iter()
-                .find(|voce| voce.origine == "generato")
-                .expect("voce generata");
-            assert_eq!(voce.quantita, Some(200.0), "la lista mostra il netto");
-            imposta_comprato(&pool, voce.id, true)
+                .next()
+                .expect("la riga del parmigiano");
+            assert_eq!(voce.quantita, Some(800.0));
+            registra_presa(&pool, voce.id, 500.0, "g", None)
                 .await
-                .expect("comprato");
+                .expect("presa");
 
             let esito = chiudi_spesa(&pool, &lista).await.expect("chiusura");
             assert_eq!(esito.archiviate, 1);
-            assert_eq!(esito.ridotte.len(), 1, "ne mancano ancora 300");
+            // I 500 g presi sono entrati in casa: dei combinati 800
+            // richiesti ne mancano 300, ed e' quello che la lista continua a
+            // chiedere.
+            assert_eq!(esito.ridotte.len(), 1);
             assert_eq!(esito.ridotte[0].quantita, 300.0);
             assert_eq!(esito.ridotte[0].unita_simbolo, "g");
 
-            // L'aggiunta è ancora lì, ridotta e marcata da questa chiusura.
-            let rimasta: (f64, Option<i64>) = sqlx::query_as(
+            // L'aggiunta resta intera -- la quantita' non si tocca, ci pensa
+            // la lista a mostrarne il netto -- e porta il segno di questa
+            // chiusura.
+            let rimaste: Vec<(f64, Option<i64>)> = sqlx::query_as(
                 "SELECT quantita, ridotta_chiusura_id FROM liste_spesa_aggiunte_catalogo",
             )
-            .fetch_one(&pool)
+            .fetch_all(&pool)
             .await
-            .expect("aggiunta rimasta");
-            assert_eq!(rimasta.0, 300.0);
-            assert_eq!(rimasta.1, Some(esito.chiusura_id));
+            .expect("aggiunte rimaste");
+            assert_eq!(rimaste.len(), 1);
+            assert_eq!(rimaste[0], (800.0, Some(esito.chiusura_id)));
 
             // "No, toglile": sparisce, e nessun'altra con lei.
             let tolte = togli_aggiunte_ridotte(&pool, esito.chiusura_id)
@@ -6695,11 +6907,20 @@ async fn spiega_aggiunta(
     unita: &str,
 ) -> String {
     let voci = carica_voci(pool, lista_id).await.unwrap_or_default();
-    let in_lista = voci.iter().find(|voce| match identita {
-        IdentitaCatalogo::Alimento(id) => voce.alimento_id == Some(id),
-        IdentitaCatalogo::Prodotto(id) => voce.prodotto_alimentare_id == Some(id),
-    });
-    match in_lista.and_then(|voce| voce.quantita) {
+    // **Tutte** le righe di quell'alimento, non la prima: aggiungendo due
+    // volte lo stesso alimento la lista mostra due righe, e leggendone una
+    // sola il bot diceva "ne restano 10 g" mentre sotto se ne vedevano 210
+    // (Alessio, collaudo del 24 settembre 2026, punto C1).
+    let in_lista: Option<f64> = voci
+        .iter()
+        .filter(|voce| match identita {
+            IdentitaCatalogo::Alimento(id) => voce.alimento_id == Some(id),
+            IdentitaCatalogo::Prodotto(id) => voce.prodotto_alimentare_id == Some(id),
+        })
+        .filter(|voce| voce.unita_simbolo.as_deref() == Some(unita))
+        .try_fold(0.0_f64, |somma, voce| Some(somma + voce.quantita?))
+        .filter(|totale| *totale > 0.0);
+    match in_lista {
         // C18: un testo mostrato all'utente sta su una riga sola nel codice,
         // per quanto lunga.
         None => "✅ Aggiunta, ma in casa ne hai già abbastanza: per ora non c'è niente da comprare.\nComparirà in lista appena te ne servirà davvero.".to_string(),
@@ -7922,6 +8143,29 @@ async fn show_lista_rimuovi(
         testo.push_str("\n\n");
     }
     testo.push_str("🗑️ Rimuovi voci\n\nSolo le voci aggiunte a mano o dal catalogo: quelle generate dai pasti pianificati le gestisce il planner.");
+    // Qui si vede anche quello che in lista non compare, perche' in casa
+    // ce n'e' gia' abbastanza: senza dirlo sembra una voce fantasma
+    // (Alessio, collaudo del 24 settembre 2026).
+    let in_lista = carica_voci(pool, lista.id).await.unwrap_or_default();
+    let coperte: Vec<&VoceRimovibile> = voci
+        .iter()
+        .filter(|voce| {
+            matches!(voce.origine, OrigineRimovibile::Catalogo)
+                && !in_lista.iter().any(|riga| {
+                    riga.descrizione.trim().to_lowercase() == voce.descrizione.trim().to_lowercase()
+                })
+        })
+        .collect();
+    if !coperte.is_empty() {
+        testo.push_str(&format!(
+            "\n\n🏠 Di queste in casa ne hai gia' abbastanza, quindi in lista non compaiono: {}.",
+            coperte
+                .iter()
+                .map(|voce| liste::tronca(&voce.descrizione, 40))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
     if voci.is_empty() {
         testo.push_str("\n\nNessuna voce da rimuovere.");
     }
@@ -8205,6 +8449,24 @@ async fn mostra_presa(
         testo.push_str(&format!(
             "\nTocca la confezione che hai preso, oppure scrivi quanto hai preso ({esempio})."
         ));
+        // I nomi per esteso: sul pulsante ci sta il formato e poco altro,
+        // e "Parmareggio Parmigiano Reggian…" non si legge (A3).
+        let lunghi: Vec<String> = confezioni
+            .iter()
+            .filter(|confezione| confezione.nome.chars().count() > 24)
+            .map(|confezione| {
+                format!(
+                    "\n• {} {} — {}",
+                    formatta_quantita(confezione.quantita),
+                    confezione.unita,
+                    confezione.nome
+                )
+            })
+            .collect();
+        if !lunghi.is_empty() {
+            testo.push_str(&lunghi.join(""));
+            testo.push('\n');
+        }
         // Il significato della stella, che da sola non si capiva (Alessio,
         // 19 settembre 2026).
         if voce.alimento_id.is_some() && confezioni.len() > 1 {
@@ -8223,15 +8485,17 @@ async fn mostra_presa(
             } else {
                 ""
             };
-            // Anche qui su due righe: con una riga sola due confezioni dello
-            // stesso prodotto sembravano uguali, perché il formato veniva
-            // tagliato ("Parmareggio Parmigiano Reggian…").
+            // Il formato **prima** del nome, e il nome tagliato corto: due
+            // confezioni dello stesso prodotto si distinguono per il
+            // formato, ed è quello che non deve sparire. Mandare a capo
+            // l'etichetta non serve -- Telegram non lo fa (punto A3 del
+            // collaudo del 24 settembre 2026).
             let mut riga = vec![button(
                 format!(
-                    "{stella}{}\n{} {}",
-                    liste::tronca(&confezione.nome, 38),
+                    "{stella}{} {} · {}",
                     formatta_quantita(confezione.quantita),
-                    confezione.unita
+                    confezione.unita,
+                    liste::tronca(&confezione.nome, 24)
                 ),
                 format!("lista_spesa:presa:f:{voce_id}:{}", confezione.token),
             )];
@@ -8322,6 +8586,14 @@ fn residuo_keyboard(chiusura_id: i64) -> InlineKeyboardMarkup {
             "🗑 No, toglile",
             format!("lista_spesa:resto:drop:{chiusura_id}"),
         )],
+        // C3: la riga di navigazione ci vuole anche qui. L'avevo dimenticata
+        // scrivendo questa schermata, e Alessio se n'è accorto subito
+        // (collaudo del 24 settembre 2026). "⬅️ Indietro" vale come
+        // "lasciale": la lista resta com'è.
+        vec![
+            button("⬅️ Indietro", "lista_spesa:menu"),
+            button("🏠 Menù principale", "menu:main"),
+        ],
     ])
 }
 
@@ -8361,7 +8633,13 @@ pub async fn togli_aggiunte_ridotte(pool: &SqlitePool, chiusura_id: i64) -> anyh
 fn totale_keyboard() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(vec![
         vec![button("➖ Salta il totale", "lista_spesa:totale:salta")],
-        vec![button("🏠 Menù principale", "menu:main")],
+        // C3: mancava "⬅️ Indietro", e da questa schermata si poteva solo
+        // scrivere il totale o saltare (Alessio, 24 settembre 2026). Torna
+        // alla lista senza segnare niente, come saltare.
+        vec![
+            button("⬅️ Indietro", "lista_spesa:menu"),
+            button("🏠 Menù principale", "menu:main"),
+        ],
     ])
 }
 
@@ -8509,7 +8787,8 @@ async fn leggi_codice_a_barre(
     // Open Prices è un dato di altri: si propone, non si registra.
     if let Ok(Some(centesimi)) = mercato::prezzo_su_open_prices(&ean).await {
         avviso.push_str(&format!(
-            "\n💶 Su Open Prices altri l'hanno pagato {}: se è anche il tuo, segnalo con 💶 Prezzo.",
+            // C1: il pulsante è già lì sotto, il testo non lo ripete.
+            "\n💶 Su Open Prices altri l'hanno pagato {}: il tuo prezzo però lo segni tu.",
             mercato::formatta_euro(centesimi)
         ));
     }
@@ -8851,7 +9130,17 @@ async fn show_lista(
         testo.push_str(&format!("\n{comprate}/{totale} comprate\n"));
     }
     if !eccessi.is_empty() {
-        testo.push_str("\n⚠️ Hai già segnato più di quanto serve ora (vedi i pulsanti sotto).\n");
+        // Quali voci, non "vedi i pulsanti sotto": con venti voci in lista
+        // quella riga faceva cercare (Alessio, collaudo del 24 settembre
+        // 2026).
+        let nomi: Vec<String> = eccessi
+            .iter()
+            .map(|eccesso| liste::tronca(&eccesso.nome, 40))
+            .collect();
+        testo.push_str(&format!(
+            "\n⚠️ Hai già segnato più di quanto serve ora: {}.\n",
+            nomi.join(", ")
+        ));
     }
     // Consegna B: quanto è già stato segnato in questa spesa. Nessun prezzo
     // registrato, nessuna riga in più: chi non usa i prezzi non li vede.
@@ -8869,60 +9158,68 @@ async fn show_lista(
         testo.push_str(&liste::blocco_legenda(liste::LEGENDA_LISTA_SPESA));
     }
 
-    let mut rows: Vec<Vec<InlineKeyboardButton>> = Vec::new();
+    // Quello che non entra in un pulsante: la confezione presa, il prezzo
+    // segnato e l'eccesso. Solo per le voci che ne hanno davvero -- se non
+    // ne ha nessuna, questo blocco non compare (C8: niente righe vuote).
+    let mut dettagli_voci: Vec<String> = Vec::new();
     for voce in &voci {
-        let icona = if voce.comprato != 0 { "✅" } else { "☐" };
-        let quantita = match (voce.quantita, &voce.unita_simbolo) {
-            (Some(valore), Some(unita)) => format!(" · {} {unita}", formatta_quantita(valore)),
-            _ => String::new(),
-        };
-        let eccesso = eccessi
-            .iter()
-            .find(|eccesso| {
-                Some(&eccesso.unita_simbolo) == voce.unita_simbolo.as_ref()
-                    && eccesso.nome.trim().to_lowercase() == voce.descrizione.trim().to_lowercase()
-            })
-            .map(|eccesso| {
-                // A capo, non " · ": su una riga sola Telegram tronca il
-                // testo con "…" invece di andare a capo da solo (visto da
-                // Alessio dal vivo con "125 in ecc…") -- un "\n" fa
-                // occupare al pulsante una riga in più invece di tagliare.
-                // Con l'unità, come dice la documentazione del modulo: il
-                // numero da solo non si capiva.
-                format!(
-                    "\n⚠️ {} {} in eccesso",
-                    formatta_quantita(eccesso.quantita_eccesso),
-                    eccesso.unita_simbolo
-                )
-            })
-            .unwrap_or_default();
-        // Nome sulla prima riga, dettagli sulla seconda: su Telegram Desktop
-        // il pulsante è stretto e una riga sola veniva tagliata, quindi
-        // "presi 200 g" e "1,29 €" non si vedevano (Alessio, collaudo del 23
-        // settembre 2026). Un "\n" manda a capo invece di troncare.
-        let mut dettagli: Vec<String> = Vec::new();
-        if !quantita.is_empty() {
-            dettagli.push(quantita.trim_start_matches(" · ").to_string());
-        }
+        let mut parti: Vec<String> = Vec::new();
         if let (Some(valore), Some(unita)) = (voce.quantita_presa, &voce.unita_presa) {
-            dettagli.push(format!("📦 {} {unita}", formatta_quantita(valore)));
+            parti.push(format!("📦 {} {unita}", formatta_quantita(valore)));
         }
         if let Some(centesimi) = voce.prezzo_centesimi {
-            dettagli.push(format!(
+            parti.push(format!(
                 "💶 {}",
                 crate::modules::mercato::formatta_euro(centesimi)
             ));
         }
-        let seconda_riga = if dettagli.is_empty() {
-            String::new()
-        } else {
-            format!("\n{}", dettagli.join(" · "))
-        };
-        let mut riga = vec![button(
-            format!(
-                "{icona} {}{seconda_riga}{eccesso}",
-                liste::tronca(&voce.descrizione, 40)
+        if let Some(eccesso) = eccessi.iter().find(|eccesso| {
+            Some(&eccesso.unita_simbolo) == voce.unita_simbolo.as_ref()
+                && eccesso.nome.trim().to_lowercase() == voce.descrizione.trim().to_lowercase()
+        }) {
+            parti.push(format!(
+                "⚠️ {} {} in eccesso",
+                formatta_quantita(eccesso.quantita_eccesso),
+                eccesso.unita_simbolo
+            ));
+        }
+        if !parti.is_empty() {
+            dettagli_voci.push(format!(
+                "• {} — {}",
+                liste::tronca(&voce.descrizione, 40),
+                parti.join(" · ")
+            ));
+        }
+    }
+    if !dettagli_voci.is_empty() {
+        testo.push_str(&format!("\n{}\n", dettagli_voci.join("\n")));
+    }
+
+    let mut rows: Vec<Vec<InlineKeyboardButton>> = Vec::new();
+    for voce in &voci {
+        let icona = if voce.comprato != 0 { "✅" } else { "☐" };
+        let quantita = match (voce.quantita, &voce.unita_simbolo) {
+            // "1,5 l", non "1500 ml": la lista aggrega nell'unita' di base,
+            // ma chi legge ha scritto "1,5 l" e in "Rimuovi voci" lo
+            // ritrovava scritto cosi' -- due numeri diversi per la stessa
+            // cosa (Alessio, collaudo del 24 settembre 2026).
+            (Some(valore), Some(unita)) => format!(
+                " · {}",
+                crate::modules::dispensa::formatta_quantita_leggibile(valore, unita)
             ),
+            _ => String::new(),
+        };
+        // Sul pulsante ci stanno il nome e la quantita', e basta.
+        //
+        // Il 23 settembre avevo provato a mandare a capo l'etichetta con un
+        // "a capo": non funziona. Telegram **non manda a capo le etichette
+        // dei pulsanti**, e su Desktop resta una riga sola che taglia la
+        // fine -- cioe' proprio il prezzo e la confezione, il motivo per cui
+        // quella voce era stata presa (Alessio, collaudo del 24 settembre
+        // 2026, punto A1). Quindi il pulsante porta il minimo indispensabile
+        // e il resto sta nel testo qui sopra, dove lo spazio non manca.
+        let mut riga = vec![button(
+            format!("{icona} {}{quantita}", liste::tronca(&voce.descrizione, 24)),
             format!("lista_spesa:toggle:{}", voce.id),
         )];
         // "📦 Ho preso…" dove c'è una quantità da correggere, e sulle voci del

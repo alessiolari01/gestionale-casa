@@ -185,6 +185,11 @@ torna da preparare; "no, usati o buttati" li lascia tolti ma stacca i
 movimenti dal pasto (`dispensa::dimentica_scarico_pasto`), così il piatto
 nuovo prenderà i suoi. `✏️ Modifica` resta per orario, partecipanti e tipo.
 
+`⬅️ Indietro` dalla scelta della ricetta torna **al pasto** che si sta
+sostituendo: fino al 24 settembre 2026 portava a `planner:add:`, cioè alla
+creazione di un pasto nuovo, e si usciva dalla sostituzione dentro un'altra
+procedura senza capire perché.
+
 **Dal 24 settembre 2026 una sostituzione chiede solo la ricetta.** Prima
 riportava per intero la procedura del pasto nuovo — profili, porzioni,
 orario — cose che nella sostituzione non cambiano mai: il draft porta il

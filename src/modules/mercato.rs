@@ -1014,11 +1014,18 @@ pub async fn mostra_confronto(
             testo.push('\n');
         }
         testo.push_str(
-            "\nÈ una stima sui prezzi che hai già visto tu, non un listino: le voci senza prezzo non ci sono dentro.",
+            "\nÈ una stima sui prezzi che hai già visto tu, non un listino: ogni riga della lista vale l'ultimo prezzo visto in quel negozio, e le righe senza prezzo restano fuori dal totale.",
         );
         if senza_prezzo > 0 {
+            // Singolare e plurale: "1 voci" si notava subito (Alessio,
+            // collaudo del 24 settembre 2026, D2).
             testo.push_str(&format!(
-                "\n\n{senza_prezzo} voci non hanno ancora nessun prezzo."
+                "\n\n{senza_prezzo} {} ancora nessun prezzo.",
+                if senza_prezzo == 1 {
+                    "voce non ha"
+                } else {
+                    "voci non hanno"
+                }
             ));
         }
     }

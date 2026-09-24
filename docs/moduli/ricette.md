@@ -383,6 +383,15 @@ Ripristinare chiede lo stesso permesso che serviva per archiviare
 (`restore_recipe` ripete la condizione di `archive_recipe`): chi non poteva
 archiviare non può nemmeno disfare.
 
+**Il giorno dopo, due correzioni** (collaudo del 24 settembre 2026). I
+callback `recipe:restore:` non arrivavano a `handle_edit_callback`, che li
+gestisce ma viene chiamata solo per i dati che iniziano con `recipe:edit:`:
+toccando una ricetta archiviata il bot rispondeva "Azione Ricette non
+disponibile". Ed è il tipo di errore che i test non prendono — la funzione
+era giusta, non la raggiungeva nessuno. La seconda: il menù mostrato subito
+dopo `✅ Ricetta archiviata` era la tastiera fissa, senza il pulsante delle
+archiviate; adesso è `menu_keyboard_aggiornata`, che le conta.
+
 ## Permessi e condivisione
 
 - proprietario: modifica e gestione;

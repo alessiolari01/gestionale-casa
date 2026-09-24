@@ -303,28 +303,43 @@ struct ObjectLocationInput<'a> {
 ///
 /// Convenzione C4: la lampadina è una sola. `💡 Migliora` segnala un problema
 /// sulla schermata corrente; la lista dei miglioramenti è `📋 Miglioramenti`.
+/// Il menù principale. Le sezioni spente in ⚙️ Impostazioni non compaiono:
+/// chi non traccia il cibo non deve vedersi davanti 🍽️ Alimentazione ogni
+/// volta (chiesto da Alessio il 24 settembre 2026). ⚙️ Impostazioni, 👤
+/// Profilo e 👥 Spazi restano sempre, altrimenti non ci sarebbe più modo
+/// di riaccendere quello che si è spento.
 pub fn main_menu_keyboard(
     is_admin: bool,
     badge_alimentazione: bool,
     badge_miglioramenti: bool,
+    funzioni: &crate::modules::impostazioni::Funzioni,
 ) -> InlineKeyboardMarkup {
-    let mut rows = vec![
-        vec![button(
+    use crate::modules::impostazioni::Funzione;
+    let mut rows = Vec::new();
+    if funzioni.attiva(Funzione::Alimentazione) {
+        rows.push(vec![button(
             &crate::modules::novita::etichetta_con_badge("🍽️ Alimentazione", badge_alimentazione),
             "food:menu",
-        )],
-        vec![button("🏷️ Oggetti", "oggetti:menu")],
-        vec![button("🏠 Case, stanze e contenitori", "loc:menu")],
-        vec![button("📜 Storico", "history:global:0")],
-        vec![
-            button("👤 Profilo", "identity:profile"),
-            button("👥 Spazi", "identity:spaces"),
-        ],
-        vec![button(
-            &crate::modules::novita::etichetta_con_badge("📋 Miglioramenti", badge_miglioramenti),
-            "improve:menu",
-        )],
-    ];
+        )]);
+    }
+    if funzioni.attiva(Funzione::Oggetti) {
+        rows.push(vec![button("🏷️ Oggetti", "oggetti:menu")]);
+    }
+    if funzioni.attiva(Funzione::Luoghi) {
+        rows.push(vec![button("🏠 Case, stanze e contenitori", "loc:menu")]);
+    }
+    if funzioni.attiva(Funzione::Storico) {
+        rows.push(vec![button("📜 Storico", "history:global:0")]);
+    }
+    rows.push(vec![
+        button("👤 Profilo", "identity:profile"),
+        button("👥 Spazi", "identity:spaces"),
+    ]);
+    rows.push(vec![button("⚙️ Impostazioni", "settings:menu")]);
+    rows.push(vec![button(
+        &crate::modules::novita::etichetta_con_badge("📋 Miglioramenti", badge_miglioramenti),
+        "improve:menu",
+    )]);
     if is_admin {
         rows.push(vec![button("🛠️ Amministrazione", "admin:menu")]);
     }
@@ -368,8 +383,9 @@ pub async fn handle_message(
                     sessions.set(chat_id, ConversationState::AwaitingSearch);
                     bot.send_message(
                         msg.chat.id,
-                        "🔎 Cerca oggetto\n\nScrivi nome, marca, modello, casa, stanza, contenitore, seriale o una parola presente nelle note.\n\nPremi ❌ Annulla per uscire.",
+                        "🔎 Cerca oggetto\n\nScrivi nome, marca, modello, casa, stanza, contenitore, seriale o una parola presente nelle note.",
                     )
+                    .reply_markup(search_cancel_keyboard())
                     .await?;
                 } else {
                     sessions.clear_chat(chat_id);
@@ -520,11 +536,10 @@ pub async fn handle_callback(
         }
         "oggetti:search" => {
             sessions.set(raw_chat_id, ConversationState::AwaitingSearch);
-            bot.send_message(
-                chat_id,
-                "🔎 Cerca oggetto\n\nScrivi cosa vuoi cercare.\n\nPremi ❌ Annulla per uscire.",
-            )
-            .await?;
+            // C1: il testo non nomina il pulsante, che adesso c'è davvero.
+            bot.send_message(chat_id, "🔎 Cerca oggetto\n\nScrivi cosa vuoi cercare.")
+                .reply_markup(search_cancel_keyboard())
+                .await?;
         }
         "oggetti:draft:name" => {
             set_draft_field(bot, chat_id, raw_chat_id, sessions, DraftField::Name).await?;
@@ -1657,7 +1672,7 @@ async fn send_object_list(
             if objects.is_empty() {
                 bot.send_message(
                     chat_id,
-                    "📋 Non ci sono ancora oggetti registrati.\n\nCreane uno con ➕ Nuovo oggetto.",
+                    "📋 Non ci sono ancora oggetti registrati.\n\nQui compariranno quelli che aggiungi, con marca, prezzo e dove stanno.",
                 )
                 .reply_markup(objects_menu_keyboard())
                 .await?;
@@ -2882,6 +2897,16 @@ fn other_details_keyboard(draft: &ObjectDraft) -> InlineKeyboardMarkup {
     ])
 }
 
+/// Uscire dalla ricerca. La schermata diceva "Premi ❌ Annulla per uscire"
+/// ma sotto non c'era nessun Annulla (Alessio, collaudo del 24 settembre
+/// 2026, L1/L2): il testo prometteva un pulsante che non esisteva.
+fn search_cancel_keyboard() -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(vec![vec![
+        button("❌ Annulla", "oggetti:menu"),
+        button("🏠 Menù principale", "menu:main"),
+    ]])
+}
+
 fn cancel_keyboard() -> InlineKeyboardMarkup {
     // C3: un passo di procedura ha un'unica riga di navigazione
     // "❌ Annulla | 💡 Migliora | 🏠 Menù principale" -- su due righe
@@ -3302,10 +3327,16 @@ fn push_optional_line(lines: &mut Vec<String>, label: &str, value: Option<&str>)
 
 #[cfg(test)]
 mod tests {
+    /// Nei test del menù le funzioni sono tutte accese: quelle spente hanno i
+    /// loro test in `impostazioni`.
+    fn accese() -> crate::modules::impostazioni::Funzioni {
+        crate::modules::impostazioni::Funzioni::tutte_accese()
+    }
+
     #[test]
     fn menu_principale_mostra_amministrazione_solo_agli_admin() {
-        let normal = main_menu_keyboard(false, false, false);
-        let admin = main_menu_keyboard(true, false, false);
+        let normal = main_menu_keyboard(false, false, false, &accese());
+        let admin = main_menu_keyboard(true, false, false, &accese());
         let normal_text = format!("{normal:?}");
         let admin_text = format!("{admin:?}");
         assert!(!normal_text.contains("Amministrazione"));
@@ -3314,16 +3345,16 @@ mod tests {
 
     #[test]
     fn menu_principale_mostra_il_badge_solo_se_richiesto() {
-        let senza_badge = main_menu_keyboard(false, false, false);
-        let con_badge = main_menu_keyboard(false, false, true);
+        let senza_badge = main_menu_keyboard(false, false, false, &accese());
+        let con_badge = main_menu_keyboard(false, false, true, &accese());
         assert!(!format!("{senza_badge:?}").contains("🆕"));
         assert!(format!("{con_badge:?}").contains("🆕 📋 Miglioramenti"));
     }
 
     #[test]
     fn menu_principale_mostra_il_badge_alimentazione_solo_se_richiesto() {
-        let senza_badge = main_menu_keyboard(false, false, false);
-        let con_badge = main_menu_keyboard(false, true, false);
+        let senza_badge = main_menu_keyboard(false, false, false, &accese());
+        let con_badge = main_menu_keyboard(false, true, false, &accese());
         assert!(!format!("{senza_badge:?}").contains("🆕"));
         // Il debug di `str` scrive il selettore di variazione (U+FE0F) di
         // "🍽️" come `\u{fe0f}`, quindi un confronto sul `{:?}` andrebbe

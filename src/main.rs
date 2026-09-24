@@ -1446,6 +1446,7 @@ async fn handle_callback(
             .unwrap_or(false);
         let badge = badge_miglioramenti(&pool, &actor).await;
         let badge_alimentazione = badge_alimentazione(&pool, &actor).await;
+        let funzioni = modules::impostazioni::funzioni(&pool).await;
         bot.send_message(
             chat_id,
             "⚠️ Questa schermata non è più attiva. Ho aperto un nuovo Menù principale.",
@@ -1454,6 +1455,7 @@ async fn handle_callback(
             is_admin,
             badge_alimentazione,
             badge,
+            &funzioni,
         ))
         .await?;
         return respond(());
@@ -1516,6 +1518,38 @@ async fn handle_authorized_callback(
     data: String,
 ) -> ResponseResult<()> {
     let data = data.as_str();
+
+    // ⚙️ Impostazioni, prima di tutto il resto: è la schermata da cui si
+    // riaccende quello che si è spento, quindi non può dipendere da niente.
+    if data.starts_with("settings:")
+        && modules::impostazioni::handle_callback(&bot, chat_id, &pool, data).await?
+    {
+        sessions.clear_chat(chat_id.0);
+        location_sessions.clear_chat(chat_id.0);
+        container_sessions.clear_chat(chat_id.0);
+        photo_sessions.clear_chat(chat_id.0);
+        food_sessions.clear_chat(chat_id.0);
+        profile_sessions.clear_chat(chat_id.0);
+        improvement_sessions.clear_chat(chat_id.0);
+        recipe_sessions.clear_chat(chat_id.0);
+        identity_sessions.clear_chat(chat_id.0);
+        distribuzione_sessions.clear_chat(chat_id.0);
+        lista_spesa_sessions.clear_chat(chat_id.0);
+        dispensa_sessions.clear_chat(chat_id.0);
+        turni_sessions.clear_chat(chat_id.0);
+        return respond(());
+    }
+
+    // Una funzione spenta non si raggiunge nemmeno dai pulsanti delle
+    // schermate vecchie, che su Telegram restano cliccabili per sempre
+    // (24 settembre 2026). Le preferenze si leggono solo se il callback
+    // appartiene davvero a una sezione spegnibile.
+    if modules::impostazioni::puo_essere_spento(data) {
+        if let Some(funzione) = modules::impostazioni::funzioni(&pool).await.blocca(data) {
+            modules::impostazioni::avvisa_spenta(&bot, chat_id, funzione).await?;
+            return respond(());
+        }
+    }
 
     // Calcolato subito, prima che qualunque modulo pulisca la propria
     // sessione: "🏠 Menù principale" premuto mentre una bozza/un input
@@ -2281,7 +2315,12 @@ async fn send_online_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     // Notifica di avvio, mandata subito dopo il boot: niente attore
     // risolto a questo punto, il badge si aggiorna comunque alla prossima
     // apertura reale del menù.
-    .reply_markup(modules::oggetti::main_menu_keyboard(true, false, false))
+    .reply_markup(modules::oggetti::main_menu_keyboard(
+        true,
+        false,
+        false,
+        &modules::impostazioni::Funzioni::tutte_accese(),
+    ))
     .await?;
     Ok(())
 }
@@ -2304,11 +2343,13 @@ async fn send_main_menu(
     };
     let badge = badge_miglioramenti(pool, actor).await;
     let badge_alimentazione = badge_alimentazione(pool, actor).await;
+    let funzioni = modules::impostazioni::funzioni(pool).await;
     bot.send_message(chat_id, "🏠 Gestionale Casa\n\nScegli una sezione.")
         .reply_markup(modules::oggetti::main_menu_keyboard(
             is_admin,
             badge_alimentazione,
             badge,
+            &funzioni,
         ))
         .await?;
     Ok(())

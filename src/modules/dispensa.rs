@@ -854,20 +854,18 @@ pub async fn rimuovi_scorta(pool: &SqlitePool, id: i64) -> anyhow::Result<()> {
 
 /// Se la merce comprata entra da sola in casa chiudendo la spesa. Acceso di
 /// default (deciso con Alessio).
+///
+/// Dal 24 settembre 2026 la risposta è no anche quando sono spente del tutto
+/// le Scorte: chi non tiene il conto di quello che ha in casa non deve
+/// ritrovarsi una dispensa che si riempie da sola
+/// (`impostazioni::Funzione::ScorteIngresso` ha `Scorte` come padre).
 pub async fn ingresso_automatico(pool: &SqlitePool) -> bool {
-    let Some(utente_id) = crate::identity::current_actor().utente_id else {
+    if crate::identity::current_actor().utente_id.is_none() {
         return false;
-    };
-    sqlx::query_scalar::<_, i64>(
-        "SELECT dispensa_ingresso_automatico FROM preferenze_utente WHERE utente_id = ?",
-    )
-    .bind(utente_id)
-    .fetch_optional(pool)
-    .await
-    .ok()
-    .flatten()
-    .map(|valore| valore != 0)
-    .unwrap_or(true)
+    }
+    crate::modules::impostazioni::funzioni(pool)
+        .await
+        .attiva(crate::modules::impostazioni::Funzione::ScorteIngresso)
 }
 
 pub async fn imposta_ingresso_automatico(pool: &SqlitePool, attivo: bool) -> anyhow::Result<()> {
@@ -1025,6 +1023,15 @@ pub async fn scala_scorte_per_pasto(
     pasto_id: i64,
     automatico: bool,
 ) -> anyhow::Result<usize> {
+    // Spente le Scorte (o il solo scarico dai pasti), un pasto non tocca
+    // niente: le scorte non sono aggiornate da nessuno, e toglierne sarebbe
+    // inventare un magazzino che l'utente non tiene (24 settembre 2026).
+    if !crate::modules::impostazioni::funzioni(pool)
+        .await
+        .attiva(crate::modules::impostazioni::Funzione::ScorteScaricoPasti)
+    {
+        return Ok(0);
+    }
     let mappa = carica_mappa_unita(pool).await?;
     let mut tx = pool
         .begin()

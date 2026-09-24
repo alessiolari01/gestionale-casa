@@ -2370,13 +2370,131 @@ ha davvero segnati.
 
 **Collaudo dal vivo su Telegram da fare.**
 
+## 2vicies. ⚙️ Impostazioni: ogni funzione si può spegnere (24 settembre 2026)
+
+Chiesto da Alessio lo stesso giorno del collaudo E–26: «dai la possibilità
+all'utente di disattivare le funzioni, tipo scorta/dispensa perché magari non
+vuole tracciare costantemente il cibo. Cerca di farlo per più funzionalità
+possibili e tutti modificabili dalle "impostazioni" che si troverà nel menù
+principale».
+
+Nuovo modulo `src/modules/impostazioni.rs`, migration 64
+(`funzioni_spente`), documentato in `docs/moduli/impostazioni.md`.
+
+1. **Undici sezioni e quattro automatismi** si accendono e si spengono da
+   ⚙️ Impostazioni, nel menù principale: Alimentazione, Ricette, Profili
+   alimentari, Planner, Lista della spesa, Scorte, Turni, Prezzi e negozi,
+   Oggetti, Luoghi, Storico; più l'ingresso automatico in casa, lo scarico
+   delle scorte coi pasti, l'aggiornamento automatico della lista e la
+   legenda dei simboli.
+2. **Spegnere non nasconde solo un pulsante.** Senza le Scorte la spesa
+   chiusa non entra in casa, i pasti non scalano niente e la lista della
+   spesa **smette di sottrarre quello che c'è in dispensa**: una lista
+   dimezzata da scorte che nessuno aggiorna più sarebbe peggio di nessuna
+   lista. È la parte che rende la cosa onesta invece che cosmetica.
+3. **I dati non si toccano.** Spegnere è reversibile: riaccendendo si ritrova
+   tutto dov'era, e per questo non c'è nessuna conferma (C16 riguarda le
+   eliminazioni definitive).
+4. **Chi contiene chi.** Spenta l'Alimentazione, le sei sezioni dentro non si
+   raggiungono; spente le Scorte, i loro due automatismi nemmeno. La scelta
+   fatta sul figlio resta però la sua: riaccendendo il padre si ritrova come
+   la si era lasciata.
+5. **I pulsanti delle schermate vecchie**, che su Telegram restano cliccabili
+   per sempre, rispondono "⚙️ … è spento" con la strada per riaccenderlo. Il
+   messaggio nomina l'interruttore che si è davvero spostato, non la sezione
+   che ne dipende.
+6. **Non si spengono** ⚙️ Impostazioni, 👤 Profilo, 👥 Spazi, 📋 Miglioramenti,
+   🛠️ Amministrazione e 🥕 Alimenti: i primi cinque perché senza non ci sarebbe
+   più modo di riaccendere niente né di segnalare un problema, l'ultimo
+   perché è il catalogo da cui dipende tutto il resto di Alimentazione.
+7. **Per utente, non per spazio.** Due persone nella stessa casa possono
+   usare il gestionale in modo diverso; i dati restano condivisi come prima,
+   perché spegnere è una preferenza, non un permesso. Le tre preferenze che
+   esistevano già restano nelle loro colonne di `preferenze_utente`: la
+   schermata legge e scrive quelle, invece di tenerne una seconda copia.
+
+6 nuovi test. Totale 469.
+
+**Distribuzione sull'S9 da fare.** **Collaudo dal vivo su Telegram da
+fare.**
+
+## 2unvicies. Dal collaudo di d806846: dieci correzioni (24 settembre 2026)
+
+Secondo collaudo di Alessio della giornata (`Collaudo_d806846_esiti.docx`,
+Telegram Desktop, punti A1–L2: 21 OK, 10 diversi, 2 non provati), via libera
+a correggere tutto insieme alle impostazioni. Una migration, di soli dati
+(la 65ª).
+
+1. **Le ricette archiviate non si aprivano** (I3): i callback
+   `recipe:restore:` finivano nel ramo finale del dispatch, perché
+   `handle_edit_callback` — che li gestisce — viene chiamata solo per
+   `recipe:edit:`. Errore mio del giro precedente, e il tipo di errore che i
+   test non prendono: la funzione era giusta, non la raggiungeva nessuno.
+2. **Il menù dopo l'archiviazione** (I2) usava la tastiera fissa, senza
+   `🗄 Ricette archiviate`. Ora usa `menu_keyboard_aggiornata`, che il numero
+   lo conta.
+3. **Il residuo della chiusura era calcolato male** (C1, C3, C5). Facevo
+   "chiesto meno comprato" ignorando le scorte, mentre la lista ragiona
+   sempre al netto: uscivano "restano 590 g" con 10 g in lista, e la domanda
+   compariva anche quando non mancava niente. Ora il residuo è quello che la
+   lista continuerebbe a chiedere (`residui_delle_aggiunte`, che passa da
+   `sottrai_scorte`, la stessa funzione della lista), calcolato **dopo** che
+   la merce è entrata in casa. Se non manca niente, nessuna domanda; e
+   l'aggiunta che resta non viene più ridotta, perché al netto ci pensa già
+   la lista. Senza le Scorte accese non c'è dispensa da guardare e vale la
+   regola vecchia: aver comprato qualcosa chiude la richiesta.
+4. **"Voce aggiunta" leggeva una riga sola** (C1): aggiungendo due volte lo
+   stesso alimento la lista mostra due righe, e il messaggio ne sommava una.
+5. **I pulsanti su due righe non esistono** (A1, A3). Telegram **ignora il
+   `\n` nelle etichette dei pulsanti**: la convenzione C19 che avevo scritto
+   il 23 settembre era sbagliata in partenza, ed è stata riscritta. Adesso
+   l'etichetta sta in una riga corta (nome tagliato più la quantità) e il
+   resto — confezione presa, prezzo, eccesso — sta nel testo del messaggio.
+   Le confezioni mostrano il **formato davanti** al nome, perché è quello che
+   le distingue ed è la fine che si perde.
+6. **`⬅️ Indietro` in due punti sbagliati** (L1): sostituendo un pasto
+   portava alla creazione di un pasto nuovo (ora torna al pasto); dal
+   dettaglio di un prodotto commerciale perdeva la pagina dell'elenco (ora il
+   bot si ricorda da dove si è arrivati, come già per le ricette).
+7. **Schermate senza riga di navigazione**: "Le lascio in lista?" — scritta
+   da me il giorno prima violando C3 — e la domanda sul totale dello
+   scontrino; `🔎 Cerca oggetto` prometteva `❌ Annulla` senza averlo.
+8. **Unità predefinite** (migration 65): latte e panna in millilitri, miele
+   in grammi. Il catalogo andava dietro alla categoria invece che a come
+   quella roba si vende. E in lista "1,5 l" resta "1,5 l", invece di
+   diventare "1500 ml" solo lì.
+9. **Cose che non si spiegavano**: `🗑️ Rimuovi voci` ora dice quali voci non
+   compaiono in lista perché in casa ce n'è già abbastanza ("Uova · 1 pz"
+   sembrava un fantasma), e l'avviso sull'eccesso dice **quali** voci
+   riguarda invece di "vedi i pulsanti sotto".
+10. **Testi**: "1 voce non ha ancora nessun prezzo" al singolare, e due testi
+    che nominavano un pulsante già visibile (C1).
+
+**Un punto del report non era un difetto** (A2, il punto al posto della
+virgola). Ho controllato tutti e cinque i posti dove il bot scrive numeri e
+prezzi — `formatta_euro`, `format_money`, `formatta_quantita`,
+`planner_format_quantity`, `porzioni::format_quantity` — e tutti usano la
+virgola, come i testi d'esempio nel sorgente. Nel codice che gira non esiste
+un punto decimale. Le schermate segnalate sono quasi certamente messaggi
+vecchi rimasti nella chat (quello delle "0.99 €" porta la data del 23
+settembre, prima dell'aggiornamento). Da riguardare se ricompare su un
+messaggio nuovo.
+
+2 nuovi test. Totale 471.
+
+**Distribuzione sull'S9 da fare.** **Collaudo dal vivo su Telegram da
+fare.**
+
 ## 3. Stato tecnico verificato
 
-- **63 migration** nel repository, tutte **applicate** al database reale
-  dell'S9: le ultime tre (formati base mancanti, prezzi all'ora locale,
-  `ridotta_chiusura_id` — sezione 2novodecies) il 24 settembre 2026,
-  verificato leggendo `applied_migrations=63` nel log di avvio del bot dopo
-  il deploy — non dedotto.
+- **65 migration** nel repository. Le prime **63** sono **applicate** al
+  database reale dell'S9: le ultime tre (formati base mancanti, prezzi
+  all'ora locale, `ridotta_chiusura_id` — sezione 2novodecies) il 24
+  settembre 2026, verificato leggendo `applied_migrations=63` nel log di
+  avvio del bot dopo il deploy — non dedotto. Le due nuove
+  (`funzioni_spente` della sezione 2vicies e le unità predefinite della
+  sezione 2unvicies) sono **in attesa del deploy**: dopo l'aggiornamento
+  dell'S9 il log deve dire `applied_migrations=65`.
   Né il secondo giro
   di correzioni del 12 settembre 2026 (sezione 2septies) né le tre
   rifiniture del 13 settembre 2026 (sezione 2octies) avevano migration
@@ -2385,7 +2503,9 @@ ha davvero segnati.
 - pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa,
   punto 1 della sezione 6): `fmt`, `check --locked`,
   `clippy --all-targets --locked -- -D warnings`, `test --locked` —
-  **463 test** (458 prima della sezione 2novodecies, 455 prima della
+  **471 test** (469 prima della sezione 2unvicies, 463 prima della sezione
+  2vicies, 458 prima della
+  sezione 2novodecies, 455 prima della
   sezione 2octodecies, 451 prima della
   sezione 2septdecies, 450 prima della
   sezione 2sexdecies, 448 prima del giro

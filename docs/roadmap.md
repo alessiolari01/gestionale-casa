@@ -52,6 +52,12 @@ Completato:
 - accesso approvato, amministrazione e Miglioramenti;
 - rifiniture UI Telegram e export Miglioramenti.
 
+**⚙️ Impostazioni** (24 settembre 2026): ogni sezione e ogni automatismo si
+può spegnere, per utente, da `⚙️ Impostazioni` nel menù principale — vedi
+`docs/moduli/impostazioni.md`. Vale anche per i moduli che verranno: un
+modulo nuovo aggiunge la sua voce all'enum `impostazioni::Funzione` e nasce
+acceso per tutti, senza migration.
+
 Prossimi blocchi funzionali, nell'ordine:
 
 1. **Porzioni e override** — quantità personali e override ingrediente — OPERATIVO;

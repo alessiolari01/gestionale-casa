@@ -516,11 +516,23 @@ ognuno dei due avrebbe ricordato di arrivare dall'altro.
 
 ## Dal collaudo E–26 (24 settembre 2026)
 
-- **Voci su due righe.** Il nome (tagliato a 40 caratteri) sta sopra,
-  `quantità · 📦 confezione · 💶 prezzo` sotto: su una riga sola Telegram
-  tagliava il pulsante e il prezzo spariva. Le confezioni seguono la stessa
-  forma, nome sopra e formato sotto.
-- **Decimali con la virgola**: `1,5 kg`, `0,99 €`.
+- **Pulsanti corti, dettagli nel testo.** Telegram **non manda a capo le
+  etichette dei pulsanti** (il tentativo del 23 settembre non funzionava,
+  vedi C19), quindi sul pulsante ci stanno l'icona di stato, il nome tagliato
+  a 24 caratteri e la quantità. Confezione presa, prezzo segnato ed eccesso
+  stanno nel testo del messaggio, una riga per ogni voce che ne ha — le altre
+  non compaiono. Le confezioni mettono il **formato davanti** al nome
+  (`500 g · Parmareggio Parmigiano…`): è il formato che le distingue, ed è la
+  fine dell'etichetta che si perde.
+- **Decimali con la virgola**: `1,5 kg`, `0,99 €`. E le quantità grandi si
+  leggono nell'unità giusta: `1,5 l`, non `1500 ml` — la lista aggrega
+  nell'unità di base, ma chi ha scritto "1,5 l" lo ritrovava scritto così in
+  `🗑️ Rimuovi voci` e diverso in lista.
+
+- **`🗑️ Rimuovi voci` spiega le assenti**: le aggiunte che in lista non
+  compaiono perché in casa ce n'è già abbastanza vengono elencate in fondo
+  ("🏠 Di queste in casa ne hai già abbastanza"), invece di sembrare voci
+  fantasma. E l'avviso sull'eccesso dice **quali** voci riguarda.
 - **La stellina del preferito** (`☆` / `⭐`) e la riga che la spiega
   compaiono solo quando le confezioni sono più di una: con una sola non c'è
   niente da preferire.
@@ -539,25 +551,36 @@ ognuno dei due avrebbe ricordato di arrivare dall'altro.
 - **Testo di chiusura**: "1 voce comprata va nell'archivio e sparisce dalla
   lista", al plurale solo quando serve.
 
-### Di un'aggiunta comprata a metà decide chi fa la spesa
+### Di quello che manca ancora decide chi fa la spesa
 
-La prima versione della correzione chiudeva l'aggiunta appena si comprava
-**qualcosa** di quell'identità: toglieva la voce fantasma, ma decideva al
-posto dell'utente (chiesti 2 kg di pasta, comprati 500 g, aggiunta chiusa).
-Dal 24 settembre 2026 la regola è in tre casi:
+Chiudendo la spesa, ogni aggiunta dal catalogo può essere servita oppure no.
+**Il bot lo decide guardando la dispensa, non lo scontrino**: dopo che la
+merce comprata è entrata in casa, si rifà la stessa sottrazione che fa la
+lista (`sottrai_scorte`) e si guarda cosa resterebbe da comprare.
 
-| comprato | cosa succede |
+| dopo la spesa | cosa succede |
 |---|---|
-| ≥ di quanto chiedeva | l'aggiunta si chiude, silenziosamente |
-| < di quanto chiedeva | resta con quel che manca, e il bot chiede "Le lascio in lista?" |
-| niente di quell'identità | resta com'è: è una richiesta non ancora servita |
+| non manca più niente | l'aggiunta si chiude, silenziosamente |
+| ne manca ancora | resta **com'è**, e il bot chiede "Le lascio in lista?" |
 
-Il residuo arriva nell'unità di aggregazione (g, ml) e viene riportato in
-proporzione nell'unità scritta dall'utente: "1,5 kg" diventa "0,5 kg", non
-"500 g". Le aggiunte ridotte da una chiusura portano il suo
-`ridotta_chiusura_id`, così `🗑 No, toglile` toglie quelle e nessun'altra —
-anche se nel frattempo ne è stata aggiunta un'altra a mano. La domanda arriva
-**prima** di quella sul totale dello scontrino, che resta l'ultima cosa.
+Il numero detto è quindi sempre quello che si legge in lista. Le prime due
+versioni di questa regola sbagliavano proprio qui: la prima chiudeva
+l'aggiunta appena si comprava *qualcosa* (decidendo al posto dell'utente), la
+seconda calcolava "chiesto meno comprato" ignorando le scorte e diceva
+"restano 590 g" mentre la lista ne chiedeva 10, chiedendo anche quando non
+mancava niente (Alessio, collaudo del 24 settembre 2026, punti C1, C3 e C5).
+
+L'aggiunta che resta **non viene ridotta**: la sua quantità è la richiesta
+("mi servono 800 g di parmigiano"), e a mostrarne il netto ci pensa già la
+lista a ogni refresh. Porta però il `ridotta_chiusura_id` di quella chiusura,
+così `🗑 No, toglile` toglie esattamente quelle e nessun'altra — anche se nel
+frattempo ne è stata aggiunta un'altra a mano. La domanda arriva **prima** di
+quella sul totale dello scontrino, che resta l'ultima cosa.
+
+**Con le Scorte spente** (⚙️ Impostazioni) non c'è nessuna dispensa da
+guardare: vale la regola vecchia, cioè aver comprato qualcosa di
+quell'identità chiude la richiesta. Altrimenti nessuna aggiunta si
+chiuderebbe mai e tornerebbero le voci fantasma.
 
 ## Schermate
 
