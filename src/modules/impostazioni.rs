@@ -287,7 +287,13 @@ impl Funzioni {
 
 /// Legge in un colpo solo tutte le funzioni spente di questo utente.
 pub async fn funzioni(pool: &SqlitePool) -> Funzioni {
-    let Some(utente_id) = crate::identity::current_actor().utente_id else {
+    // `current_actor_opt`, non `current_actor`: questa funzione viene chiamata
+    // anche da schermate che girano fuori da ogni contesto (la notifica di
+    // avvio, la risposta "questa schermata non e' piu' attiva"). Con
+    // `current_actor` il bot cadeva -- ed e' caduto davvero, il 24 settembre
+    // 2026, restando giu' fino al giorno dopo.
+    let Some(utente_id) = crate::identity::current_actor_opt().and_then(|attore| attore.utente_id)
+    else {
         return Funzioni::tutte_accese();
     };
     let mut spente: HashSet<String> =
@@ -609,6 +615,26 @@ mod db_tests {
             assert!(dispensa::ingresso_automatico(&pool).await);
         })
         .await;
+    }
+
+    /// Fuori da ogni contesto utente -- la notifica di avvio agli
+    /// amministratori, la risposta "questa schermata non e' piu' attiva" --
+    /// le funzioni risultano tutte accese, e soprattutto **non si cade**.
+    ///
+    /// Il 24 settembre 2026 questa lettura girava con `current_actor`, che in
+    /// produzione va in panic quando il contesto manca: il dispatcher e'
+    /// morto e il bot e' rimasto giu' fino al giorno dopo. In test non si
+    /// vedeva, perche' in test il contesto mancante ricade sull'attore di
+    /// sistema invece di fallire; per questo il test guarda il valore, che
+    /// e' la cosa che si puo' davvero controllare da qui.
+    #[tokio::test]
+    async fn senza_nessun_utente_e_tutto_acceso_e_non_si_cade() {
+        let pool = test_pool().await;
+        let funzioni = funzioni(&pool).await;
+        for funzione in SEZIONI.iter().chain(AUTOMATISMI.iter()) {
+            assert!(funzioni.attiva(*funzione), "{}", funzione.chiave());
+        }
+        assert!(crate::identity::current_actor_opt().is_none());
     }
 
     /// I tre interruttori piu' vecchi vivono ancora nelle loro colonne di

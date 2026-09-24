@@ -72,6 +72,25 @@ Il messaggio nomina l'interruttore che si è davvero spostato: se le Scorte
 sono spente perché è spenta l'Alimentazione, dire "Scorte" manderebbe a
 cercare un interruttore già a posto.
 
+## Leggere le impostazioni non deve far cadere il bot
+
+`funzioni()` passa da `identity::current_actor_opt()`, non da
+`current_actor()`. La differenza non è cosmetica: `current_actor()` in
+produzione **va in panic** quando il contesto dell'attore manca, e alcune
+schermate girano proprio fuori da quel contesto — la notifica di avvio agli
+amministratori e la risposta "questa schermata non è più attiva", che arriva
+prima che l'attore venga risolto.
+
+Il 24 settembre 2026 la prima versione di questo modulo usava
+`current_actor()`, e il bot è caduto per davvero:
+panic su un worker di Tokio, dispatcher di teloxide morto, processo finito,
+bot giù per un'ora e mezza. Senza utente le funzioni risultano **tutte
+accese**: è il default giusto, perché quelle schermate devono solo mostrare
+qualcosa, non decidere niente sui dati di nessuno.
+
+I test non prendono questa classe di errore da soli: in `#[cfg(test)]` il
+contesto mancante ricade sull'attore di sistema invece di far cadere niente.
+
 ## Dove sta il sì/no
 
 Le funzioni nuove stanno in **`funzioni_spente`**, una riga per ogni funzione

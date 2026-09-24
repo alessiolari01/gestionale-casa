@@ -860,7 +860,10 @@ pub async fn rimuovi_scorta(pool: &SqlitePool, id: i64) -> anyhow::Result<()> {
 /// ritrovarsi una dispensa che si riempie da sola
 /// (`impostazioni::Funzione::ScorteIngresso` ha `Scorte` come padre).
 pub async fn ingresso_automatico(pool: &SqlitePool) -> bool {
-    if crate::identity::current_actor().utente_id.is_none() {
+    if crate::identity::current_actor_opt()
+        .and_then(|attore| attore.utente_id)
+        .is_none()
+    {
         return false;
     }
     crate::modules::impostazioni::funzioni(pool)

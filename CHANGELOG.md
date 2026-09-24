@@ -2,6 +2,21 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_PANIC_IMPOSTAZIONI_20260925 -->
+# 25/09/2026 — Il bot cadeva premendo un pulsante di una schermata vecchia
+
+- **Corretto un blocco totale del bot** introdotto ieri con le impostazioni.
+  La risposta "questa schermata non è più attiva" ricostruisce il menù
+  principale, e per farlo leggeva le impostazioni **fuori dal contesto
+  dell'utente**: in produzione quella lettura va in panic, il panic uccideva
+  il dispatcher di Telegram e il bot restava spento. È rimasto giù dalle
+  21:10 di ieri.
+- **`identity::current_actor_opt()`**: dice "non c'è nessun utente" invece di
+  morire, e serve solo a decidere cosa mostrare. Per leggere o scrivere dati
+  resta `current_actor`, che deve continuare a fallire.
+- **Un test di questa classe di errore**: senza contesto utente le funzioni
+  risultano tutte accese.
+
 <!-- CHANGELOG_COLLAUDO_D806846_20260924 -->
 # 24/09/2026 — Dal collaudo di d806846: dieci correzioni
 

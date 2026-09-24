@@ -63,6 +63,26 @@ pub(crate) fn current_actor() -> AuditActor {
     }
 }
 
+/// L'attore corrente **se c'e'**, senza far cadere niente.
+///
+/// `current_actor` in produzione va in panic quando il contesto manca, ed e'
+/// giusto: un'operazione sui dati di qualcuno senza sapere di chi e' un errore
+/// di programmazione, e ricadere in silenzio sullo spazio bootstrap
+/// rischierebbe di leggere o scrivere nello spazio sbagliato.
+///
+/// Ci sono pero' punti che girano **fuori** da ogni contesto e che devono solo
+/// disegnare una schermata: la notifica di avvio agli amministratori e la
+/// risposta "questa schermata non e' piu' attiva", che arriva prima che
+/// l'attore venga risolto. Li' serve sapere "non c'e' nessuno" invece di
+/// morire: il 24 settembre 2026 una lettura delle preferenze in quel punto ha
+/// fatto cadere il dispatcher, e il bot e' rimasto giu' per un'ora.
+///
+/// Da usare solo per decidere cosa **mostrare**. Per leggere o scrivere dati
+/// resta `current_actor`, che deve continuare a fallire.
+pub(crate) fn current_actor_opt() -> Option<AuditActor> {
+    CURRENT_ACTOR.try_with(Clone::clone).ok()
+}
+
 #[cfg(test)]
 fn missing_actor_context() -> AuditActor {
     // I test legacy dei moduli Step 6 eseguono molte primitive direttamente.

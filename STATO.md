@@ -2494,6 +2494,39 @@ yogurt ancora in `g` come doveva restare.
 
 **Collaudo dal vivo su Telegram da fare.**
 
+## 2duovicies. Il bot cadeva: contesto attore mancante (25 settembre 2026)
+
+**Il bot è rimasto spento dalle 21:10 del 24 settembre**, da subito dopo il
+deploy del commit `d502cab`, e me ne sono accorto solo perché Alessio ha
+chiesto di verificare che fosse attivo. Vale la pena scriverlo per intero,
+perché è il difetto peggiore introdotto finora.
+
+**Cosa succedeva.** Premendo un pulsante di una schermata non più attiva, il
+bot risponde "⚠️ Questa schermata non è più attiva" e ricostruisce il menù
+principale. Quel punto sta **prima** di `identity::with_actor`, perché
+l'attore lì non serve: i badge ricevono l'attore come parametro. Scrivendo le
+impostazioni ci ho aggiunto `impostazioni::funzioni(&pool)`, che legge le
+preferenze dell'utente corrente con `identity::current_actor()` — e
+`current_actor()` in produzione **va in panic** se il contesto manca (ed è
+giusto: leggere i dati di qualcuno senza sapere di chi sarebbe peggio). Il
+panic è arrivato su un worker di Tokio, il dispatcher di teloxide è morto con
+`TX is dead`, e il processo è finito.
+
+**Perché i test non l'hanno preso.** In `#[cfg(test)]` il contesto mancante
+non fa cadere niente: ricade sull'attore di sistema
+(`identity::missing_actor_context`). Quindi lo stesso codice che in produzione
+muore, nei test funziona. È una differenza fra test e produzione che va
+tenuta a mente ogni volta che si tocca `current_actor()`.
+
+**La correzione.** `identity::current_actor_opt()` ritorna `Option` invece di
+cadere, e si usa **solo** per decidere cosa mostrare: `impostazioni::funzioni`
+e `dispensa::ingresso_automatico` ora passano da lì, e senza utente
+rispondono "tutto acceso". Per leggere o scrivere dati resta `current_actor`,
+che deve continuare a fallire. Un test nuovo fissa il comportamento senza
+contesto.
+
+1 nuovo test. Totale 472.
+
 ## 3. Stato tecnico verificato
 
 - **65 migration** nel repository, tutte **applicate** al database reale
@@ -2509,7 +2542,8 @@ yogurt ancora in `g` come doveva restare.
 - pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa,
   punto 1 della sezione 6): `fmt`, `check --locked`,
   `clippy --all-targets --locked -- -D warnings`, `test --locked` —
-  **471 test** (469 prima della sezione 2unvicies, 463 prima della sezione
+  **472 test** (471 prima della sezione 2duovicies, 469 prima della sezione
+  2unvicies, 463 prima della sezione
   2vicies, 458 prima della
   sezione 2novodecies, 455 prima della
   sezione 2octodecies, 451 prima della
