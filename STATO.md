@@ -2631,6 +2631,91 @@ registrato) e sull'S9 rispondeva "Permission denied" -- corretto con
 
 **Collaudo dal vivo su Telegram da fare** per tutto il resto.
 
+## 2quattuorvicies. Dal collaudo di 7223550: voci che sparivano, e un lockout (25 settembre 2026)
+
+Collaudo di Alessio su `7223550` (`Collaudo_7223550_esiti.docx`: **36 OK, 4
+diversi, 2 non provati**). Via libera a correggere tutto. Nessuna migration.
+
+### Le voci che sparivano (punti D1 e D5) — difetto mio del giorno prima
+
+La versione del 24 settembre passava le aggiunte dal catalogo **una per una**
+a `sottrai_scorte` e poi provava a riaccoppiare richieste e residui
+camminando in parallelo sulle due liste. Con due aggiunte dello stesso
+alimento quell'accoppiamento sbaglia: `sottrai_scorte` toglie dall'elenco le
+righe azzerate, quindi il residuo della seconda aggiunta finiva sulla prima e
+l'altra — creduta servita — veniva **cancellata**. Alessio ci ha perso 2,5 l
+di Latte e 170 g di Pasta, e rispondendo "✅ Sì, lasciale" si ritrovava la
+lista vuota.
+
+Ora `residui_per_identita` **somma prima di sottrarre**: una riga per
+identità e unità, con dentro gli id delle aggiunte che la compongono. Con una
+riga sola per identità l'ambiguità non esiste.
+
+Al secondo errore dello stesso punto: la domanda "ne avevi chiesto di più"
+compariva anche per un alimento **mai messo nel carrello**. `sistema_le_aggiunte`
+ora guarda solo le identità presenti fra le voci comprate; le altre non si
+toccano. E quando manca ancora qualcosa **non si cancella nessuna aggiunta**:
+la quantità di un'aggiunta è la richiesta, e a mostrarne il netto ci pensa la
+lista a ogni refresh.
+
+### Il lockout (punto M1)
+
+Alle 18:25:41 UTC, mentre aggiungeva le uova, il bot ha risposto "🔒 Questo
+account non può usare il gestionale in questo momento". Nel log:
+`Callback senza accesso applicativo … error=Impossibile aggiornare il nome
+dell'utente`.
+
+Dentro `resolve_telegram_actor` il bot **rinfresca il nome visualizzato**
+leggendolo da Telegram, e quell'UPDATE aveva un `?`: un errore lì risaliva
+fino al controllo d'accesso, che tratta ogni errore come "questo account non
+può usare il gestionale". Un aggiornamento estetico chiudeva fuori il
+proprietario di casa.
+
+Tre misure:
+
+1. **l'aggiornamento del nome non è più fatale**: se non riesce si tiene
+   quello di prima e si va avanti;
+2. **l'errore vero finisce nel log** (`errore = %errore`), non solo il
+   messaggio di contesto: la causa sotto non si è potuta sapere, e senza
+   quella si tira a indovinare;
+3. **database in WAL** con `busy_timeout` di 10 secondi e `synchronous =
+   normal`. Girava in journal mode `delete` — verificato con
+   `PRAGMA journal_mode` sul file dell'S9 — dove ogni scrittura ferma tutte le
+   letture, con cinque connessioni nel pool.
+
+### "Ne hai anche in …" e il nome della riga (punto F3)
+
+`altrove_in_casa` confrontava le colonne `alimento_id`, ma una confezione di
+marca a database ha solo `prodotto_alimentare_id`: il Parmareggio in dispensa
+non risultava lo stesso alimento del parmigiano in frigo, e la riga non
+compariva. Ora la query passa da una vista con il `COALESCE` sul prodotto, la
+stessa idea del raggruppamento.
+
+E la riga di un gruppo prendeva il nome dalla **prima confezione**
+("Parmareggio Parmigiano 24 mesi"): ora `Scorta` porta anche
+`alimento_nome`, e il gruppo si chiama come l'alimento.
+
+### Le quattro cose minori
+
+- la scheda di una scorta scriveva "1590 g" mentre l'elenco scriveva
+  "1,59 kg": ora entrambe usano `formatta_quantita_leggibile`;
+- `🗑️ Rimuovi voci` mostra la quantità **chiesta** e adesso lo dice ("2 kg
+  chiesti"), perché in lista si vede quella da comprare;
+- la seconda aggiunta di un alimento che non si ha in casa diceva solo "✅
+  Voce aggiunta": ora dice "in tutto servono 370 g";
+- `✏️ Ho mangiato altro` → `⬅️ Indietro` tornava alla giornata invece che al
+  pasto (era corretto solo per `🔁 Sostituisci`).
+
+### Due punti non provabili, colpa del prompt
+
+**F2** chiedeva confezioni di marca in un posto dove Alessio non le aveva, e
+**M2** un messaggio vecchio da premere, che il bot cancella tenendo una sola
+schermata per chat. Da riscrivere nel prompt, non nel codice.
+
+1 nuovo test. Totale 475.
+
+**Distribuzione sull'S9 da fare.** **Collaudo dal vivo su Telegram da fare.**
+
 ## 3. Stato tecnico verificato
 
 - **65 migration** nel repository, tutte **applicate** al database reale
@@ -2646,7 +2731,8 @@ registrato) e sull'S9 rispondeva "Permission denied" -- corretto con
 - pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa,
   punto 1 della sezione 6): `fmt`, `check --locked`,
   `clippy --all-targets --locked -- -D warnings`, `test --locked` —
-  **474 test** (472 prima della sezione 2trevicies, 471 prima della sezione
+  **475 test** (474 prima della sezione 2quattuorvicies, 472 prima della
+  sezione 2trevicies, 471 prima della sezione
   2duovicies, 469 prima della sezione
   2unvicies, 463 prima della sezione
   2vicies, 458 prima della

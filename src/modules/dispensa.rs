@@ -214,6 +214,14 @@ pub struct Scorta {
     pub quantita: f64,
     pub unita_simbolo: String,
     pub scadenza: Option<String>,
+    /// Il nome dell'alimento a cui questa confezione appartiene, anche quando
+    /// ci arriva attraverso un prodotto di marca. La riga di un gruppo porta
+    /// questo -- "Parmigiano Reggiano" -- e non il nome della prima
+    /// confezione, che era "Parmareggio Parmigiano 24 mesi" e faceva sembrare
+    /// la riga un'altra cosa (Alessio, collaudo del 25 settembre 2026, F3).
+    /// `None` per le scorte scritte a mano, che un alimento non l'hanno.
+    #[sqlx(default)]
+    pub alimento_nome: Option<String>,
 }
 
 /// Le confezioni dello stesso alimento, nello stesso posto e nella stessa
@@ -310,7 +318,13 @@ pub fn raggruppa_scorte(
             None => gruppi.push((
                 chiave,
                 GruppoScorte {
-                    descrizione: scorta.descrizione.clone(),
+                    // Il nome dell'alimento se c'e': la riga mette insieme il
+                    // generico e quello di marca, e deve chiamarsi come la
+                    // cosa, non come la prima confezione che ci e' finita.
+                    descrizione: scorta
+                        .alimento_nome
+                        .clone()
+                        .unwrap_or_else(|| scorta.descrizione.clone()),
                     quantita_base,
                     unita_base,
                     lotti: vec![scorta.clone()],
@@ -374,12 +388,14 @@ type MappaUnita = HashMap<String, InfoUnita>;
 const COLONNE_SCORTA: &str = "s.id, s.conservazione, \
                               COALESCE(s.alimento_id, p.alimento_id) AS alimento_id, \
                               s.prodotto_alimentare_id, \
-                              s.descrizione, s.quantita, s.unita_simbolo, s.scadenza";
+                              s.descrizione, s.quantita, s.unita_simbolo, s.scadenza, \
+                              a.nome AS alimento_nome";
 
 /// Le scorte si leggono sempre con il loro prodotto accanto, per via del
 /// `COALESCE` di `COLONNE_SCORTA`.
-const DA_SCORTE: &str =
-    "FROM scorte s LEFT JOIN prodotti_alimentari p ON p.id = s.prodotto_alimentare_id";
+const DA_SCORTE: &str = "FROM scorte s \
+     LEFT JOIN prodotti_alimentari p ON p.id = s.prodotto_alimentare_id \
+     LEFT JOIN alimenti a ON a.id = COALESCE(s.alimento_id, p.alimento_id)";
 
 /// Le confezioni di un posto, nello spazio corrente.
 pub async fn scorte_del_luogo(
@@ -542,10 +558,21 @@ pub async fn altrove_in_casa(
     scorta_id: i64,
 ) -> anyhow::Result<Vec<(Conservazione, f64, String)>> {
     let spazio_id = crate::identity::current_actor().spazio_id;
+    // L'alimento si guarda **anche attraverso il prodotto**: una confezione di
+    // marca a database ha solo `prodotto_alimentare_id`, e confrontando le sole
+    // colonne `alimento_id` il Parmareggio in dispensa non risultava lo stesso
+    // alimento del parmigiano in frigo -- quindi la riga non compariva
+    // (Alessio, collaudo del 25 settembre 2026, punto F3).
     let righe: Vec<(String, f64, String)> = sqlx::query_as(
-        "SELECT altre.conservazione, SUM(altre.quantita), altre.unita_simbolo \
-         FROM scorte questa \
-         JOIN scorte altre ON altre.spazio_id = questa.spazio_id \
+        "WITH viste AS ( \
+             SELECT s.id, s.spazio_id, s.conservazione, s.quantita, s.unita_simbolo, \
+                    COALESCE(s.alimento_id, p.alimento_id) AS alimento_id \
+             FROM scorte s \
+             LEFT JOIN prodotti_alimentari p ON p.id = s.prodotto_alimentare_id \
+         ) \
+         SELECT altre.conservazione, SUM(altre.quantita), altre.unita_simbolo \
+         FROM viste questa \
+         JOIN viste altre ON altre.spazio_id = questa.spazio_id \
            AND altre.alimento_id IS NOT NULL \
            AND altre.alimento_id = questa.alimento_id \
            AND altre.conservazione <> questa.conservazione \
@@ -2582,12 +2609,13 @@ async fn mostra_scorta(
         testo.push_str(avviso);
         testo.push_str("\n\n");
     }
+    // "1,59 kg", come nell'elenco: la scheda scriveva "1590 g" e sembravano
+    // due numeri diversi (Alessio, collaudo del 25 settembre 2026).
     testo.push_str(&format!(
-        "{}\n\n{} · {} {}\n{}",
+        "{}\n\n{} · {}\n{}",
         dove.etichetta(),
         scorta.descrizione,
-        formatta_quantita(scorta.quantita),
-        scorta.unita_simbolo,
+        formatta_quantita_leggibile(scorta.quantita, &scorta.unita_simbolo),
         match scorta.scadenza.as_deref() {
             Some(data) => format!("📅 Scade {}", calendario::display_date(data)),
             None => "📅 Nessuna scadenza".to_string(),
@@ -2721,6 +2749,9 @@ mod tests {
             quantita: q,
             unita_simbolo: u.to_string(),
             scadenza: s.map(str::to_string),
+            // Nei test il nome sul pulsante e' quello della confezione: i
+            // casi in cui conta il nome dell'alimento lo impostano a mano.
+            alimento_nome: None,
         }
     }
 
@@ -3395,16 +3426,22 @@ mod tests {
         // e' la query a riempirle l'alimento con un COALESCE.
         let mut di_marca = scorta(2, Some(7), "Parmareggio Parmigiano", 200.0, "g", None);
         di_marca.prodotto_alimentare_id = Some(42);
-        let gruppi = raggruppa_scorte(
-            &[
-                scorta(1, Some(7), "Parmigiano Reggiano", 220.0, "g", None),
-                di_marca,
-            ],
-            info,
-        );
+        di_marca.alimento_nome = Some("Parmigiano Reggiano".to_string());
+        let mut generico = scorta(1, Some(7), "Parmigiano Reggiano", 220.0, "g", None);
+        generico.alimento_nome = Some("Parmigiano Reggiano".to_string());
+        let gruppi = raggruppa_scorte(&[generico, di_marca.clone()], info);
         assert_eq!(gruppi.len(), 1, "una riga sola");
         assert_eq!(gruppi[0].quantita_base, 420.0);
         assert_eq!(gruppi[0].lotti.len(), 2, "le confezioni restano distinte");
+        assert_eq!(
+            gruppi[0].descrizione, "Parmigiano Reggiano",
+            "la riga si chiama come l'alimento"
+        );
+
+        // Una confezione di marca da sola: la riga porta comunque il nome
+        // dell'alimento, non quello del prodotto (punto F3 del collaudo).
+        let gruppi = raggruppa_scorte(&[di_marca], info);
+        assert_eq!(gruppi[0].descrizione, "Parmigiano Reggiano");
     }
 
     /// Collaudo del 23 settembre 2026, punto 12: lo stesso alimento non deve

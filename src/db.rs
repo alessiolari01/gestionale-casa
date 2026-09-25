@@ -37,7 +37,20 @@ pub async fn connect(database_url: &str) -> Result<SqlitePool> {
         .create_if_missing(true)
         // SQLx abilita gia' le foreign key per SQLite, ma lo rendiamo esplicito
         // perche' e' una proprieta' di sicurezza/integrita' importante.
-        .foreign_keys(true);
+        .foreign_keys(true)
+        // WAL: chi legge non blocca chi scrive e viceversa. Il database girava
+        // in journal mode `delete`, dove ogni scrittura ferma tutte le letture
+        // -- con cinque connessioni nel pool la contesa e' quotidiana, e il 25
+        // settembre 2026 una UPDATE fallita durante il controllo d'accesso ha
+        // fatto rispondere al bot "questo account non puo' usare il
+        // gestionale" (sezione 2quattuorvicies di STATO.md).
+        .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
+        // E se il lock c'e' comunque, si aspetta invece di fallire subito.
+        .busy_timeout(std::time::Duration::from_secs(10))
+        // Con WAL, `normal` e' il compromesso consigliato: si perde al piu'
+        // l'ultima transazione in caso di spegnimento brutale del telefono,
+        // mai il database.
+        .synchronous(sqlx::sqlite::SqliteSynchronous::Normal);
 
     ensure_parent_directory(options.get_filename())?;
 

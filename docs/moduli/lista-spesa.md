@@ -560,8 +560,17 @@ lista (`sottrai_scorte`) e si guarda cosa resterebbe da comprare.
 
 | dopo la spesa | cosa succede |
 |---|---|
-| non manca più niente | l'aggiunta si chiude, silenziosamente |
-| ne manca ancora | resta **com'è**, e il bot chiede "Le lascio in lista?" |
+| quell'alimento non era nel carrello | non si tocca niente, e non si chiede niente |
+| era nel carrello e non manca più niente | tutte le sue aggiunte si chiudono, silenziosamente |
+| era nel carrello e ne manca ancora | restano **tutte come sono**, e il bot chiede "Le lascio in lista?" una volta sola |
+
+**Si somma prima di sottrarre.** Le richieste dello stesso alimento diventano
+una riga sola (`residui_per_identita`) e solo dopo si toglie quello che c'è in
+casa. La prima versione passava le aggiunte una per una e poi riaccoppiava
+richieste e residui per posizione: con due aggiunte dello stesso alimento il
+residuo finiva sulla richiesta sbagliata e l'altra veniva cancellata, e
+Alessio ci ha perso delle voci (collaudo del 25 settembre 2026, punti D1 e
+D5).
 
 Il numero detto è quindi sempre quello che si legge in lista. Le prime due
 versioni di questa regola sbagliavano proprio qui: la prima chiudeva

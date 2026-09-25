@@ -1851,9 +1851,18 @@ async fn planner_show_recipe_picker(
     // sempre a "planner:add:", cioe' alla creazione di un pasto nuovo: si
     // usciva dalla sostituzione dentro un'altra procedura, senza capire
     // perche' (Alessio, collaudo del 24 settembre 2026, L1).
-    let indietro = match (draft.sostituzione, draft.meal_id) {
-        (true, Some(meal_id)) => format!("planner:view:{meal_id}"),
-        _ => format!("planner:add:{}", draft.date),
+    // Vale anche per "✏️ Ho mangiato altro" su un pasto consumato, che porta
+    // qui con `sostituisce_pasto_id`: anche da li' "Indietro" deve tornare al
+    // pasto, non alla creazione di un pasto nuovo (Alessio, collaudo del 25
+    // settembre 2026).
+    let torna_al_pasto = if draft.sostituzione {
+        draft.meal_id
+    } else {
+        draft.sostituisce
+    };
+    let indietro = match torna_al_pasto {
+        Some(meal_id) => format!("planner:view:{meal_id}"),
+        None => format!("planner:add:{}", draft.date),
     };
     rows.push(planner_global_nav(&indietro));
 

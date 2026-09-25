@@ -166,11 +166,21 @@ pub(crate) async fn lookup_telegram_actor(
     }
 
     let display_name = telegram_user.full_name().trim().to_string();
-    if display_name.is_empty() {
-        bail!("Telegram non ha fornito un nome utilizzabile per l'autore");
-    }
 
-    sqlx::query(
+    // Rinfrescare il nome visualizzato e' una comodita', non un permesso: se
+    // non riesce si tiene quello di prima e si va avanti.
+    //
+    // Il 25 settembre 2026 questo `?` ha chiuso Alessio fuori dal gestionale:
+    // l'UPDATE e' fallito una volta, l'errore e' risalito fino al controllo
+    // d'accesso, e il bot gli ha risposto "🔒 Questo account non puo' usare il
+    // gestionale in questo momento" mentre aggiungeva le uova alla lista. Un
+    // nome non aggiornato non e' un motivo per non far usare la propria casa.
+    if display_name.is_empty() {
+        tracing::warn!(
+            user_id,
+            "Telegram non ha dato un nome utilizzabile: tengo quello che c'era"
+        );
+    } else if let Err(errore) = sqlx::query(
         "UPDATE utenti \
          SET nome_visualizzato = ?, aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
          WHERE id = ?",
@@ -179,7 +189,16 @@ pub(crate) async fn lookup_telegram_actor(
     .bind(user_id)
     .execute(&mut *tx)
     .await
-    .context("Impossibile aggiornare il nome dell'utente")?;
+    {
+        // L'errore per esteso, non solo il messaggio di contesto: senza la
+        // causa vera (database occupato? vincolo? disco pieno?) la volta
+        // scorsa si e' potuto solo tirare a indovinare.
+        tracing::warn!(
+            user_id,
+            errore = %errore,
+            "Nome visualizzato non aggiornato: tengo quello che c'era"
+        );
+    }
 
     sqlx::query(
         "UPDATE account_telegram \

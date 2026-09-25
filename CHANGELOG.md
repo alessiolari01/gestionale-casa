@@ -2,6 +2,35 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_COLLAUDO_7223550_20260925 -->
+# 25/09/2026 — Dal collaudo di 7223550: voci che sparivano, e un lockout
+
+- **Le voci della lista non sparivano più dopo la chiusura.** Con due
+  aggiunte dello stesso alimento il bot attribuiva il residuo alla richiesta
+  sbagliata e cancellava l'altra, credendola servita: Alessio ci ha perso il
+  Latte e la Pasta. Ora quello che manca si calcola **per alimento**,
+  sommando le richieste prima di sottrarre le scorte, e quando manca qualcosa
+  **non si cancella niente**.
+- **Un alimento che non hai comprato non viene più trattato come residuo**: il
+  bot chiedeva "ne avevi chiesto di più" per il Latte rimasto intatto in
+  lista.
+- **Corretto un lockout**: aggiungendo le uova il bot ha risposto "🔒 Questo
+  account non può usare il gestionale in questo momento". Dentro il controllo
+  d'accesso il bot rinfresca il nome visualizzato, e quell'aggiornamento —
+  puramente estetico — se falliva chiudeva fuori l'utente. Ora si tiene il
+  nome di prima e si va avanti, e l'errore vero finisce nel log.
+- **Database in WAL**, con dieci secondi di attesa sui lock: girava in journal
+  mode `delete`, dove ogni scrittura ferma le letture, con cinque connessioni
+  nel pool.
+- **"🏠 Ne hai anche in …"** compare anche quando una delle due confezioni è di
+  marca, e la riga di una scorta si chiama come l'**alimento**, non come la
+  prima confezione ("Parmigiano Reggiano", non "Parmareggio Parmigiano 24
+  mesi").
+- **Quantità scritte uguali in ogni schermata** ("1,59 kg" anche nella scheda
+  di una scorta), `🗑️ Rimuovi voci` dice che la quantità è quella **chiesta**,
+  e la seconda aggiunta di un alimento che non hai in casa dice il totale.
+- **`✏️ Ho mangiato altro` → `⬅️ Indietro`** torna al pasto.
+
 <!-- CHANGELOG_COLLAUDO_D502CAB_20260925 -->
 # 25/09/2026 — Dal collaudo di d502cab, e un guardiano per il bot
 
