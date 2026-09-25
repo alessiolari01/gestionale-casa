@@ -1014,7 +1014,7 @@ pub async fn mostra_confronto(
             testo.push('\n');
         }
         testo.push_str(
-            "\nÈ una stima sui prezzi che hai già visto tu, non un listino: ogni riga della lista vale l'ultimo prezzo visto in quel negozio, e le righe senza prezzo restano fuori dal totale.",
+            "\nÈ una stima sui prezzi che hai già visto tu, non un listino: ogni riga della lista vale l'ultimo prezzo visto in quel negozio, e le righe senza prezzo restano fuori dal totale.\nIl prezzo è quello della confezione che avevi preso, non della quantità che serve adesso.",
         );
         if senza_prezzo > 0 {
             // Singolare e plurale: "1 voci" si notava subito (Alessio,

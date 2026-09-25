@@ -253,10 +253,20 @@ enum ChiaveScorta {
     Nome(String),
 }
 
+/// Che cosa tiene insieme due confezioni in una riga sola.
+///
+/// **L'alimento viene prima del prodotto**: 200 g di Parmareggio e 220 g di
+/// parmigiano generico sono la stessa cosa in dispensa, e vederli su due
+/// righe separate fa credere di averne meno (Alessio, collaudo del 25
+/// settembre 2026). La marca non si perde: resta sulle confezioni dentro la
+/// riga, che si aprono dal pulsante.
+///
+/// `alimento_id` di una confezione nata da un prodotto lo riempie la query
+/// (`COLONNE_SCORTA`), con un `COALESCE` sul prodotto.
 fn chiave_scorta(scorta: &Scorta) -> ChiaveScorta {
-    match (scorta.prodotto_alimentare_id, scorta.alimento_id) {
-        (Some(id), _) => ChiaveScorta::Prodotto(id),
-        (None, Some(id)) => ChiaveScorta::Alimento(id),
+    match (scorta.alimento_id, scorta.prodotto_alimentare_id) {
+        (Some(id), _) => ChiaveScorta::Alimento(id),
+        (None, Some(id)) => ChiaveScorta::Prodotto(id),
         (None, None) => ChiaveScorta::Nome(normalizza_nome(&scorta.descrizione)),
     }
 }
@@ -356,8 +366,20 @@ pub fn etichetta_gruppo(gruppo: &GruppoScorte) -> String {
 
 type MappaUnita = HashMap<String, InfoUnita>;
 
-const COLONNE_SCORTA: &str = "id, conservazione, alimento_id, prodotto_alimentare_id, \
-                              descrizione, quantita, unita_simbolo, scadenza";
+/// `alimento_id` arriva con un `COALESCE` sul prodotto: una confezione nata
+/// da un prodotto commerciale a database ha solo `prodotto_alimentare_id`, ma
+/// per raggrupparla con il resto di quell'alimento serve sapere qual e'
+/// (`chiave_scorta`, 25 settembre 2026). Le scritture continuano a usare le
+/// colonne vere, questa e' solo una lettura.
+const COLONNE_SCORTA: &str = "s.id, s.conservazione, \
+                              COALESCE(s.alimento_id, p.alimento_id) AS alimento_id, \
+                              s.prodotto_alimentare_id, \
+                              s.descrizione, s.quantita, s.unita_simbolo, s.scadenza";
+
+/// Le scorte si leggono sempre con il loro prodotto accanto, per via del
+/// `COALESCE` di `COLONNE_SCORTA`.
+const DA_SCORTE: &str =
+    "FROM scorte s LEFT JOIN prodotti_alimentari p ON p.id = s.prodotto_alimentare_id";
 
 /// Le confezioni di un posto, nello spazio corrente.
 pub async fn scorte_del_luogo(
@@ -366,7 +388,7 @@ pub async fn scorte_del_luogo(
 ) -> anyhow::Result<Vec<Scorta>> {
     let actor = crate::identity::current_actor();
     sqlx::query_as(&format!(
-        "SELECT {COLONNE_SCORTA} FROM scorte WHERE spazio_id = ? AND conservazione = ?"
+        "SELECT {COLONNE_SCORTA} {DA_SCORTE} WHERE s.spazio_id = ? AND s.conservazione = ?"
     ))
     .bind(actor.spazio_id)
     .bind(dove.token())
@@ -390,7 +412,7 @@ pub async fn gruppi_del_luogo(
 pub async fn scorta_per_id(pool: &SqlitePool, id: i64) -> anyhow::Result<Option<Scorta>> {
     let actor = crate::identity::current_actor();
     sqlx::query_as(&format!(
-        "SELECT {COLONNE_SCORTA} FROM scorte WHERE id = ? AND spazio_id = ?"
+        "SELECT {COLONNE_SCORTA} {DA_SCORTE} WHERE s.id = ? AND s.spazio_id = ?"
     ))
     .bind(id)
     .bind(actor.spazio_id)
@@ -675,10 +697,10 @@ async fn unisci_o_inserisci(
     nuova: NuovaScorta<'_>,
 ) -> anyhow::Result<i64> {
     let candidati: Vec<Scorta> = sqlx::query_as(&format!(
-        "SELECT {COLONNE_SCORTA} FROM scorte \
-         WHERE spazio_id = ? AND conservazione = ? \
-           AND alimento_id IS ? AND prodotto_alimentare_id IS ? AND scadenza IS ? \
-         ORDER BY id"
+        "SELECT {COLONNE_SCORTA} {DA_SCORTE} \
+         WHERE s.spazio_id = ? AND s.conservazione = ? \
+           AND s.alimento_id IS ? AND s.prodotto_alimentare_id IS ? AND s.scadenza IS ? \
+         ORDER BY s.id"
     ))
     .bind(nuova.spazio_id)
     .bind(nuova.dove.token())
@@ -1206,8 +1228,8 @@ async fn scorte_dell_alimento(
     alimento_id: i64,
 ) -> anyhow::Result<Vec<Scorta>> {
     let mut candidati: Vec<Scorta> = sqlx::query_as(&format!(
-        "SELECT {COLONNE_SCORTA} FROM scorte \
-         WHERE spazio_id IS ? AND (alimento_id = ? OR prodotto_alimentare_id IN \
+        "SELECT {COLONNE_SCORTA} {DA_SCORTE} \
+         WHERE s.spazio_id IS ? AND (s.alimento_id = ? OR s.prodotto_alimentare_id IN \
                (SELECT id FROM prodotti_alimentari WHERE alimento_id = ?))"
     ))
     .bind(spazio_id)
@@ -1373,13 +1395,13 @@ pub async fn restituisci_scorte_pasto(
     let mut rimesse = 0usize;
     for movimento in movimenti {
         let esistente: Option<Scorta> = match movimento.scorta_id {
-            Some(id) => {
-                sqlx::query_as(&format!("SELECT {COLONNE_SCORTA} FROM scorte WHERE id = ?"))
-                    .bind(id)
-                    .fetch_optional(&mut *tx)
-                    .await
-                    .context("Impossibile rileggere la scorta")?
-            }
+            Some(id) => sqlx::query_as(&format!(
+                "SELECT {COLONNE_SCORTA} {DA_SCORTE} WHERE s.id = ?"
+            ))
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await
+            .context("Impossibile rileggere la scorta")?,
             None => None,
         };
         let (base, unita_base) = converti_in_base(
@@ -3362,6 +3384,27 @@ mod tests {
             assert!(scala_scorte_per_pasto(&pool, pasto, false).await.unwrap() > 0);
         })
         .await;
+    }
+
+    /// Due confezioni dello stesso alimento -- una generica e una di marca --
+    /// stanno in una riga sola: su due righe separate sembra di averne meno
+    /// (Alessio, collaudo del 25 settembre 2026).
+    #[test]
+    fn il_generico_e_quello_di_marca_stanno_nella_stessa_riga() {
+        // Entrambe portano l'alimento 7: la seconda ha anche il prodotto, ed
+        // e' la query a riempirle l'alimento con un COALESCE.
+        let mut di_marca = scorta(2, Some(7), "Parmareggio Parmigiano", 200.0, "g", None);
+        di_marca.prodotto_alimentare_id = Some(42);
+        let gruppi = raggruppa_scorte(
+            &[
+                scorta(1, Some(7), "Parmigiano Reggiano", 220.0, "g", None),
+                di_marca,
+            ],
+            info,
+        );
+        assert_eq!(gruppi.len(), 1, "una riga sola");
+        assert_eq!(gruppi[0].quantita_base, 420.0);
+        assert_eq!(gruppi[0].lotti.len(), 2, "le confezioni restano distinte");
     }
 
     /// Collaudo del 23 settembre 2026, punto 12: lo stesso alimento non deve

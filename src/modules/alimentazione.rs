@@ -5712,9 +5712,8 @@ struct ProductCatalogRecord {
     id: i64,
     brand: String,
     product_name: String,
-    /// Letto dalla query ma non piu' mostrato sul pulsante dell'elenco: sta
-    /// nel dettaglio, dove c'e' spazio (24 settembre 2026).
-    #[allow(dead_code)]
+    /// Non sul pulsante, dove non ci sta: nel testo, accanto ai nomi lunghi
+    /// (25 settembre 2026).
     food_name: String,
     package_quantity: f64,
     unit_symbol: String,
@@ -5858,24 +5857,48 @@ async fn send_product_catalog(
             None => "\n\nNessun prodotto commerciale.\nSi aggiungono da un alimento, con 🛒 Prodotti associati.",
         });
     } else {
-        text.push_str(
-            "\n\nOgni riga è una confezione: marca, prodotto e alimento a cui è collegato.",
-        );
+        text.push_str("\n\nOgni riga è una confezione: formato, marca e prodotto.");
+        // I nomi che sul pulsante non ci stanno, con l'alimento a cui sono
+        // collegati: sul pulsante non entrerebbero mai (25 settembre 2026).
+        let lunghi: Vec<String> = products
+            .iter()
+            .filter(|product| {
+                format!("{} {}", product.brand, product.product_name)
+                    .chars()
+                    .count()
+                    > 22
+            })
+            .map(|product| {
+                format!(
+                    "\n• {} {} — {} {} · 🥕 {}",
+                    display_quantity(product.package_quantity),
+                    product.unit_symbol,
+                    product.brand,
+                    product.product_name,
+                    product.food_name
+                )
+            })
+            .collect();
+        if !lunghi.is_empty() {
+            text.push_str(&lunghi.join(""));
+        }
     }
 
-    // Una riga sola e corta: Telegram non manda a capo le etichette dei
-    // pulsanti, e il "\n🥕 alimento" che c'era qui non si vedeva -- si
-    // vedeva solo il taglio (collaudo del 24 settembre 2026, A1). L'alimento
-    // collegato resta nel dettaglio, dove c'è spazio.
+    // Il **formato davanti**, come per le confezioni della lista: Telegram non
+    // manda a capo le etichette dei pulsanti (C19), e con il nome davanti si
+    // perdeva la fine -- "Alpro Mandorla senza zucch… · 1 l" (Alessio,
+    // collaudo del 25 settembre 2026). Il formato è quello che distingue due
+    // confezioni della stessa marca, quindi non può essere la parte tagliata.
+    // I nomi per esteso stanno nel testo qui sopra.
     let mut rows: Vec<Vec<InlineKeyboardButton>> = products
         .iter()
         .map(|product| {
             vec![button(
                 format!(
-                    "{} · {} {}",
-                    liste::tronca(&format!("{} {}", product.brand, product.product_name), 26),
+                    "{} {} · {}",
                     display_quantity(product.package_quantity),
                     product.unit_symbol,
+                    liste::tronca(&format!("{} {}", product.brand, product.product_name), 22),
                 ),
                 format!("food:product:view:{}", product.id),
             )]

@@ -33,6 +33,9 @@ fi
 
 mkdir -p "$CARTELLA_RUN" || exit 1
 
+# Il bot riparte di proposito: il guardiano puo' ricominciare a guardarlo.
+rm -f "$CARTELLA_RUN/guardiano.pausa"
+
 if [ -f "$PIDFILE" ]; then
     VECCHIO_PID="$(cat "$PIDFILE" 2>/dev/null)"
     if [ -n "$VECCHIO_PID" ] && kill -0 "$VECCHIO_PID" 2>/dev/null; then

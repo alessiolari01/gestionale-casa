@@ -40,6 +40,11 @@ if [ -z "$PID" ] || ! kill -0 "$PID" 2>/dev/null; then
     exit 1
 fi
 
+# Il guardiano (`guardiano-bot.sh`) non deve rimettere in piedi un bot che si
+# sta fermando di proposito: questo file glielo dice, e `avvia-bot.sh` lo
+# togliera' alla prossima accensione.
+touch "$(dirname "$PIDFILE")/guardiano.pausa" 2>/dev/null
+
 echo "Mando SIGINT al pid $PID (spegnimento pulito, come Ctrl+C)..."
 kill -INT "$PID"
 

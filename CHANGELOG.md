@@ -2,6 +2,35 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_COLLAUDO_D502CAB_20260925 -->
+# 25/09/2026 — Dal collaudo di d502cab, e un guardiano per il bot
+
+- **Il guardiano del bot** (`scripts/guardiano-bot.sh`): ogni minuto controlla
+  che il processo sia vivo e, se non lo è, lo riaccende — salvando prima le
+  ultime righe del log, così la caduta si può leggere invece di sparire. Non
+  riaccende un bot fermato a mano, e dopo cinque riaccensioni in mezz'ora si
+  arresta e lo scrive, invece di nascondere un guasto che si ripete.
+- **"Voce aggiunta" dice sempre i numeri**: somma tutte le aggiunte di quello
+  stesso alimento ("in tutto servono 1300 g, in lista ne restano 370 g") e
+  confronta le quantità **dopo** la conversione — chiedendo litri con la lista
+  in millilitri diceva "in casa ne hai già abbastanza" con la voce in vista.
+- **Il residuo dopo la spesa si somma per alimento**, non per aggiunta: una
+  riga sola, non "restano 70 g" e "restano 100 g" dello stesso parmigiano.
+- **Quantità davanti al nome** sui pulsanti della lista e dei prodotti
+  commerciali: con `📦` accanto il pulsante è largo mezza riga, e la parte
+  tagliata era proprio il numero.
+- **Preso più di quanto serviva**: accanto alla confezione compare "ne
+  servivano 500 g". Nota neutra, non un avviso: una confezione più grande non
+  è un errore.
+- **Con l'ingresso automatico spento** il bot non chiede più del residuo e non
+  dice più che la roba "entra in casa".
+- **Dispensa: una riga per alimento**, anche mettendo insieme il generico e
+  quello di marca; le confezioni restano distinte dentro.
+- **Ricetta archiviata**: prima di ripristinarla si vedono porzioni, numero di
+  passaggi e i primi ingredienti.
+- **Riordina lista** ha la riga di navigazione, e "Dove conviene" dice che il
+  prezzo è quello della confezione presa.
+
 <!-- CHANGELOG_PANIC_IMPOSTAZIONI_20260925 -->
 # 25/09/2026 — Il bot cadeva premendo un pulsante di una schermata vecchia
 

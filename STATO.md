@@ -2535,6 +2535,83 @@ processo vivo, `Gestionale Casa online` nel log, zero `panicked`.
 **Da riprovare dal vivo**: premere il pulsante di una schermata vecchia --
 e' il gesto che faceva cadere il bot.
 
+## 2trevicies. Dal collaudo di d502cab, e un guardiano per il bot (25 settembre 2026)
+
+Collaudo di Alessio su `d502cab` (`Collaudo_d502cab_esiti.docx`: 29 OK, 5
+diversi, 1 non provato), interrotto per otto ore dalla caduta del bot —
+quella della sezione 2duovicies, che lui ha incontrato dal vivo premendo un
+pulsante mentre era nel menù Ricette. Via libera a correggere tutto insieme.
+Nessuna migration.
+
+### Il guardiano (chiesto dopo il guasto)
+
+`scripts/guardiano-bot.sh` gira sull'S9 e ogni minuto guarda se il processo
+del bot è ancora vivo; se non lo è, salva le ultime ottanta righe di
+`bot.out` in `data/log/caduta_<data>.log` — `avvia-bot.sh` riscrive quel file
+da zero, quindi senza copia la causa sparirebbe — e richiama `avvia-bot.sh`.
+Scrive tutto in `data/log/guardiano.log`.
+
+Due cose che **non** fa, di proposito: non riaccende un bot fermato a mano
+(`ferma-bot.sh` lascia `data/run/guardiano.pausa`, che `avvia-bot.sh`
+rimuove), e dopo **cinque riaccensioni in mezz'ora** si arrende e lo scrive.
+Un bot che cade appena parte non si aggiusta riaccendendolo: riaccenderlo per
+sempre nasconderebbe il guasto, che è esattamente l'errore appena commesso.
+
+### Le correzioni
+
+1. **"Voce aggiunta" senza numeri** (punto O2) e **"in casa ne hai già
+   abbastanza" con la voce in vista** (segnalazione nuova sul latte): due
+   facce dello stesso difetto in `spiega_aggiunta`. Confrontavo il residuo con
+   la quantità dell'**ultima** aggiunta invece che col totale chiesto, e
+   confrontavo i **simboli** delle unità invece dei valori convertiti — quindi
+   "2,5 l" chiesti non trovavano la riga scritta in `ml`. Ora somma tutte le
+   aggiunte di quell'alimento e converte prima di confrontare.
+2. **Residuo in due righe con lo stesso nome** (O4): si somma per alimento.
+3. **Pulsanti ancora tagliati** (P1): il pulsante di una voce è largo **mezza
+   riga** perché accanto c'è `📦`, quindi ventiquattro caratteri di nome erano
+   ancora troppi. La quantità va **davanti**, che è la cosa che non si può
+   perdere davanti allo scaffale, e il nome intero si legge nel testo. Stessa
+   cura per l'elenco dei prodotti commerciali.
+4. **Preso più di quanto serviva** (P3): accanto alla confezione compare "ne
+   servivano 500 g". Alessio chiedeva un `⚠️`; gliel'ho proposta come nota
+   neutra perché prendere una confezione più grande non è un errore e `⚠️`
+   vuol dire "qualcosa non va" (C4), e ha accettato.
+5. **Con l'ingresso automatico spento** (nota su M8): la dispensa non riceve
+   niente, quindi leggere le scorte diceva che mancava tutto — "Uova: restano
+   1 pz" dopo averne prese 6. In quel caso vale la regola semplice (comprato
+   qualcosa, richiesta servita), la stessa che già valeva con le Scorte
+   spente. E il messaggio di `📦` non promette più un ingresso in casa che
+   l'utente ha spento.
+6. **`🔃 Riordina lista`** senza riga di navigazione (C3).
+7. **"gia'"** scritto con l'apostrofo invece di "già": testo mio, in
+   `🗑️ Rimuovi voci`.
+
+### Le tre migliorie che ha chiesto
+
+8. **Ricetta archiviata con un riepilogo**: porzioni, numero di passaggi e i
+   primi quattro ingredienti, prima di decidere se ripristinarla.
+9. **Dispensa, una riga per alimento**: il parmigiano generico e quello di
+   marca stavano su due righe e sembrava di averne meno. `chiave_scorta` ora
+   guarda l'alimento prima del prodotto, e `COLONNE_SCORTA` riempie
+   `alimento_id` con un `COALESCE` sul prodotto. Le confezioni restano
+   distinte dentro la riga, quindi la marca non si perde.
+10. **"Dove conviene"** dice che il prezzo è quello della confezione presa,
+    non della quantità che serve adesso.
+
+**Un punto non era un difetto** (T1, "(es. 43.20)" col punto). Verificato non
+sul sorgente ma sul **binario che gira sull'S9**: `strings` trova
+`Scrivilo (es. 43,20)` e nessun "43.20". Vale anche per i punti decimali
+segnalati il giorno prima.
+
+**M5 non è provabile** come l'avevo scritto: il bot tiene una sola schermata
+per chat e cancella la precedente, quindi un messaggio vecchio da premere non
+c'è. È anche il motivo per cui quel difetto era difficile da incontrare.
+
+3 nuovi test. Totale 474.
+
+**Distribuzione sull'S9 da fare.** **Collaudo dal vivo su Telegram da
+fare** (il guardiano si prova uccidendo il processo del bot, non da Telegram).
+
 ## 3. Stato tecnico verificato
 
 - **65 migration** nel repository, tutte **applicate** al database reale
@@ -2550,7 +2627,8 @@ e' il gesto che faceva cadere il bot.
 - pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa,
   punto 1 della sezione 6): `fmt`, `check --locked`,
   `clippy --all-targets --locked -- -D warnings`, `test --locked` —
-  **472 test** (471 prima della sezione 2duovicies, 469 prima della sezione
+  **474 test** (472 prima della sezione 2trevicies, 471 prima della sezione
+  2duovicies, 469 prima della sezione
   2unvicies, 463 prima della sezione
   2vicies, 458 prima della
   sezione 2novodecies, 455 prima della

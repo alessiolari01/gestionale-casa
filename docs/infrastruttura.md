@@ -288,6 +288,45 @@ git status
 Questa separazione permette di capire rapidamente se un problema riguarda
 **rete Tailscale**, **server SSH**, **Git/GitHub** oppure **backend Telegram**.
 
+## 9bis. Il guardiano del bot (25 settembre 2026)
+
+`avvia-bot.sh` accende il bot e poi non lo guarda più. Il 24 settembre 2026 il
+bot è andato in panic al primo click dopo un aggiornamento, il dispatcher di
+Telegram è morto, il processo è finito — e **nessuno se n'è accorto per otto
+ore**, perché il deploy aveva verificato solo che il bot fosse *partito*.
+
+`scripts/guardiano-bot.sh` gira sull'S9 e controlla ogni minuto:
+
+```bash
+ssh s9 'cd ~/gestionale-casa && ./scripts/guardiano-bot.sh --avvia'
+ssh s9 'cd ~/gestionale-casa && ./scripts/guardiano-bot.sh --stato'
+ssh s9 'cd ~/gestionale-casa && ./scripts/guardiano-bot.sh --ferma'
+```
+
+Quando trova il processo morto: copia le ultime ottanta righe di
+`data/run/bot.out` in `data/log/caduta_<data>.log` (senza la copia la causa
+sparirebbe, perché `avvia-bot.sh` riscrive `bot.out` da zero), cerca la riga
+`panicked` e la scrive nel log, poi richiama `avvia-bot.sh`. Tutto finisce in
+`data/log/guardiano.log`.
+
+**Non riaccende un bot fermato a mano**: `ferma-bot.sh` crea
+`data/run/guardiano.pausa` e `avvia-bot.sh` lo rimuove, così uno swap del
+binario non diventa una lotta fra due script.
+
+**Si arrende dopo cinque riaccensioni in mezz'ora**, scrivendo "MI ARRENDO"
+nel log e mettendosi in pausa. Un bot che cade appena parte non si aggiusta
+riaccendendolo: insistere nasconderebbe il guasto, che è precisamente
+l'errore da cui nasce questo script.
+
+**Non va usato insieme al ciclo di `scripts/termux-boot.sh`**, che ha un suo
+riavvio automatico e lancia la build `--release`: due supervisori vorrebbero
+dire due bot accesi, e Telegram accetta un solo poller per token.
+
+Il guardiano non sostituisce il controllo dopo un deploy: dopo un riavvio va
+comunque guardato, qualche minuto più tardi, che il processo sia ancora vivo e
+che `bot.out` non abbia `panicked`. Il guardiano fa in modo che quel controllo
+non sia l'**unica** rete.
+
 ## 10. Runtime UI, shutdown ed export amministrativo
 
 Dal blocco 7.2G.5 il bot persiste in SQLite il `message_id` della schermata UI principale per ogni chat. Questo permette di mantenere la UI a schermata singola anche attraverso riavvii: allo shutdown resta una schermata offline amministrativa e al successivo startup quella schermata viene sostituita/ripulita.

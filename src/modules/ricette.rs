@@ -2917,9 +2917,15 @@ async fn handle_edit_callback(
                 .ok()
                 .flatten()
                 .unwrap_or_default();
+        // Un riepilogo prima di decidere: il nome da solo non basta a
+        // ricordarsi quale ricetta era (Alessio, collaudo del 25 settembre
+        // 2026). Niente elenco completo degli ingredienti -- quello si legge
+        // aprendola dopo il ripristino -- ma i primi, le porzioni e quanti
+        // passaggi ha.
+        let riepilogo = riepilogo_archiviata(pool, recipe_id).await;
         bot.send_message(
             chat_id,
-            format!("♻️ {nome}\n\nTorna negli elenchi come prima, con i suoi ingredienti e il suo procedimento."),
+            format!("♻️ {nome}{riepilogo}\n\nTorna negli elenchi come prima, con i suoi ingredienti e il suo procedimento."),
         )
         .reply_markup(InlineKeyboardMarkup::new(vec![
             vec![button(
@@ -7183,6 +7189,64 @@ async fn cleanup_recipe_media_files(recipe_id: i64, paths: &[String]) {
 /// Quante ricette archiviate può riprendere chi sta guardando: le sue,
 /// più quelle del catalogo globale se è amministratore. Le ricette
 /// archiviate da altri non si vedono nemmeno.
+/// Le due righe che dicono che ricetta era: porzioni, quanti passaggi e i
+/// primi ingredienti. Mai in errore: se qualcosa non si legge, si mostra solo
+/// il nome -- un riepilogo mancante non deve impedire un ripristino.
+async fn riepilogo_archiviata(pool: &SqlitePool, recipe_id: i64) -> String {
+    let dati: Option<(i64, i64)> = sqlx::query_as(
+        "SELECT r.porzioni_base, (SELECT COUNT(*) FROM ricetta_step s WHERE s.ricetta_id = r.id) \
+         FROM ricette r WHERE r.id = ?",
+    )
+    .bind(recipe_id)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten();
+    let Some((porzioni, passaggi)) = dati else {
+        return String::new();
+    };
+    let ingredienti: Vec<String> = sqlx::query_scalar(
+        "SELECT a.nome FROM ricetta_ingredienti ri \
+         JOIN alimenti a ON a.id = ri.alimento_id \
+         WHERE ri.ricetta_id = ? ORDER BY ri.ordinamento, ri.id LIMIT 4",
+    )
+    .bind(recipe_id)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+    let quanti: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM ricetta_ingredienti WHERE ricetta_id = ?")
+            .bind(recipe_id)
+            .fetch_one(pool)
+            .await
+            .unwrap_or(0);
+
+    let mut riga = format!(
+        "\n\n🍽️ {porzioni} {} · 📝 {passaggi} {}",
+        if porzioni == 1 {
+            "porzione"
+        } else {
+            "porzioni"
+        },
+        if passaggi == 1 {
+            "passaggio"
+        } else {
+            "passaggi"
+        }
+    );
+    let nomi: Vec<String> = ingredienti
+        .into_iter()
+        .filter(|nome| !nome.trim().is_empty())
+        .collect();
+    if !nomi.is_empty() {
+        riga.push_str(&format!("\n🥕 {}", nomi.join(", ")));
+        if quanti > nomi.len() as i64 {
+            riga.push_str(&format!(" e altri {}", quanti - nomi.len() as i64));
+        }
+    }
+    riga
+}
+
 async fn count_archived_recipes(pool: &SqlitePool) -> Result<i64> {
     let user_id = identity::current_actor()
         .utente_id
