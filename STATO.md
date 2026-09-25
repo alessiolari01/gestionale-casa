@@ -2714,7 +2714,18 @@ schermata per chat. Da riscrivere nel prompt, non nel codice.
 
 1 nuovo test. Totale 475.
 
-**Distribuzione sull'S9 da fare.** **Collaudo dal vivo su Telegram da fare.**
+**Distribuito sull'S9 il 25 settembre 2026** (commit `cdc6809`): CI verde
+(run #167), 475 test e clippy verdi anche sul telefono, nessuna migration
+nuova (`applied_migrations=65` invariato), `Gestionale Casa online`, zero
+`panicked`, guardiano ancora attivo e agganciato al processo nuovo.
+
+**WAL verificato sul database reale**: `PRAGMA journal_mode` risponde `wal`
+(era `delete`), e accanto al file sono comparsi `gestionale.db-wal` e
+`gestionale.db-shm`, che sono parte del database e non si cancellano a mano.
+I backup restano al sicuro: `aggiorna-s9.sh` e `backup.sh` usano
+`sqlite3 .backup`, che in WAL fa la cosa giusta, non una copia del file.
+
+**Collaudo dal vivo su Telegram da fare.**
 
 ## 3. Stato tecnico verificato
 
