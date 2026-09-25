@@ -2609,8 +2609,27 @@ c'è. È anche il motivo per cui quel difetto era difficile da incontrare.
 
 3 nuovi test. Totale 474.
 
-**Distribuzione sull'S9 da fare.** **Collaudo dal vivo su Telegram da
-fare** (il guardiano si prova uccidendo il processo del bot, non da Telegram).
+**Distribuito sull'S9 il 25 settembre 2026** (commit `7223550`): CI verde
+(run #166), 474 test e clippy verdi anche sul telefono, nessuna migration
+nuova (`applied_migrations=65` invariato), `Gestionale Casa online`, zero
+`panicked`.
+
+**Il guardiano e' stato provato dal vivo sull'S9**, ed e' l'unica cosa di
+questo giro che si puo' collaudare senza Telegram:
+
+- ucciso il bot con `kill -9`: entro un minuto il guardiano ha scritto "bot
+  non vivo", ha salvato `data/log/caduta_20260925_164006.log` e lo ha
+  riacceso ("riaccensione riuscita", pid nuovo);
+- fermato il bot con `ferma-bot.sh`: dopo oltre un minuto il bot era ancora
+  fermo e il guardiano in pausa, come deve essere;
+- riacceso con `avvia-bot.sh`: la pausa e' sparita da sola.
+
+Una nota pratica: il bit di esecuzione dello script non era finito in git
+(su Windows `core.filemode` e' false, quindi un `chmod` locale non viene
+registrato) e sull'S9 rispondeva "Permission denied" -- corretto con
+`git update-index --chmod=+x`. Da ricordare per ogni script nuovo.
+
+**Collaudo dal vivo su Telegram da fare** per tutto il resto.
 
 ## 3. Stato tecnico verificato
 
