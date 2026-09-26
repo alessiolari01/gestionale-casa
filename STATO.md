@@ -2837,7 +2837,12 @@ scritta sul codice e una scritta sul difetto.
 
 4 nuovi test. Totale 477 (due prove della regola vecchia rimosse con lei).
 
-**Distribuzione sull'S9 da fare.** **Collaudo dal vivo su Telegram da fare.**
+**Distribuito sull'S9 il 26 settembre 2026** (commit `9307a33`): CI verde
+(run #168), 477 test e clippy verdi anche sul telefono, nessuna migration
+nuova (`applied_migrations=65` invariato), `Gestionale Casa online`, zero
+`panicked`, guardiano attivo e agganciato al processo nuovo.
+
+**Collaudo dal vivo su Telegram da fare.**
 
 ## 3. Stato tecnico verificato
 
