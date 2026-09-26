@@ -423,87 +423,6 @@ pub struct AggiuntaCatalogo {
     pub riga: RigaIngrediente,
 }
 
-/// Cosa succede alle aggiunte dal catalogo quando la spesa si chiude.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct EsitoAggiunte {
-    /// Comprato almeno quanto chiedevano: la richiesta è servita, si tolgono.
-    pub chiuse: Vec<i64>,
-    /// Comprato meno di quanto chiedevano: restano con quel che manca
-    /// (`id`, quantità residua nell'unità di aggregazione), e il bot chiede
-    /// se tenerle.
-    pub ridotte: Vec<(i64, f64)>,
-}
-
-/// Cosa fare di ogni aggiunta dal catalogo chiudendo la spesa.
-///
-/// Un'aggiunta dal catalogo resta viva attraverso ogni refresh (è il suo
-/// scopo: "mi serve anche questo"), quindi chiudere la spesa senza toccarla
-/// la farebbe ricomparire il giorno dopo come se non l'avessi mai comprata.
-///
-/// - **comprato ≥ chiesto**: la richiesta è servita, l'aggiunta si chiude;
-/// - **comprato < chiesto**: l'aggiunta resta, ridotta a quel che manca, e
-///   il bot chiede se lasciarla in lista;
-/// - **comprato niente di quell'identità**: l'aggiunta resta com'è, è una
-///   richiesta non ancora servita.
-///
-/// Prima si pretendeva la copertura intera e basta, ma la lista mostra il
-/// **netto delle scorte**: chiedendo 500 g con 300 g già in casa se ne
-/// comprano 200, l'aggiunta non risultava mai coperta e restava in lista per
-/// sempre — invisibile (la lista era vuota), ma ancora contata nel
-/// fabbisogno e ancora elencata in "🗑️ Rimuovi voci". Trovato da Alessio nel
-/// collaudo del 23 settembre 2026 (punti 6 e 7); la domanda sul residuo è la
-/// sua scelta del 24, al posto della chiusura silenziosa.
-///
-/// Le righe che vengono dal planner non compaiono qui: le gestisce il
-/// planner (un pasto pianificato continua a servire finché non lo si
-/// consuma o lo si toglie), esattamente come per "🗑️ Rimuovi voci".
-pub fn aggiunte_coperte_dalla_spesa(
-    aggiunte: &[AggiuntaCatalogo],
-    comprate: &[VoceGenerata],
-) -> EsitoAggiunte {
-    let mut residuo: Vec<(Identita, String, f64)> = Vec::new();
-    for voce in comprate {
-        let identita = identita_voce(voce);
-        match residuo
-            .iter_mut()
-            .find(|(i, unita, _)| *i == identita && unita == &voce.unita_simbolo)
-        {
-            Some((_, _, quantita)) => *quantita += voce.quantita,
-            None => residuo.push((identita, voce.unita_simbolo.clone(), voce.quantita)),
-        }
-    }
-
-    let mut ordinate: Vec<&AggiuntaCatalogo> = aggiunte.iter().collect();
-    ordinate.sort_by_key(|aggiunta| aggiunta.id);
-
-    let mut esito = EsitoAggiunte::default();
-    for aggiunta in ordinate {
-        let identita = identita_riga(&aggiunta.riga);
-        let Some((_, _, disponibile)) = residuo
-            .iter_mut()
-            .find(|(i, unita, _)| *i == identita && *unita == aggiunta.riga.unita_simbolo)
-        else {
-            continue;
-        };
-        if *disponibile <= 0.0 {
-            // Di questa identità si è già usato tutto il comprato per le
-            // aggiunte precedenti: questa resta in piedi.
-            continue;
-        }
-        // Si scala quello che si può, così due aggiunte dello stesso
-        // alimento non si chiudono con una sola spesa piccola.
-        let usato = disponibile.min(aggiunta.riga.quantita);
-        *disponibile -= usato;
-        let manca = aggiunta.riga.quantita - usato;
-        if manca > TOLLERANZA_QUANTITA {
-            esito.ridotte.push((aggiunta.id, manca));
-        } else {
-            esito.chiuse.push(aggiunta.id);
-        }
-    }
-    esito
-}
-
 /// Una scorta vista dalla lista della spesa, già nell'unità-base: a quale
 /// alimento appartiene (anche quando è un prodotto specifico), il prodotto
 /// se c'è, e il nome per le scorte scritte a mano.
@@ -1355,64 +1274,6 @@ mod domain_tests {
             intervallo_da_oggi("2026-09-01", "2026-09-07", "2026-09-16", true),
             None
         );
-    }
-
-    fn aggiunta(id: i64, alimento_id: i64, quantita: f64, unita: &str) -> AggiuntaCatalogo {
-        AggiuntaCatalogo {
-            id,
-            riga: RigaIngrediente {
-                alimento_id: Some(alimento_id),
-                prodotto_id: None,
-                nome: "Pasta".to_string(),
-                unita_simbolo: unita.to_string(),
-                quantita,
-            },
-        }
-    }
-
-    fn comprata(alimento_id: i64, quantita: f64, unita: &str) -> VoceGenerata {
-        VoceGenerata {
-            alimento_id: Some(alimento_id),
-            prodotto_id: None,
-            nome: "Pasta".to_string(),
-            quantita,
-            unita_simbolo: unita.to_string(),
-        }
-    }
-
-    #[test]
-    fn chiusura_chiude_le_aggiunte_servite_e_riduce_quelle_a_meta() {
-        // 100 g comprati per due aggiunte dello stesso alimento: la prima
-        // (50 g) è servita e si chiude, la seconda (200 g) resta con i 150 g
-        // che mancano -- e su quelli il bot chiede se lasciarli in lista
-        // (scelta di Alessio, 24 settembre 2026).
-        let aggiunte = vec![aggiunta(1, 7, 50.0, "g"), aggiunta(2, 7, 200.0, "g")];
-        let esito = aggiunte_coperte_dalla_spesa(&aggiunte, &[comprata(7, 100.0, "g")]);
-        assert_eq!(esito.chiuse, vec![1]);
-        assert_eq!(esito.ridotte, vec![(2, 150.0)]);
-
-        // Comprato tutto quello che si era chiesto: niente da chiedere.
-        let esito = aggiunte_coperte_dalla_spesa(&aggiunte, &[comprata(7, 250.0, "g")]);
-        assert_eq!(esito.chiuse, vec![1, 2]);
-        assert!(esito.ridotte.is_empty());
-
-        // Di quell'alimento non si è comprato niente: le aggiunte restano
-        // com'erano, sono richieste non ancora servite.
-        let esito = aggiunte_coperte_dalla_spesa(&aggiunte, &[comprata(9, 100.0, "g")]);
-        assert!(esito.chiuse.is_empty());
-        assert!(esito.ridotte.is_empty());
-    }
-
-    #[test]
-    fn chiusura_non_tocca_un_aggiunta_di_un_altro_alimento_o_unita() {
-        let aggiunte = vec![aggiunta(1, 7, 50.0, "g"), aggiunta(2, 9, 50.0, "g")];
-        // Il comprato è di un altro alimento: nessuna aggiunta è toccata.
-        let esito = aggiunte_coperte_dalla_spesa(&aggiunte, &[comprata(3, 500.0, "g")]);
-        assert_eq!(esito, EsitoAggiunte::default());
-        // Stesso alimento ma unità diversa: non si scala (`pz` e `g` non si
-        // convertono fra loro).
-        let esito = aggiunte_coperte_dalla_spesa(&aggiunte, &[comprata(7, 500.0, "pz")]);
-        assert_eq!(esito, EsitoAggiunte::default());
     }
 
     fn in_casa(alimento: Option<i64>, prodotto: Option<i64>, q: f64, u: &str) -> ScortaDisponibile {
@@ -3559,13 +3420,22 @@ async fn sistema_le_aggiunte(
             });
         }
     } else {
-        let aggiunte = aggiunte_convertite(pool, lista.id, &mappa_unita).await?;
-        let esito = aggiunte_coperte_dalla_spesa(&aggiunte, comprate_generate);
-        da_chiudere = esito
-            .chiuse
+        // Senza dispensa aggiornata non c'e' nessun residuo da calcolare: si
+        // sa solo che quell'alimento e' stato comprato, e allora la richiesta
+        // e' servita **per intero** -- tutte le sue aggiunte, non una.
+        //
+        // `aggiunte_coperte_dalla_spesa` ragiona aggiunta per aggiunta, e il
+        // 26 settembre 2026 di due aggiunte di riso (200 e 170 g, con 200 g
+        // gia' in casa) ne chiudeva una e lasciava l'altra viva in "Rimuovi
+        // voci": una richiesta che sarebbe tornata in lista appena la scorta
+        // scendeva (Miglioramento 16).
+        let comprate_ids: Vec<i64> = aggiunte_convertite(pool, lista.id, &mappa_unita)
+            .await?
             .into_iter()
-            .chain(esito.ridotte.into_iter().map(|(id, _)| id))
+            .filter(|aggiunta| comprate.contains(&identita_riga(&aggiunta.riga)))
+            .map(|aggiunta| aggiunta.id)
             .collect();
+        da_chiudere = comprate_ids;
     }
 
     for id in da_chiudere {
@@ -3663,9 +3533,14 @@ pub async fn chiudi_spesa(pool: &SqlitePool, lista: &ListaSpesa) -> anyhow::Resu
         .await
         .context("Impossibile aprire la transazione")?;
     let chiusura_id = sqlx::query(
+        // `chiusa_il` scritto a mano con l'ora **locale**: il default della
+        // colonna e' l'ora UTC, e chiudendo la spesa alle 00:14 di sabato
+        // "Ultima spesa chiusa" scriveva venerdi' (Alessio, 26 settembre 2026,
+        // Miglioramento 17). Era l'ultima data in UTC fra quelle mostrate.
         "INSERT INTO liste_spesa_chiusure \
-         (lista_id, chiusa_da_utente_id, data_inizio, data_fine, voci_totali, negozio_id) \
-         VALUES (?, ?, ?, ?, ?, ?)",
+         (lista_id, chiusa_da_utente_id, data_inizio, data_fine, voci_totali, negozio_id, \
+          chiusa_il) \
+         VALUES (?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%f','now','localtime'))",
     )
     .bind(lista.id)
     .bind(utente_id)
@@ -5511,6 +5386,155 @@ mod db_tests {
             assert!(
                 messaggio.contains("in tutto servono"),
                 "due aggiunte, quindi il totale: {messaggio}"
+            );
+        })
+        .await;
+    }
+
+    /// Con l'ingresso automatico **spento** la dispensa non riceve la merce
+    /// comprata, quindi il residuo non si puo' leggere: vale la regola
+    /// semplice, comprato qualcosa di quell'alimento, richiesta servita. E
+    /// servita vuol dire **tutte** le sue aggiunte.
+    ///
+    /// Il 26 settembre 2026 ne chiudeva una e lasciava l'altra, perche' la
+    /// regola vecchia ragiona aggiunta per aggiunta: in "Rimuovi voci"
+    /// restava "Riso 170 g chiesti", una richiesta viva che sarebbe tornata in
+    /// lista appena la scorta scendeva (Miglioramento 16).
+    #[tokio::test]
+    async fn con_l_ingresso_spento_si_chiude_tutto_quello_che_si_e_comprato() {
+        let pool = test_pool().await;
+        let user_id = create_user(&pool, "Alessio").await;
+        let space_id = create_space(&pool, "Casa").await;
+        add_membership(&pool, space_id, user_id).await;
+
+        // Le preferenze vivono in una riga per utente: senza quella riga
+        // `imposta_ingresso_automatico` aggiornerebbe zero righe in silenzio.
+        sqlx::query("INSERT INTO preferenze_utente (utente_id, spazio_attivo_id) VALUES (?, ?)")
+            .bind(user_id)
+            .bind(space_id)
+            .execute(&pool)
+            .await
+            .expect("preferenze");
+
+        crate::identity::with_actor(actor(user_id, space_id, "Alessio"), async {
+            crate::modules::dispensa::imposta_ingresso_automatico(&pool, false)
+                .await
+                .expect("ingresso spento");
+            assert!(
+                !crate::modules::dispensa::ingresso_automatico(&pool).await,
+                "l'ingresso deve risultare spento"
+            );
+            let lista = trova_o_crea_lista_attiva(&pool).await.expect("lista");
+            let riso = create_alimento_globale(&pool, "Riso").await;
+
+            // Il caso esatto di Alessio: 200 g di riso **gia' in casa**, due
+            // aggiunte da 200 e 170 g, quindi la lista ne chiede solo 170.
+            // Senza quei 200 g in casa il difetto non si vede, perche' il
+            // comprato copre tutte e due le aggiunte.
+            crate::modules::dispensa::aggiungi_scorta(
+                &pool,
+                crate::modules::dispensa::Conservazione::Dispensa,
+                Some(IdentitaCatalogo::Alimento(riso)),
+                "Riso",
+                200.0,
+                "g",
+            )
+            .await
+            .expect("riso in casa");
+            for quantita in [200.0, 170.0] {
+                aggiungi_da_catalogo(
+                    &pool,
+                    lista.id,
+                    IdentitaCatalogo::Alimento(riso),
+                    "Riso",
+                    quantita,
+                    "g",
+                )
+                .await
+                .expect("aggiunta");
+            }
+            aggiorna_lista(&pool, &lista).await.expect("refresh");
+            let voce = carica_voci(&pool, lista.id)
+                .await
+                .expect("voci")
+                .into_iter()
+                .next()
+                .expect("la riga del riso");
+            assert_eq!(voce.quantita, Some(170.0), "370 chiesti meno 200 in casa");
+            registra_presa(&pool, voce.id, 300.0, "g", None)
+                .await
+                .expect("presa");
+
+            let esito = chiudi_spesa(&pool, &lista).await.expect("chiusura");
+            assert!(esito.entrate.is_empty(), "niente entra in casa");
+            assert!(
+                esito.ridotte.is_empty(),
+                "senza dispensa aggiornata non si chiede niente: {:?}",
+                esito.ridotte
+            );
+
+            let restano: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM liste_spesa_aggiunte_catalogo")
+                    .fetch_one(&pool)
+                    .await
+                    .expect("conteggio");
+            assert_eq!(restano, 0, "tutte e due le aggiunte del riso sono servite");
+            assert!(
+                voci_rimovibili(&pool, lista.id).await.unwrap().is_empty(),
+                "niente voci vive in Rimuovi voci"
+            );
+        })
+        .await;
+    }
+
+    /// La data di chiusura e' quella di **oggi**, non quella di ieri: la
+    /// colonna aveva come default l'ora UTC, e chiudendo la spesa alle 00:14
+    /// di sabato "Ultima spesa chiusa" scriveva venerdi' (Miglioramento 17).
+    #[tokio::test]
+    async fn la_chiusura_porta_la_data_di_oggi_non_quella_utc() {
+        let pool = test_pool().await;
+        let user_id = create_user(&pool, "Alessio").await;
+        let space_id = create_space(&pool, "Casa").await;
+        add_membership(&pool, space_id, user_id).await;
+
+        crate::identity::with_actor(actor(user_id, space_id, "Alessio"), async {
+            let lista = trova_o_crea_lista_attiva(&pool).await.expect("lista");
+            let riso = create_alimento_globale(&pool, "Riso").await;
+            aggiungi_da_catalogo(
+                &pool,
+                lista.id,
+                IdentitaCatalogo::Alimento(riso),
+                "Riso",
+                200.0,
+                "g",
+            )
+            .await
+            .expect("aggiunta");
+            aggiorna_lista(&pool, &lista).await.expect("refresh");
+            let voce = carica_voci(&pool, lista.id)
+                .await
+                .expect("voci")
+                .into_iter()
+                .next()
+                .expect("riga");
+            imposta_comprato(&pool, voce.id, true)
+                .await
+                .expect("comprato");
+            chiudi_spesa(&pool, &lista).await.expect("chiusura");
+
+            let chiusa_il: String =
+                sqlx::query_scalar("SELECT chiusa_il FROM liste_spesa_chiusure")
+                    .fetch_one(&pool)
+                    .await
+                    .expect("chiusa_il");
+            assert!(
+                !chiusa_il.ends_with('Z'),
+                "l'ora locale non porta la Z di UTC: {chiusa_il}"
+            );
+            assert_eq!(
+                &chiusa_il[..10],
+                today(&pool).await.as_str(),
+                "la data di chiusura e' quella di oggi"
             );
         })
         .await;

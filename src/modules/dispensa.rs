@@ -353,6 +353,49 @@ pub fn raggruppa_scorte(
     risultato
 }
 
+/// Come si presenta un elenco di confezioni: "2 confezioni con scadenze
+/// diverse" solo se le scadenze sono **davvero** diverse.
+///
+/// Il 26 settembre 2026 quella frase compariva anche con due confezioni
+/// entrambe senza scadenza: il bot affermava una cosa falsa, ed e' il tipo di
+/// riga che poi fa dubitare anche dei numeri accanto (Miglioramento 18).
+pub fn frase_confezioni(lotti: &[Scorta]) -> String {
+    let mut scadenze: Vec<Option<&str>> = lotti.iter().map(|l| l.scadenza.as_deref()).collect();
+    scadenze.sort_unstable();
+    scadenze.dedup();
+    if scadenze.len() > 1 {
+        format!(
+            "{} confezioni con scadenze diverse: scegli quale guardare.",
+            lotti.len()
+        )
+    } else {
+        format!("{} confezioni: scegli quale guardare.", lotti.len())
+    }
+}
+
+/// Etichetta di una confezione dentro un gruppo: quanta ce n'e', la marca se
+/// la confezione ne ha una, e la scadenza.
+///
+/// La marca serve: due confezioni dello stesso alimento si distinguono per
+/// quella, e il 26 settembre 2026 i pulsanti dicevano solo "1590 g · senza
+/// scadenza" e "200 g · senza scadenza" -- il nome del prodotto si vedeva
+/// solo entrando (Miglioramento 18). `nome_gruppo` e' il nome dell'alimento:
+/// ripeterlo sul pulsante non direbbe niente di nuovo.
+pub fn etichetta_lotto(lotto: &Scorta, nome_gruppo: &str) -> String {
+    let scadenza = match lotto.scadenza.as_deref() {
+        Some(data) => format!("scade {}", calendario::display_date(data)),
+        None => "senza scadenza".to_string(),
+    };
+    // Come nell'elenco: "1,59 kg", non "1590 g" (osservazione C5).
+    let quantita = formatta_quantita_leggibile(lotto.quantita, &lotto.unita_simbolo);
+    let marca = lotto.descrizione.trim();
+    if marca.is_empty() || marca.eq_ignore_ascii_case(nome_gruppo.trim()) {
+        format!("{quantita} · {scadenza}")
+    } else {
+        format!("{quantita} · {} · {scadenza}", liste::tronca(marca, 24))
+    }
+}
+
 /// Etichetta di un gruppo su un pulsante: nome e totale, e -- se c'è -- la
 /// scadenza più vicina **a capo** (C15: una parte opzionale non si accoda
 /// con " · ", altrimenti Telegram taglia l'etichetta senza avvisare).
@@ -2553,27 +2596,35 @@ async fn mostra_gruppo(
         return mostra_scorta(bot, chat_id, pool, scorta_id, None).await;
     }
 
-    let testo = format!(
-        "{}\n\n{} · {}\n{} confezioni con scadenze diverse: scegli quale guardare.",
+    let mut testo = format!(
+        "{}\n\n{} · {}\n{}",
         dove.etichetta(),
         gruppo.descrizione,
         formatta_quantita_leggibile(gruppo.quantita_base, &gruppo.unita_base),
-        gruppo.lotti.len()
+        frase_confezioni(&gruppo.lotti)
     );
+    // Lo stesso alimento negli altri posti si vede anche da qui, non solo
+    // entrando in una singola confezione (osservazione C4 del 26 settembre).
+    let altrove = altrove_in_casa(pool, scorta_id).await.unwrap_or_default();
+    if !altrove.is_empty() {
+        let righe: Vec<String> = altrove
+            .iter()
+            .map(|(dove, quantita, unita)| {
+                format!(
+                    "{} {}",
+                    dove.etichetta(),
+                    formatta_quantita_leggibile(*quantita, unita)
+                )
+            })
+            .collect();
+        testo.push_str(&format!("\n\n🏠 Ne hai anche in {}", righe.join(", ")));
+    }
     let mut rows: Vec<Vec<InlineKeyboardButton>> = gruppo
         .lotti
         .iter()
         .map(|lotto| {
-            let scadenza = match lotto.scadenza.as_deref() {
-                Some(data) => format!("scade {}", calendario::display_date(data)),
-                None => "senza scadenza".to_string(),
-            };
             vec![button(
-                format!(
-                    "{} {} · {scadenza}",
-                    formatta_quantita(lotto.quantita),
-                    lotto.unita_simbolo
-                ),
+                etichetta_lotto(lotto, &gruppo.descrizione),
                 format!("dispensa:scorta:{}", lotto.id),
             )]
         })
@@ -3420,6 +3471,51 @@ mod tests {
     /// Due confezioni dello stesso alimento -- una generica e una di marca --
     /// stanno in una riga sola: su due righe separate sembra di averne meno
     /// (Alessio, collaudo del 25 settembre 2026).
+    /// Miglioramento 18: il pulsante di una confezione dice la marca, scrive
+    /// la quantita' come l'elenco, e la frase non promette scadenze diverse
+    /// quando non ce ne sono.
+    #[test]
+    fn le_confezioni_dicono_la_marca_e_la_frase_non_mente() {
+        let mut generico = scorta(1, Some(7), "Parmigiano Reggiano", 1590.0, "g", None);
+        generico.alimento_nome = Some("Parmigiano Reggiano".to_string());
+        let mut di_marca = scorta(
+            2,
+            Some(7),
+            "Parmareggio Parmigiano 24 mesi",
+            200.0,
+            "g",
+            None,
+        );
+        di_marca.prodotto_alimentare_id = Some(42);
+        di_marca.alimento_nome = Some("Parmigiano Reggiano".to_string());
+
+        // La confezione generica si chiama come l'alimento: ripeterlo sul
+        // pulsante non aggiunge niente.
+        assert_eq!(
+            etichetta_lotto(&generico, "Parmigiano Reggiano"),
+            "1,59 kg · senza scadenza"
+        );
+        // Quella di marca la dice, ed e' l'unica cosa che le distingue.
+        assert_eq!(
+            etichetta_lotto(&di_marca, "Parmigiano Reggiano"),
+            "200 g · Parmareggio Parmigiano 2… · senza scadenza"
+        );
+
+        // Nessuna delle due ha scadenza: la frase non deve dire il contrario.
+        let senza = vec![generico.clone(), di_marca.clone()];
+        assert_eq!(
+            frase_confezioni(&senza),
+            "2 confezioni: scegli quale guardare."
+        );
+
+        let mut con_scadenza = di_marca.clone();
+        con_scadenza.scadenza = Some("2026-12-31".to_string());
+        assert_eq!(
+            frase_confezioni(&[generico, con_scadenza]),
+            "2 confezioni con scadenze diverse: scegli quale guardare."
+        );
+    }
+
     #[test]
     fn il_generico_e_quello_di_marca_stanno_nella_stessa_riga() {
         // Entrambe portano l'alimento 7: la seconda ha anche il prodotto, ed

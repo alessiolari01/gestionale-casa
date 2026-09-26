@@ -2727,6 +2727,118 @@ I backup restano al sicuro: `aggiorna-s9.sh` e `backup.sh` usano
 
 **Collaudo dal vivo su Telegram da fare.**
 
+## 2quinvicies. Ci si ferma qui: difetti registrati nei Miglioramenti (26 settembre 2026)
+
+Collaudo di Alessio su `cdc6809` (`Collaudo_cdc6809_esiti.docx`): **27 OK, 2
+diversi, 1 non provato**, più due osservazioni nuove. I punti A e B — le voci
+che sparivano dalla lista, il difetto peggiore di tutta la settimana — sono
+**passati**, e in mezz'ora d'uso continuato non è mai comparso il blocco
+dell'account.
+
+Alessio ha deciso di **fermarsi**: niente correzioni per ora, i difetti restano
+scritti e si riprendono quando vuole lui. Sono stati inseriti nel database
+reale dell'S9, in `miglioramenti`, con stato `da_fare` — si leggono dal bot in
+`📋 Miglioramenti`:
+
+| id | cosa |
+|---|---|
+| 15 | **Semplificare la riconciliazione delle aggiunte dal catalogo** (il lavoro di fondo) |
+| 16 | Con l'ingresso automatico spento una voce comprata resta viva in `🗑️ Rimuovi voci` |
+| 17 | `chiusa_il` in UTC: "Ultima spesa chiusa" mostra il giorno prima dopo le 22 |
+| 18 | Le confezioni di una scorta non dicono la marca, e la frase "scadenze diverse" è falsa quando non ce ne sono |
+| 19 | `✏️ Ho mangiato altro` → `⬅️ Indietro` torna alla giornata |
+| 20 | Decisione da prendere sulla web app e sull'accesso da fuori casa |
+
+Il database è stato salvato prima di scrivere
+(`data/db/backups/gestionale_pre_miglioramenti_20260926_010525.db`), e le nuove
+righe hanno `creato_il` in **ora locale**, non UTC: il difetto 17 riguarda
+un'altra colonna, ma la lezione si applica subito a quello che si scrive di
+nuovo.
+
+### Il punto 15 non è un difetto come gli altri
+
+Il calcolo di che fine fanno le aggiunte dal catalogo alla chiusura della spesa
+è stato **sbagliato tre volte in tre giorni**: il 23 settembre chiudeva troppo
+(sezione 2novodecies), il 24 chiudeva troppo poco e col numero sbagliato
+(2unvicies), il 25 cancellava la voce sbagliata e chiedeva di voci mai comprate
+(2quattuorvicies). Ogni volta ho corretto il sintomo.
+
+Quella parte ha **quattro strade diverse** da tenere in piedi insieme (Scorte
+accese o spente, ingresso automatico acceso o spento, prodotto di marca o
+alimento generico) e le aggiunte vivono in parallelo alla lista, da
+riconciliare solo alla chiusura. Anche il difetto 16 nasce esattamente lì, nel
+ramo che vale quando non si può guardare la dispensa. Va rifatto con una strada
+sola, non rattoppato una quarta volta.
+
+**E va scritto anche il mio errore di metodo**: tre volte su tre ho corretto
+prima e scritto la prova dopo, e la prova passava perché era scritta sul codice
+nuovo invece che sul caso reale del collaudo. L'ordine giusto è l'inverso —
+prima una prova che riproduce il caso di Alessio **e che fallisce**, poi la
+correzione. Se non fallisce, non ho capito il difetto.
+
+### La domanda grossa: web app, accesso da fuori, dove far girare tutto
+
+Alessio ha chiesto un quadro onesto su web app, Figma, accesso fuori dalla rete
+di casa, futuro dell'S9, senso di Rust e collaudo con un secondo account.
+Scritto per intero in **`docs/previsto/web-app-e-accesso-remoto.md`**. In due
+righe: due terzi dei difetti di questi giorni non c'entrano con Telegram né con
+Rust, quindi una web app va fatta per avere un'interfaccia decente e per poter
+**collaudare gli spazi condivisi con una seconda email** — non per avere meno
+bug. Il nucleo Rust e le sue prove si tengono; l'accesso da fuori non richiede
+di toccare il modem in nessuno degli scenari.
+
+Nessuna modifica al codice. Nessuna migration.
+
+## 2sexvicies. I quattro difetti del collaudo di cdc6809 (26 settembre 2026)
+
+Alessio ha chiesto di correggerli, dopo aver deciso di **restare sul bot** e
+non aprire il cantiere della web app (sezione 2quinvicies e
+`docs/previsto/web-app-e-accesso-remoto.md`). Sono i Miglioramenti 16–19;
+il 15 — semplificare la riconciliazione delle aggiunte — resta aperto, ed è
+lavoro a sé. Nessuna migration.
+
+**Stavolta le prove sono state scritte prima**, come dice la lezione della
+sezione 2quinvicies, e la prima versione della prova sul punto 16 **passava
+subito**: segno che non riproduceva il caso di Alessio. Gli mancavano i 200 g
+di riso già in casa, che sono esattamente ciò che fa chiedere alla lista meno
+del totale e che fa emergere il difetto. Aggiunti quelli, la prova è fallita
+com'era giusto, e solo allora ho corretto. È la differenza fra una prova
+scritta sul codice e una scritta sul difetto.
+
+1. **Miglioramento 16** — con l'ingresso automatico spento la dispensa non
+   riceve niente, quindi il residuo non si può leggere e vale la regola
+   semplice: comprato quell'alimento, richiesta servita. Ma "servita" vuol dire
+   **tutte** le sue aggiunte: la vecchia `aggiunte_coperte_dalla_spesa`
+   ragionava aggiunta per aggiunta e di due richieste di riso (200 e 170 g, con
+   200 g già in casa) ne chiudeva una e lasciava l'altra viva in
+   `🗑️ Rimuovi voci`. Ora si chiudono tutte le aggiunte delle identità
+   comprate, e la funzione vecchia — con la sua struttura `EsitoAggiunte` e i
+   suoi test — è stata **rimossa**: era l'ultima cosa che la usava.
+2. **Miglioramento 17** — `liste_spesa_chiusure.chiusa_il` aveva come default
+   l'ora UTC: chiudendo alle 00:14 di sabato "Ultima spesa chiusa" scriveva
+   venerdì. Ora l'`INSERT` scrive l'ora locale. Le righe già salvate restano
+   come sono: sono poche, e una migration che le riscrive toccherebbe uno
+   storico per un errore di poche ore — se dà fastidio si fa, ma non di
+   nascosto.
+3. **Miglioramento 18** — l'elenco delle confezioni di una scorta. Tre cose in
+   una: i pulsanti non dicevano la **marca** (l'unica cosa che distingue due
+   confezioni dello stesso alimento), usavano il formato vecchio delle
+   quantità, e la frase diceva "2 confezioni con **scadenze diverse**" anche
+   con due confezioni senza scadenza — il bot affermava una cosa falsa. Nate
+   due funzioni pure, `etichetta_lotto` e `frase_confezioni`, con i loro test.
+   In quella schermata è comparsa anche la riga "🏠 Ne hai anche in …", che
+   prima c'era solo entrando in una singola confezione.
+4. **Miglioramento 19** — `✏️ Ho mangiato altro` → `⬅️ Indietro` tornava alla
+   giornata. La correzione del 25 settembre era stata messa sulla schermata
+   della **ricetta**, ma quel flusso parte da quella del **tipo di pasto**: il
+   difetto era rimasto intatto. Ora la decisione sta in una funzione sola
+   (`planner_indietro_dal_passo`) usata da tutti i passi, con un test sui tre
+   casi: pasto nuovo, sostituzione, correzione.
+
+4 nuovi test. Totale 477 (due prove della regola vecchia rimosse con lei).
+
+**Distribuzione sull'S9 da fare.** **Collaudo dal vivo su Telegram da fare.**
+
 ## 3. Stato tecnico verificato
 
 - **65 migration** nel repository, tutte **applicate** al database reale
@@ -2742,7 +2854,8 @@ I backup restano al sicuro: `aggiorna-s9.sh` e `backup.sh` usano
 - pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa,
   punto 1 della sezione 6): `fmt`, `check --locked`,
   `clippy --all-targets --locked -- -D warnings`, `test --locked` —
-  **475 test** (474 prima della sezione 2quattuorvicies, 472 prima della
+  **477 test** (475 prima della sezione 2sexvicies, 474 prima della sezione
+  2quattuorvicies, 472 prima della
   sezione 2trevicies, 471 prima della sezione
   2duovicies, 469 prima della sezione
   2unvicies, 463 prima della sezione

@@ -273,7 +273,9 @@ impl MealType {
     }
 }
 
-#[derive(Debug, Clone)]
+// `Default` serve ai test: una bozza vuota con `..Default::default()` dice
+// subito quali campi contano per quel caso e quali no.
+#[derive(Debug, Clone, Default)]
 struct PlannerDraft {
     meal_id: Option<i64>,
     date: String,
@@ -1804,7 +1806,14 @@ async fn planner_show_type_picker(
                 .collect(),
         );
     }
-    rows.push(planner_global_nav(&format!("planner:day:{date}")));
+    // Questo e' il **primo** passo della procedura, quindi e' quello che deve
+    // saper tornare al pasto quando si sta sostituendo o correggendo: "✏️ Ho
+    // mangiato altro" parte proprio da qui, e fino al 26 settembre 2026
+    // l'Indietro riportava alla giornata (Miglioramento 19).
+    let indietro = planner_get_draft(chat_id.0)
+        .map(|draft| planner_indietro_dal_passo(&draft))
+        .unwrap_or_else(|| format!("planner:day:{date}"));
+    rows.push(planner_global_nav(&indietro));
     bot.send_message(
         chat_id,
         format!(
@@ -1818,6 +1827,29 @@ async fn planner_show_type_picker(
     .reply_markup(InlineKeyboardMarkup::new(rows))
     .await?;
     Ok(())
+}
+
+/// Dove torna `⬅️ Indietro` da un passo della procedura di un pasto.
+///
+/// Sostituendo (`🔁 Sostituisci`) o correggendo (`✏️ Ho mangiato altro`) si
+/// torna **al pasto**: si e' partiti da li', e mandare alla creazione di un
+/// pasto nuovo fa uscire dalla procedura dentro un'altra procedura. Solo
+/// creando un pasto da zero si torna al giorno.
+///
+/// Il 25 settembre 2026 avevo messo questa regola sulla sola schermata della
+/// ricetta, ma "✏️ Ho mangiato altro" parte da quella del **tipo di pasto**:
+/// il difetto e' rimasto (Alessio, 26 settembre, Miglioramento 19). Per questo
+/// adesso e' una funzione sola, usata da tutti i passi.
+fn planner_indietro_dal_passo(draft: &PlannerDraft) -> String {
+    let torna_al_pasto = if draft.sostituzione {
+        draft.meal_id
+    } else {
+        draft.sostituisce
+    };
+    match torna_al_pasto {
+        Some(meal_id) => format!("planner:view:{meal_id}"),
+        None => format!("planner:add:{}", draft.date),
+    }
 }
 
 async fn planner_show_recipe_picker(
@@ -1851,20 +1883,7 @@ async fn planner_show_recipe_picker(
     // sempre a "planner:add:", cioe' alla creazione di un pasto nuovo: si
     // usciva dalla sostituzione dentro un'altra procedura, senza capire
     // perche' (Alessio, collaudo del 24 settembre 2026, L1).
-    // Vale anche per "✏️ Ho mangiato altro" su un pasto consumato, che porta
-    // qui con `sostituisce_pasto_id`: anche da li' "Indietro" deve tornare al
-    // pasto, non alla creazione di un pasto nuovo (Alessio, collaudo del 25
-    // settembre 2026).
-    let torna_al_pasto = if draft.sostituzione {
-        draft.meal_id
-    } else {
-        draft.sostituisce
-    };
-    let indietro = match torna_al_pasto {
-        Some(meal_id) => format!("planner:view:{meal_id}"),
-        None => format!("planner:add:{}", draft.date),
-    };
-    rows.push(planner_global_nav(&indietro));
+    rows.push(planner_global_nav(&planner_indietro_dal_passo(&draft)));
 
     bot.send_message(
         chat_id,
@@ -3427,6 +3446,36 @@ fn planner_format_quantity(value: f64) -> String {
 #[cfg(test)]
 mod telegram_tests {
     use super::*;
+
+    /// Miglioramento 19: sostituendo o correggendo un pasto, "Indietro" torna
+    /// al pasto. Solo creandone uno da zero torna al giorno.
+    ///
+    /// Il 25 settembre la regola era su una schermata sola e "Ho mangiato
+    /// altro" -- che parte da un'altra -- continuava a portare alla giornata.
+    #[test]
+    fn indietro_da_un_passo_torna_al_pasto_se_si_sta_sostituendo() {
+        let nuovo = PlannerDraft {
+            date: "2026-09-26".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(planner_indietro_dal_passo(&nuovo), "planner:add:2026-09-26");
+
+        // "Sostituisci" su un pasto non ancora mangiato.
+        let sostituzione = PlannerDraft {
+            meal_id: Some(7),
+            sostituzione: true,
+            ..nuovo.clone()
+        };
+        assert_eq!(planner_indietro_dal_passo(&sostituzione), "planner:view:7");
+
+        // "Ho mangiato altro" su un pasto consumato: il pasto vecchio sta in
+        // `sostituisce`, non in `meal_id`.
+        let correzione = PlannerDraft {
+            sostituisce: Some(9),
+            ..nuovo
+        };
+        assert_eq!(planner_indietro_dal_passo(&correzione), "planner:view:9");
+    }
 
     #[test]
     fn callback_data_resta_sotto_limite_telegram() {

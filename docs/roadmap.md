@@ -52,6 +52,12 @@ Completato:
 - accesso approvato, amministrazione e Miglioramenti;
 - rifiniture UI Telegram e export Miglioramenti.
 
+**Web app e accesso da fuori casa** (domanda aperta del 26 settembre 2026):
+quadro completo in `docs/previsto/web-app-e-accesso-remoto.md`. Da leggere
+prima di aprire quel cantiere; l'ordine consigliato lì mette **prima** la
+semplificazione della riconciliazione delle aggiunte (Miglioramento 15) e poi
+l'interfaccia HTTP sul nucleo esistente, partendo da una sola schermata.
+
 **⚙️ Impostazioni** (24 settembre 2026): ogni sezione e ogni automatismo si
 può spegnere, per utente, da `⚙️ Impostazioni` nel menù principale — vedi
 `docs/moduli/impostazioni.md`. Vale anche per i moduli che verranno: un

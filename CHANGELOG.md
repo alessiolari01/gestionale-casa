@@ -2,6 +2,26 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_MIGLIORAMENTI_16_19_20260926 -->
+# 26/09/2026 — I quattro difetti del collaudo di cdc6809
+
+- **Con l'ingresso automatico spento, una voce comprata non resta più viva.**
+  Senza dispensa aggiornata il bot chiudeva una sola delle aggiunte di quel
+  cibo e lasciava l'altra: una richiesta che sarebbe tornata in lista da sola
+  appena la scorta scendeva. Ora si chiude tutto quello che si è comprato.
+- **"Ultima spesa chiusa" ha la data giusta**: la chiusura veniva salvata con
+  l'ora UTC, quindi dopo le 22 mostrava il giorno prima. Era l'ultima data in
+  UTC fra quelle che il bot mostra.
+- **Le confezioni di una scorta dicono la marca** ("200 g · Parmareggio
+  Parmigiano… · senza scadenza"), scrivono la quantità come l'elenco
+  ("1,59 kg", non "1590 g"), e la frase non promette più "scadenze diverse"
+  quando nessuna ha scadenza. In quella schermata compare anche
+  "🏠 Ne hai anche in …".
+- **`✏️ Ho mangiato altro` → `⬅️ Indietro`** torna al pasto: la correzione di
+  ieri era su una schermata sola, e quel flusso parte da un'altra.
+- Tolta la vecchia regola di chiusura delle aggiunte, che non serviva più a
+  nessuno.
+
 <!-- CHANGELOG_COLLAUDO_7223550_20260925 -->
 # 25/09/2026 — Dal collaudo di 7223550: voci che sparivano, e un lockout
 
