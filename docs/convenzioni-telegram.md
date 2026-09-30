@@ -682,6 +682,52 @@ planner e i filtri dello Storico (per questi tre il dettaglio che distingue
 
 ---
 
+### C20. Si capisce quello che l'utente voleva scrivere
+
+Deciso da Alessio il 1 ottobre 2026, dopo il primo collaudo "da umano
+distratto" (build `9307a33`), che ha trovato più difetti nel testo scritto
+male che in qualunque altro punto.
+
+**Regola**: un testo scritto a mano si legge come lo leggerebbe una persona,
+non come lo leggerebbe un parser. Se l'intenzione è chiara, si accetta; se è
+ambigua, si chiede; si rifiuta solo quello che non ha un senso possibile — e
+il rifiuto dice cosa scrivere, con il nome della cosa di cui si sta parlando.
+
+Il caso da cui è nata: `500g` al posto di `500 g` deve valere 500 grammi.
+Altri della stessa famiglia, da coprire tutti:
+
+- **numero e unità attaccati o staccati**: `500g`, `500 g`, `1,5kg`,
+  `2pz`;
+- **unità scritte per esteso, abbreviate o in maiuscolo**: `gr`, `grammi`,
+  `G`, `kg`, `chili`, `lt`, `litri`, `ml`, `pezzi`, `pz`;
+- **virgola o punto**, e le migliaia col punto (già fatto il 29 settembre:
+  `1.000`);
+- **spazi in più**, prima, dopo e in mezzo;
+- **prezzi** con `€`, `euro`, `eur`, prima o dopo il numero (già fatto il 29
+  settembre);
+- **date** scritte come le dice una persona: `oggi`, `ieri`, `domani` dove ha
+  senso, `1/10`, `01/10/26`, `1-10-2026`;
+- **orari**: `13`, `13.30`, `13,30`, `13:30`, `ore 13`;
+- **nomi con maiuscole e accenti** diversi da quelli del catalogo nelle
+  ricerche.
+
+E **il flusso dei pulsanti** va pensato allo stesso modo mentre si scrive il
+codice, non trovato al collaudo: cosa succede premendo due volte, tornando
+indietro a metà, uscendo con `🏠` o `/start`, scrivendo del testo dove si
+aspetta un pulsante (e viceversa), mandando una foto dove si aspetta un
+testo. Per ognuno la risposta deve dire cosa fare, e il bot non deve restare
+in uno stato che lo schermo non mostra.
+
+**Come si prova**: con le prove sul flusso (`src/telegram_finto.rs`), che
+passano dai gestori veri, e con le funzioni pure di lettura dei numeri e delle
+date — una tabella di casi scritti "male" per ognuna.
+
+**Stato**: regola decisa, **da applicare**. È il primo lavoro del giro
+successivo al 1 ottobre 2026 (`STATO.md`, sezione 6): un giro su ogni punto
+del bot che legge testo scritto a mano.
+
+---
+
 ## Parte 3 — Come si applica
 
 Una convenzione che vale solo per il codice nuovo non serve a niente. L'ordine

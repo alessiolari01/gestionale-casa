@@ -142,6 +142,15 @@ com'erano poste, perché spiegano le scelte:
 - **Codici a barre dei novanta prodotti seminati**: si riempiono man mano
   fotografando le confezioni, oppure restano vuoti.
 
+### Prima dei moduli nuovi: la C20 (deciso il 1 ottobre 2026)
+
+Prima di Documenti, Promemoria, Palestra e Soldi, un giro su tutto il bot
+per applicare la convenzione **C20**: ogni testo scritto a mano si legge
+capendo cosa l'utente voleva scrivere (`500g` vale `500 g`), e il flusso dei
+pulsanti si pensa mentre si scrive il codice. Da allora vale anche per ogni
+modulo nuovo. Dettagli in `docs/convenzioni-telegram.md` (C20) e nella
+sezione 6 di `STATO.md`.
+
 ### Prossimo giro, chiesto da Alessio il 17 settembre 2026
 
 Quattro moduli nuovi da aggiungere al menù principale, ciascuno da

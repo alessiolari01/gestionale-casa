@@ -2993,7 +2993,15 @@ Dettagli in C19, `docs/convenzioni-telegram.md`.
 
 21 nuovi test. Totale 498.
 
-**Collaudo dal vivo su Telegram da fare.**
+**Distribuito sull'S9 il 1 ottobre 2026** (commit `bfe1169`), il primo con
+la regola nuova della sezione 7 (distribuire senza chiedere): CI verde (run
+#175), 498 test e clippy verdi anche sul telefono, nessuna migration nuova
+(`applied_migrations=65` invariato), `Gestionale Casa online`, zero
+`panicked`, guardiano attivo.
+
+**Collaudo dal vivo su Telegram da fare**: solo la verifica delle modifiche
+(Fase 1 di `Collaudo_bfe1169_prompt.md`); la Fase 2 "da umano distratto" è
+sospesa (sezione 6).
 
 ## 3. Stato tecnico verificato
 
@@ -3169,6 +3177,21 @@ src/modules/novita.rs               registro delle novità e badge "🆕" propag
 ```
 
 ## 6. Punti aperti
+
+**Il prossimo lavoro, deciso da Alessio il 1 ottobre 2026** — prima di
+qualunque modulo nuovo:
+
+- **Applicare la C20 a tutto il bot** (`docs/convenzioni-telegram.md`): ogni
+  punto che legge testo scritto a mano deve capire cosa l'utente voleva
+  scrivere — `500g` come `500 g`, `gr`/`grammi`/`G`, `1,5kg`, orari come
+  `13.30` o `ore 13`, date come `1/10` o `domani` — e il flusso dei pulsanti
+  va pensato mentre si scrive il codice (doppi tocchi, uscite a metà, testo
+  dove serve un pulsante), non scoperto al collaudo. Si comincia con un
+  elenco di tutti gli input testuali del bot e di cosa accettano oggi.
+- **Il collaudo "da umano distratto" è sospeso**: da qui si verificano solo
+  le modifiche fatte (la Fase 1 dei copioni). Il copione di `bfe1169` è
+  `Collaudo_bfe1169_prompt.md` nella cartella di lavoro, con la Fase 2
+  segnata come sospesa.
 
 1. **Tre toolchain diverse, e solo una conta.** Il runner della CI usa la
    **1.98**; l'ambiente dell'assistente e' fermo alla **1.95** e non puo'
