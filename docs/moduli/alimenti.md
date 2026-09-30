@@ -95,8 +95,8 @@ scelta per nome e categoria (`docs/moduli/dispensa.md`).
 ## Elenco dei soli prodotti commerciali (18 settembre 2026)
 
 `🛒 Prodotti commerciali` nel menù Alimenti: l'elenco dei prodotti di marca,
-cinque per pagina (C6), ognuno con marca, nome, formato e — a capo —
-l'alimento a cui è attaccato. `🔎 Cerca prodotto` filtra per marca, nome del
+cinque per pagina (C6): sul pulsante il formato davanti, poi marca e nome;
+nel testo i nomi per esteso e l'alimento a cui ciascuno è attaccato (C19). `🔎 Cerca prodotto` filtra per marca, nome del
 prodotto o nome dell'alimento.
 
 Prima esisteva solo `🛒 Prodotti associati` dentro un alimento: con

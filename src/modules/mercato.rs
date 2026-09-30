@@ -41,22 +41,39 @@ pub fn formatta_euro(centesimi: i64) -> String {
     format!("{segno}{},{:02} €", valore / 100, valore % 100)
 }
 
-/// Legge un prezzo scritto a mano: `1,29`, `1.29`, `1`, `1,29 €`, `€ 1,29`.
-/// Rifiuta zero, negativi e tutto ciò che non è un numero.
+/// Legge un prezzo scritto a mano: `1,29`, `1.29`, `1`, `1,29 €`, `€ 1,29`,
+/// `3 euro`. Rifiuta zero, negativi e tutto ciò che non è un numero.
 pub fn interpreta_prezzo(testo: &str) -> Option<i64> {
-    let pulito: String = testo
-        .trim()
-        .replace('€', "")
-        .replace("eur", "")
-        .replace("EUR", "")
-        .trim()
-        .replace(',', ".");
-    let valore: f64 = pulito.trim().parse().ok()?;
-    if !valore.is_finite() || valore <= 0.0 {
+    let valore = numero_del_prezzo(testo)?;
+    if valore <= 0.0 {
         return None;
     }
     let centesimi = (valore * 100.0).round() as i64;
     (centesimi > 0).then_some(centesimi)
+}
+
+/// Perché `interpreta_prezzo` ha rifiutato quel testo, detto a chi l'ha
+/// scritto: un numero negativo non è "un prezzo scritto male".
+pub fn errore_prezzo(testo: &str) -> &'static str {
+    match numero_del_prezzo(testo) {
+        Some(valore) if valore <= 0.0 => "Il prezzo deve essere maggiore di zero.",
+        _ => "Scrivi un prezzo, ad esempio 1,29.",
+    }
+}
+
+fn numero_del_prezzo(testo: &str) -> Option<f64> {
+    // "euro" prima di "eur": togliendo "eur" da "3 euro" restava "3 o", ed
+    // era rifiutato il modo più naturale di scriverlo (collaudo di 9307a33).
+    let pulito = testo
+        .trim()
+        .to_lowercase()
+        .replace('€', "")
+        .replace("euro", "")
+        .replace("eur", "")
+        .trim()
+        .replace(',', ".");
+    let valore: f64 = pulito.parse().ok()?;
+    valore.is_finite().then_some(valore)
 }
 
 /// Il prezzo riportato a un'unità confrontabile: `2,50 € per 500 g` diventa
@@ -90,6 +107,18 @@ pub fn prezzo_al_riferimento(
     }
     let per_riferimento = (centesimi as f64 / quantita_in_riferimento).round() as i64;
     (per_riferimento > 0).then_some((per_riferimento, riferimento))
+}
+
+/// Oltre questo prezzo al kg o al litro quasi sempre c'è un errore di
+/// battitura, nella quantità o nel prezzo: 200 € al kg è già zafferano.
+const PREZZO_AL_KG_SOSPETTO: i64 = 20_000;
+
+/// Vero quando un prezzo riportato al kg o al litro è così alto che vale
+/// la pena farlo notare. Non blocca niente — il prezzo può essere giusto —
+/// ma "1000,00 € al kg" per il sale fino entrava nello storico senza che
+/// nessuno se ne accorgesse (collaudo di 9307a33, H1-P3).
+pub fn prezzo_fuori_scala(per_riferimento: i64, riferimento: &str) -> bool {
+    matches!(riferimento, "kg" | "l") && per_riferimento > PREZZO_AL_KG_SOSPETTO
 }
 
 /// Una riga del confronto fra negozi.
@@ -1185,6 +1214,37 @@ mod tests {
         assert_eq!(formatta_euro(129), "1,29 €");
         assert_eq!(formatta_euro(2000), "20,00 €");
         assert_eq!(formatta_euro(5), "0,05 €");
+    }
+
+    #[test]
+    fn un_prezzo_al_chilo_assurdo_si_fa_notare() {
+        // 2,50 € per 2,5 g di sale: 1000 € al kg.
+        let (per_kg, riferimento) = prezzo_al_riferimento(250, Some(2.5), Some("g")).unwrap();
+        assert!(prezzo_fuori_scala(per_kg, riferimento));
+        // Il parmigiano a 25 € al kg è normale.
+        assert!(!prezzo_fuori_scala(2_500, "kg"));
+        // Al pezzo non c'è una scala sensata.
+        assert!(!prezzo_fuori_scala(50_000, "pz"));
+    }
+
+    /// Collaudo di 9307a33, H1-P5 e H1-P2: `€ 3` passava e `3 euro` no
+    /// (togliendo "eur" restava "3 o"), e un prezzo negativo o zero riceveva
+    /// lo stesso "Scrivi un prezzo" di una parola qualsiasi.
+    #[test]
+    fn euro_scritto_per_esteso_e_il_motivo_del_rifiuto() {
+        assert_eq!(interpreta_prezzo("3 euro"), Some(300));
+        assert_eq!(interpreta_prezzo("3 Euro"), Some(300));
+        assert_eq!(interpreta_prezzo("3€"), Some(300));
+        assert_eq!(interpreta_prezzo("euro 2,50"), Some(250));
+        assert_eq!(
+            errore_prezzo("-2"),
+            "Il prezzo deve essere maggiore di zero."
+        );
+        assert_eq!(
+            errore_prezzo("0"),
+            "Il prezzo deve essere maggiore di zero."
+        );
+        assert_eq!(errore_prezzo("abc"), "Scrivi un prezzo, ad esempio 1,29.");
     }
 
     #[test]

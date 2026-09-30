@@ -1209,22 +1209,7 @@ fn dynamic_filter_keyboard(
     )]];
 
     for option in options {
-        let mut label = String::new();
-        if current == Some(option.id) {
-            label.push_str("✅ ");
-        }
-        if option.deleted != 0 {
-            label.push_str("🗑 ");
-        }
-        label.push_str(&truncate_chars(&option.label, 24));
-        if let Some(subtitle) = option.subtitle.as_deref() {
-            // A capo, non " · " (C15): concatenata sulla stessa riga,
-            // Telegram può troncare l'intera etichetta con "…" invece di
-            // andare a capo da solo -- lo stesso difetto trovato dal vivo
-            // sulla lista della spesa.
-            label.push('\n');
-            label.push_str(&truncate_chars(&filter_subtitle_label(kind, subtitle), 16));
-        }
+        let label = etichetta_filtro(kind, current == Some(option.id), option);
         rows.push(vec![button(
             &label,
             &format!("h:s:{kind_code}:{}:{token}", base62_encode(option.id)),
@@ -1252,6 +1237,31 @@ fn filter_back_keyboard(filters: HistoryFilters) -> InlineKeyboardMarkup {
         button("⬅️ Torna ai filtri", &format!("h:f:{}", filters.to_token())),
         button("🏠 Menù principale", "menu:main"),
     ]])
+}
+
+/// L'etichetta di una voce nel selettore di un filtro dello Storico. Il
+/// tipo ("Stanza", "Casa") sta **davanti** al nome: è quello che distingue
+/// due voci con lo stesso nome. Fino al 29 settembre 2026 stava dopo un
+/// `\n` (vecchia C15), che Telegram ignora, e veniva tagliato per primo
+/// (C19).
+fn etichetta_filtro(
+    kind: HistoryFilterKind,
+    selezionato: bool,
+    option: &HistoryPickerOption,
+) -> String {
+    let mut label = String::new();
+    if selezionato {
+        label.push_str("✅ ");
+    }
+    if option.deleted != 0 {
+        label.push_str("🗑 ");
+    }
+    if let Some(subtitle) = option.subtitle.as_deref() {
+        label.push_str(&truncate_chars(&filter_subtitle_label(kind, subtitle), 10));
+        label.push_str(" · ");
+    }
+    label.push_str(&truncate_chars(&option.label, 22));
+    label
 }
 
 fn filter_subtitle_label(kind: HistoryFilterKind, value: &str) -> String {
@@ -2385,6 +2395,31 @@ fn total_pages(total: i64) -> i64 {
 mod tests {
     use super::*;
     use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
+
+    /// C19: il tipo di un filtro ("Stanza", "Casa") stava dopo un `\n` che
+    /// Telegram ignora, e si perdeva per primo. È quello che distingue due
+    /// voci con lo stesso nome, quindi va davanti.
+    #[test]
+    fn il_filtro_dice_il_tipo_davanti_e_sta_su_una_riga() {
+        let opzione = HistoryPickerOption {
+            id: 1,
+            label: "Cucina".to_string(),
+            subtitle: Some("stanza".to_string()),
+            deleted: 0,
+        };
+        assert_eq!(
+            etichetta_filtro(HistoryFilterKind::Entity, true, &opzione),
+            "✅ Stanza · Cucina"
+        );
+        let senza = HistoryPickerOption {
+            subtitle: None,
+            ..opzione
+        };
+        assert_eq!(
+            etichetta_filtro(HistoryFilterKind::Entity, false, &senza),
+            "Cucina"
+        );
+    }
 
     async fn test_pool() -> SqlitePool {
         let pool = SqlitePoolOptions::new()

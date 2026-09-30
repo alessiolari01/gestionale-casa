@@ -262,6 +262,30 @@ un `⬅️` da solo e nessun Menù principale. Prima, in quel caso, Migliora
 finiva in una riga a parte e il Menù mancava — Alessio l'ha visto su
 `🗑️ Rimuovi voci`, ma valeva per ogni schermata costruita così.
 
+#### Uscire davvero, e il doppio tocco (29 settembre 2026)
+
+Dal collaudo "da umano distratto" di `9307a33`, tre regole su cosa succede
+quando si esce da una procedura in un modo diverso da `❌ Annulla`:
+
+- **`/start` chiude ogni attesa, sempre.** È la via d'uscita di Telegram, e
+  deve esserlo anche a metà di una procedura: prima la Dispensa, in attesa
+  di una quantità, lo leggeva come una quantità sbagliata.
+- **Il menù riaperto da "⚠️ Questa schermata non è più attiva" chiude ogni
+  attesa.** Prima sullo schermo c'era il menù principale e il bot aspettava
+  ancora la ricerca degli Oggetti: uno stato nascosto. Le attese si chiudono
+  tutte insieme da un punto solo (`Procedure::chiudi_tutte` in `main.rs`),
+  non con un elenco ricopiato in ogni ramo.
+- **Il secondo di due tocchi in fretta si ignora.** Non è una schermata
+  vecchia: trattarlo così riapriva il menù principale e cancellava la
+  risposta al primo tocco (compresa la domanda sul totale dello scontrino).
+  Per dieci secondi una schermata appena toccata non genera l'avviso
+  (`context_bot::Rivendicazione`).
+
+E due conseguenze su `🏠 Menù principale` durante una procedura: con una
+scheda oggetto compilata chiede prima di buttarla, e lasciando a metà il
+totale dello scontrino dice "✅ Spesa chiusa" invece di "❌ Operazione
+annullata", che era falso.
+
 #### Sotto una foto (19 settembre 2026)
 
 Una foto o un video con i pulsanti di navigazione è una **schermata**:
@@ -448,48 +472,27 @@ fino al menù principale se poi non si segna nessun pulsante nel mezzo.
 Il campo di testo resta accettato dove già c'è (orari, quantità): il calendario
 aggiunge una strada, non ne toglie una.
 
-### C15. Le parti aggiunte a un'etichetta vanno a capo, non concatenate
+### C15. Le parti aggiunte a un'etichetta non si accodano con "·"
 
 Trovato da Alessio collaudando dal vivo la lista della spesa (9 settembre
 2026): un pulsante che unisce più parti sulla stessa riga con " · " (nome +
 quantità + un avviso opzionale, o un'etichetta + un sottotitolo opzionale)
-rischia di superare la larghezza che Telegram riserva a un pulsante. A quel
-punto **Telegram non va a capo da solo**: taglia l'intera etichetta con "…",
-qualunque parte sia stata tagliata — si era visto con "125 in ecc…" invece
-di "125 in eccesso".
+supera la larghezza che Telegram riserva a un pulsante, e **Telegram taglia
+l'intera etichetta con "…"** senza avvisare — si era visto con "125 in ecc…"
+invece di "125 in eccesso". La parte persa è sempre la fine, cioè quasi sempre
+quella aggiunta, che spesso è la più importante.
 
-**Regola**: quando un'etichetta ha una parte opzionale o di lunghezza
-variabile aggiunta a un nome già presente (un avviso, un sottotitolo, un
-badge), quella parte va **a capo** (`\n` nel testo del pulsante, che
-Telegram interpreta come una riga in più, non come testo tagliato) invece
-di essere concatenata con " · " o uno spazio sulla stessa riga. Non serve
-calcolare una lunghezza massima esatta — è la stessa idea di C1: il testo
-non deve mai lasciare a Telegram la scelta di tagliare qualcosa.
+**Regola**: una parte opzionale o di lunghezza variabile (un avviso, un
+sottotitolo, una scadenza, un orario) non si accoda a un'etichetta che ha già
+il suo contenuto. Un singolo `· totale` (C7) o `· oggi` (C9) resta ammesso,
+perché è corto.
 
-Applicata alla lista della spesa (`⚠️ ... in eccesso` su una riga propria
-dentro il pulsante di ogni voce) e allo Storico (il sottotitolo di un filtro
-dinamico, `dynamic_filter_keyboard`). La quantità di una voce della lista
-della spesa resta invece sulla stessa riga del nome: è sempre presente e
-breve (mai la causa del taglio osservato), non una parte opzionale.
-
-### C15. Le parti aggiunte a un'etichetta vanno a capo, mai accodate con "·"
-
-Deciso il 9 settembre 2026, scrivendo la lista della spesa: quando
-un'etichetta di pulsante ha già un contenuto (es. il nome di una voce) e
-serve aggiungere altre informazioni che la distinguono (quantità, stato,
-orario...), le parti aggiunte vanno **a capo con `\n`**, non accodate sulla
-stessa riga con `" · "`. Telegram tronca — senza avviso, con un puntino di
-sospensione muto — il testo di un pulsante che supera la larghezza
-disponibile su una riga sola: un'etichetta con troppe parti unite da `·`
-rischia di perdere silenziosamente l'ultima, quella che spesso è la più
-importante (l'orario, la situazione). Un pulsante multi-riga (Telegram
-supporta `\n` nell'etichetta) resta invece leggibile per intero.
-
-Vale solo per le etichette con **più di due parti aggiunte** al contenuto
-principale: un singolo `· totale` (C7) o `· oggi` (C9) resta su una riga,
-perché corto e già collaudato. Il limite si applica quando le parti si
-sommano (es. tipo pasto + orario + situazione + nota di preparazione, come
-nei pulsanti di `turni.rs`).
+**Dove va, allora, è deciso da C19**: nel testo del messaggio. Fino al 24
+settembre 2026 questa convenzione diceva di mandare la parte aggiunta **a capo
+con `\n` dentro l'etichetta**, credendo che Telegram facesse un pulsante su più
+righe. Non è così: Telegram ignora il `\n` nelle etichette, il pulsante resta
+su una riga e taglia come prima. Quella metà della regola è stata sbagliata
+fin dall'inizio, e il codice scritto seguendola è elencato nella parte 4.
 
 ### C10. Un verbo solo per ogni azione
 
@@ -666,9 +669,16 @@ Non è in contrasto con C1 (il testo non ripete i pulsanti): il testo non
 rifà l'elenco, aggiunge quello che sul pulsante non entra. Se una voce non ha
 niente in più, non compare nel testo.
 
-È la sorella di C15 — che manda a capo le parti **opzionali** di
-un'etichetta nel testo — applicata ai pulsanti, dove andare a capo non si
-può.
+È il completamento di C15: C15 dice che le parti aggiunte non si accodano
+all'etichetta, C19 dice dove vanno.
+
+**Applicata ovunque il 29 settembre 2026.** Rileggendo il codice sono venuti
+fuori sette pulsanti ancora scritti con il `\n` della vecchia C15: i gruppi
+di scorte (`dispensa::nota_gruppo`), gli ingredienti di una ricetta
+(`ricette::nota_ingrediente`), i pasti di un modello e di un'assegnazione
+(`turni::nota_pasto`), `🔄 Aggiorna` e `🗑 Elimina` di un'assegnazione nel
+planner e i filtri dello Storico (per questi tre il dettaglio che distingue
+è andato davanti). Ognuno ha la sua prova che l'etichetta non contiene `\n`.
 
 ---
 

@@ -68,6 +68,14 @@ Gli handler principali continuano a ricevere `Arc<HandlerDependencies>` per evit
 
 Gli input testuali fuori da un wizard non sostituiscono la schermata corrente: vengono trattati come input inattesi. Dopo tre tentativi consecutivi viene aggiunto il suggerimento `/start`; il contatore viene azzerato da una navigazione/comando valido o dall'ingresso in un flusso che richiede input.
 
+Ogni modulo tiene le sue attese di testo in una mappa di sessione propria. `Procedure` in `main.rs` le raccoglie tutte e le chiude insieme (`chiudi_tutte`) quando si riparte da zero: `/start`, e il menù riaperto da una schermata non più attiva. Prima del 29 settembre 2026 ogni ramo ne chiudeva a mano un gruppo diverso, e ne nascevano stati nascosti.
+
+Un tocco su un pulsante passa da `ContextBot::rivendica`: la schermata attiva si esegue, una schermata toccata negli ultimi dieci secondi si ignora (è un doppio tocco), una schermata vecchia riapre il menù principale.
+
+### Le prove sul flusso dei messaggi
+
+`src/telegram_finto.rs`, compilato solo nei test, è un server HTTP locale che risponde come l'API di Telegram e registra le richieste. `TelegramFinto::bot` dà un `ContextBot` collegato a lui, così una prova può chiamare i gestori veri (`handle_message`, `handle_callback`, `handle_authorized_message`) con i passi di un collaudo e poi controllare il database, i testi mandati (`ultimo_testo`) e i pulsanti (`ultimi_pulsanti`). Il database resta `sqlite::memory:`.
+
 ## Spazi e inviti
 
 `src/modules/spazi_membri.rs` gestisce membership e inviti privati. Gli inviti usano deep-link Telegram e supportano ruolo, modalità monouso/riutilizzabile, limite utilizzi e scadenza. L'apertura da parte del creatore o di un membro già presente non consuma l'invito.

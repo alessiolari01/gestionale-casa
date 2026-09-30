@@ -60,9 +60,12 @@ sopra la soglia, ogni pulsante mostra anche il profilo del modello),
 `➕ Nuovo modello`, `🗄 Modelli archiviati` (punto 8), `📅 Vedi/modifica
 assegnazione`.
 
-**Dettaglio modello** — i pasti del modello come pulsanti (tipo, orario,
-situazione, eventuale preparazione — su più righe per lo stesso pulsante,
-convenzione C15), ordinati **per orario crescente, i senza orario in fondo**
+**Dettaglio modello** — i pasti del modello come pulsanti (`13:00 · 🍝
+Pranzo`: orario e tipo, su una riga), e nel testo una riga per pasto con
+situazione ed eventuale preparazione (`• 13:00 · 🍝 Pranzo: 💼 Lavoro · 🧺
+Da preparare prima`) — fino al 29 settembre 2026 stavano sul pulsante dopo
+dei `\n` che Telegram ignora (C19); lo stesso vale per i pasti di
+un'assegnazione. Ordinati **per orario crescente, i senza orario in fondo**
 (punto 1). Toccare un pasto apre un dettaglio con modifica di situazione,
 orario, preparazione (con nota) e nota libera, più un'esplicita
 eliminazione con conferma (punto 7 e 9 — prima toccare un pasto lo
@@ -142,7 +145,7 @@ sezione, non al menù Turni generale.
 (punto 14, 13 settembre 2026)** — prima "🗑 Elimina assegnazione" esisteva
 solo nel dettaglio raggiunto da "📅 Vedi/modifica assegnazione". Ora la
 schermata Giorno mostra, per ciascuna assegnazione di quel giorno, un
-bottone `🗑 Elimina {profilo}` con il nome del turno a capo: stessa
+bottone `🗑 Elimina «{modello}» · {profilo}` (il modello davanti, C19): stessa
 conferma esplicita (C16) e stessa funzione di dominio
 (`elimina_assegnazione`); dopo la conferma si torna alla schermata Giorno
 del planner (non al menù Turni), passando `data` nel callback
@@ -174,7 +177,9 @@ prima il blocco informativo del turno lì era solo testo, senza bottoni.
 Ora, per ciascuna assegnazione di quel giorno (di uno o più profili dello
 spazio) con un aggiornamento disponibile dal modello (stesso controllo di
 `assegnazione_ha_aggiornamento_disponibile`), compare un bottone `🔄
-Aggiorna {profilo}` con il nome del turno a capo (`«{modello}»`, C15) —
+Aggiorna «{modello}» · {profilo}` (il modello davanti, perché è quello che
+distingue due assegnazioni e con il `\n` di prima era tagliato per primo,
+C19) —
 prima c'era solo il nome del profilo, che con due turni assegnati a
 profili diversi lo stesso giorno non bastava a capire quale modello fosse
 di chi. Porta alla stessa schermata di conferma di "📅 Vedi/modifica

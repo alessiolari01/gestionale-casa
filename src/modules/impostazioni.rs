@@ -429,14 +429,19 @@ async fn mostra_elenco(
     // C1: il testo non ripete i nomi, che stanno sui pulsanti. Spiega solo
     // come si legge la riga e cosa fa un tocco.
     let mut testo = format!("{titolo}\n\n✅ acceso · ⬜ spento — toccane uno per cambiarlo.");
+    // Ogni funzione ha la sua spiegazione, accesa o spenta. Fino al 29
+    // settembre 2026 la aveva solo quella accesa: spegnendone una, la riga
+    // spariva proprio quando serviva sapere cosa si riaccende (collaudo di
+    // 9307a33, M1). Quella spenta porta "(spento)" nel testo, perché il
+    // simbolo sta già sul pulsante.
     for funzione in elenco {
-        if funzioni.spenta_di_suo(*funzione) {
-            continue;
-        }
-        // La spiegazione la merita quello che è ancora acceso: è lì che serve
-        // sapere cosa si perde spegnendolo.
+        let stato = if funzioni.spenta_di_suo(*funzione) {
+            " (spento)"
+        } else {
+            ""
+        };
         testo.push_str(&format!(
-            "\n\n{} {}",
+            "\n\n{}{stato} {}",
             funzione.etichetta(),
             funzione.spiegazione()
         ));

@@ -221,16 +221,12 @@ l'eccesso. `calcola_eccessi` è dominio puro, testato senza database. **Dal
 17 settembre 2026** il fabbisogno con cui si confronta è quello **al netto
 delle scorte** (sezione seguente): quello che serve davvero.
 
-La lista lo mostra su ogni voce coinvolta, su una riga a parte dentro lo
-stesso pulsante (`⚠️ 150 g in eccesso` **a capo**, non accodato con " · ".
-Fino al 17 settembre 2026 il codice mostrava il numero senza l'unità, al
-contrario di quanto scritto qui: allineato alla documentazione.
-su una riga sola Telegram tronca il testo con "…" invece di andare a capo
-da solo, visto da Alessio dal vivo — un "\n" fa occupare al pulsante una
-riga in più invece di tagliare) più un avviso generale in testa alla
-schermata quando c'è almeno un eccesso — non un'azione da compiere, solo
+La lista lo mostra nel testo, sulla riga della voce coinvolta
+(`⚠️ 150 g in eccesso`), più un avviso generale in testa alla schermata
+quando c'è almeno un eccesso — non un'azione da compiere, solo
 un'informazione: sta all'utente decidere cosa farne (usarlo comunque,
-tenerlo per un pasto futuro...).
+tenerlo per un pasto futuro...). Fino al 24 settembre 2026 stava dentro il
+pulsante dopo un `\n`, che Telegram ignora: arrivava tagliato (C19).
 
 ## Al netto di quello che c'è in casa (17 settembre 2026)
 
@@ -429,8 +425,11 @@ così in casa entra quello che si è preso davvero.
   solo quelle del prodotto se la voce è già di un prodotto preciso —
   (`lista_spesa:presa:f:{voce}:p{prodotto}` / `:f{formato}`) e accetta una
   quantità scritta (senza unità vale quella della voce).
-- Segnare la presa **spunta la voce**; il pulsante mostra, a capo,
-  `📦 presi 300 g`. `↩️ Conta la quantità in lista`
+- Segnare la presa **spunta la voce**, e il pulsante mostra la quantità
+  presa invece di quella chiesta: `✅ 📦 300 g · Riso` (dal 29 settembre
+  2026, collaudo di 9307a33, M5). Nel testo la riga `📦 300 g · ne
+  servivano 170 g` dice quanto serviva ogni volta che il numero è diverso,
+  anche prendendone meno (M4). `↩️ Conta la quantità in lista`
   (`lista_spesa:presa:reset:{voce}`) la toglie lasciando la spunta.
   **Togliere la spunta** dimentica anche la presa.
 - **Alla chiusura** entra in archivio — e quindi in casa — la quantità

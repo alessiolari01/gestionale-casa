@@ -396,24 +396,36 @@ pub fn etichetta_lotto(lotto: &Scorta, nome_gruppo: &str) -> String {
     }
 }
 
-/// Etichetta di un gruppo su un pulsante: nome e totale, e -- se c'è -- la
-/// scadenza più vicina **a capo** (C15: una parte opzionale non si accoda
-/// con " · ", altrimenti Telegram taglia l'etichetta senza avvisare).
+/// Etichetta di un gruppo su un pulsante: nome e totale, su una riga sola.
+///
+/// Fino al 29 settembre 2026 portava la scadenza e il numero di confezioni
+/// dopo un `\n`, seguendo la vecchia C15; Telegram ignora il `\n` nelle
+/// etichette, quindi arrivavano attaccati al nome e venivano tagliati per
+/// primi. Ora stanno in `nota_gruppo`, nel testo (C19).
 pub fn etichetta_gruppo(gruppo: &GruppoScorte) -> String {
-    let base = format!(
+    format!(
         "{} · {}",
         liste::tronca(&gruppo.descrizione, 30),
         formatta_quantita_leggibile(gruppo.quantita_base, &gruppo.unita_base)
-    );
-    let confezioni = gruppo.lotti.len();
-    match (gruppo.prima_scadenza(), confezioni) {
-        (Some(data), 1) => format!("{base}\n📅 scade {}", calendario::display_date(data)),
-        (Some(data), n) => format!(
-            "{base}\n📅 prima scadenza {} · {n} confezioni",
+    )
+}
+
+/// Quello che sul pulsante di un gruppo non entra: la scadenza più vicina e
+/// quante confezioni sono. `None` per una confezione sola senza scadenza,
+/// che non ha niente da aggiungere (C19: nel testo solo chi ne ha bisogno).
+pub fn nota_gruppo(gruppo: &GruppoScorte) -> Option<String> {
+    let nome = liste::tronca(&gruppo.descrizione, 30);
+    match (gruppo.prima_scadenza(), gruppo.lotti.len()) {
+        (None, 1) => None,
+        (Some(data), 1) => Some(format!(
+            "• {nome}: scade {}",
             calendario::display_date(data)
-        ),
-        (None, 1) => base,
-        (None, n) => format!("{base}\n{n} confezioni"),
+        )),
+        (Some(data), n) => Some(format!(
+            "• {nome}: prima scadenza {} · {n} confezioni",
+            calendario::display_date(data)
+        )),
+        (None, n) => Some(format!("• {nome}: {n} confezioni")),
     }
 }
 
@@ -1939,8 +1951,18 @@ pub async fn handle_message(
                     }
                 }
             }
+            // La domanda intera con l'errore in testa, come nella lista della
+            // spesa (collaudo di 9307a33, H1.1).
             Err(errore) => {
-                bot.send_message(msg.chat.id, format!("⚠️ {errore}"))
+                let testo = format!(
+                    "⚠️ {}\n\n{}",
+                    crate::modules::lista_spesa::spiega_errore_quantita(
+                        errore,
+                        unita_default.as_deref()
+                    ),
+                    testo_quantita(&descrizione, unita_default.as_deref())
+                );
+                bot.send_message(msg.chat.id, testo)
                     .reply_markup(InlineKeyboardMarkup::new(vec![annulla_row(
                         "dispensa:menu",
                     )]))
@@ -1965,11 +1987,35 @@ pub async fn handle_message(
                 )
                 .await?;
             }
+            // "0" vuol dire "è finita": chi l'ha scritto resta bloccato su "deve
+            // essere maggiore di zero" se non gli si dice come toglierla
+            // (collaudo di 9307a33, H6.3b). Si passa dalla stessa conferma
+            // di 🗑 Elimina (C16), non si toglie niente da qui.
             Err(errore) => {
-                bot.send_message(msg.chat.id, format!("⚠️ {errore}"))
-                    .reply_markup(InlineKeyboardMarkup::new(vec![annulla_row(&format!(
-                        "dispensa:scorta:{scorta_id}"
-                    ))]))
+                let finita = text
+                    .split_whitespace()
+                    .next()
+                    .and_then(crate::modules::lista_spesa::leggi_numero_scritto)
+                    == Some(0.0);
+                let mut righe = Vec::new();
+                let testo = if finita {
+                    righe.push(vec![button(
+                        "🗑 Elimina la confezione",
+                        format!("dispensa:del:ask:{scorta_id}"),
+                    )]);
+                    "⚠️ Con 0 la confezione è finita: se vuoi toglierla, eliminala.".to_string()
+                } else {
+                    format!(
+                        "⚠️ {}",
+                        crate::modules::lista_spesa::spiega_errore_quantita(
+                            errore,
+                            Some(&unita_attuale)
+                        )
+                    )
+                };
+                righe.push(annulla_row(&format!("dispensa:scorta:{scorta_id}")));
+                bot.send_message(msg.chat.id, testo)
+                    .reply_markup(InlineKeyboardMarkup::new(righe))
                     .await?;
             }
         },
@@ -2387,9 +2433,19 @@ pub async fn handle_callback(
             invalid(bot, chat_id).await?;
             return Ok(true);
         };
+        // Il nome nella domanda, come in 🗑️ Rimuovi voci (collaudo di
+        // 9307a33, H6.1b).
+        let cosa = match scorta_per_id(pool, scorta_id).await {
+            Ok(Some(scorta)) => format!(
+                "«{}» ({})",
+                scorta.descrizione,
+                formatta_quantita_leggibile(scorta.quantita, &scorta.unita_simbolo)
+            ),
+            _ => "questa scorta".to_string(),
+        };
         bot.send_message(
             chat_id,
-            "⚠️ Eliminare questa scorta definitivamente? Non si può recuperare.",
+            format!("⚠️ Eliminare {cosa} definitivamente? Non si può recuperare."),
         )
         .reply_markup(InlineKeyboardMarkup::new(vec![
             vec![button(
@@ -2540,6 +2596,17 @@ async fn mostra_luogo(
         testo.push_str("\n\nNon c'è ancora niente qui.\nAggiungi la prima scorta.");
     } else {
         testo.push_str("\n\nPrima quelle che scadono.");
+    }
+    // Scadenze e confezioni delle righe di questa pagina: sui pulsanti non
+    // entrano (C19).
+    let note: Vec<String> = gruppi
+        .iter()
+        .skip(liste::scarto(pagina) as usize)
+        .take(liste::VOCI_PER_PAGINA)
+        .filter_map(nota_gruppo)
+        .collect();
+    if !note.is_empty() {
+        testo.push_str(&format!("\n\n{}", note.join("\n")));
     }
 
     let mut rows: Vec<Vec<InlineKeyboardButton>> = gruppi
@@ -2706,7 +2773,21 @@ async fn mostra_scorta(
         "🗑 Elimina",
         format!("dispensa:del:ask:{scorta_id}"),
     )]);
-    rows.push(nav_row(&format!("dispensa:luogo:{}:0", dove.token())));
+    // Da una confezione di un gruppo si torna alla scelta delle confezioni,
+    // per guardare l'altra: prima si tornava all'elenco del posto, un tocco
+    // in più (collaudo di 9307a33, M3). Una confezione sola non ha una
+    // scelta da cui tornare.
+    let in_gruppo = gruppi_del_luogo(pool, dove)
+        .await
+        .unwrap_or_default()
+        .iter()
+        .any(|gruppo| gruppo.contiene(scorta_id) && gruppo.lotti.len() > 1);
+    let indietro = if in_gruppo {
+        format!("dispensa:gruppo:{scorta_id}")
+    } else {
+        format!("dispensa:luogo:{}:0", dove.token())
+    };
+    rows.push(nav_row(&indietro));
 
     bot.send_message(chat_id, testo)
         .reply_markup(InlineKeyboardMarkup::new(rows))
@@ -2879,10 +2960,16 @@ mod tests {
         assert!(gruppi[0].contiene(1));
     }
 
+    /// C19: Telegram ignora il `\n` nelle etichette dei pulsanti. Questa
+    /// etichetta lo usava per la scadenza e il numero di confezioni, che
+    /// arrivavano attaccati al nome e venivano tagliati per primi (visto nel
+    /// collaudo di 9307a33: "Parmigiano Reggiano · 420 g 2 confezioni").
+    /// L'etichetta resta corta, e il resto va in una nota nel testo.
     #[test]
-    fn l_etichetta_manda_a_capo_la_scadenza_e_conta_le_confezioni() {
+    fn l_etichetta_sta_su_una_riga_e_la_scadenza_va_nel_testo() {
         let una = raggruppa_scorte(&[scorta(1, Some(7), "Pollo", 800.0, "g", None)], info);
         assert_eq!(etichetta_gruppo(&una[0]), "Pollo · 800 g");
+        assert_eq!(nota_gruppo(&una[0]), None);
 
         let due = raggruppa_scorte(
             &[
@@ -2891,10 +2978,12 @@ mod tests {
             ],
             info,
         );
-        let etichetta = etichetta_gruppo(&due[0]);
         // Virgola, come si scrive in italiano (23 settembre 2026).
-        assert!(etichetta.starts_with("Pasta · 1,5 kg\n📅 prima scadenza "));
-        assert!(etichetta.ends_with("· 2 confezioni"));
+        assert_eq!(etichetta_gruppo(&due[0]), "Pasta · 1,5 kg");
+        let nota = nota_gruppo(&due[0]).expect("nota");
+        assert!(nota.starts_with("• Pasta: prima scadenza "), "{nota}");
+        assert!(nota.ends_with("· 2 confezioni"), "{nota}");
+        assert!(!nota.contains('\n'));
     }
 
     #[test]

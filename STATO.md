@@ -1,4 +1,7 @@
-# Stato del progetto — 02/09/2026
+# Stato del progetto
+
+La data di ogni fatto sta nella sezione che lo racconta: una data qui in cima
+restava indietro a ogni aggiornamento (diceva 02/09/2026 fino al 29 settembre).
 
 **Questo e' l'unico documento che descrive il presente.** Se un fatto sta qui,
 non sta anche altrove: gli altri documenti raccontano com'e' fatto il codice
@@ -2844,6 +2847,154 @@ nuova (`applied_migrations=65` invariato), `Gestionale Casa online`, zero
 
 **Collaudo dal vivo su Telegram da fare.**
 
+## 2septvicies. Pulizia, senza codice (29 settembre 2026)
+
+- **Miglioramento 20 segnato `scartato`** nel database reale, su richiesta di
+  Alessio ("per il momento"): la decisione era già presa, si resta sul bot.
+  Scritto con la stessa query di `set_status` del bot, dopo un backup
+  (`data/db/backups/gestionale_pre_scarto_m20_20260929_191146.db`). Restano
+  `da_fare` il 15 (lavoro di fondo, da non iniziare senza richiesta) e i
+  16–19 (in attesa del collaudo dal vivo).
+- **Fermato sull'S9 un ciclo d'attesa dimenticato dal 17 settembre**: un
+  `while pgrep -f 'aggiorna-s9.sh'` che non poteva finire, perché `pgrep -f`
+  trovava la propria riga di comando. Tolto anche `data/run/controlli.pid`,
+  che nessuno script usa e puntava a quel ciclo.
+- **La C15 delle convenzioni era doppia e diceva ancora di usare `\n` nei
+  pulsanti**, che la C19 aveva già smentito. Ora è una sola; i pulsanti del
+  codice scritti con la regola vecchia sono stati corretti nel giro dopo
+  (sezione 2octovicies).
+
+## 2octovicies. Dal collaudo di 9307a33: il primo collaudo "da umano distratto" (29 settembre – 1 ottobre 2026)
+
+Il collaudo di `9307a33` l'ha fatto una sessione Claude che pilotava Telegram
+Desktop sul PC di Alessio, in due fasi (`Collaudo_esiti_fase1.md`,
+`Collaudo_esiti_fase2.md`):
+
+- **fase 1, ordinata**: 23 OK, 1 difetto, 5 migliorie;
+- **fase 2, "da umano distratto"** (formati sbagliati, doppi tocchi,
+  procedure lasciate a metà): 23 OK, 9 difetti, 13 migliorie, 4 non provati.
+
+**Il bot non si è mai fermato** in quasi tre ore, e nessun doppio tocco ha
+mai registrato due volte la stessa cosa. Via libera di Alessio a correggere
+tutto. Nessuna migration.
+
+**Il database reale è stato ripristinato** da `collaudo_00_prima.db` (29
+settembre, 19:19) a bot spento, con `sqlite3 .restore`: la fase 2 l'aveva
+sporcato di proposito (1000 tonnellate di Riso in lista, prezzi del Sale a
+1000 €/kg). Prima è stato salvato lo stato sporco
+(`gestionale_pre_ripristino_collaudo_20260929_232121.db`); dopo, gli stessi
+conteggi di `collaudo_00_prima`, `integrity_check` `ok`, WAL e 65 migration.
+
+**I Miglioramenti 16–19** sono passati nella fase 1 (A, C, D), tranne il 17
+("Ultima spesa" in ora locale), che alle 19:33 non si poteva vedere: va
+riprovato fra mezzanotte e le due. Alessio ha chiesto di segnarli `fatto`,
+ma la scrittura sul database dell'S9 è stata **bloccata dai permessi** della
+sessione: restano `da_fare` finché non li segna lui dal bot o non dà il
+permesso.
+
+### Un Telegram finto per i test
+
+I difetti peggiori stavano nel **flusso** dei messaggi, dove i test non
+arrivavano: ogni gestore ha bisogno di un bot che parli con Telegram.
+`src/telegram_finto.rs` (solo nei test) è un server HTTP locale che risponde
+come l'API di Telegram e si ricorda cosa gli è stato chiesto, così una prova
+può ripetere i passi del collaudo attraverso i gestori veri e controllare
+dati, testi e pulsanti. Cinque prove di questo giro lo usano.
+
+### I difetti, ognuno con la prova scritta prima e fallita
+
+1. **D4 — `⬅️ Indietro` da "Scegli il tipo di pasto" ridisegnava se
+   stesso.** Errore mio del 26 settembre: per un pasto nuovo il primo passo
+   usava la regola degli altri passi, che torna a `planner:add:` — cioè a
+   quella stessa schermata. Ora torna alla giornata
+   (`planner_indietro_dal_tipo`). La prova del 26 settembre verificava
+   proprio il valore sbagliato.
+2. **H1-P1 — un prezzo scritto male faceva registrare una quantità.** Dopo
+   `abc` il bot rispondeva "Scrivi un prezzo" ma si rimetteva ad aspettare
+   la quantità presa: `2,50` diventava "presi 2,5 g" di Sale, entrava in
+   casa, e i prezzi dopo finivano nello storico a 1000 €/kg. Ora si resta
+   sul prezzo (`chiedi_prezzo`). Prova col Telegram finto: esattamente
+   `(presi 2,5, nessun prezzo)` prima, `(nessuna presa, 2,50 €)` dopo.
+3. **H1.5, H1.8, H1.9 — le quantità.** `1.000` era 1 g senza dirlo (ora il
+   punto seguito da tre cifre sono migliaia, `leggi_numero_scritto`);
+   `999999999` passava (ora un massimo per unità: 100 kg, 100 l, 1000
+   pezzi); `0,0001` passava e diventava "0 g" con la frase falsa "in casa ne
+   hai già abbastanza" (ora il minimo è 0,01). Vale per la lista e per le
+   scorte, che passano dalle stesse due funzioni.
+4. **H1-D3 — una data d'acquisto nel 2099 accettata.** Ora il futuro è
+   rifiutato, con il motivo (`leggi_data_acquisto`); insieme, "data troppo
+   vecchia" per il 1800 (H1-D2) e «oggi»/«ieri» (H1-D1).
+5. **H2.1 — ogni doppio tocco portava al menù principale.** Il secondo tocco
+   era trattato come una schermata vecchia, e il menù cancellava la
+   risposta al primo — in H2.2 anche la domanda sul totale dello scontrino.
+   Ora per dieci secondi una schermata appena toccata si ignora in silenzio
+   (`Rivendicazione::AppenaToccata`).
+6. **H3.3 — stato nascosto.** Il menù aperto da "⚠️ Questa schermata non è
+   più attiva" non chiudeva la procedura in corso: sullo schermo il menù,
+   e il bot cercava ancora negli Oggetti.
+7. **H3.4 — `/start` letto come quantità.** I moduli leggevano il testo
+   prima che `/start` fosse riconosciuto.
+
+   Per 6 e 7 le attese di tutti i moduli si chiudono ora da un punto solo,
+   `Procedure::chiudi_tutte` in `main.rs`: prima ogni ramo ne chiudeva un
+   gruppo diverso, e `/start` sei su tredici.
+8. **H4.1b — "Comando non riconosciuto. Usa il pulsante 🏠 Menù
+   principale"** senza quel pulsante, e con il menù di prima cancellato. Ora
+   l'avviso sta sopra il menù principale.
+9. **H4.4** — il nome troppo lungo di un oggetto diceva "premi ❌ Annulla"
+   con il solo `💡 Migliora` sotto.
+
+### Le migliorie
+
+- **Lista della spesa**: il pulsante di una voce presa dice la quantità
+  presa (`✅ 📦 300 g · Riso`, M5); "ne servivano …" anche quando se ne
+  prende meno (M4); "1 kg" invece di "1000 g" in Ultima spesa e nel pannello
+  📦 (M2, H6.2b); l'Ultima spesa dice il totale dello scontrino o che manca
+  (H3.5); uscire dal totale con 🏠 dice "✅ Spesa chiusa" e non
+  "Operazione annullata" (H3.5b); in 🗑️ Rimuovi voci le voci uguali sono
+  numerate davanti e il testo spiega che la quantità è quella chiesta
+  (H1.10); le conferme di eliminazione dicono quale voce (H6.1b, anche per
+  le scorte).
+- **Prezzi**: `3 euro` accettato (H1-P5), "deve essere maggiore di zero"
+  per un prezzo negativo (H1-P2), e un avviso non bloccante sopra i 200 € al
+  kg o al litro (H1-P3).
+- **Errori sulle quantità**: ripetono la domanda intera con il nome
+  dell'alimento, e non dicono più "scrivi quantità e unità" a chi doveva
+  scrivere solo il numero (H1.1). Scrivendo `0` per una confezione il bot
+  propone di eliminarla (H6.3b).
+- **Scorte**: da una confezione di un gruppo `⬅️ Indietro` torna alla
+  scelta delle confezioni (M3).
+- **Planner**: segnare consumato un pasto di un giorno futuro chiede
+  conferma, perché scala le scorte adesso (H2.6).
+- **Oggetti**: l'elenco vuoto ha `➕ Nuovo oggetto` e un Indietro che torna
+  agli Oggetti (H3.1); `🏠 Menù principale` con una scheda compilata chiede
+  se buttarla (H3.1b).
+- **Impostazioni**: ogni interruttore ha la sua spiegazione anche da spento
+  (M1).
+- **Una foto al posto di un testo** atteso dice "scrivi quello che ti ho
+  chiesto" invece di mandare in una scheda oggetto (H4.3).
+
+### I pulsanti con `\n` (C19)
+
+Messi in programma il 29 settembre, corretti in questo giro. Rileggendo il
+codice per intero erano **sette**, non cinque: si erano aggiunti i pasti di
+un'assegnazione in Turni e `🗑 Elimina` di un'assegnazione nel planner.
+Dettagli in C19, `docs/convenzioni-telegram.md`.
+
+### Non fatto
+
+- **Il 15** (la riconciliazione delle aggiunte) resta aperto: H1.10 ha
+  cambiato solo come si leggono le voci, non il calcolo.
+- La frase "Premi ❌ Annulla per uscire." compare ancora in diverse
+  richieste (Alimenti, Oggetti) accanto al pulsante che nomina (C1): fuori
+  da questo collaudo.
+- **Non provati** nel collaudo: vocale e sticker (H4.5) e due schermi
+  insieme (H7) — servono il telefono di Alessio.
+
+21 nuovi test. Totale 498.
+
+**Collaudo dal vivo su Telegram da fare.**
+
 ## 3. Stato tecnico verificato
 
 - **65 migration** nel repository, tutte **applicate** al database reale
@@ -2859,7 +3010,7 @@ nuova (`applied_migrations=65` invariato), `Gestionale Casa online`, zero
 - pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa,
   punto 1 della sezione 6): `fmt`, `check --locked`,
   `clippy --all-targets --locked -- -D warnings`, `test --locked` —
-  **477 test** (475 prima della sezione 2sexvicies, 474 prima della sezione
+  **498 test** (477 prima della sezione 2octovicies, 475 prima della sezione 2sexvicies, 474 prima della sezione
   2quattuorvicies, 472 prima della
   sezione 2trevicies, 471 prima della sezione
   2duovicies, 469 prima della sezione
@@ -3210,6 +3361,13 @@ src/modules/novita.rs               registro delle novità e badge "🆕" propag
 - nei blocchi shell dell'S9 non usare `set -e`: usare `|| return 1` o `|| exit 1`
   in modo che un errore fermi lo step senza chiudere la sessione SSH;
 - niente commit o push se la pipeline fallisce;
+- **dal 1 ottobre 2026, per scelta di Alessio**, un lavoro finito con la
+  pipeline verde si distribuisce **senza chiedere**: commit con
+  `pipeline-locale.sh`, CI, aggiornamento dell'S9, riavvio e controllo che il
+  bot resti vivo senza `panicked`. Restano invariati: prima di **iniziare**
+  le correzioni di un collaudo serve il suo via libera, niente force-push,
+  `reset --hard`, `--no-verify` o `--amend`, e il collaudo dal vivo lo fa
+  lui (o una sessione che lancia lui);
 - prima di una migration reale: backup, `integrity_check`, `foreign_key_check` e
   prova su copia — lo script lo fa gia';
 - Telegram: massimo 5 elementi per pagina, nessun ID tecnico, accenti italiani

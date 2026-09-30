@@ -188,8 +188,10 @@ Una ricetta deve mantenere almeno uno step.
 ### Ingredienti (17 settembre 2026)
 
 `🥕 Ingredienti` mostra una riga per ingrediente: a sinistra il nome con
-quantità e unità (e, a capo, `🛒` col prodotto specifico se c'è), a destra
-`🗑`. Il testo della schermata dice solo quanti sono (C1).
+quantità e unità, a destra `🗑`. Il testo della schermata dice quanti sono
+e, per gli ingredienti che ne hanno uno, il prodotto specifico
+(`🛒 Pomodori: Mutti · Polpa fine`): fino al 29 settembre 2026 stava sul
+pulsante dopo un `\n` che Telegram ignora (C19).
 
 - **Toccare il nome** apre la modifica: si scrive la nuova quantità
   nell'unità attuale, oppure `📏 Cambia unità` e poi la quantità.

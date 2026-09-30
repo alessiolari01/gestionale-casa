@@ -4261,8 +4261,7 @@ fn ingredient_amount_keyboard(recipe_id: i64) -> InlineKeyboardMarkup {
 }
 
 /// Etichetta di un ingrediente nella schermata di modifica: nome e
-/// quantità, e -- se c'è -- il prodotto specifico **a capo** (C15: una parte
-/// opzionale non si accoda, altrimenti Telegram taglia l'etichetta).
+/// quantità, su una riga. Il prodotto specifico sta in `nota_ingrediente`.
 fn ingredient_button_label(ingredient: &IngredientRecord) -> String {
     let base = format!(
         "{} · {} {}",
@@ -4270,10 +4269,17 @@ fn ingredient_button_label(ingredient: &IngredientRecord) -> String {
         display_quantity(ingredient.quantity),
         ingredient.unit_symbol
     );
-    match &ingredient.product_label {
-        Some(label) => format!("{base}\n🛒 {label}"),
-        None => base,
-    }
+    base
+}
+
+/// Il prodotto specifico di un ingrediente, per il testo della schermata:
+/// sul pulsante stava dopo un `\n` che Telegram ignora, e si perdeva per
+/// primo (C19).
+fn nota_ingrediente(ingredient: &IngredientRecord) -> Option<String> {
+    ingredient
+        .product_label
+        .as_ref()
+        .map(|label| format!("🛒 {}: {label}", ingredient.food_name))
 }
 
 /// L'ingrediente da modificare, con alimento e unità pronti per il flusso di
@@ -4427,6 +4433,10 @@ async fn show_manage_ingredients(
                 "🥕 Ingredienti ricetta\n\n{}",
                 result_label(ingredients.len() as i64)
             ));
+            let prodotti: Vec<String> = ingredients.iter().filter_map(nota_ingrediente).collect();
+            if !prodotti.is_empty() {
+                text.push_str(&format!("\n\n{}", prodotti.join("\n")));
+            }
             if !ingredients.is_empty() {
                 text.push_str("\nTocca un ingrediente per cambiarne la quantità.");
             }
@@ -7920,6 +7930,33 @@ mod tests {
         .fetch_one(pool)
         .await
         .expect("unità")
+    }
+
+    /// C19: il prodotto specifico di un ingrediente stava dopo un `\n`
+    /// nell'etichetta, che Telegram ignora — e si perdeva per primo.
+    #[test]
+    fn il_prodotto_di_un_ingrediente_va_nel_testo_non_sul_pulsante() {
+        let record = IngredientRecord {
+            id: 1,
+            food_id: 1,
+            food_name: "Pomodori".to_string(),
+            product_label: Some("Mutti · Polpa fine".to_string()),
+            quantity: 400.0,
+            unit_id: 1,
+            unit_symbol: "g".to_string(),
+            optional: 0,
+            notes: None,
+        };
+        assert_eq!(ingredient_button_label(&record), "Pomodori · 400 g");
+        assert_eq!(
+            nota_ingrediente(&record).as_deref(),
+            Some("🛒 Pomodori: Mutti · Polpa fine")
+        );
+        let generico = IngredientRecord {
+            product_label: None,
+            ..record
+        };
+        assert_eq!(nota_ingrediente(&generico), None);
     }
 
     fn ingredient(food: &FoodChoice, unit: &UnitChoice, quantity: f64) -> DraftIngredient {

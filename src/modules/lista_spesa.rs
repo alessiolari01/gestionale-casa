@@ -256,6 +256,8 @@ pub enum VoceManualeError {
     DescrizioneTroppoLunga,
     QuantitaFormatoNonValido,
     QuantitaNonPositiva,
+    QuantitaTroppoPiccola,
+    QuantitaTroppoGrande,
     UnitaMancante,
     UnitaTroppoLunga,
 }
@@ -271,6 +273,10 @@ impl fmt::Display for VoceManualeError {
                 "Scrivi quantità e unità separate da uno spazio, es. \"500 g\"."
             }
             Self::QuantitaNonPositiva => "La quantità deve essere maggiore di zero.",
+            Self::QuantitaTroppoPiccola => "La quantità è troppo piccola: il minimo è 0,01.",
+            Self::QuantitaTroppoGrande => {
+                "È troppo per una spesa di casa: controlla il numero. Il massimo è 100 kg, 100 l o 1000 pezzi."
+            }
             Self::UnitaMancante => "Scrivi anche l'unità, es. \"500 g\".",
             Self::UnitaTroppoLunga => "L'unità è troppo lunga (massimo 20 caratteri).",
         };
@@ -311,20 +317,96 @@ pub fn valida_quantita_manuale(testo: &str) -> Result<(f64, String), VoceManuale
     if numero.is_empty() {
         return Err(VoceManualeError::QuantitaFormatoNonValido);
     }
-    let quantita: f64 = numero
-        .replace(',', ".")
-        .parse()
-        .map_err(|_| VoceManualeError::QuantitaFormatoNonValido)?;
+    let quantita =
+        leggi_numero_scritto(numero).ok_or(VoceManualeError::QuantitaFormatoNonValido)?;
     if unita.is_empty() {
         return Err(VoceManualeError::UnitaMancante);
     }
-    if !quantita.is_finite() || quantita <= 0.0 {
-        return Err(VoceManualeError::QuantitaNonPositiva);
-    }
+    controlla_limiti_quantita(quantita, unita)?;
     if unita.chars().count() > UNITA_MAX_CARATTERI {
         return Err(VoceManualeError::UnitaTroppoLunga);
     }
     Ok((quantita, unita.to_string()))
+}
+
+/// Un numero scritto da una persona: la virgola separa i decimali, e il
+/// punto pure — tranne quando è seguito da gruppi di tre cifre (`1.000`,
+/// `12.500`), che in italiano sono migliaia. Con virgola e punto insieme
+/// (`1.500,5`) il punto sono sempre le migliaia.
+///
+/// Fino al 29 settembre 2026 `1.000` diventava 1 g senza che il bot lo
+/// dicesse (collaudo di 9307a33, H1.5).
+pub fn leggi_numero_scritto(testo: &str) -> Option<f64> {
+    let testo = testo.trim();
+    let normalizzato = if testo.contains(',') {
+        testo.replace('.', "").replace(',', ".")
+    } else if migliaia_col_punto(testo) {
+        testo.replace('.', "")
+    } else {
+        testo.to_string()
+    };
+    normalizzato
+        .parse::<f64>()
+        .ok()
+        .filter(|valore| valore.is_finite())
+}
+
+fn migliaia_col_punto(testo: &str) -> bool {
+    let mut gruppi = testo.split('.');
+    let primo = gruppi.next().unwrap_or_default();
+    let resto: Vec<&str> = gruppi.collect();
+    let solo_cifre =
+        |gruppo: &str| !gruppo.is_empty() && gruppo.chars().all(|c| c.is_ascii_digit());
+    // "0.250" è un decimale: nessun numero con le migliaia comincia per 0.
+    !resto.is_empty()
+        && solo_cifre(primo)
+        && primo.len() <= 3
+        && !primo.starts_with('0')
+        && resto
+            .iter()
+            .all(|gruppo| gruppo.len() == 3 && solo_cifre(gruppo))
+}
+
+/// L'errore su una quantità detto in modo coerente con la domanda: se il
+/// bot ha chiesto "scrivi solo la quantità" perché conosce già l'unità, non
+/// può rispondere "scrivi quantità e unità separate da uno spazio"
+/// (collaudo di 9307a33, H1.1).
+pub fn spiega_errore_quantita(errore: VoceManualeError, unita_default: Option<&str>) -> String {
+    match (errore, unita_default) {
+        (VoceManualeError::QuantitaFormatoNonValido, Some(_)) => {
+            "Non è una quantità: scrivi solo il numero, es. 500.".to_string()
+        }
+        _ => errore.to_string(),
+    }
+}
+
+/// La quantità più piccola che il bot sa mostrare senza scrivere "0".
+const QUANTITA_MINIMA: f64 = 0.01;
+
+/// Il massimo sensato per una spesa di casa, per unità. Non è un limite
+/// del database: serve a fermare un errore di battitura prima che diventi
+/// "1000000,2 kg di Riso" in lista (collaudo di 9307a33, H1.8).
+fn quantita_massima(unita: &str) -> f64 {
+    match unita.trim().to_lowercase().as_str() {
+        "g" | "ml" => 100_000.0,
+        "cl" => 10_000.0,
+        "hg" | "dl" => 1_000.0,
+        "kg" | "l" => 100.0,
+        _ => 1_000.0,
+    }
+}
+
+pub fn controlla_limiti_quantita(quantita: f64, unita: &str) -> Result<(), VoceManualeError> {
+    if !quantita.is_finite() || quantita <= 0.0 {
+        return Err(VoceManualeError::QuantitaNonPositiva);
+    }
+    if quantita < QUANTITA_MINIMA {
+        return Err(VoceManualeError::QuantitaTroppoPiccola);
+    }
+    if quantita > quantita_massima(unita) {
+        return Err(VoceManualeError::QuantitaTroppoGrande);
+    }
+    Ok(())
 }
 
 /// Come `valida_quantita_manuale`, ma per un'aggiunta dal catalogo: se
@@ -347,11 +429,9 @@ pub fn valida_quantita_con_default(
     if numero.is_empty() {
         return Err(VoceManualeError::QuantitaFormatoNonValido);
     }
-    let quantita: f64 = numero
-        .replace(',', ".")
-        .parse()
-        .map_err(|_| VoceManualeError::QuantitaFormatoNonValido)?;
-    if !quantita.is_finite() || quantita <= 0.0 {
+    let quantita =
+        leggi_numero_scritto(numero).ok_or(VoceManualeError::QuantitaFormatoNonValido)?;
+    if quantita <= 0.0 {
         return Err(VoceManualeError::QuantitaNonPositiva);
     }
 
@@ -362,6 +442,7 @@ pub fn valida_quantita_con_default(
     } else {
         unita_scritta.to_string()
     };
+    controlla_limiti_quantita(quantita, &unita)?;
     if unita.chars().count() > UNITA_MAX_CARATTERI {
         return Err(VoceManualeError::UnitaTroppoLunga);
     }
@@ -707,6 +788,120 @@ pub fn riga_modifica(modifica: &Modifica) -> String {
 mod domain_tests {
     use super::*;
 
+    fn voce_di_prova(
+        descrizione: &str,
+        chiesti: f64,
+        presi: Option<f64>,
+        comprato: bool,
+    ) -> VoceListaSpesa {
+        VoceListaSpesa {
+            id: 1,
+            origine: "manuale".to_string(),
+            alimento_id: None,
+            descrizione: descrizione.to_string(),
+            quantita: Some(chiesti),
+            unita_simbolo: Some("g".to_string()),
+            comprato: i64::from(comprato),
+            ordinamento: 1,
+            prodotto_alimentare_id: None,
+            quantita_presa: presi,
+            unita_presa: presi.map(|_| "g".to_string()),
+            prodotto_preso_id: None,
+            prezzo_centesimi: None,
+        }
+    }
+
+    /// Collaudo di 9307a33, M4: "ne servivano …" compariva solo prendendone
+    /// di più, e mancava proprio quando se ne prende meno, che è il caso in
+    /// cui serve saperlo.
+    #[test]
+    fn la_riga_dei_presi_dice_quanto_serviva_anche_se_ne_hai_preso_meno() {
+        let meno = voce_di_prova("Farina 00", 500.0, Some(200.0), false);
+        assert_eq!(
+            riga_presa(&meno).as_deref(),
+            Some("📦 200 g · ne servivano 500 g")
+        );
+        let di_piu = voce_di_prova("Riso", 170.0, Some(1500.0), true);
+        assert_eq!(
+            riga_presa(&di_piu).as_deref(),
+            Some("📦 1,5 kg · ne servivano 170 g")
+        );
+        let giusti = voce_di_prova("Sale", 500.0, Some(500.0), true);
+        assert_eq!(riga_presa(&giusti).as_deref(), Some("📦 500 g"));
+        assert_eq!(riga_presa(&voce_di_prova("Pane", 1.0, None, false)), None);
+    }
+
+    /// Collaudo di 9307a33, M5: segnati 300 g di Riso su 170, il pulsante
+    /// diceva ancora "✅ 170 g · 🌾 Riso". Chi guarda solo i pulsanti deve
+    /// leggere quello che ha nel carrello.
+    #[test]
+    fn il_pulsante_di_una_voce_presa_dice_quanto_hai_preso() {
+        let presa = voce_di_prova("Riso", 170.0, Some(300.0), true);
+        assert_eq!(etichetta_voce(&presa), "✅ 📦 300 g · Riso");
+        let normale = voce_di_prova("Riso", 170.0, None, false);
+        assert_eq!(etichetta_voce(&normale), "☐ 170 g · Riso");
+    }
+
+    /// Collaudo di 9307a33, H3.5b: spesa chiusa, domanda sul totale lasciata
+    /// a metà con `🏠 Menù principale`, e il bot diceva "❌ Operazione
+    /// annullata." — come se fosse annullata la chiusura, che invece c'era.
+    #[test]
+    fn uscire_dal_totale_non_dice_che_la_spesa_e_annullata() {
+        let sessions = ListaSpesaSessionStore::new();
+        sessions.set(
+            1,
+            ListaSpesaConversationState::AwaitingTotaleSpesa { chiusura_id: 3 },
+        );
+        assert_eq!(
+            sessions.avviso_uscita(1),
+            Some("✅ Spesa chiusa. Il totale dello scontrino non l'ho segnato.")
+        );
+        sessions.set(
+            1,
+            ListaSpesaConversationState::AwaitingPrezzo { voce_id: 3 },
+        );
+        assert_eq!(sessions.avviso_uscita(1), None);
+    }
+
+    #[test]
+    fn l_errore_sulla_quantita_non_contraddice_la_richiesta() {
+        assert_eq!(
+            spiega_errore_quantita(VoceManualeError::QuantitaFormatoNonValido, Some("g")),
+            "Non è una quantità: scrivi solo il numero, es. 500."
+        );
+        // Senza unità predefinita la domanda chiedeva davvero numero e unità.
+        assert_eq!(
+            spiega_errore_quantita(VoceManualeError::QuantitaFormatoNonValido, None),
+            VoceManualeError::QuantitaFormatoNonValido.to_string()
+        );
+    }
+
+    /// Collaudo di 9307a33, H1.10: due aggiunte uguali di Riso comparivano
+    /// come due pulsanti identici "🗑️ Riso · 200 g chiesti".
+    #[test]
+    fn le_voci_uguali_da_rimuovere_si_distinguono() {
+        let voce = |id: i64, nome: &str, quantita: f64| VoceRimovibile {
+            id,
+            origine: OrigineRimovibile::Catalogo,
+            descrizione: nome.to_string(),
+            quantita: Some(quantita),
+            unita_simbolo: Some("g".to_string()),
+        };
+        let voci = vec![
+            voce(1, "Riso", 200.0),
+            voce(2, "Farina 00", 500.0),
+            voce(3, "Riso", 200.0),
+        ];
+        assert_eq!(
+            etichette_rimovibili(&voci),
+            vec![
+                "🗑️ 1ª · Riso · 200 g chiesti",
+                "🗑️ Farina 00 · 500 g chiesti",
+                "🗑️ 2ª · Riso · 200 g chiesti",
+            ]
+        );
+    }
+
     fn info_massa() -> InfoUnita {
         InfoUnita {
             famiglia: Some(FamigliaConversione::Massa),
@@ -999,6 +1194,49 @@ mod domain_tests {
             valida_quantita_con_default("1,5", Some("kg")),
             Ok((1.5, "kg".to_string()))
         );
+    }
+
+    /// Collaudo di 9307a33: `1.000` diventava 1 g senza dirlo (H1.5),
+    /// `999999999` veniva accettato e mostrato come "1000000,2 kg" (H1.8),
+    /// `0,0001` passava dove `0` era rifiutato e diventava "0 g" (H1.9).
+    /// In italiano il punto seguito da tre cifre separa le migliaia; resta
+    /// un separatore decimale negli altri casi ("1.5", "0.25"), perché è
+    /// così che lo scrive chi ha la tastiera inglese.
+    #[test]
+    fn quantita_scritte_come_le_scrive_una_persona() {
+        assert_eq!(
+            valida_quantita_con_default("1.000", Some("g")),
+            Ok((1000.0, "g".to_string()))
+        );
+        assert_eq!(
+            valida_quantita_con_default("1.500,5", Some("g")),
+            Ok((1500.5, "g".to_string()))
+        );
+        assert_eq!(
+            valida_quantita_con_default("1.5", Some("kg")),
+            Ok((1.5, "kg".to_string()))
+        );
+        assert_eq!(
+            valida_quantita_con_default("0.25", Some("kg")),
+            Ok((0.25, "kg".to_string()))
+        );
+        assert_eq!(
+            valida_quantita_con_default("999999999", Some("g")),
+            Err(VoceManualeError::QuantitaTroppoGrande)
+        );
+        assert_eq!(
+            valida_quantita_manuale("999999999 g"),
+            Err(VoceManualeError::QuantitaTroppoGrande)
+        );
+        assert_eq!(
+            valida_quantita_con_default("0,0001", Some("g")),
+            Err(VoceManualeError::QuantitaTroppoPiccola)
+        );
+        // Quello che si compra davvero passa ancora.
+        assert!(valida_quantita_con_default("50", Some("kg")).is_ok());
+        assert!(valida_quantita_con_default("24", Some("pz")).is_ok());
+        assert!(valida_quantita_con_default("0,5", Some("g")).is_ok());
+        assert!(valida_quantita_con_default("20000", Some("g")).is_ok());
     }
 
     #[test]
@@ -1463,6 +1701,60 @@ pub struct VoceListaSpesa {
     pub prodotto_preso_id: Option<i64>,
     /// Quanto è costata davvero questa voce (consegna B), se l'hai segnato.
     pub prezzo_centesimi: Option<i64>,
+}
+
+/// La riga "📦 presi" di una voce nel testo della lista. Dice quanto ne
+/// serviva ogni volta che il numero è diverso: prendendone di più fa
+/// quadrare i conti, prendendone di meno dice quanto manca — e fino al 29
+/// settembre 2026 compariva solo nel primo caso (collaudo di 9307a33, M4).
+/// La nota è neutra e non un "⚠️": le confezioni sono quelle che sono (C4).
+fn riga_presa(voce: &VoceListaSpesa) -> Option<String> {
+    let (valore, unita) = (voce.quantita_presa?, voce.unita_presa.as_ref()?);
+    let leggibile = crate::modules::dispensa::formatta_quantita_leggibile;
+    let mut presa = format!("📦 {}", leggibile(valore, unita));
+    if let (Some(serviva), Some(unita_serviva)) = (voce.quantita, &voce.unita_simbolo) {
+        if unita_serviva == unita && (valore - serviva).abs() > TOLLERANZA_QUANTITA {
+            presa.push_str(&format!(
+                " · ne servivano {}",
+                leggibile(serviva, unita_serviva)
+            ));
+        }
+    }
+    Some(presa)
+}
+
+/// L'etichetta del pulsante di una voce: **la quantità davanti al nome**, e
+/// il nome corto.
+///
+/// Telegram non manda a capo le etichette dei pulsanti (C19), e questo
+/// pulsante è largo mezza riga perché accanto c'è "📦": la quantità è la
+/// cosa che non si può perdere davanti allo scaffale, quindi va prima, e il
+/// nome intero si legge nel testo (collaudo del 25 settembre 2026, P1).
+///
+/// Quando si è segnato quanto si è preso, il pulsante dice **quello**, con
+/// `📦` davanti: prima diceva ancora la quantità chiesta, e chi guardava
+/// solo i pulsanti leggeva 170 g con 300 g nel carrello (collaudo di
+/// 9307a33, M5). "1,5 l" resta "1,5 l", non "1500 ml" (24 settembre 2026).
+fn etichetta_voce(voce: &VoceListaSpesa) -> String {
+    let icona = if voce.comprato != 0 { "✅" } else { "☐" };
+    let leggibile = crate::modules::dispensa::formatta_quantita_leggibile;
+    let quantita = match (
+        voce.quantita_presa,
+        &voce.unita_presa,
+        voce.quantita,
+        &voce.unita_simbolo,
+    ) {
+        (Some(presa), Some(unita), _, _) => Some(format!("📦 {}", leggibile(presa, unita))),
+        (_, _, Some(valore), Some(unita)) => Some(leggibile(valore, unita)),
+        _ => None,
+    };
+    match &quantita {
+        Some(quantita) => format!(
+            "{icona} {quantita} · {}",
+            liste::tronca(&voce.descrizione, 14)
+        ),
+        None => format!("{icona} {}", liste::tronca(&voce.descrizione, 22)),
+    }
 }
 
 async fn trova_per_id(pool: &SqlitePool, id: i64) -> anyhow::Result<Option<ListaSpesa>> {
@@ -1976,8 +2268,9 @@ pub async fn annulla_presa(pool: &SqlitePool, voce_id: i64) -> anyhow::Result<()
 pub struct Confezione {
     pub token: String,
     pub prodotto_id: i64,
-    /// Marca e nome commerciale, senza il formato: il formato va a capo sul
-    /// pulsante, altrimenti su Telegram Desktop veniva tagliato.
+    /// Marca e nome commerciale, senza il formato: il formato va **davanti**
+    /// sul pulsante, perché è quello che distingue due confezioni ed è la
+    /// fine che Telegram taglia (C19).
     pub nome: String,
     pub etichetta: String,
     pub quantita: f64,
@@ -3182,6 +3475,8 @@ pub struct ChiusuraSpesa {
     pub data_fine: String,
     pub voci_totali: i64,
     pub chiusa_il: String,
+    /// Il totale dello scontrino, se l'hai scritto.
+    pub totale_centesimi: Option<i64>,
 }
 
 /// Una voce archiviata da una chiusura: solo quello che serve a rileggerla,
@@ -3638,7 +3933,7 @@ pub async fn ultima_chiusura(
     lista_id: i64,
 ) -> anyhow::Result<Option<ChiusuraSpesa>> {
     sqlx::query_as(
-        "SELECT id, data_inizio, data_fine, voci_totali, chiusa_il \
+        "SELECT id, data_inizio, data_fine, voci_totali, chiusa_il, totale_centesimi \
          FROM liste_spesa_chiusure WHERE lista_id = ? ORDER BY id DESC LIMIT 1",
     )
     .bind(lista_id)
@@ -6357,6 +6652,56 @@ mod db_tests {
         })
         .await;
     }
+
+    async fn quantita_e_prezzo(pool: &SqlitePool, voce_id: i64) -> (Option<f64>, Option<i64>) {
+        sqlx::query_as("SELECT quantita_presa, prezzo_centesimi FROM liste_spesa_voci WHERE id = ?")
+            .bind(voce_id)
+            .fetch_one(pool)
+            .await
+            .expect("voce")
+    }
+
+    /// Collaudo di 9307a33, H1-P1: su `💶 Prezzo` si scrive `abc`, poi —
+    /// senza ripremere niente — `-2` e `2,50`. Il bot rispondeva "Scrivi un
+    /// prezzo" ma sotto si era rimesso ad aspettare la **quantità presa**:
+    /// `2,50` diventava "presi 2,5 g" di Sale fino, entrava in casa, e i
+    /// prezzi dopo finivano nello storico a 1000 €/kg.
+    #[tokio::test]
+    async fn un_prezzo_scritto_male_non_diventa_una_quantita() {
+        let pool = test_pool().await;
+        let user_id = create_user(&pool, "Alessio").await;
+        let space_id = create_space(&pool, "Casa").await;
+        add_membership(&pool, space_id, user_id).await;
+        let telegram = crate::telegram_finto::TelegramFinto::avvia().await;
+        let bot = telegram.bot(&pool);
+        let sessions = ListaSpesaSessionStore::new();
+
+        crate::identity::with_actor(actor(user_id, space_id, "Alessio"), async {
+            let lista = trova_o_crea_lista_attiva(&pool).await.expect("lista");
+            let voce = aggiungi_voce_manuale(&pool, lista.id, "Sale fino", Some(0.5), Some("g"))
+                .await
+                .expect("voce");
+            handle_callback(
+                &bot,
+                ChatId(crate::telegram_finto::CHAT),
+                &pool,
+                &sessions,
+                &format!("lista_spesa:prezzo:{voce}"),
+            )
+            .await
+            .expect("💶 Prezzo");
+
+            for testo in ["abc", "-2", "2,50"] {
+                let messaggio = crate::telegram_finto::messaggio(testo);
+                handle_message(&bot, &messaggio, &pool, &sessions, testo)
+                    .await
+                    .expect("testo");
+            }
+
+            assert_eq!(quantita_e_prezzo(&pool, voce).await, (None, Some(250)));
+        })
+        .await;
+    }
 }
 
 // ===========================================================================
@@ -6434,6 +6779,19 @@ impl ListaSpesaSessionStore {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .remove(&chat_id);
+    }
+
+    /// Cosa dire a chi esce da questa attesa con `🏠 Menù principale`,
+    /// quando "❌ Operazione annullata." sarebbe falso.
+    pub fn avviso_uscita(&self, chat_id: i64) -> Option<&'static str> {
+        match self.get(chat_id)? {
+            // La spesa è già chiusa: si lascia solo il totale (collaudo di
+            // 9307a33, H3.5b).
+            ListaSpesaConversationState::AwaitingTotaleSpesa { .. } => {
+                Some("✅ Spesa chiusa. Il totale dello scontrino non l'ho segnato.")
+            }
+            _ => None,
+        }
     }
 
     pub fn has_active(&self, chat_id: i64) -> bool {
@@ -6938,8 +7296,16 @@ pub async fn handle_message(
                 )
                 .await?;
             }
+            // Di nuovo la domanda intera, con l'errore in testa: prima restava
+            // solo l'errore, e non si capiva più di cosa si stesse scrivendo
+            // la quantità (collaudo di 9307a33, H1.1).
             Err(errore) => {
-                bot.send_message(msg.chat.id, format!("⚠️ {errore}"))
+                let testo = format!(
+                    "⚠️ {}\n\n{}",
+                    spiega_errore_quantita(errore, unita_default.as_deref()),
+                    testo_scelta_quantita_catalogo(&descrizione, unita_default.as_deref())
+                );
+                bot.send_message(msg.chat.id, testo)
                     .reply_markup(annulla_keyboard())
                     .await?;
             }
@@ -7001,15 +7367,11 @@ pub async fn handle_message(
         }
         ListaSpesaConversationState::AwaitingPrezzo { voce_id } => {
             let Some(centesimi) = crate::modules::mercato::interpreta_prezzo(text) else {
-                mostra_presa(
-                    bot,
-                    msg.chat.id,
-                    pool,
-                    sessions,
-                    voce_id,
-                    Some("⚠️ Scrivi un prezzo, ad esempio 1,29."),
-                )
-                .await?;
+                // Si resta sul prezzo: fino al 29 settembre 2026 qui si
+                // tornava al pannello della quantità, e il prezzo riscritto
+                // diventava "presi 2,5 g" (collaudo di 9307a33, H1-P1).
+                let errore = crate::modules::mercato::errore_prezzo(text);
+                chiedi_prezzo(bot, msg.chat.id, pool, sessions, voce_id, Some(errore)).await?;
                 return Ok(true);
             };
             let negozio = trova_lista_attiva(pool)
@@ -7077,7 +7439,10 @@ Quando ci sarà la sezione Soldi diventerà una spesa registrata.",
                 salva_presa(bot, msg.chat.id, pool, voce_id, quantita, &unita, None).await?;
             }
             Err(errore) => {
-                let avviso = format!("⚠️ {errore}");
+                let avviso = format!(
+                    "⚠️ {}",
+                    spiega_errore_quantita(errore, unita_default.as_deref())
+                );
                 mostra_presa(bot, msg.chat.id, pool, sessions, voce_id, Some(&avviso)).await?;
             }
         },
@@ -7538,8 +7903,18 @@ pub async fn handle_callback(
             invalid(bot, chat_id).await?;
             return Ok(true);
         };
+        // Il nome nella domanda: una conferma irreversibile deve dire cosa
+        // elimina (collaudo di 9307a33, H6.1b).
+        let nome: Option<String> =
+            sqlx::query_scalar("SELECT descrizione FROM liste_spesa_voci WHERE id = ?")
+                .bind(voce_id)
+                .fetch_optional(pool)
+                .await
+                .ok()
+                .flatten();
+        let cosa = nome.map_or_else(|| "questa voce".to_string(), |nome| format!("«{nome}»"));
         let (testo, markup) = conferma_eliminazione_markup(
-            "questa voce",
+            &cosa,
             &format!("lista_spesa:remove:yes:manuale:{voce_id}"),
             "lista_spesa:remove",
         );
@@ -7553,8 +7928,26 @@ pub async fn handle_callback(
             invalid(bot, chat_id).await?;
             return Ok(true);
         };
+        let nome: Option<(String, f64, String)> = sqlx::query_as(
+            "SELECT descrizione_snapshot, quantita, unita_simbolo \
+             FROM liste_spesa_aggiunte_catalogo WHERE id = ?",
+        )
+        .bind(aggiunta_id)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten();
+        let cosa = nome.map_or_else(
+            || "questa voce".to_string(),
+            |(nome, quantita, unita)| {
+                format!(
+                    "«{nome}» ({} chiesti)",
+                    crate::modules::dispensa::formatta_quantita_leggibile(quantita, &unita)
+                )
+            },
+        );
         let (testo, markup) = conferma_eliminazione_markup(
-            "questa voce",
+            &cosa,
             &format!("lista_spesa:remove:yes:catalogo:{aggiunta_id}"),
             "lista_spesa:remove",
         );
@@ -7712,21 +8105,7 @@ pub async fn handle_callback(
             invalid(bot, chat_id).await?;
             return Ok(true);
         };
-        sessions.set(
-            chat_id.0,
-            ListaSpesaConversationState::AwaitingPrezzo { voce_id },
-        );
-        bot.send_message(
-            chat_id,
-            "💶 Quanto è costato?
-
-Scrivi il prezzo pagato, ad esempio 1,29.",
-        )
-        .reply_markup(InlineKeyboardMarkup::new(vec![vec![
-            button("❌ Annulla", "lista_spesa:back"),
-            button("🏠 Menù principale", "menu:main"),
-        ]]))
-        .await?;
+        chiedi_prezzo(bot, chat_id, pool, sessions, voce_id, None).await?;
         return Ok(true);
     }
     if let Some(raw) = data.strip_prefix("lista_spesa:ean:") {
@@ -8398,6 +8777,29 @@ fn etichetta_rimovibile(voce: &VoceRimovibile) -> String {
     format!("🗑️ {}{quantita}", liste::tronca(&voce.descrizione, 30))
 }
 
+/// Le etichette di tutte le voci da rimuovere. Due aggiunte uguali (stesso
+/// nome, stessa quantità) erano due pulsanti identici: ora portano il
+/// numero d'ordine **davanti** — il dettaglio che distingue va all'inizio,
+/// perché è la fine che Telegram taglia (C19) — nell'ordine in cui le hai
+/// aggiunte (collaudo di 9307a33, H1.10).
+fn etichette_rimovibili(voci: &[VoceRimovibile]) -> Vec<String> {
+    let base: Vec<String> = voci.iter().map(etichetta_rimovibile).collect();
+    base.iter()
+        .enumerate()
+        .map(|(indice, etichetta)| {
+            let uguali = base.iter().filter(|altra| *altra == etichetta).count();
+            if uguali < 2 {
+                return etichetta.clone();
+            }
+            let posizione = base[..=indice]
+                .iter()
+                .filter(|altra| *altra == etichetta)
+                .count();
+            etichetta.replacen("🗑️ ", &format!("🗑️ {posizione}ª · "), 1)
+        })
+        .collect()
+}
+
 /// Modalità dedicata per rimuovere una voce manuale o un'aggiunta dal
 /// catalogo (chiesto da Alessio dopo un collaudo dal vivo: prima non era
 /// possibile rimuovere né l'una né l'altra). Le righe `generato`
@@ -8457,6 +8859,12 @@ async fn show_lista_rimuovi(
         testo.push_str("\n\n");
     }
     testo.push_str("🗑️ Rimuovi voci\n\nSolo le voci aggiunte a mano o dal catalogo: quelle generate dai pasti pianificati le gestisce il planner.");
+    // "500 g chiesti" qui e "300 g" in lista sembravano due numeri in
+    // contraddizione (collaudo di 9307a33, H1.10): qui c'è la richiesta,
+    // in lista quello che manca ancora.
+    if !voci.is_empty() {
+        testo.push_str("\n\nLa quantità è quella che avevi chiesto: in lista vedi quella che manca ancora, tolto quello che hai in casa o hai già preso.");
+    }
     // Qui si vede anche quello che in lista non compare, perche' in casa
     // ce n'e' gia' abbastanza: senza dirlo sembra una voce fantasma
     // (Alessio, collaudo del 24 settembre 2026).
@@ -8486,13 +8894,14 @@ async fn show_lista_rimuovi(
 
     let mut rows: Vec<Vec<InlineKeyboardButton>> = voci
         .iter()
-        .map(|voce| {
+        .zip(etichette_rimovibili(&voci))
+        .map(|(voce, etichetta)| {
             let prefisso = match voce.origine {
                 OrigineRimovibile::Manuale => "manuale",
                 OrigineRimovibile::Catalogo => "catalogo",
             };
             vec![button(
-                etichetta_rimovibile(voce),
+                etichetta,
                 format!("lista_spesa:remove:ask:{prefisso}:{}", voce.id),
             )]
         })
@@ -8561,11 +8970,24 @@ async fn mostra_ultima_chiusura(
                     "voci"
                 },
             ));
+            // Il totale c'è sempre, anche quando manca: prima la schermata
+            // non diceva né quanto né che non l'avevi scritto (collaudo di
+            // 9307a33, H3.5).
+            match chiusura.totale_centesimi {
+                Some(centesimi) => testo.push_str(&format!(
+                    "💶 Totale: {}\n\n",
+                    crate::modules::mercato::formatta_euro(centesimi)
+                )),
+                None => testo.push_str("💶 Totale dello scontrino non segnato.\n\n"),
+            }
             for voce in &voci {
                 let quantita = match (voce.quantita, &voce.unita_simbolo) {
-                    (Some(valore), Some(unita)) => {
-                        format!(" · {} {unita}", formatta_quantita(valore))
-                    }
+                    // "1 kg" come nella lista e in Dispensa, non "1000 g"
+                    // (collaudo di 9307a33, M2).
+                    (Some(valore), Some(unita)) => format!(
+                        " · {}",
+                        crate::modules::dispensa::formatta_quantita_leggibile(valore, unita)
+                    ),
                     _ => String::new(),
                 };
                 testo.push_str(&format!("✅ {}{quantita}\n", voce.descrizione));
@@ -8647,6 +9069,46 @@ struct VocePresa {
 /// giusta al grammo (servono 250 g, c'è quella da 300 g). Qui si sceglie
 /// una confezione registrata o si scrive quanto si è preso; alla chiusura
 /// entra in casa quello.
+/// Chiede il prezzo di una voce e resta ad aspettarlo. Anche dopo un prezzo
+/// scritto male si ripassa da qui, con l'errore in testa: il messaggio e
+/// l'attesa devono dire la stessa cosa.
+async fn chiedi_prezzo(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    sessions: &ListaSpesaSessionStore,
+    voce_id: i64,
+    errore: Option<&str>,
+) -> ResponseResult<()> {
+    let descrizione: Option<String> =
+        sqlx::query_scalar("SELECT descrizione FROM liste_spesa_voci WHERE id = ?")
+            .bind(voce_id)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten();
+    sessions.set(
+        chat_id.0,
+        ListaSpesaConversationState::AwaitingPrezzo { voce_id },
+    );
+    let mut testo = String::new();
+    if let Some(errore) = errore {
+        testo.push_str(&format!("⚠️ {errore}\n\n"));
+    }
+    match descrizione {
+        Some(descrizione) => testo.push_str(&format!("💶 {descrizione}: quanto è costato?")),
+        None => testo.push_str("💶 Quanto è costato?"),
+    }
+    testo.push_str("\n\nScrivi il prezzo pagato, ad esempio 1,29.");
+    bot.send_message(chat_id, testo)
+        .reply_markup(InlineKeyboardMarkup::new(vec![vec![
+            button("❌ Annulla", "lista_spesa:back"),
+            button("🏠 Menù principale", "menu:main"),
+        ]]))
+        .await?;
+    Ok(())
+}
+
 async fn mostra_presa(
     bot: &Bot,
     chat_id: ChatId,
@@ -8716,13 +9178,18 @@ async fn mostra_presa(
     }
     testo.push_str(&format!("📦 {}\n\n", voce.descrizione));
     if let (Some(valore), Some(unita)) = (voce.quantita, &voce.unita_simbolo) {
+        // Nell'unità della lista: "Servono: 1000000200 g." era illeggibile
+        // accanto a "1000000,2 kg" (collaudo di 9307a33, H6.2b).
         testo.push_str(&format!(
-            "Servono: {} {unita}.\n",
-            formatta_quantita(valore)
+            "Servono: {}.\n",
+            crate::modules::dispensa::formatta_quantita_leggibile(valore, unita)
         ));
     }
     if let (Some(valore), Some(unita)) = (voce.quantita_presa, &voce.unita_presa) {
-        testo.push_str(&format!("Presi: {} {unita}.\n", formatta_quantita(valore)));
+        testo.push_str(&format!(
+            "Presi: {}.\n",
+            crate::modules::dispensa::formatta_quantita_leggibile(valore, unita)
+        ));
     }
     // L'ultimo prezzo visto per questa roba, con la data: al supermercato
     // serve proprio a sapere se quello sullo scaffale e' buono (18 settembre
@@ -9213,10 +9680,16 @@ async fn riferimento_voce(pool: &SqlitePool, voce_id: i64, centesimi: i64) -> Op
     };
     let (per_riferimento, riferimento) =
         crate::modules::mercato::prezzo_al_riferimento(centesimi, quantita, unita.as_deref())?;
-    Some(format!(
+    let mut testo = format!(
         "{} al {riferimento}",
         crate::modules::mercato::formatta_euro(per_riferimento)
-    ))
+    );
+    // Salvato comunque, ma detto: un numero così è quasi sempre un errore
+    // nella quantità presa o nel prezzo (collaudo di 9307a33, H1-P3).
+    if crate::modules::mercato::prezzo_fuori_scala(per_riferimento, riferimento) {
+        testo.push_str(" — ⚠️ è tanto: controlla la quantità presa e il prezzo");
+    }
+    Some(testo)
 }
 
 /// Salva il totale dello scontrino sulla chiusura appena fatta. È
@@ -9486,24 +9959,7 @@ async fn show_lista(
     let mut dettagli_voci: Vec<String> = Vec::new();
     for voce in &voci {
         let mut parti: Vec<String> = Vec::new();
-        if let (Some(valore), Some(unita)) = (voce.quantita_presa, &voce.unita_presa) {
-            let mut presa = format!("📦 {} {unita}", formatta_quantita(valore));
-            // Preso piu' di quanto serviva: e' normale, le confezioni sono
-            // quelle che sono, e per questo la nota e' neutra e non un "⚠️"
-            // (C4: l'allarme si usa per le cose che non vanno). Serve solo a
-            // far quadrare i numeri: 1000 g presi dove ne servivano 500
-            // (Alessio, collaudo del 25 settembre 2026, punto P3).
-            if let (Some(serviva), Some(unita_serviva)) = (voce.quantita, &voce.unita_simbolo) {
-                if unita_serviva == unita && valore > serviva + TOLLERANZA_QUANTITA {
-                    presa.push_str(&format!(
-                        " · ne servivano {}",
-                        crate::modules::dispensa::formatta_quantita_leggibile(
-                            serviva,
-                            unita_serviva
-                        )
-                    ));
-                }
-            }
+        if let Some(presa) = riga_presa(voce) {
             parti.push(presa);
         }
         if let Some(centesimi) = voce.prezzo_centesimi {
@@ -9544,33 +10000,7 @@ async fn show_lista(
 
     let mut rows: Vec<Vec<InlineKeyboardButton>> = Vec::new();
     for voce in &voci {
-        let icona = if voce.comprato != 0 { "✅" } else { "☐" };
-        // "1,5 l", non "1500 ml": la lista aggrega nell'unita' di base, ma chi
-        // legge ha scritto "1,5 l" e in "Rimuovi voci" lo ritrovava scritto
-        // cosi' -- due numeri diversi per la stessa cosa (24 settembre 2026).
-        let quantita = match (voce.quantita, &voce.unita_simbolo) {
-            (Some(valore), Some(unita)) => Some(
-                crate::modules::dispensa::formatta_quantita_leggibile(valore, unita),
-            ),
-            _ => None,
-        };
-        // **La quantita' davanti al nome**, e il nome corto.
-        //
-        // Telegram non manda a capo le etichette dei pulsanti (C19), e questo
-        // pulsante e' largo **mezza riga** perche' accanto c'e' "📦": il 24
-        // settembre avevo messo il nome davanti tagliato a 24 caratteri, e
-        // Alessio si e' ritrovato "☐ Parmigiano Reggiano · 270" senza la "g" e
-        // "· 37" senza uno zero (collaudo del 25 settembre, punto P1). La
-        // quantita' e' la cosa che non si puo' perdere -- e' quella che si
-        // guarda davanti allo scaffale -- quindi va prima, e il nome intero si
-        // legge nel testo qui sopra.
-        let etichetta = match &quantita {
-            Some(quantita) => format!(
-                "{icona} {quantita} · {}",
-                liste::tronca(&voce.descrizione, 14)
-            ),
-            None => format!("{icona} {}", liste::tronca(&voce.descrizione, 22)),
-        };
+        let etichetta = etichetta_voce(voce);
         let mut riga = vec![button(etichetta, format!("lista_spesa:toggle:{}", voce.id))];
         // "📦 Ho preso…" dove c'è una quantità da correggere, e sulle voci del
         // catalogo senza quantità: è da lì che si dice quanto se ne è preso, e

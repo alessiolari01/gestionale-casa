@@ -50,6 +50,16 @@ impl SessionStore {
         self.with_sessions(|sessions| sessions.keys().copied().collect())
     }
 
+    /// Il nome della scheda aperta e non ancora salvata, se ce n'è una:
+    /// chi preme `🏠 Menù principale` con una scheda compilata deve poter
+    /// dire se buttarla (collaudo di 9307a33, H3.1b).
+    pub fn bozza_non_salvata(&self, chat_id: i64) -> Option<String> {
+        match self.get(chat_id)? {
+            ConversationState::EditingObject { draft, .. } => Some(draft.name.clone()),
+            _ => None,
+        }
+    }
+
     fn get(&self, chat_id: i64) -> Option<ConversationState> {
         self.with_sessions(|sessions| sessions.get(&chat_id).cloned())
     }
@@ -476,10 +486,14 @@ pub async fn handle_message(
                     send_draft_panel(bot, msg.chat.id, &draft).await?;
                 }
             } else {
+                // Con la stessa tastiera della richiesta: il testo nominava
+                // ❌ Annulla e sotto c'era solo 💡 Migliora (collaudo di
+                // 9307a33, H4.4).
                 bot.send_message(
                     msg.chat.id,
-                    "Il nome non può essere vuoto e deve restare entro 120 caratteri. Riprova oppure premi ❌ Annulla.",
+                    "⚠️ Il nome non può essere vuoto e deve restare entro 120 caratteri.",
                 )
+                .reply_markup(cancel_keyboard())
                 .await?;
             }
             Ok(true)
@@ -504,7 +518,7 @@ pub async fn handle_message(
                 return Ok(true);
             };
 
-            apply_field_input(bot, msg.chat.id, chat_id, sessions, *draft, field, text).await?;
+            apply_field_input(bot, pool, msg.chat.id, sessions, *draft, field, text).await?;
             Ok(true)
         }
     }
@@ -1317,13 +1331,14 @@ async fn set_draft_field(
 
 async fn apply_field_input(
     bot: &Bot,
+    pool: &SqlitePool,
     chat_id: ChatId,
-    raw_chat_id: i64,
     sessions: &SessionStore,
     mut draft: ObjectDraft,
     field: DraftField,
     input: &str,
 ) -> ResponseResult<()> {
+    let raw_chat_id = chat_id.0;
     let cleaned = clean_optional(input, 500);
 
     match field {
@@ -1363,8 +1378,8 @@ async fn apply_field_input(
             draft.position = clean_optional(input, 160);
             finish_field(bot, chat_id, raw_chat_id, sessions, draft).await?;
         }
-        DraftField::PurchaseDate => match parse_date_to_iso(input) {
-            Some(date) => {
+        DraftField::PurchaseDate => match leggi_data_acquisto(input, &oggi(pool).await) {
+            Ok(date) => {
                 draft.purchase_date = Some(date);
                 let prompt = field_prompt(DraftField::PurchasePrice, &draft);
                 let keyboard = field_keyboard(DraftField::PurchasePrice, &draft);
@@ -1379,13 +1394,10 @@ async fn apply_field_input(
                     .reply_markup(keyboard)
                     .await?;
             }
-            None => {
-                bot.send_message(
-                    chat_id,
-                    "⚠️ Data non valida. Usa GG/MM/AAAA oppure AAAA-MM-GG, per esempio 14/05/2025.",
-                )
-                .reply_markup(field_keyboard(DraftField::PurchaseDate, &draft))
-                .await?;
+            Err(errore) => {
+                bot.send_message(chat_id, errore.messaggio(&oggi(pool).await))
+                    .reply_markup(field_keyboard(DraftField::PurchaseDate, &draft))
+                    .await?;
             }
         },
         DraftField::PurchasePrice => match parse_money_to_cents(input) {
@@ -1674,7 +1686,16 @@ async fn send_object_list(
                     chat_id,
                     "📋 Non ci sono ancora oggetti registrati.\n\nQui compariranno quelli che aggiungi, con marca, prezzo e dove stanno.",
                 )
-                .reply_markup(objects_menu_keyboard())
+                // Il pulsante che rimedia (C8), e un Indietro che torna agli
+                // Oggetti: con la tastiera del menù Oggetti portava al menù
+                // principale (collaudo di 9307a33, H3.1).
+                .reply_markup(InlineKeyboardMarkup::new(vec![
+                    vec![button("➕ Nuovo oggetto", "oggetti:new")],
+                    vec![
+                        button("⬅️ Indietro", "oggetti:menu"),
+                        button("🏠 Menù principale", "menu:main"),
+                    ],
+                ]))
                 .await?;
                 return Ok(());
             }
@@ -3153,7 +3174,7 @@ fn field_prompt(field: DraftField, draft: &ObjectDraft) -> String {
         DraftField::Model => "🏷 Inserisci il modello.".to_string(),
         DraftField::Position if draft.is_update() => "📌 Inserisci un dettaglio libero della posizione.\nEsempio: scaffale 2, cassetto alto.\nCasa e stanza si cambiano dalla scheda dell'oggetto con 🚚 Sposta oggetto.".to_string(),
         DraftField::Position => "📌 Campo posizione legacy. Non viene più usato per i nuovi oggetti.".to_string(),
-        DraftField::PurchaseDate => "📅 Inserisci la data di acquisto (GG/MM/AAAA o AAAA-MM-GG).".to_string(),
+        DraftField::PurchaseDate => "📅 Inserisci la data di acquisto (GG/MM/AAAA o AAAA-MM-GG), oppure scrivi «oggi» o «ieri».".to_string(),
         DraftField::PurchasePrice => "💶 Inserisci il prezzo pagato.\nEsempio: 89,90".to_string(),
         DraftField::Seller => "🏪 Inserisci negozio o venditore.\nEsempio: Amazon".to_string(),
         DraftField::Notes => "📝 Inserisci le note.".to_string(),
@@ -3265,32 +3286,85 @@ fn parse_money_to_cents(input: &str) -> Option<i64> {
     euros.checked_mul(100)?.checked_add(cents)
 }
 
-fn parse_date_to_iso(input: &str) -> Option<String> {
+/// Oggi in ora locale, `AAAA-MM-GG`, dal database come nel resto del bot.
+async fn oggi(pool: &SqlitePool) -> String {
+    sqlx::query_scalar("SELECT date('now','localtime')")
+        .fetch_one(pool)
+        .await
+        .unwrap_or_else(|_| "2200-12-31".to_string())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ErroreData {
+    Formato,
+    TroppoVecchia,
+    NelFuturo,
+}
+
+impl ErroreData {
+    fn messaggio(self, oggi: &str) -> String {
+        match self {
+            Self::Formato => "⚠️ Data non valida. Usa GG/MM/AAAA oppure AAAA-MM-GG, per esempio 14/05/2025, oppure scrivi «oggi» o «ieri».".to_string(),
+            Self::TroppoVecchia => "⚠️ Data troppo vecchia: si accettano date dal 1900 in poi.".to_string(),
+            Self::NelFuturo => format!(
+                "⚠️ Un acquisto non può essere nel futuro: oggi è {}.",
+                crate::modules::calendario::display_date(oggi)
+            ),
+        }
+    }
+}
+
+/// La data d'acquisto scritta a mano, con `oggi` (`AAAA-MM-GG`, ora locale)
+/// passato da fuori. Accetta «oggi» e «ieri», rifiuta il futuro e dice
+/// perché ha rifiutato: fino al 29 settembre 2026 `31/12/2099` passava, e
+/// `01/01/1800` riceveva "usa GG/MM/AAAA" (collaudo di 9307a33).
+fn leggi_data_acquisto(input: &str, oggi: &str) -> Result<String, ErroreData> {
+    let (anno_oggi, mese_oggi, giorno_oggi) = componenti_data(oggi).ok_or(ErroreData::Formato)?;
+    let oggi_data = chrono::NaiveDate::from_ymd_opt(anno_oggi, mese_oggi, giorno_oggi)
+        .ok_or(ErroreData::Formato)?;
+    let data = match input.trim().to_lowercase().as_str() {
+        "oggi" => oggi_data,
+        "ieri" => oggi_data.pred_opt().ok_or(ErroreData::Formato)?,
+        _ => {
+            let (anno, mese, giorno) = componenti_data(input).ok_or(ErroreData::Formato)?;
+            if anno < 1900 && valid_date(2000, mese, giorno) {
+                return Err(ErroreData::TroppoVecchia);
+            }
+            if !valid_date(anno, mese, giorno) {
+                return Err(ErroreData::Formato);
+            }
+            chrono::NaiveDate::from_ymd_opt(anno, mese, giorno).ok_or(ErroreData::Formato)?
+        }
+    };
+    if data > oggi_data {
+        return Err(ErroreData::NelFuturo);
+    }
+    use chrono::Datelike;
+    Ok(format!(
+        "{:04}-{:02}-{:02}",
+        data.year(),
+        data.month(),
+        data.day()
+    ))
+}
+
+/// Anno, mese e giorno da `GG/MM/AAAA` o `AAAA-MM-GG`, senza controllare
+/// che la data esista.
+fn componenti_data(input: &str) -> Option<(i32, u32, u32)> {
     let value = input.trim();
-    let (year, month, day) = if value.contains('/') {
+    if value.contains('/') {
         let mut parts = value.split('/');
         let day = parts.next()?.parse::<u32>().ok()?;
         let month = parts.next()?.parse::<u32>().ok()?;
         let year = parts.next()?.parse::<i32>().ok()?;
-        if parts.next().is_some() {
-            return None;
-        }
-        (year, month, day)
+        parts.next().is_none().then_some((year, month, day))
     } else {
         let mut parts = value.split('-');
         let year = parts.next()?.parse::<i32>().ok()?;
         let month = parts.next()?.parse::<u32>().ok()?;
         let day = parts.next()?.parse::<u32>().ok()?;
-        if parts.next().is_some() {
-            return None;
-        }
-        (year, month, day)
-    };
-
-    if !valid_date(year, month, day) {
-        return None;
+        parts.next().is_none().then_some((year, month, day))
     }
-    Some(format!("{year:04}-{month:02}-{day:02}"))
 }
 
 fn valid_date(year: i32, month: u32, day: u32) -> bool {
@@ -3314,7 +3388,7 @@ fn format_money(cents: i64) -> String {
 /// Le date degli oggetti seguono la regola di tutto il bot (C17, `Mer 14
 /// Mag 2025`): prima questo modulo aveva una sua copia che scriveva
 /// `14/05/2025`, e la regola delle date leggibili qui non valeva. Resta il
-/// formato numerico solo per scriverle a mano (`parse_date_to_iso`).
+/// formato numerico solo per scriverle a mano (`leggi_data_acquisto`).
 fn display_date(iso: &str) -> String {
     crate::modules::calendario::display_date(iso)
 }
@@ -3395,21 +3469,93 @@ mod tests {
     }
 
     #[test]
+    fn una_scheda_compilata_si_riconosce_come_non_salvata() {
+        let sessions = SessionStore::new();
+        assert_eq!(sessions.bozza_non_salvata(1), None);
+        sessions.set(
+            1,
+            ConversationState::EditingObject {
+                draft: Box::new(ObjectDraft::new("Collaudo lampada").expect("bozza")),
+                field: None,
+            },
+        );
+        assert_eq!(
+            sessions.bozza_non_salvata(1).as_deref(),
+            Some("Collaudo lampada")
+        );
+        // Una ricerca non è una scheda: nessuna domanda.
+        sessions.set(1, ConversationState::AwaitingSearch);
+        assert_eq!(sessions.bozza_non_salvata(1), None);
+    }
+
+    /// Collaudo di 9307a33: `31/12/2099` veniva accettata come data
+    /// d'acquisto e mostrata sulla scheda (H1-D3); `01/01/1800` era
+    /// rifiutata con "usa GG/MM/AAAA" a chi l'aveva scritta proprio così
+    /// (H1-D2); "ieri" non veniva capito (H1-D1).
+    #[test]
+    fn data_di_acquisto_come_la_scrive_una_persona() {
+        let oggi = "2026-09-29";
+        assert_eq!(
+            leggi_data_acquisto("31/12/2099", oggi),
+            Err(ErroreData::NelFuturo)
+        );
+        assert_eq!(
+            leggi_data_acquisto("30/09/2026", oggi),
+            Err(ErroreData::NelFuturo)
+        );
+        assert_eq!(
+            leggi_data_acquisto("29/09/2026", oggi),
+            Ok("2026-09-29".to_string())
+        );
+        assert_eq!(
+            leggi_data_acquisto("oggi", oggi),
+            Ok("2026-09-29".to_string())
+        );
+        assert_eq!(
+            leggi_data_acquisto(" Ieri ", oggi),
+            Ok("2026-09-28".to_string())
+        );
+        assert_eq!(
+            leggi_data_acquisto("ieri", "2026-03-01"),
+            Ok("2026-02-28".to_string())
+        );
+        assert_eq!(
+            leggi_data_acquisto("01/01/1800", oggi),
+            Err(ErroreData::TroppoVecchia)
+        );
+        assert_eq!(
+            leggi_data_acquisto("32/13/2026", oggi),
+            Err(ErroreData::Formato)
+        );
+        assert_eq!(
+            leggi_data_acquisto("2026-02-30", oggi),
+            Err(ErroreData::Formato)
+        );
+    }
+
+    #[test]
     fn date_vengono_normalizzate_e_validate() {
+        let oggi = "2030-01-01";
         assert_eq!(
-            parse_date_to_iso("14/05/2025").as_deref(),
-            Some("2025-05-14")
+            leggi_data_acquisto("14/05/2025", oggi).as_deref(),
+            Ok("2025-05-14")
         );
         assert_eq!(
-            parse_date_to_iso("2025-05-14").as_deref(),
-            Some("2025-05-14")
+            leggi_data_acquisto("2025-05-14", oggi).as_deref(),
+            Ok("2025-05-14")
         );
         assert_eq!(
-            parse_date_to_iso("29/02/2024").as_deref(),
-            Some("2024-02-29")
+            leggi_data_acquisto("29/02/2024", oggi).as_deref(),
+            Ok("2024-02-29")
         );
-        assert_eq!(parse_date_to_iso("29/02/2025"), None);
-        assert_eq!(parse_date_to_iso("31/04/2025"), None);
+        assert_eq!(
+            leggi_data_acquisto("29/02/2025", oggi),
+            Err(ErroreData::Formato)
+        );
+        assert_eq!(
+            leggi_data_acquisto("31/04/2025", oggi),
+            Err(ErroreData::Formato)
+        );
     }
 
     #[test]

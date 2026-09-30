@@ -10,6 +10,8 @@ mod db;
 mod identity;
 mod modules;
 mod resource_permissions;
+#[cfg(test)]
+mod telegram_finto;
 
 use std::{
     collections::HashMap,
@@ -268,6 +270,121 @@ struct HandlerDependencies {
     shutdown_controller: ShutdownController,
     modalita_riservata: ModalitaRiservata,
     collaudo_store: CollaudoStore,
+}
+
+/// Tutte le attese di testo di una chat, per poterle chiudere insieme.
+///
+/// Ogni modulo tiene la sua, e fino al 29 settembre 2026 ogni ramo di questo
+/// file ne chiudeva a mano un gruppo diverso: `/start` ne chiudeva sei su
+/// tredici, e il menù aperto da "⚠️ Questa schermata non è più attiva"
+/// nessuna. Il risultato era uno **stato nascosto** — sullo schermo il menù
+/// principale, e il bot ancora ad aspettare la ricerca degli Oggetti o la
+/// quantità di una scorta (collaudo di 9307a33, H3.3 e H3.4).
+#[derive(Clone, Default)]
+struct Procedure {
+    sessions: SessionStore,
+    location_sessions: LocationSessionStore,
+    container_sessions: ContainerSessionStore,
+    photo_sessions: PhotoSessionStore,
+    food_sessions: FoodSessionStore,
+    profile_sessions: ProfileSessionStore,
+    improvement_sessions: ImprovementSessionStore,
+    recipe_sessions: RecipeSessionStore,
+    identity_sessions: IdentitySessionStore,
+    distribuzione_sessions: DistribuzioneSessionStore,
+    lista_spesa_sessions: ListaSpesaSessionStore,
+    dispensa_sessions: DispensaSessionStore,
+    turni_sessions: TurniSessionStore,
+}
+
+impl Procedure {
+    fn da(deps: &HandlerDependencies) -> Self {
+        Self {
+            sessions: deps.sessions.clone(),
+            location_sessions: deps.location_sessions.clone(),
+            container_sessions: deps.container_sessions.clone(),
+            photo_sessions: deps.photo_sessions.clone(),
+            food_sessions: deps.food_sessions.clone(),
+            profile_sessions: deps.profile_sessions.clone(),
+            improvement_sessions: deps.improvement_sessions.clone(),
+            recipe_sessions: deps.recipe_sessions.clone(),
+            identity_sessions: deps.identity_sessions.clone(),
+            distribuzione_sessions: deps.distribuzione_sessions.clone(),
+            lista_spesa_sessions: deps.lista_spesa_sessions.clone(),
+            dispensa_sessions: deps.dispensa_sessions.clone(),
+            turni_sessions: deps.turni_sessions.clone(),
+        }
+    }
+
+    /// Vero se la chat ha un'attesa aperta in un modulo qualsiasi.
+    fn qualcuna_attiva(&self, chat_id: i64) -> bool {
+        self.sessions.has_active(chat_id)
+            || self.location_sessions.has_active(chat_id)
+            || self.container_sessions.has_active(chat_id)
+            || self.photo_sessions.has_active(chat_id)
+            || self.food_sessions.has_active(chat_id)
+            || self.profile_sessions.has_active(chat_id)
+            || self.improvement_sessions.has_active(chat_id)
+            || self.recipe_sessions.has_active(chat_id)
+            || self.identity_sessions.has_active(chat_id)
+            || self.distribuzione_sessions.has_active(chat_id)
+            || self.lista_spesa_sessions.has_active(chat_id)
+            || self.dispensa_sessions.has_active(chat_id)
+            || self.turni_sessions.has_active(chat_id)
+    }
+
+    /// Chiude ogni attesa della chat, comprese le due che non stanno in una
+    /// mappa di sessione: l'orario scritto a mano degli inviti e quello del
+    /// planner.
+    fn chiudi_tutte(&self, chat_id: i64) {
+        self.sessions.clear_chat(chat_id);
+        self.location_sessions.clear_chat(chat_id);
+        self.container_sessions.clear_chat(chat_id);
+        self.photo_sessions.clear_chat(chat_id);
+        self.food_sessions.clear_chat(chat_id);
+        self.profile_sessions.clear_chat(chat_id);
+        self.improvement_sessions.clear_chat(chat_id);
+        self.recipe_sessions.clear_chat(chat_id);
+        self.identity_sessions.clear_chat(chat_id);
+        self.distribuzione_sessions.clear_chat(chat_id);
+        self.lista_spesa_sessions.clear_chat(chat_id);
+        self.dispensa_sessions.clear_chat(chat_id);
+        self.turni_sessions.clear_chat(chat_id);
+        modules::spazi_membri::clear_pending_input(chat_id);
+        modules::planner_alimentare::chiudi_attesa_orario(chat_id);
+    }
+}
+
+/// "⚠️ Questa schermata non è più attiva": si è premuto un pulsante di una
+/// schermata vecchia, e si riparte dal menù principale.
+async fn schermata_non_piu_attiva(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    actor: &identity::AuditActor,
+    procedure: &Procedure,
+) -> ResponseResult<()> {
+    // Il menù principale è una ripartenza: niente deve restare ad aspettare
+    // un testo dietro di lui (collaudo di 9307a33, H3.3).
+    procedure.chiudi_tutte(chat_id.0);
+    let is_admin = identity::is_system_admin(pool, actor)
+        .await
+        .unwrap_or(false);
+    let badge = badge_miglioramenti(pool, actor).await;
+    let badge_alimentazione = badge_alimentazione(pool, actor).await;
+    let funzioni = modules::impostazioni::funzioni(pool).await;
+    bot.send_message(
+        chat_id,
+        "⚠️ Questa schermata non è più attiva. Ho aperto un nuovo Menù principale.",
+    )
+    .reply_markup(modules::oggetti::main_menu_keyboard(
+        is_admin,
+        badge_alimentazione,
+        badge,
+        &funzioni,
+    ))
+    .await?;
+    Ok(())
 }
 
 /// Vera solo quando la modalità riservata è attiva e chi scrive non è
@@ -816,6 +933,30 @@ async fn handle_authorized_message(
 ) -> ResponseResult<()> {
     let chat_id = msg.chat.id.0;
 
+    // `/start` è la via d'uscita di Telegram, e deve esserlo anche a metà di
+    // una procedura: si chiude ogni attesa **prima** che un modulo legga il
+    // testo. Fino al 29 settembre 2026 la Dispensa, in attesa di una
+    // quantità, rispondeva a `/start` "⚠️ Scrivi quantità e unità"
+    // (collaudo di 9307a33, H3.4).
+    let procedure = Procedure {
+        sessions: sessions.clone(),
+        location_sessions: location_sessions.clone(),
+        container_sessions: container_sessions.clone(),
+        photo_sessions: photo_sessions.clone(),
+        food_sessions: food_sessions.clone(),
+        profile_sessions: profile_sessions.clone(),
+        improvement_sessions: improvement_sessions.clone(),
+        recipe_sessions: recipe_sessions.clone(),
+        identity_sessions: identity_sessions.clone(),
+        distribuzione_sessions: distribuzione_sessions.clone(),
+        lista_spesa_sessions: lista_spesa_sessions.clone(),
+        dispensa_sessions: dispensa_sessions.clone(),
+        turni_sessions: turni_sessions.clone(),
+    };
+    if msg.text().and_then(first_command) == Some("/start") {
+        procedure.chiudi_tutte(chat_id);
+    }
+
     // Gli inviti spazi possono attendere un orario digitato manualmente.
     // La gestione è attiva solo quando il relativo picker ha aperto l'attesa.
     if modules::spazi_membri::handle_message(&bot, &msg, &pool, &actor).await? {
@@ -906,11 +1047,16 @@ async fn handle_authorized_message(
 
     let Some(text) = msg.text() else {
         if msg.photo().is_some() {
-            bot.send_message(
-                msg.chat.id,
-                "📷 Non sto aspettando una foto. Apri la scheda di un oggetto e usa 📷 Foto → ➕ Aggiungi foto.",
-            )
-            .await?;
+            // Con un'attesa aperta il bot non aspetta "niente": aspetta un
+            // testo, e l'attesa resta viva. Prima diceva di andare in una
+            // scheda oggetto mentre aspettava la quantità di una scorta
+            // (collaudo di 9307a33, H4.3).
+            let testo = if procedure.qualcuna_attiva(chat_id) {
+                "📷 Qui non serve una foto: scrivi quello che ti ho chiesto nel messaggio sopra."
+            } else {
+                "📷 Non sto aspettando una foto. Apri la scheda di un oggetto e usa 📷 Foto → ➕ Aggiungi foto."
+            };
+            bot.send_message(msg.chat.id, testo).await?;
         }
         return respond(());
     };
@@ -1342,11 +1488,11 @@ async fn handle_authorized_message(
             send_status(&bot, msg.chat.id, &pool, &actor).await?;
         }
         Some(_) => {
-            bot.send_message(
-                msg.chat.id,
-                "Comando non riconosciuto.\nUsa il pulsante 🏠 Menù principale.",
-            )
-            .await?;
+            // Con il menù sotto, nello stesso messaggio: prima c'era solo il
+            // testo "Usa il pulsante 🏠 Menù principale", senza quel pulsante
+            // e con il menù di prima cancellato (collaudo di 9307a33, H4.1b).
+            bot.annulla_e_avvisa(chat_id, "⚠️ Comando non riconosciuto.");
+            send_main_menu(&bot, msg.chat.id, &pool, &actor).await?;
         }
         None => {
             let attempts = unexpected_input_count(chat_id);
@@ -1440,25 +1586,15 @@ async fn handle_callback(
         }
     }
 
-    if !bot.claim_callback(chat_id.0, message.id, &data) {
-        let is_admin = identity::is_system_admin(&pool, &actor)
-            .await
-            .unwrap_or(false);
-        let badge = badge_miglioramenti(&pool, &actor).await;
-        let badge_alimentazione = badge_alimentazione(&pool, &actor).await;
-        let funzioni = modules::impostazioni::funzioni(&pool).await;
-        bot.send_message(
-            chat_id,
-            "⚠️ Questa schermata non è più attiva. Ho aperto un nuovo Menù principale.",
-        )
-        .reply_markup(modules::oggetti::main_menu_keyboard(
-            is_admin,
-            badge_alimentazione,
-            badge,
-            &funzioni,
-        ))
-        .await?;
-        return respond(());
+    match bot.rivendica(chat_id.0, message.id, &data) {
+        context_bot::Rivendicazione::Nuova => {}
+        // Un secondo tocco in fretta: il primo sta già lavorando, e la
+        // clessidra di Telegram l'ha già spenta `answer_callback_query`.
+        context_bot::Rivendicazione::AppenaToccata => return respond(()),
+        context_bot::Rivendicazione::Vecchia => {
+            schermata_non_piu_attiva(&bot, chat_id, &pool, &actor, &Procedure::da(&deps)).await?;
+            return respond(());
+        }
     }
 
     bot.cleanup_transient_media(chat_id).await;
@@ -1558,7 +1694,7 @@ async fn handle_authorized_callback(
     // con Alessio il 7 settembre 2026) -- non solo silenziosamente portare
     // al menù. Le stesse dieci mappe già interrogate dal pre-swap
     // dell'automazione (`chat_con_sessione_attiva`).
-    let annullamento_da_sessione = data == "menu:main"
+    let annullamento_da_sessione = (data == "menu:main" || data == "menu:main:scarta")
         && (sessions.has_active(chat_id.0)
             || location_sessions.has_active(chat_id.0)
             || container_sessions.has_active(chat_id.0)
@@ -1572,6 +1708,9 @@ async fn handle_authorized_callback(
             || lista_spesa_sessions.has_active(chat_id.0)
             || dispensa_sessions.has_active(chat_id.0)
             || turni_sessions.has_active(chat_id.0));
+    let avviso_uscita = lista_spesa_sessions
+        .avviso_uscita(chat_id.0)
+        .unwrap_or("❌ Operazione annullata.");
 
     if (data.starts_with("improve:")
         || (data == "menu:main" && improvement_sessions.has_active(chat_id.0)))
@@ -1785,8 +1924,34 @@ async fn handle_authorized_callback(
         return respond(());
     }
 
+    // Una scheda oggetto compilata non si butta al primo tocco su
+    // `🏠 Menù principale`: si chiede (collaudo di 9307a33, H3.1b). La
+    // risposta "sì" è `menu:main:scarta`, che chiude come `menu:main`.
+    if data == "menu:main" {
+        if let Some(nome) = sessions.bozza_non_salvata(chat_id.0) {
+            bot.send_message(
+                chat_id,
+                format!(
+                    "📝 La scheda «{nome}» non è salvata.\n\nLa butto e torno al menù principale?"
+                ),
+            )
+            .reply_markup(InlineKeyboardMarkup::new(vec![
+                vec![InlineKeyboardButton::callback(
+                    "🗑 Sì, buttala",
+                    "menu:main:scarta",
+                )],
+                vec![InlineKeyboardButton::callback(
+                    "⬅️ No, torna alla scheda",
+                    "oggetti:draft:back",
+                )],
+            ]))
+            .await?;
+            return respond(());
+        }
+    }
+
     match data {
-        "menu:main" => {
+        "menu:main" | "menu:main:scarta" => {
             sessions.clear_chat(chat_id.0);
             location_sessions.clear_chat(chat_id.0);
             container_sessions.clear_chat(chat_id.0);
@@ -1801,7 +1966,7 @@ async fn handle_authorized_callback(
             dispensa_sessions.clear_chat(chat_id.0);
             turni_sessions.clear_chat(chat_id.0);
             if annullamento_da_sessione {
-                bot.annulla_e_avvisa(chat_id.0, "❌ Operazione annullata.");
+                bot.annulla_e_avvisa(chat_id.0, avviso_uscita);
             }
             send_main_menu(&bot, chat_id, &pool, &actor).await?;
         }
@@ -3407,6 +3572,205 @@ mod runtime_tests {
     #[test]
     fn runtime_tokio_mantiene_stack_rinforzato() {
         const { assert!(TOKIO_THREAD_STACK_SIZE >= 8 * 1024 * 1024) };
+    }
+
+    mod flusso {
+        use super::super::*;
+        use crate::telegram_finto::{messaggio, TelegramFinto, CHAT};
+        use sqlx::sqlite::SqlitePoolOptions;
+
+        struct Banco {
+            pool: SqlitePool,
+            telegram: TelegramFinto,
+            bot: Bot,
+            procedure: Procedure,
+            actor: identity::AuditActor,
+        }
+
+        async fn banco() -> Banco {
+            let pool = SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect("sqlite::memory:")
+                .await
+                .expect("database in memoria");
+            sqlx::migrate!("./migrations")
+                .run(&pool)
+                .await
+                .expect("migration");
+            let utente: i64 =
+                sqlx::query("INSERT INTO utenti (nome_visualizzato) VALUES ('Alessio')")
+                    .execute(&pool)
+                    .await
+                    .expect("utente")
+                    .last_insert_rowid();
+            let spazio: i64 =
+                sqlx::query("INSERT INTO spazi (nome, tipo) VALUES ('Casa', 'condiviso')")
+                    .execute(&pool)
+                    .await
+                    .expect("spazio")
+                    .last_insert_rowid();
+            sqlx::query("INSERT INTO membri_spazio (spazio_id, utente_id, ruolo) VALUES (?, ?, 'proprietario')")
+                .bind(spazio)
+                .bind(utente)
+                .execute(&pool)
+                .await
+                .expect("membro");
+            let telegram = TelegramFinto::avvia().await;
+            let bot = telegram.bot(&pool);
+            Banco {
+                actor: identity::AuditActor {
+                    utente_id: Some(utente),
+                    nome_snapshot: "Alessio".to_string(),
+                    spazio_id: spazio,
+                    spazio_nome_snapshot: "Casa".to_string(),
+                    view_all: false,
+                    origine: "telegram",
+                    telegram_user_id: Some(CHAT),
+                    telegram_username: None,
+                },
+                pool,
+                telegram,
+                bot,
+                procedure: Procedure::default(),
+            }
+        }
+
+        impl Banco {
+            async fn scrivi(&self, testo: &str) {
+                let p = self.procedure.clone();
+                identity::with_actor(
+                    self.actor.clone(),
+                    handle_authorized_message(
+                        self.bot.clone(),
+                        messaggio(testo),
+                        self.pool.clone(),
+                        p.sessions,
+                        p.location_sessions,
+                        p.container_sessions,
+                        p.photo_sessions,
+                        p.food_sessions,
+                        p.profile_sessions,
+                        p.improvement_sessions,
+                        p.recipe_sessions,
+                        p.identity_sessions,
+                        p.distribuzione_sessions,
+                        p.lista_spesa_sessions,
+                        p.dispensa_sessions,
+                        p.turni_sessions,
+                        ModalitaRiservata::new(false),
+                        self.actor.clone(),
+                    ),
+                )
+                .await
+                .expect("messaggio");
+            }
+        }
+
+        /// Collaudo di 9307a33, H3.4: `🥫 Scorte → 🧺 Dispensa → ➕ Nuova
+        /// scorta → 🌾 Pasta`, e invece della quantità `/start`. Il bot
+        /// rispondeva "⚠️ Scrivi quantità e unità separate da uno spazio":
+        /// la Dispensa leggeva il testo prima che `/start` fosse
+        /// riconosciuto.
+        #[tokio::test]
+        async fn start_esce_anche_mentre_si_aspetta_una_quantita() {
+            let banco = banco().await;
+            let pasta: i64 = sqlx::query_scalar(
+                "SELECT id FROM alimenti WHERE nome_normalizzato = 'pasta' AND spazio_id IS NULL",
+            )
+            .fetch_one(&banco.pool)
+            .await
+            .expect("Pasta nel catalogo");
+            identity::with_actor(banco.actor.clone(), async {
+                modules::dispensa::handle_callback(
+                    &banco.bot,
+                    ChatId(CHAT),
+                    &banco.pool,
+                    &banco.procedure.dispensa_sessions,
+                    &format!("dispensa:pick:alimento:dispensa:{pasta}"),
+                )
+                .await
+                .expect("🌾 Pasta");
+            })
+            .await;
+            assert!(banco.procedure.dispensa_sessions.has_active(CHAT));
+
+            banco.scrivi("/start").await;
+
+            assert!(
+                !banco.procedure.dispensa_sessions.has_active(CHAT),
+                "la Dispensa aspetta ancora una quantità"
+            );
+            assert!(
+                banco.telegram.ultimo_testo().contains("Scegli una sezione"),
+                "ultimo testo: {}",
+                banco.telegram.ultimo_testo()
+            );
+        }
+
+        /// Collaudo di 9307a33, H4.1b: un comando che non esiste. Il bot
+        /// rispondeva "Usa il pulsante 🏠 Menù principale" con il solo
+        /// `💡 Migliora` sotto, e il menù che c'era spariva: nessun pulsante
+        /// da premere, e il testo ne nominava uno.
+        #[tokio::test]
+        async fn un_comando_sconosciuto_lascia_un_menu_da_premere() {
+            let banco = banco().await;
+            banco.scrivi("/comando_che_non_esiste").await;
+            let pulsanti = banco.telegram.ultimi_pulsanti();
+            assert!(
+                pulsanti.iter().any(|p| p.contains("Alimentazione")),
+                "pulsanti: {pulsanti:?}"
+            );
+        }
+
+        /// Collaudo di 9307a33, H4.4: un nome di 2000 caratteri per un
+        /// oggetto nuovo. L'errore diceva "Riprova oppure premi ❌ Annulla",
+        /// ma sotto c'era solo `💡 Migliora`.
+        #[tokio::test]
+        async fn il_nome_troppo_lungo_offre_l_annulla_che_nomina() {
+            let banco = banco().await;
+            banco.scrivi("/oggetto_nuovo").await;
+            banco.scrivi(&"a".repeat(2000)).await;
+            let pulsanti = banco.telegram.ultimi_pulsanti();
+            assert!(
+                pulsanti.iter().any(|p| p.contains("Annulla")),
+                "testo: {} — pulsanti: {pulsanti:?}",
+                banco.telegram.ultimo_testo()
+            );
+        }
+
+        /// Collaudo di 9307a33, H3.3: `🏷️ Oggetti → 🔎 Cerca`, poi il
+        /// pulsante di una schermata vecchia, poi una parola qualsiasi. Sullo
+        /// schermo c'era il menù principale, ma il bot cercava ancora:
+        /// "🔎 Nessun oggetto trovato per: lampada".
+        #[tokio::test]
+        async fn il_menu_di_una_schermata_vecchia_chiude_la_ricerca_in_corso() {
+            let banco = banco().await;
+            banco.scrivi("/oggetto_cerca").await;
+            assert!(banco.procedure.sessions.has_active(CHAT));
+
+            identity::with_actor(banco.actor.clone(), async {
+                schermata_non_piu_attiva(
+                    &banco.bot,
+                    ChatId(CHAT),
+                    &banco.pool,
+                    &banco.actor,
+                    &banco.procedure,
+                )
+                .await
+                .expect("schermata vecchia");
+            })
+            .await;
+            banco.scrivi("lampada").await;
+
+            assert!(
+                !banco
+                    .telegram
+                    .ultimo_testo()
+                    .contains("Nessun oggetto trovato"),
+                "la ricerca era ancora viva: {}",
+                banco.telegram.ultimo_testo()
+            );
+        }
     }
 
     #[test]

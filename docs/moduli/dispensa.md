@@ -89,9 +89,13 @@ righe separate. Ora:
   (`unisci_o_inserisci`). Vale per le aggiunte a mano e per la spesa chiusa;
 - confezioni con **scadenze diverse** restano righe distinte a database
   (fonderle farebbe perdere la data più vicina), ma **l'elenco le mostra
-  come una riga sola** con il totale (`raggruppa_scorte`): `Pasta sfoglia ·
-  1 kg`, e a capo `📅 prima scadenza Gio 1 Ott · 2 confezioni`. Toccandola
-  si sceglie la confezione, ognuna con la sua scadenza (idea di Alessio).
+  come una riga sola** con il totale (`raggruppa_scorte`): il pulsante dice
+  `Pasta sfoglia · 1 kg`, e il testo della schermata aggiunge
+  `• Pasta sfoglia: prima scadenza Gio 1 Ott · 2 confezioni` (`nota_gruppo`,
+  C19: fino al 29 settembre 2026 stava sul pulsante dopo un `\n` che
+  Telegram ignora). Toccandola si sceglie la confezione, ognuna con la sua
+  scadenza (idea di Alessio); da una confezione `⬅️ Indietro` torna a quella
+  scelta, non all'elenco del posto.
 
 Le quantità grandi si leggono nell'unità comoda: `1500 g` diventa `1.5 kg`,
 `2000 ml` diventa `2 l`.

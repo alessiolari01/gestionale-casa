@@ -2,6 +2,61 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_COLLAUDO_9307A33_20261001 -->
+# 01/10/2026 — Dal collaudo di 9307a33: il primo "da umano distratto"
+
+Il collaudo l'ha fatto una sessione Claude che usava Telegram Desktop,
+sbagliando apposta. Il bot non si è mai fermato; questi sono i difetti che
+ha trovato, ognuno con la sua prova scritta prima della correzione.
+
+- **Un prezzo scritto male non diventa più una quantità.** Dopo "abc" il bot
+  chiedeva il prezzo ma aspettava la quantità presa: "2,50" diventava "presi
+  2,5 g" di Sale, e lo storico prezzi finiva a 1000 € al kg.
+- **Le quantità si leggono come le scrive una persona**: "1.000" è mille, non
+  uno; 999999999 e 0,0001 sono rifiutati invece di diventare "1000000,2 kg"
+  e "0 g".
+- **Un acquisto non può essere nel futuro**, e le date si possono scrivere
+  "oggi" o "ieri".
+- **Il doppio tocco non porta più al menù principale**: il secondo si
+  ignora, e la risposta al primo resta (compresa la domanda sul totale dello
+  scontrino).
+- **`/start` esce sempre**, anche a metà di una procedura, e il menù aperto
+  da una schermata vecchia chiude quello che era in corso: prima il bot
+  poteva restare ad aspettare una ricerca dietro al menù principale.
+- **`⬅️ Indietro` dal tipo di pasto** torna alla giornata: dopo la
+  correzione del 26 settembre ridisegnava se stesso.
+- Un comando sconosciuto lascia il menù da premere; il nome troppo lungo di
+  un oggetto ha il suo `❌ Annulla`.
+- Migliorie: il pulsante di una voce presa dice quanto hai preso; "ne
+  servivano …" anche prendendone meno; "1 kg" invece di "1000 g"; il totale
+  dello scontrino nell'Ultima spesa; le conferme di eliminazione dicono
+  cosa eliminano; un avviso sui prezzi al kg assurdi; "3 euro" accettato; un
+  pasto di domani chiede conferma prima di scalare le scorte; una scheda
+  oggetto compilata non si butta senza chiedere; gli interruttori spenti
+  hanno la loro spiegazione.
+- **Sette pulsanti con `\n` nell'etichetta** (C19), che Telegram ignora:
+  quello che stava dopo va ora nel testo, o davanti quando distingue.
+- Per i test: un Telegram finto (`src/telegram_finto.rs`) che permette di
+  ripetere i passi di un collaudo attraverso i gestori veri.
+- Il database reale è stato ripristinato a prima del collaudo, che l'aveva
+  sporcato di proposito.
+
+<!-- CHANGELOG_DOCUMENTI_C15_20260929 -->
+# 29/09/2026 — Documenti: la C15 era doppia e in parte falsa
+
+- **Miglioramento 20 scartato** (la web app): la decisione di restare sul
+  bot era già presa, mancava solo lo stato nel database.
+
+- **`docs/convenzioni-telegram.md` aveva due C15**, e tutte e due dicevano
+  di mandare a capo con `\n` le parti aggiunte a un'etichetta. La C19 aveva
+  già dimostrato che Telegram ignora il `\n` nei pulsanti, ma la C15 non era
+  stata corretta. Ora ce n'è una sola: tiene la parte vera (niente parti
+  accodate con "·") e per la destinazione rimanda alla C19.
+- **Cinque pulsanti del codice usano ancora `\n` nell'etichetta**, scritti
+  seguendo la regola vecchia: elencati nella parte 4 delle convenzioni, da
+  correggere. Nessuna modifica al codice in questo giro.
+- Tolta da `STATO.md` la data in cima, ferma al 2 settembre.
+
 <!-- CHANGELOG_MIGLIORAMENTI_16_19_20260926 -->
 # 26/09/2026 — I quattro difetti del collaudo di cdc6809
 

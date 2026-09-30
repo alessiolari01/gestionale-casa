@@ -112,6 +112,37 @@ impl Situazione {
 /// (privata lì, non riusabile da qui: piccola duplicazione accettata,
 /// stesso principio già scelto in `lista_spesa::clausola_visibilita_alimento`
 /// per non forzare un accoppiamento fra moduli).
+/// Il pulsante di un pasto (di un modello o di un'assegnazione): orario e
+/// tipo, su una riga. L'orario davanti, perché è l'ordine dei pulsanti e la
+/// cosa che distingue due pasti.
+///
+/// Fino al 29 settembre 2026 portava anche situazione e preparazione dopo
+/// due `\n`, seguendo la vecchia C15: Telegram li ignora, e la preparazione
+/// era la prima cosa a essere tagliata. Ora stanno in `nota_pasto` (C19).
+fn etichetta_pasto(tipo_pasto: &str, orario: Option<&str>) -> String {
+    let tipo = MealType::from_token(tipo_pasto)
+        .map(|meal| format!("{} {}", meal_emoji(meal), meal.label()))
+        .unwrap_or_else(|| "🍴 Pasto".to_string());
+    format!("{} · {tipo}", orario.unwrap_or("--:--"))
+}
+
+/// La riga di testo di un pasto: quello che sul pulsante non entra.
+fn nota_pasto(
+    tipo_pasto: &str,
+    orario: Option<&str>,
+    situazione: &str,
+    preparazione: bool,
+) -> String {
+    let mut nota = format!("• {}:", etichetta_pasto(tipo_pasto, orario));
+    if let Some(situazione) = Situazione::from_token(situazione) {
+        nota.push_str(&format!(" {} {}", situazione.emoji(), situazione.label()));
+    }
+    if preparazione {
+        nota.push_str(" · 🧺 Da preparare prima");
+    }
+    nota
+}
+
 fn meal_emoji(meal: MealType) -> &'static str {
     match meal {
         MealType::Breakfast => "☕",
@@ -377,6 +408,35 @@ pub fn formatta_blocco_routine(righe: &[PastoRoutine]) -> Option<String> {
 #[cfg(test)]
 mod domain_tests {
     use super::*;
+
+    /// C19: il pulsante di un pasto del modello portava orario, situazione
+    /// e preparazione su tre righe con `\n`, che Telegram ignora: tutto su
+    /// una riga, e tagliato in fondo — proprio la preparazione.
+    #[test]
+    fn il_pasto_di_un_modello_sta_su_una_riga_e_il_resto_nel_testo() {
+        let pasto = PastoModelloRow {
+            id: 1,
+            modello_id: 1,
+            tipo_pasto: "pranzo".to_string(),
+            orario: Some("13:00".to_string()),
+            situazione: "lavoro".to_string(),
+            preparazione_anticipata: 1,
+            preparazione_note: None,
+            nota: None,
+        };
+        let etichetta = etichetta_pasto(&pasto.tipo_pasto, pasto.orario.as_deref());
+        assert!(!etichetta.contains('\n'), "{etichetta}");
+        assert!(etichetta.starts_with("13:00 · "), "{etichetta}");
+        assert_eq!(
+            nota_pasto(
+                &pasto.tipo_pasto,
+                pasto.orario.as_deref(),
+                &pasto.situazione,
+                pasto.preparazione_anticipata != 0
+            ),
+            format!("• {}: 💼 Lavoro · 🧺 Da preparare prima", etichetta)
+        );
+    }
 
     #[test]
     fn nome_modello_valido_e_rifiuta_vuoto() {
@@ -2363,23 +2423,24 @@ async fn show_model_detail(
     let mut rows: Vec<Vec<InlineKeyboardButton>> = pasti
         .iter()
         .map(|pasto| {
-            let tipo = MealType::from_token(&pasto.tipo_pasto)
-                .map(|meal| format!("{} {}", meal_emoji(meal), meal.label()))
-                .unwrap_or_else(|| "🍴 Pasto".to_string());
-            let situazione = Situazione::from_token(&pasto.situazione)
-                .map(|s| format!("{} {}", s.emoji(), s.label()))
-                .unwrap_or_default();
-            let orario = pasto.orario.clone().unwrap_or_else(|| "--:--".to_string());
-            // C15: più di due parti aggiunte (orario, situazione, eventuale
-            // preparazione) vanno a capo, non accodate con "·".
-            let mut etichetta = format!("{tipo}\n{orario} · {situazione}");
-            if pasto.preparazione_anticipata != 0 {
-                etichetta.push_str("\n🧺 Da preparare prima");
-            }
             // Punto 7: toccare un pasto ora apre un dettaglio (situazione,
             // orario, preparazione, nota, eliminazione con conferma) invece
             // di eliminarlo subito -- stesso menù del pasto assegnato.
-            vec![button(etichetta, format!("turni:mpasto:{}", pasto.id))]
+            vec![button(
+                etichetta_pasto(&pasto.tipo_pasto, pasto.orario.as_deref()),
+                format!("turni:mpasto:{}", pasto.id),
+            )]
+        })
+        .collect();
+    let note_pasti: Vec<String> = pasti
+        .iter()
+        .map(|pasto| {
+            nota_pasto(
+                &pasto.tipo_pasto,
+                pasto.orario.as_deref(),
+                &pasto.situazione,
+                pasto.preparazione_anticipata != 0,
+            )
         })
         .collect();
 
@@ -2434,6 +2495,7 @@ async fn show_model_detail(
     if pasti.is_empty() {
         testo.push_str("\n\nNessun pasto ancora. Aggiungine uno con ➕ Aggiungi pasto.");
     } else {
+        testo.push_str(&format!("\n\n{}", note_pasti.join("\n")));
         testo.push_str("\n\nTocca un pasto per modificarlo o eliminarlo.");
     }
 
@@ -3102,18 +3164,21 @@ async fn show_assignment_detail(
     let mut rows: Vec<Vec<InlineKeyboardButton>> = pasti
         .iter()
         .map(|pasto| {
-            let tipo = MealType::from_token(&pasto.tipo_pasto)
-                .map(|meal| format!("{} {}", meal_emoji(meal), meal.label()))
-                .unwrap_or_else(|| "🍴 Pasto".to_string());
-            let situazione = Situazione::from_token(&pasto.situazione)
-                .map(|s| format!("{} {}", s.emoji(), s.label()))
-                .unwrap_or_default();
-            let orario = pasto.orario.clone().unwrap_or_else(|| "--:--".to_string());
-            let mut etichetta = format!("{tipo}\n{orario} · {situazione}");
-            if pasto.preparazione_anticipata != 0 {
-                etichetta.push_str("\n🧺 Da preparare prima");
-            }
-            vec![button(etichetta, format!("turni:apasto:{}", pasto.id))]
+            vec![button(
+                etichetta_pasto(&pasto.tipo_pasto, pasto.orario.as_deref()),
+                format!("turni:apasto:{}", pasto.id),
+            )]
+        })
+        .collect();
+    let note_pasti: Vec<String> = pasti
+        .iter()
+        .map(|pasto| {
+            nota_pasto(
+                &pasto.tipo_pasto,
+                pasto.orario.as_deref(),
+                &pasto.situazione,
+                pasto.preparazione_anticipata != 0,
+            )
         })
         .collect();
     // Punto 10: proposto solo quando il modello è cambiato davvero dopo
@@ -3144,6 +3209,7 @@ async fn show_assignment_detail(
     if pasti.is_empty() {
         testo.push_str("\n\nNessun pasto in questa assegnazione.");
     } else {
+        testo.push_str(&format!("\n\n{}", note_pasti.join("\n")));
         testo.push_str("\n\nTocca un pasto per modificarlo.");
     }
 

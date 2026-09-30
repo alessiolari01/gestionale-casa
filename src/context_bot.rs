@@ -14,6 +14,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
     },
+    time::{Duration, Instant},
 };
 
 use sqlx::SqlitePool;
@@ -32,6 +33,9 @@ const MAX_RECENT_ACTIONS: usize = 6;
 const MAX_CONTEXTS_PER_CHAT: usize = 120;
 const MAX_SCREEN_TITLE_CHARS: usize = 180;
 const MAX_TYPED_TEXT_CHARS: usize = 100;
+/// Quanto a lungo un secondo tocco sulla stessa schermata conta come un
+/// doppio tocco, e si ignora, invece che come una schermata vecchia.
+const FINESTRA_DOPPIO_TOCCO: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone)]
 pub(crate) struct ImproveContextSnapshot {
@@ -59,11 +63,28 @@ impl ImproveContextSnapshot {
     }
 }
 
+/// Cosa fare di un tocco su un pulsante.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Rivendicazione {
+    /// Il primo tocco sulla schermata attiva: si esegue.
+    Nuova,
+    /// Un secondo tocco su una schermata toccata pochi secondi fa: si
+    /// ignora in silenzio, il primo sta già facendo il suo lavoro.
+    AppenaToccata,
+    /// Una schermata vecchia: si avvisa e si riapre il menù principale.
+    Vecchia,
+}
+
 #[derive(Debug, Default)]
 struct ChatUiState {
     active_ui: Option<MessageId>,
     transient_media: Vec<MessageId>,
     claimed_messages: HashSet<MessageId>,
+    /// Le schermate toccate negli ultimi secondi, con l'istante del tocco.
+    /// Non si svuota quando arriva una schermata nuova, a differenza di
+    /// `claimed_messages`: il secondo di due tocchi in fretta arriva spesso
+    /// quando la risposta al primo ha già sostituito la schermata.
+    tocchi_recenti: HashMap<MessageId, Instant>,
     callback_labels: HashMap<String, String>,
     current_section: Option<String>,
     /// Avviso in attesa di essere anteposto alla **prossima** schermata
@@ -305,6 +326,30 @@ impl ImproveContextStore {
         std::mem::take(&mut ui.transient_media)
     }
 
+    /// Decide cosa fare di un tocco. Il secondo di due tocchi in fretta non
+    /// è una schermata vecchia: trattarlo come tale riapriva il menù
+    /// principale e cancellava la risposta al primo (collaudo di 9307a33,
+    /// H2.1).
+    fn rivendica(&self, chat_id: i64, message_id: MessageId, data: &str) -> Rivendicazione {
+        let adesso = Instant::now();
+        let nuova = self.claim_callback(chat_id, message_id, data);
+        let mut state = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let ui = state.ui.entry(chat_id).or_default();
+        ui.tocchi_recenti
+            .retain(|_, quando| adesso.duration_since(*quando) < FINESTRA_DOPPIO_TOCCO);
+        if nuova {
+            ui.tocchi_recenti.insert(message_id, adesso);
+            Rivendicazione::Nuova
+        } else if ui.tocchi_recenti.contains_key(&message_id) {
+            Rivendicazione::AppenaToccata
+        } else {
+            Rivendicazione::Vecchia
+        }
+    }
+
     fn claim_callback(&self, chat_id: i64, message_id: MessageId, data: &str) -> bool {
         // Ogni altra schermata del progetto manda un messaggio nuovo per ogni
         // cambio, quindi un `message_id` va rivendicato una volta sola.  La
@@ -392,8 +437,8 @@ impl ContextBot {
         self.contexts.get_snapshot(chat_id, token)
     }
 
-    pub fn claim_callback(&self, chat_id: i64, message_id: MessageId, data: &str) -> bool {
-        self.contexts.claim_callback(chat_id, message_id, data)
+    pub fn rivendica(&self, chat_id: i64, message_id: MessageId, data: &str) -> Rivendicazione {
+        self.contexts.rivendica(chat_id, message_id, data)
     }
 
     /// Mette in coda un avviso (es. "❌ Operazione annullata.") che verrà
@@ -1115,6 +1160,43 @@ mod tests {
 
     fn migliora() -> InlineKeyboardButton {
         InlineKeyboardButton::callback("💡 Migliora".to_string(), "improve:context:1".to_string())
+    }
+
+    /// Collaudo di 9307a33, H2.1: due tocchi in fretta sullo stesso
+    /// pulsante. Il secondo arrivava su una schermata già rivendicata (o già
+    /// sostituita dalla risposta al primo) e veniva trattato come vecchio:
+    /// "⚠️ Questa schermata non è più attiva" e il menù principale, che
+    /// cancellava la risposta al primo tocco — compresa la domanda sul
+    /// totale dello scontrino.
+    #[test]
+    fn il_secondo_tocco_sulla_stessa_schermata_si_ignora() {
+        let store = ImproveContextStore::default();
+        store.restore_ui_message(1, MessageId(10));
+        assert_eq!(
+            store.rivendica(1, MessageId(10), "x:y"),
+            Rivendicazione::Nuova
+        );
+        // Il secondo tocco arriva mentre il primo lavora ancora…
+        assert_eq!(
+            store.rivendica(1, MessageId(10), "x:y"),
+            Rivendicazione::AppenaToccata
+        );
+        // …oppure quando il primo ha già mandato la schermata nuova.
+        store.register_ui_message(1, MessageId(11));
+        assert_eq!(
+            store.rivendica(1, MessageId(10), "x:y"),
+            Rivendicazione::AppenaToccata
+        );
+        // La schermata nuova si tocca normalmente.
+        assert_eq!(
+            store.rivendica(1, MessageId(11), "x:y"),
+            Rivendicazione::Nuova
+        );
+        // Una schermata mai toccata e non più attiva resta vecchia.
+        assert_eq!(
+            store.rivendica(1, MessageId(5), "x:y"),
+            Rivendicazione::Vecchia
+        );
     }
 
     #[test]

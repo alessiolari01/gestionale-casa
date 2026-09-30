@@ -453,6 +453,19 @@ fn planner_get_draft(chat_id: i64) -> Option<PlannerDraft> {
         .cloned()
 }
 
+/// Smette di aspettare un orario scritto a mano: è l'unica attesa di testo
+/// del planner. `/start` e il menù riaperto da una schermata vecchia la
+/// chiudono insieme a quelle degli altri moduli.
+pub fn chiudi_attesa_orario(chat_id: i64) {
+    if let Some(bozza) = planner_drafts()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get_mut(&chat_id)
+    {
+        bozza.orario_in_attesa = false;
+    }
+}
+
 fn planner_clear_draft(chat_id: i64) {
     planner_drafts()
         .lock()
@@ -1183,10 +1196,52 @@ pub async fn handle_callback(
         return Ok(true);
     }
     if let Some(raw_id) = data.strip_prefix("planner:complete:") {
+        // "future:" è la risposta "sì" alla domanda qui sotto.
+        let (raw_id, futuro_confermato) = match raw_id.strip_prefix("future:") {
+            Some(raw_id) => (raw_id, true),
+            None => (raw_id, false),
+        };
         let Some(meal_id) = planner_positive_i64(raw_id) else {
             planner_invalid(bot, chat_id).await?;
             return Ok(true);
         };
+        // Un pasto di un giorno che non è ancora arrivato: segnarlo
+        // consumato scala le scorte adesso, quindi prima si chiede. Fino al
+        // 29 settembre 2026 la cena di domani passava senza una parola
+        // (collaudo di 9307a33, H2.6).
+        if !futuro_confermato {
+            let date: Option<(String, String)> = sqlx::query_as(
+                "SELECT data_pasto, date('now','localtime') FROM planner_pasti WHERE id = ?",
+            )
+            .bind(meal_id)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten();
+            if let Some((data_pasto, oggi)) = date {
+                if data_pasto > oggi {
+                    bot.send_message(
+                        chat_id,
+                        format!(
+                            "📅 Questo pasto è di {}, non di oggi.\n\nLo segno comunque come consumato? Gli ingredienti si tolgono dalle scorte adesso.",
+                            crate::modules::calendario::display_date(&data_pasto)
+                        ),
+                    )
+                    .reply_markup(InlineKeyboardMarkup::new(vec![
+                        vec![planner_button(
+                            "✅ Sì, l'ho già mangiato",
+                            format!("planner:complete:future:{meal_id}"),
+                        )],
+                        vec![
+                            planner_button("❌ Annulla", format!("planner:view:{meal_id}")),
+                            planner_button("🏠 Menù principale", "menu:main"),
+                        ],
+                    ]))
+                    .await?;
+                    return Ok(true);
+                }
+            }
+        }
         let mancanze = crate::modules::dispensa::mancanti_per_pasto(pool, meal_id)
             .await
             .unwrap_or_else(|error| {
@@ -1717,7 +1772,7 @@ async fn planner_show_day(
         crate::modules::turni::assegnazioni_aggiornabili_del_giorno(pool, date).await
     {
         rows.push(vec![planner_button(
-            format!("🔄 Aggiorna {profilo_nome}\n«{modello_nome}»"),
+            etichetta_assegnazione("🔄 Aggiorna", &profilo_nome, &modello_nome),
             format!("turni:assign:refresh:ask:{assegnazione_id}:planner:{date}"),
         )]);
     }
@@ -1730,7 +1785,7 @@ async fn planner_show_day(
         crate::modules::turni::assegnazioni_del_giorno(pool, date).await
     {
         rows.push(vec![planner_button(
-            format!("🗑 Elimina {profilo_nome}\n«{modello_nome}»"),
+            etichetta_assegnazione("🗑 Elimina", &profilo_nome, &modello_nome),
             format!("turni:assegnazione:delete:ask:{assegnazione_id}:planner:{date}"),
         )]);
     }
@@ -1811,7 +1866,7 @@ async fn planner_show_type_picker(
     // mangiato altro" parte proprio da qui, e fino al 26 settembre 2026
     // l'Indietro riportava alla giornata (Miglioramento 19).
     let indietro = planner_get_draft(chat_id.0)
-        .map(|draft| planner_indietro_dal_passo(&draft))
+        .map(|draft| planner_indietro_dal_tipo(&draft))
         .unwrap_or_else(|| format!("planner:day:{date}"));
     rows.push(planner_global_nav(&indietro));
     bot.send_message(
@@ -1840,6 +1895,34 @@ async fn planner_show_type_picker(
 /// ricetta, ma "✏️ Ho mangiato altro" parte da quella del **tipo di pasto**:
 /// il difetto e' rimasto (Alessio, 26 settembre, Miglioramento 19). Per questo
 /// adesso e' una funzione sola, usata da tutti i passi.
+/// Il pulsante che aggiorna o elimina l'assegnazione di un turno dal giorno
+/// del planner. Il nome del modello sta **davanti**: è quello che distingue
+/// due assegnazioni dello stesso giorno, e con il `\n` di prima (che
+/// Telegram ignora) era la parte tagliata per prima (C19).
+fn etichetta_assegnazione(azione: &str, profilo: &str, modello: &str) -> String {
+    format!(
+        "{azione} «{}» · {}",
+        liste::tronca(modello, 12),
+        liste::tronca(profilo, 8)
+    )
+}
+
+/// Dove torna `⬅️ Indietro` dal **primo** passo, la scelta del tipo di pasto.
+///
+/// Uguale agli altri passi quando si sostituisce o si corregge, ma per un
+/// pasto nuovo non può tornare a `planner:add:`, che è questa stessa
+/// schermata: torna alla giornata. Il 26 settembre 2026 avevo usato qui
+/// `planner_indietro_dal_passo` e l'Indietro ridisegnava se stesso
+/// (collaudo di 9307a33, D4).
+fn planner_indietro_dal_tipo(draft: &PlannerDraft) -> String {
+    let dal_passo = planner_indietro_dal_passo(draft);
+    if dal_passo.starts_with("planner:add:") {
+        format!("planner:day:{}", draft.date)
+    } else {
+        dal_passo
+    }
+}
+
 fn planner_indietro_dal_passo(draft: &PlannerDraft) -> String {
     let torna_al_pasto = if draft.sostituzione {
         draft.meal_id
@@ -3475,6 +3558,52 @@ mod telegram_tests {
             ..nuovo
         };
         assert_eq!(planner_indietro_dal_passo(&correzione), "planner:view:9");
+    }
+
+    /// C19: "🔄 Aggiorna Alessio\n«Chiusura»" arrivava su una riga sola,
+    /// perché Telegram ignora il `\n`, e il nome del modello — quello che
+    /// distingue due assegnazioni dello stesso giorno — era tagliato per
+    /// primo. Ora il modello sta davanti.
+    #[test]
+    fn il_pulsante_di_un_assegnazione_dice_prima_il_modello() {
+        assert_eq!(
+            etichetta_assegnazione("🔄 Aggiorna", "Alessio", "Chiusura"),
+            "🔄 Aggiorna «Chiusura» · Alessio"
+        );
+        let lungo = etichetta_assegnazione(
+            "🗑 Elimina",
+            "Alessio Lari Mariani",
+            "Chiusura del negozio il sabato",
+        );
+        assert!(!lungo.contains('\n'));
+        assert!(lungo.starts_with("🗑 Elimina «Chiusura del"), "{lungo}");
+        assert!(lungo.chars().count() <= 40, "{lungo}");
+    }
+
+    /// Collaudo di 9307a33, D4: dal **primo** passo di un pasto nuovo
+    /// ("Scegli il tipo di pasto") `⬅️ Indietro` ridisegnava la stessa
+    /// schermata, perché `planner:add:` è quella schermata. Da lì un pasto
+    /// nuovo torna alla giornata; sostituendo o correggendo, al pasto.
+    #[test]
+    fn indietro_dal_tipo_di_pasto_non_ridisegna_se_stesso() {
+        let nuovo = PlannerDraft {
+            date: "2026-09-30".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(planner_indietro_dal_tipo(&nuovo), "planner:day:2026-09-30");
+
+        let correzione = PlannerDraft {
+            sostituisce: Some(9),
+            ..nuovo.clone()
+        };
+        assert_eq!(planner_indietro_dal_tipo(&correzione), "planner:view:9");
+
+        let sostituzione = PlannerDraft {
+            meal_id: Some(7),
+            sostituzione: true,
+            ..nuovo
+        };
+        assert_eq!(planner_indietro_dal_tipo(&sostituzione), "planner:view:7");
     }
 
     #[test]
