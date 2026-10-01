@@ -53,10 +53,10 @@ export CARGO_INCREMENTAL=0
 
 if [ "$RISERVATO" = "1" ]; then
     echo "Avvio in background, modalita' riservata (nohup, log in $LOGFILE)..."
-    RISERVATO=1 nohup cargo run --locked > "$LOGFILE" 2>&1 &
+    RISERVATO=1 nohup cargo run --release --locked > "$LOGFILE" 2>&1 &
 else
     echo "Avvio in background (nohup, log in $LOGFILE)..."
-    nohup cargo run --locked > "$LOGFILE" 2>&1 &
+    nohup cargo run --release --locked > "$LOGFILE" 2>&1 &
 fi
 PID=$!
 disown

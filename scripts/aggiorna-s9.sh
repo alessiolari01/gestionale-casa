@@ -209,6 +209,10 @@ passo "4/7  Clippy e test"
 # --------------------------------------------------------------------------
 esegui cargo clippy --all-targets --locked -- -D warnings || esito_compilazione
 esegui cargo test --locked -- --test-threads=1 || esito_compilazione
+# La build ottimizzata, quella che avvia-bot.sh fa girare (1 ottobre 2026):
+# si compila qui, durante i controlli, cosi' l'avvio non deve compilare niente
+# e il bot resta spento il meno possibile.
+esegui cargo build --release --locked || esito_compilazione
 
 # I documenti si aggiornano insieme al codice (regola in STATO.md, sezione 0).
 # Il conteggio dei test e' il fatto piu' facile da lasciare indietro, ed e'
@@ -305,4 +309,4 @@ fi
 # Da qui in poi non si registra piu' nulla: il bot puo' restare acceso per
 # ore e il suo output riempirebbe il log fino a esaurire il disco.
 echo "log dei controlli: $LOG"
-cargo run --locked
+cargo run --release --locked

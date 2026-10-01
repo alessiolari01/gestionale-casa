@@ -152,19 +152,34 @@ scritta. Dominio puro in `valida_quantita_con_default`, accanto a
   della pasta" con "voglio comprare proprio quella marca" (decisione
   esplicita presa con Alessio).
 
-**Non sono uno snapshot**: a differenza delle righe `generato` pure-planner
-(cancellate e rigenerate da zero a ogni refresh), le aggiunte dal catalogo
-vivono nella propria tabella (`liste_spesa_aggiunte_catalogo`) e
-partecipano di nuovo ogni volta al calcolo di `🔄 Aggiorna lista`
-(`aggiorna_lista` unisce le righe del planner con quelle di questa tabella
-prima di aggregare) — restano "vive" attraverso ogni refresh, finché non
-vengono coperte da una voce comprata (stesso congelamento di sempre: una
-riga segnata comprata resta congelata, e se serve dell'altro compare una
-voce nuova per la differenza).
+**Sono nette** (dal 1 ottobre 2026, Miglioramento 15): un'aggiunta dice
+quanto c'è **da comprare**. Le scorte si guardano **una volta sola**, quando
+si aggiunge, dopo aver tenuto da parte quello che serve ai pasti del planner
+(`aggiungi_da_catalogo` → `da_comprare_per`): 1 kg di Riso chiesto con 200 g
+in casa salva un'aggiunta da 800 g. La lista poi somma le aggiunte alla riga
+dei pasti **dopo** aver tolto le scorte (`fabbisogno_con_aggiunte`), così
+200 g dal planner più 50 g chiesti a mano restano una riga da 250 g.
 
-Salvata l'aggiunta, la lista si aggiorna subito (chiamata automatica ad
-`aggiorna_lista`) così la somma o la nuova riga compaiono senza dover
-premere "🔄 Aggiorna lista" a mano.
+Due richieste di fila dello stesso alimento non contano due volte la stessa
+scorta: il bot si ricorda quanta ne ha già presa ogni richiesta, in questo
+giro di spesa (`liste_spesa_scorte_usate`). Con 200 g di Riso in casa,
+chiederne 200 g e poi altri 170 mette in lista 170 g. La memoria si libera
+chiudendo la spesa, togliendo l'aggiunta o con "🗑️ Rimuovi tutte".
+
+Quando le scorte coprono tutto, il bot lo dice ("✅ In casa ne hai già
+abbastanza per 100 g: non l'ho messa in lista.") e offre **➕ Mettila lo
+stesso**, che la aggiunge per intero (`aggiungi_da_catalogo_comunque`): una
+scorta non aggiornata non deve impedire di comprare (C20).
+
+Fino al 30 settembre un'aggiunta era **lorda** ("mi serve 1 kg") e la lista
+le sottraeva le scorte a ogni aggiornamento: alla chiusura bisognava
+indovinare quando ritirarla, e la regola è stata sbagliata quattro volte
+(STATO.md, sezioni 2novodecies–2novovicies).
+
+Salvata l'aggiunta, la lista si aggiorna subito e il messaggio dice i numeri
+della riga (`spiega_aggiunta`): "✅ Aggiunta: servono 1 kg, in casa ne hai già
+200 g, in lista 800 g.", oppure "✅ Aggiunta: 100 g in più, in lista ora
+310 g." per una seconda richiesta.
 
 Ricerca in `cerca_nel_catalogo` (dedicata a questo modulo, stesso schema di
 visibilità di `ricette::search_food_choices` ma non riusata da lì: quella
@@ -388,12 +403,15 @@ conferma e poi, con `✅ Sì, chiudi la spesa`:
   `liste_spesa_chiusure` che ricorda quando, da chi e su quale intervallo;
 - le toglie dalla lista attiva; **le voci non comprate restano** dov'erano,
   con il loro ordine;
-- toglie le **aggiunte dal catalogo già coperte** da ciò che si è comprato
-  (`aggiunte_coperte_dalla_spesa`, dominio puro): un'aggiunta resta viva
-  attraverso ogni refresh — è il suo scopo — quindi senza questo passaggio
-  ricomparirebbe il giorno dopo come se non fosse mai stata comprata. Si
-  scala il comprato sulle aggiunte della stessa identità e unità, dalla più
-  vecchia alla più recente, e rientra solo l'aggiunta coperta per intero;
+- **ritira le aggiunte dal catalogo** con quello che si è comprato, con
+  una regola sola (`ritira_aggiunte`, dal 1 ottobre 2026): quello che si è
+  comprato di una riga copre prima la parte dei pasti — che dopo si
+  ricalcola da sola — e il resto ritira le aggiunte di quell'alimento, dalla
+  più vecchia. Le aggiunte sono nette, quindi il conto è esatto e non
+  dipende dalle Scorte o dall'ingresso automatico accesi o spenti. Se di una
+  riga si è segnato con `📦` di averne preso **meno**, quel che manca torna
+  come un'aggiunta nuova e il bot chiede "Le lascio in lista?" ("No,
+  toglile" toglie esattamente quella);
 - fa entrare in casa, ognuna nel suo posto, le voci collegate al catalogo
   (`dispensa::ingresso_da_chiusura`, se l'ingresso automatico è acceso);
 - ricalcola subito la lista, che — al netto delle scorte appena entrate —

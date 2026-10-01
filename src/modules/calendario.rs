@@ -170,6 +170,79 @@ pub fn anno_corrente() -> i32 {
         .unwrap_or(1970)
 }
 
+/// Una data nella forma che entra a database, `AAAA-MM-GG`.
+pub fn format_date(data: NaiveDate) -> String {
+    format!("{:04}-{:02}-{:02}", data.year(), data.month(), data.day())
+}
+
+/// Dove cade una data scritta senza l'anno.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Verso {
+    /// Una scadenza, un appuntamento: "15/3" scritto a ottobre è marzo
+    /// prossimo.
+    Futuro,
+    /// Un acquisto: "15/11" scritto a ottobre è novembre scorso.
+    Passato,
+}
+
+/// Una data scritta a mano, letta come la scrive una persona (C20, 1 ottobre
+/// 2026): "oggi", "ieri", "domani"; giorno e mese separati da `/`, `-`, `.` o
+/// da uno spazio; l'anno a quattro cifre, a due, oppure assente — e allora
+/// la data cade nel `verso` giusto rispetto a `oggi` (`AAAA-MM-GG`). Anche la
+/// forma ISO va bene. Ritorna la data ISO, oppure `None` se non esiste.
+pub fn leggi_data_scritta(testo: &str, oggi: &str, verso: Verso) -> Option<String> {
+    let oggi = parse_date(oggi)?;
+    let testo = testo.trim().to_lowercase();
+    let data = match testo.as_str() {
+        "oggi" => oggi,
+        "ieri" => oggi.pred_opt()?,
+        "domani" => oggi.succ_opt()?,
+        "dopodomani" => oggi.succ_opt()?.succ_opt()?,
+        _ => {
+            if let Some(data) = parse_date(&testo) {
+                return Some(format_date(data));
+            }
+            let parti: Vec<&str> = testo
+                .split(['/', '-', '.', ' '])
+                .filter(|parte| !parte.is_empty())
+                .collect();
+            let numero = |parte: &str| -> Option<u32> {
+                parte
+                    .bytes()
+                    .all(|b| b.is_ascii_digit())
+                    .then(|| parte.parse().ok())
+                    .flatten()
+            };
+            match parti.as_slice() {
+                [giorno, mese] => {
+                    let (giorno, mese) = (numero(giorno)?, numero(mese)?);
+                    let quest_anno = NaiveDate::from_ymd_opt(oggi.year(), mese, giorno)?;
+                    match verso {
+                        Verso::Futuro if quest_anno < oggi => {
+                            NaiveDate::from_ymd_opt(oggi.year() + 1, mese, giorno)?
+                        }
+                        Verso::Passato if quest_anno > oggi => {
+                            NaiveDate::from_ymd_opt(oggi.year() - 1, mese, giorno)?
+                        }
+                        _ => quest_anno,
+                    }
+                }
+                [giorno, mese, anno] => {
+                    let anno_scritto = numero(anno)? as i32;
+                    let anno = match anno.len() {
+                        2 => 2000 + anno_scritto,
+                        4 => anno_scritto,
+                        _ => return None,
+                    };
+                    NaiveDate::from_ymd_opt(anno, numero(mese)?, numero(giorno)?)?
+                }
+                _ => return None,
+            }
+        }
+    };
+    Some(format_date(data))
+}
+
 /// La forma con cui le date si mostrano in tutto il bot: vedi
 /// `data_leggibile`. Una stringa che non è una data resta com'è.
 pub fn display_date(value: &str) -> String {
@@ -381,6 +454,31 @@ pub fn righe(config: &Calendario<'_>) -> Vec<Vec<InlineKeyboardButton>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// C20 (1 ottobre 2026): una data si scrive come la dice una persona.
+    #[test]
+    fn una_data_si_legge_come_la_scrive_una_persona() {
+        let oggi = "2026-10-01";
+        let futuro = |testo: &str| leggi_data_scritta(testo, oggi, Verso::Futuro);
+        let passato = |testo: &str| leggi_data_scritta(testo, oggi, Verso::Passato);
+        assert_eq!(futuro("oggi").as_deref(), Some("2026-10-01"));
+        assert_eq!(futuro(" Domani ").as_deref(), Some("2026-10-02"));
+        assert_eq!(passato("ieri").as_deref(), Some("2026-09-30"));
+        assert_eq!(futuro("15/11/2026").as_deref(), Some("2026-11-15"));
+        assert_eq!(futuro("15-11-26").as_deref(), Some("2026-11-15"));
+        assert_eq!(futuro("15.11.2026").as_deref(), Some("2026-11-15"));
+        assert_eq!(futuro("15 11 2026").as_deref(), Some("2026-11-15"));
+        assert_eq!(futuro("2026-11-15").as_deref(), Some("2026-11-15"));
+        // Senza anno: una scadenza cade nel futuro, un acquisto nel passato.
+        assert_eq!(futuro("15/11").as_deref(), Some("2026-11-15"));
+        assert_eq!(futuro("15/3").as_deref(), Some("2027-03-15"));
+        assert_eq!(passato("15/11").as_deref(), Some("2025-11-15"));
+        assert_eq!(passato("15/3").as_deref(), Some("2026-03-15"));
+        // Una data che non esiste resta rifiutata.
+        assert_eq!(futuro("30/02/2026"), None);
+        assert_eq!(futuro("32/13"), None);
+        assert_eq!(futuro("presto"), None);
+    }
 
     fn config_base<'a>(
         oggi: &'a str,

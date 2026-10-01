@@ -239,7 +239,41 @@ impl Error for OrarioNonValido {}
 /// Riusata anche da `planner_alimentare` per il nuovo campo orario del
 /// pasto vero (punto 4): un'unica funzione condivisa invece di due copie,
 /// per non dover correggere lo stesso bug due volte.
+/// Un orario scritto come lo scrive una persona (C20, 1 ottobre 2026):
+/// "13:30", ma anche "13.30", "13,30", "13 30", "ore 13", "13h", "h13",
+/// "1330" e "13". Fino ad allora valeva solo "13:30".
 fn orario_normalizzato(value: &str) -> Option<(u32, u32)> {
+    let mut testo = value.trim().to_lowercase();
+    for prefisso in ["alle ore ", "alle ", "ore ", "h "] {
+        if let Some(resto) = testo.strip_prefix(prefisso) {
+            testo = resto.trim().to_string();
+        }
+    }
+    let testo = testo.trim_start_matches('h').trim_end_matches('h').trim();
+    let testo: String = testo
+        .chars()
+        .map(|carattere| match carattere {
+            '.' | ',' | ' ' | 'h' => ':',
+            altro => altro,
+        })
+        .collect();
+    if !testo.contains(':') {
+        if !testo.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        return match testo.len() {
+            1 | 2 => orario_con_due_punti(&format!("{testo}:00")),
+            3 | 4 => {
+                let (ore, minuti) = testo.split_at(testo.len() - 2);
+                orario_con_due_punti(&format!("{ore}:{minuti}"))
+            }
+            _ => None,
+        };
+    }
+    orario_con_due_punti(&testo)
+}
+
+fn orario_con_due_punti(value: &str) -> Option<(u32, u32)> {
     let (ore_testo, minuti_testo) = value.split_once(':')?;
     if ore_testo.is_empty() || ore_testo.len() > 2 || minuti_testo.len() != 2 {
         return None;
@@ -480,6 +514,29 @@ mod domain_tests {
         assert_eq!(valida_orario("7:30"), Ok("07:30".to_string()));
         assert_eq!(valida_orario(" 9:05 "), Ok("09:05".to_string()));
         assert_eq!(valida_orario("0:00"), Ok("00:00".to_string()));
+    }
+
+    /// C20 (1 ottobre 2026): un orario si scrive come lo dice una persona.
+    #[test]
+    fn orario_scritto_come_lo_dice_una_persona() {
+        for (scritto, atteso) in [
+            ("13", "13:00"),
+            ("7", "07:00"),
+            ("13.30", "13:30"),
+            ("13,30", "13:30"),
+            ("13 30", "13:30"),
+            ("ore 13", "13:00"),
+            ("alle 20.15", "20:15"),
+            ("13h", "13:00"),
+            ("h 9", "09:00"),
+            ("1330", "13:30"),
+            ("930", "09:30"),
+        ] {
+            assert_eq!(valida_orario(scritto), Ok(atteso.to_string()), "{scritto}");
+        }
+        for invalido in ["25", "13.75", "pranzo", "12345"] {
+            assert_eq!(valida_orario(invalido), Err(OrarioNonValido), "{invalido}");
+        }
     }
 
     #[test]

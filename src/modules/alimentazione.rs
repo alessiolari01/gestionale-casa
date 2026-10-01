@@ -493,7 +493,12 @@ pub async fn handle_message(
             product_name,
             unit_id,
         }) => {
-            let normalized = text.trim().replace(',', ".");
+            // C20: come in tutto il bot, "1.000", "1,5" e anche "500g".
+            let normalized = crate::modules::lista_spesa::leggi_numero_scritto(
+                &crate::modules::lista_spesa::separa_quantita(text).0,
+            )
+            .map(|valore| valore.to_string())
+            .unwrap_or_default();
             let quantity = normalized.parse::<f64>().ok().filter(|value| *value > 0.0);
             let Some(quantity) = quantity else {
                 match get_unit_by_id(pool, unit_id).await {
@@ -628,7 +633,12 @@ pub async fn handle_message(
             product_id,
             unit_id,
         }) => {
-            let normalized = text.trim().replace(',', ".");
+            // C20: come in tutto il bot, "1.000", "1,5" e anche "500g".
+            let normalized = crate::modules::lista_spesa::leggi_numero_scritto(
+                &crate::modules::lista_spesa::separa_quantita(text).0,
+            )
+            .map(|valore| valore.to_string())
+            .unwrap_or_default();
             let quantity = normalized
                 .parse::<f64>()
                 .ok()
@@ -673,7 +683,12 @@ pub async fn handle_message(
             format_id,
             unit_id,
         }) => {
-            let normalized = text.trim().replace(',', ".");
+            // C20: come in tutto il bot, "1.000", "1,5" e anche "500g".
+            let normalized = crate::modules::lista_spesa::leggi_numero_scritto(
+                &crate::modules::lista_spesa::separa_quantita(text).0,
+            )
+            .map(|valore| valore.to_string())
+            .unwrap_or_default();
             let quantity = normalized
                 .parse::<f64>()
                 .ok()
@@ -2175,11 +2190,10 @@ pub async fn handle_callback(
                             bot.send_message(
                                 chat_id,
                                 format!(
-                                    "🗑 Elimina formato\n\n{} · {}\nConfezione: {} {}\n\nIl formato verrà rimosso dalle opzioni attive. Il prodotto commerciale resterà disponibile.",
+                                    "🗑 Elimina formato\n\n{} · {}\nConfezione: {}\n\nIl formato verrà rimosso dalle opzioni attive. Il prodotto commerciale resterà disponibile.",
                                     product.brand,
                                     product.product_name,
-                                    display_quantity(format.package_quantity),
-                                    format.package_unit_symbol,
+                                    crate::modules::dispensa::formatta_quantita_leggibile(format.package_quantity, &format.package_unit_symbol),
                                 ),
                             )
                             .reply_markup(InlineKeyboardMarkup::new(vec![
@@ -5870,9 +5884,11 @@ async fn send_product_catalog(
             })
             .map(|product| {
                 format!(
-                    "\n• {} {} — {} {} · 🥕 {}",
-                    display_quantity(product.package_quantity),
-                    product.unit_symbol,
+                    "\n• {} — {} {} · 🥕 {}",
+                    crate::modules::dispensa::formatta_quantita_leggibile(
+                        product.package_quantity,
+                        &product.unit_symbol
+                    ),
                     product.brand,
                     product.product_name,
                     product.food_name
@@ -5895,9 +5911,11 @@ async fn send_product_catalog(
         .map(|product| {
             vec![button(
                 format!(
-                    "{} {} · {}",
-                    display_quantity(product.package_quantity),
-                    product.unit_symbol,
+                    "{} · {}",
+                    crate::modules::dispensa::formatta_quantita_leggibile(
+                        product.package_quantity,
+                        &product.unit_symbol
+                    ),
                     liste::tronca(&format!("{} {}", product.brand, product.product_name), 22),
                 ),
                 format!("food:product:view:{}", product.id),
@@ -7009,10 +7027,12 @@ fn product_formats_summary(formats: &[ProductFormatRecord]) -> String {
                 .map(|value| format!(" · EAN {value}"))
                 .unwrap_or_default();
             format!(
-                "• {} {} {}{}",
+                "• {} {}{}",
                 unit_icon(&format.package_unit_symbol),
-                display_quantity(format.package_quantity),
-                format.package_unit_symbol,
+                crate::modules::dispensa::formatta_quantita_leggibile(
+                    format.package_quantity,
+                    &format.package_unit_symbol
+                ),
                 ean
             )
         })
@@ -7099,12 +7119,14 @@ async fn send_product_format_detail(
     bot.send_message(
         chat_id,
         format!(
-            "📦 Formato\n{} · {}\n\n{} Confezione: {} {}\n🔢 Barcode / EAN: {}",
+            "📦 Formato\n{} · {}\n\n{} Confezione: {}\n🔢 Barcode / EAN: {}",
             product.brand,
             product.product_name,
             unit_icon(&format.package_unit_symbol),
-            display_quantity(format.package_quantity),
-            format.package_unit_symbol,
+            crate::modules::dispensa::formatta_quantita_leggibile(
+                format.package_quantity,
+                &format.package_unit_symbol
+            ),
             ean,
         ),
     )
@@ -7391,11 +7413,8 @@ fn parse_nutrition_values(raw: &str) -> Result<[Option<f64>; 9]> {
         if *raw_value == "-" || raw_value.is_empty() {
             continue;
         }
-        let normalized = raw_value.replace(',', ".");
-        let value = normalized
-            .parse::<f64>()
-            .ok()
-            .filter(|value| value.is_finite() && *value >= 0.0)
+        let value = crate::modules::lista_spesa::leggi_numero_scritto(raw_value)
+            .filter(|value| *value >= 0.0)
             .with_context(|| format!("Valore {} non valido", index + 1))?;
         values[index] = Some(value);
     }
@@ -7742,10 +7761,12 @@ fn product_formats_keyboard(
         .map(|format| {
             vec![button(
                 format!(
-                    "{} {} {}",
+                    "{} {}",
                     unit_icon(&format.package_unit_symbol),
-                    display_quantity(format.package_quantity),
-                    format.package_unit_symbol
+                    crate::modules::dispensa::formatta_quantita_leggibile(
+                        format.package_quantity,
+                        &format.package_unit_symbol
+                    )
                 ),
                 format!("food:format:view:{}", format.id),
             )]

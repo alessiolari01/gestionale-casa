@@ -658,7 +658,12 @@ async fn show_history_filter_menu(
         "✅ Mostra risultati",
         &format!("h:g:0:{token}"),
     )]);
-    rows.push(vec![button("🏠 Menù principale", "menu:main")]);
+    // C3: mancava ⬅️ Indietro (collaudo di bfe1169, nota su F4). Torna allo
+    // Storico con i filtri di adesso, come "Mostra risultati".
+    rows.push(vec![
+        button("⬅️ Indietro", &format!("h:g:0:{token}")),
+        button("🏠 Menù principale", "menu:main"),
+    ]);
 
     bot.send_message(chat_id, text)
         .reply_markup(InlineKeyboardMarkup::new(rows))
@@ -1256,24 +1261,43 @@ fn etichetta_filtro(
     if option.deleted != 0 {
         label.push_str("🗑 ");
     }
-    if let Some(subtitle) = option.subtitle.as_deref() {
-        label.push_str(&truncate_chars(&filter_subtitle_label(kind, subtitle), 10));
-        label.push_str(" · ");
+    // Sul pulsante solo il tipo, breve, davanti: il sottotitolo è "tipo ·
+    // spazio", e tagliato a dieci caratteri diventava "Oggetto · …" o
+    // "Prodotto a…" (collaudo di bfe1169, F4). Per case e stanze il tipo è lo
+    // stesso per tutte le voci, e non serve.
+    if kind == HistoryFilterKind::Entity {
+        if let Some(subtitle) = option.subtitle.as_deref() {
+            label.push_str(&filter_subtitle_label(kind, subtitle));
+            label.push_str(" · ");
+        }
     }
     label.push_str(&truncate_chars(&option.label, 22));
     label
 }
 
+/// Il tipo di un elemento dello Storico, come lo dice una persona: mai il
+/// nome interno ("profilo_alimentare" compariva così sul pulsante, F4).
 fn filter_subtitle_label(kind: HistoryFilterKind, value: &str) -> String {
-    if kind == HistoryFilterKind::Entity {
-        match value {
-            "oggetto" => "Oggetto".to_string(),
-            "abitazione" => "Casa".to_string(),
-            "stanza" => "Stanza".to_string(),
-            other => other.to_string(),
+    if kind != HistoryFilterKind::Entity {
+        return value.to_string();
+    }
+    let tipo = value.split(" · ").next().unwrap_or(value).trim();
+    match tipo.to_lowercase().as_str() {
+        "oggetto" => "Oggetto".to_string(),
+        "abitazione" | "casa" => "Casa".to_string(),
+        "stanza" => "Stanza".to_string(),
+        "contenitore" => "Contenitore".to_string(),
+        "prodotto_alimentare" | "prodotto alimentare" => "Prodotto".to_string(),
+        "profilo_alimentare" | "profilo alimentare" => "Profilo".to_string(),
+        "alimento" => "Alimento".to_string(),
+        "ricetta" => "Ricetta".to_string(),
+        altro => {
+            let mut parole = altro.replace('_', " ");
+            if let Some(prima) = parole.get(..1) {
+                parole = prima.to_uppercase() + &parole[1..];
+            }
+            parole
         }
-    } else {
-        value.to_string()
     }
 }
 

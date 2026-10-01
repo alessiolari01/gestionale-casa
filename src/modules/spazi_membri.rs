@@ -129,7 +129,9 @@ pub async fn handle_message(
         clear_manual_time(chat_id);
         return Ok(false);
     }
-    let value = text.trim();
+    // C20: "12.43", "12" o "ore 12" valgono come "12:43" e "12:00".
+    let normalizzato = crate::modules::turni::valida_orario(text).ok();
+    let value = normalizzato.as_deref().unwrap_or(text.trim());
 
     if matches!(
         target,
@@ -138,7 +140,7 @@ pub async fn handle_message(
     {
         bot.send_message(
             msg.chat.id,
-            "⚠️ Orario non valido.\n\nScrivilo esattamente nel formato 24 ore HH:MM, per esempio 12:43. Puoi riprovare subito oppure usare Indietro.",
+            "⚠️ Orario non valido.\n\nScrivilo per esempio 12:43, 12.43 o anche solo 12. Puoi riprovare subito oppure usare Indietro.",
         )
         .reply_markup(manual_time_back_keyboard(&target))
         .await?;

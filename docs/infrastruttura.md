@@ -228,8 +228,14 @@ progetto. Per il runtime è già stato utile:
 CARGO_BUILD_JOBS=1 \
 CARGO_PROFILE_DEV_DEBUG=0 \
 CARGO_INCREMENTAL=0 \
-cargo run --locked
+cargo run --release --locked
 ```
+
+Dal 1 ottobre 2026 sull'S9 gira la **build ottimizzata** (`--release`,
+`[profile.release]` in `Cargo.toml`, `opt-level = 2`): fino ad allora girava
+quella di debug, e sotto carico le risposte arrivavano in 5–20 secondi.
+`aggiorna-s9.sh` la compila durante i controlli, `avvia-bot.sh` la avvia, e
+`salva-binario.sh` salva quella per il rollback.
 
 ## 7. Backend ↔ Telegram
 

@@ -235,10 +235,11 @@ nuovo da solo (vedi `docs/moduli/lista-spesa.md`).
 
 ### `liste_spesa_aggiunte_catalogo` (9 settembre 2026)
 Aggiunte dal catalogo per "➕ Aggiungi voce manuale → 🔎 Cerca nel
-catalogo": a differenza delle righe `generato` di `liste_spesa_voci`, non
-sono uno snapshot — restano qui e partecipano di nuovo ogni volta al
-ricalcolo di `aggiorna_lista`, finché non vengono coperte da una voce
-comprata. Dettagli e motivazione della scelta di design in
+catalogo". **Dal 1 ottobre 2026 sono nette**: `quantita` è quello che c'è da
+comprare, già al netto delle scorte guardate al momento dell'aggiunta, e la
+lista la somma alla riga dei pasti dopo aver tolto le scorte. Si ritirano
+alla chiusura con quello che si è comprato (`ritira_aggiunte`). Le righe
+scritte prima di quella data erano lorde; nel database reale non ce n'erano. Dettagli e motivazione della scelta di design in
 `docs/moduli/lista-spesa.md`, sezione "Aggiunta dal catalogo".
 
 | Campo | Tipo | Note |
@@ -690,3 +691,23 @@ modulo veicoli avrà uno `storico_interventi` (interventi già effettuati,
 diverso dai promemoria futuri), il modulo ricette avrà `ingredienti` e
 `pianificazione_pasti`. Verranno progettate una alla volta, con un file
 dedicato in `docs/moduli/`.
+
+## `liste_spesa_scorte_usate` (1 ottobre 2026, migration 66)
+
+La scorta che le richieste dal catalogo hanno già preso per sé, in questo
+giro di spesa: due richieste di fila dello stesso alimento non devono
+contare due volte la stessa scorta (Miglioramento 15).
+
+| Campo | Tipo | Note |
+|---|---|---|
+| `lista_id` | INTEGER | riferimento a `liste_spesa(id)`, `ON DELETE CASCADE` |
+| `aggiunta_id` | INTEGER | nullable, l'aggiunta nata dalla richiesta quando la scorta non bastava; `ON DELETE CASCADE`: ritirando l'aggiunta la scorta si libera |
+| `alimento_id` | INTEGER | nullable, `ON DELETE CASCADE` |
+| `prodotto_alimentare_id` | INTEGER | nullable, `ON DELETE CASCADE`; almeno uno dei due è presente |
+| `quantita` | REAL | > 0, la scorta presa |
+| `unita_simbolo` | TEXT | unità di aggregazione (`g`, `ml`, …) |
+| `creato_il` | TEXT | ora locale |
+
+Una richiesta coperta del tutto dalle scorte non ha un'aggiunta
+(`aggiunta_id` nullo): la sua riga si libera chiudendo la spesa, che è la
+fine del giro. "🗑️ Rimuovi tutte" libera tutto.

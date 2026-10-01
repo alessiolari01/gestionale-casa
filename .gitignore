@@ -9,3 +9,7 @@
 
 # File di sistema
 .DS_Store
+
+# Collaudi dal vivo: copioni, esiti e screenshot della chat personale.
+# Restano sul PC: il repository e' pubblico, e sul telefono non servono.
+/collaudi/

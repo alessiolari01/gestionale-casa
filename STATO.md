@@ -2864,6 +2864,15 @@ nuova (`applied_migrations=65` invariato), `Gestionale Casa online`, zero
   codice scritti con la regola vecchia sono stati corretti nel giro dopo
   (sezione 2octovicies).
 
+## Dove stanno i collaudi
+
+Dal 1 ottobre 2026 tutti i collaudi dal vivo — copioni, esiti e screenshot —
+stanno in `collaudi/`, una cartella per collaudo (`AAAA-MM-GG_commit`), con
+gli helper della sessione di collaudo in `collaudi/_strumenti/`. La cartella
+è in `.gitignore`: il repository è pubblico e gli screenshot sono catture
+della chat personale, quindi resta solo sul PC. I nomi dei file citati nelle
+sezioni qui sotto si trovano lì.
+
 ## 2octovicies. Dal collaudo di 9307a33: il primo collaudo "da umano distratto" (29 settembre – 1 ottobre 2026)
 
 Il collaudo di `9307a33` l'ha fatto una sessione Claude che pilotava Telegram
@@ -3003,13 +3012,104 @@ la regola nuova della sezione 7 (distribuire senza chiedere): CI verde (run
 (Fase 1 di `Collaudo_bfe1169_prompt.md`); la Fase 2 "da umano distratto" è
 sospesa (sezione 6).
 
+## 2novovicies. Dal collaudo di bfe1169: il Miglioramento 15, la C20, l'offline (1 ottobre 2026)
+
+Collaudo di `bfe1169`, solo Fase 1 (`collaudi/2026-10-01_bfe1169/`): **30
+OK, 1 difetto, 5 migliorie**. Tutte le correzioni del giro prima hanno
+retto. Il database reale è stato ripristinato da `collaudo_b_00_prima.db`
+(salvato prima `gestionale_pre_ripristino_collaudo_b_20261001_182918.db`).
+Via libera di Alessio a: correggere tutto, fare il Miglioramento 15, la build
+ottimizzata, le unità "con le cifre più piccole possibili".
+
+### Il Miglioramento 15: una strada sola
+
+Il difetto X1 — "Di questo ne avevi chiesto di più" su un Riso comprato
+esattamente come diceva la lista, e la richiesta da 1 kg rimasta viva — era
+il quinto errore della stessa riconciliazione. La causa era il modello:
+un'aggiunta dal catalogo era una richiesta **lorda** ("mi serve 1 kg"), la
+lista le sottraeva le scorte a ogni aggiornamento, e alla chiusura qualcuno
+doveva decidere quando ritirarla; ritirandola presto la scorta "mangiava" le
+altre voci, tenendola restava viva.
+
+Ora un'aggiunta è **netta**: dice quanto c'è da comprare, le scorte si
+guardano una volta quando la si aggiunge, la lista la somma alla riga dei
+pasti **dopo** le scorte (200 g del planner più 50 a mano restano una riga
+da 250, come voleva Alessio), e alla chiusura **una regola sola**
+(`ritira_aggiunte`): il comprato copre prima la parte dei pasti, il resto
+ritira le aggiunte dalla più vecchia. Nessun ramo per Scorte o ingresso
+automatico accesi o spenti. Migration 66, `liste_spesa_scorte_usate`: il bot
+si ricorda quanta scorta ogni richiesta ha già preso, così due richieste di
+fila non la contano due volte (il caso del Miglioramento 16: 200 g in casa,
+chiesti 200 e poi 170, la lista ne chiede 170). Quando le scorte coprono
+tutto, **➕ Mettila lo stesso** (C20).
+
+Un tentativo intermedio, con le aggiunte diventate righe della lista, è stato
+scartato prima di consegnarlo: separava la riga dei pasti da quella chiesta
+a mano, contro una richiesta esplicita di Alessio. L'ha fermato un test che
+portava quella richiesta nel commento.
+
+La prova di X1 è stata scritta sul caso del collaudo e vista fallire prima
+di ogni correzione.
+
+### Le migliorie e le note del collaudo
+
+- **Pulsanti tagliati (C19)**: la conferma "scheda non salvata" (`📝 No, torna
+  alla scheda`, senza il 🏠 ambiguo); gli ingredienti con la quantità davanti
+  e il nome intero nel testo; le confezioni di una scorta con la marca corta e
+  intera nel testo, senza "senza scadenza" sul pulsante; le confezioni del
+  pannello 📦 con il nome a 16 caratteri; i filtri dello Storico con il tipo
+  breve ("Prodotto", "Profilo") invece di "Prodotto a…" e "profilo_al…", e
+  `⬅️ Indietro` nella schermata dei Filtri.
+- **Unità leggibili ovunque** (richiesta di Alessio: "2350 g → 2,35 kg"):
+  ricette, porzioni, planner, scorte, formati dei prodotti, resoconto della
+  lista, confezioni — tutte da `formatta_quantita_leggibile`.
+- **Piccole cose**: dopo un errore torna `➖ Senza quantità`; `❌ Annulla`
+  dalla nuova scorta torna al posto da cui si era partiti (e chiude
+  l'attesa); "Con 0 «…» è finita" con il nome; l'esempio della modifica di
+  una scorta nella forma leggibile; l'errore sulla data d'acquisto ripete la
+  domanda; l'Ultima spesa mostra i prezzi segnati.
+- **M2 non era un difetto**: "Esempio: 89.90" — il binario sull'S9 contiene
+  "Esempio: 89,90"; letto male dallo schermo.
+
+### La C20
+
+Applicata in funzioni condivise: quantità con l'unità attaccata e unità
+scritte per esteso, numeri, date ("domani", "15/11", "15-11-26"), orari
+("13", "13.30", "ore 13"), prezzi. Dettagli in C20,
+`docs/convenzioni-telegram.md`. Resta il giro sulle ricerche.
+
+### Il messaggio "offline" che restava
+
+Non nasceva da un riavvio normale, ma da un **ripristino del database**: lo
+spegnimento salva l'id dell'offline come schermata attiva, il ripristino
+riporta quella di prima, e l'offline restava in chat. È successo il 29
+settembre e il 1 ottobre, ripristinando dopo i collaudi. La prima prova, sul
+riavvio normale, passava subito — segno che il difetto non era quello; la
+seconda, con il ripristino in mezzo, è fallita com'era giusto. Ora lo
+spegnimento ricorda gli id anche in `data/run/messaggi_offline.txt`, che
+nessun ripristino tocca, e la riaccensione li cancella da lì.
+
+### La build ottimizzata
+
+Sull'S9 girava la build di debug. Ora `aggiorna-s9.sh` compila anche
+`--release` (`[profile.release]`, `opt-level = 2`, con le stesse protezioni
+per la memoria del telefono) e `avvia-bot.sh` avvia quella.
+
+### Altro
+
+- I collaudi stanno in `collaudi/` (sezione sopra), fuori da git.
+
+6 nuovi test (e quelli sulle aggiunte riscritti sul modello nuovo). Totale 504.
+
+**Collaudo dal vivo su Telegram da fare** (solo le modifiche).
+
 ## 3. Stato tecnico verificato
 
-- **65 migration** nel repository, tutte **applicate** al database reale
-  dell'S9: le ultime due (`funzioni_spente` della sezione 2vicies e le unità
-  predefinite della sezione 2unvicies) il 24 settembre 2026, verificato
-  leggendo `applied_migrations=65` nel log di avvio del bot dopo il deploy —
-  non dedotto.
+- **66 migration** nel repository. La 66ª (`liste_spesa_scorte_usate`,
+  sezione 2novovicies) si applica al primo avvio dopo il deploy del 1
+  ottobre 2026: va verificata leggendo `applied_migrations=66` nel log, non
+  dedotta. Le 65 di prima sono applicate al database reale dell'S9 dal 24
+  settembre 2026 (`applied_migrations=65` nel log di avvio).
   Né il secondo giro
   di correzioni del 12 settembre 2026 (sezione 2septies) né le tre
   rifiniture del 13 settembre 2026 (sezione 2octies) avevano migration
@@ -3018,7 +3118,7 @@ sospesa (sezione 6).
 - pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa,
   punto 1 della sezione 6): `fmt`, `check --locked`,
   `clippy --all-targets --locked -- -D warnings`, `test --locked` —
-  **498 test** (477 prima della sezione 2octovicies, 475 prima della sezione 2sexvicies, 474 prima della sezione
+  **504 test** (498 prima della sezione 2novovicies, 477 prima della sezione 2octovicies, 475 prima della sezione 2sexvicies, 474 prima della sezione
   2quattuorvicies, 472 prima della
   sezione 2trevicies, 471 prima della sezione
   2duovicies, 469 prima della sezione
@@ -3178,29 +3278,15 @@ src/modules/novita.rs               registro delle novità e badge "🆕" propag
 
 ## 6. Punti aperti
 
-**Il prossimo lavoro, deciso da Alessio il 1 ottobre 2026** — prima di
-qualunque modulo nuovo:
+**Prossimi passi**, dopo il giro del 1 ottobre 2026 (sezione 2novovicies):
 
-- **Applicare la C20 a tutto il bot** (`docs/convenzioni-telegram.md`): ogni
-  punto che legge testo scritto a mano deve capire cosa l'utente voleva
-  scrivere — `500g` come `500 g`, `gr`/`grammi`/`G`, `1,5kg`, orari come
-  `13.30` o `ore 13`, date come `1/10` o `domani` — e il flusso dei pulsanti
-  va pensato mentre si scrive il codice (doppi tocchi, uscite a metà, testo
-  dove serve un pulsante), non scoperto al collaudo. Si comincia con un
-  elenco di tutti gli input testuali del bot e di cosa accettano oggi.
-- **Il messaggio "🔴 Gestionale Casa è offline." resta in chat** dopo la
-  riaccensione (visto da Alessio il 1 ottobre 2026, dopo il deploy di
-  `bfe1169`). Lo manda lo spegnimento come schermata tracciata
-  (`send_message_without_improve` in `main.rs`), e "🟢 Gestionale Casa è
-  online." dovrebbe sostituirlo. Due ipotesi da verificare, non ancora
-  verificate: il processo esce prima che quella schermata sia salvata in
-  `telegram_ui_state`, oppure il messaggio di avvio parte prima di
-  `restore_persisted_ui`. Prima una prova che lo riproduce, poi la
-  correzione.
-- **Il collaudo "da umano distratto" è sospeso**: da qui si verificano solo
-  le modifiche fatte (la Fase 1 dei copioni). Il copione di `bfe1169` è
-  `Collaudo_bfe1169_prompt.md` nella cartella di lavoro, con la Fase 2
-  segnata come sospesa.
+- i **moduli nuovi**, nell'ordine concordato: Documenti, Promemoria,
+  Palestra, Soldi (`docs/roadmap.md`), ognuno scritto con la C20 in mente;
+- **C20, quello che resta**: le ricerche con accenti e maiuscole diversi dal
+  catalogo (`docs/convenzioni-telegram.md`);
+- **unire `lista-della-spesa` su `main`**;
+- **Il collaudo "da umano distratto" resta sospeso**: si verificano solo le
+  modifiche fatte (la Fase 1 dei copioni, in `collaudi/`).
 
 1. **Tre toolchain diverse, e solo una conta.** Il runner della CI usa la
    **1.98**; l'ambiente dell'assistente e' fermo alla **1.95** e non puo'

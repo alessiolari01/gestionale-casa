@@ -2,6 +2,31 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_COLLAUDO_BFE1169_20261001 -->
+# 01/10/2026 — Dal collaudo di bfe1169: le aggiunte rifatte, la C20, l'offline
+
+- **Le richieste dal catalogo non si confondono più alla chiusura** (il
+  Miglioramento 15). Il bot chiedeva "ne avevi chiesto di più" per un Riso
+  comprato proprio come diceva la lista, e teneva viva una richiesta già
+  comprata. Ora una richiesta dice quanto c'è **da comprare**, le scorte si
+  guardano una volta quando la aggiungi, e chiudendo la spesa quello che hai
+  comprato la ritira, con una regola sola. Pasti e richieste dello stesso
+  alimento restano una riga.
+- **Quando in casa ce n'è già abbastanza**, il bot lo dice e offre
+  **➕ Mettila lo stesso**.
+- **Si scrive come si parla** (C20): `500g`, `2 chili`, `3 cucchiai`;
+  `domani`, `15/11`, `15-11-26`; `13`, `13.30`, `ore 13`.
+- **Le quantità nella forma più leggibile ovunque**: 2350 g diventa 2,35 kg
+  nelle ricette, nelle porzioni, nel planner, nelle scorte e nei prodotti.
+- **Pulsanti tagliati**: ingredienti, confezioni, la conferma della scheda
+  oggetto, i filtri dello Storico (che ora ha anche ⬅️ Indietro).
+- Altre piccole cose: `➖ Senza quantità` resta dopo un errore, `❌ Annulla`
+  da una nuova scorta torna al posto giusto, l'Ultima spesa mostra i prezzi.
+- **Il messaggio "🔴 offline" non resta più in chat** dopo un ripristino del
+  database: ora il bot se ne ricorda anche fuori dal database.
+- **Sul telefono gira la versione ottimizzata del bot**, non quella di prova:
+  più veloce sotto carico.
+
 <!-- CHANGELOG_COLLAUDO_9307A33_20261001 -->
 # 01/10/2026 — Dal collaudo di 9307a33: il primo "da umano distratto"
 

@@ -10,7 +10,7 @@
 # `cargo build` per tornare indietro, si aspetterebbe la stessa build che
 # potrebbe essere quella rotta.
 #
-# Fondamentale l'ORDINE d'uso: va lanciato mentre target/debug/ corrisponde
+# Fondamentale l'ORDINE d'uso: va lanciato mentre target/release/ corrisponde
 # ancora al codice IN ESECUZIONE -- cioe' prima di `git pull`/`cargo build`
 # per la versione nuova, non dopo. Lanciarlo dopo la build nuova
 # salverebbe il binario sbagliato.
@@ -23,7 +23,7 @@ set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 CARTELLA_RUN="$PWD/data/run"
-SORGENTE="$PWD/target/debug/gestionale-casa"
+SORGENTE="$PWD/target/release/gestionale-casa"
 DESTINAZIONE="$CARTELLA_RUN/binario_precedente"
 
 mkdir -p "$CARTELLA_RUN" || exit 1

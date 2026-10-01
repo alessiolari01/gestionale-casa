@@ -210,17 +210,21 @@ pub async fn handle_quantity_message(
                 .unwrap_or(0);
             let message = if changed {
                 format!(
-                    "✅ Quantità aggiornata per {}: {} {}.",
+                    "✅ Quantità aggiornata per {}: {}.",
                     updated.row.name,
-                    format_quantity(quantity),
-                    updated.row.unit
+                    crate::modules::dispensa::formatta_quantita_leggibile(
+                        quantity,
+                        &updated.row.unit
+                    )
                 )
             } else {
                 format!(
-                    "ℹ️ {} usa già {} {}.",
+                    "ℹ️ {} usa già {}.",
                     updated.row.name,
-                    format_quantity(quantity),
-                    updated.row.unit
+                    crate::modules::dispensa::formatta_quantita_leggibile(
+                        quantity,
+                        &updated.row.unit
+                    )
                 )
             };
             show_list_with_notice(
@@ -357,16 +361,15 @@ async fn show_detail(
 
     match load_one(pool, profile_id, recipe_id, ingredient_id).await {
         Ok(Some(view)) => {
-            let calculated = format!(
-                "{} {}",
-                format_quantity(view.calculated_quantity),
-                view.row.unit
+            let calculated = crate::modules::dispensa::formatta_quantita_leggibile(
+                view.calculated_quantity,
+                &view.row.unit,
             );
             let (final_value, mode) = match (view.row.override_kind.as_deref(), view.final_quantity)
             {
                 (Some("escluso"), None) => ("ingrediente escluso".to_string(), "escluso"),
                 (Some("quantita"), Some(quantity)) => (
-                    format!("{} {}", format_quantity(quantity), view.row.unit),
+                    crate::modules::dispensa::formatta_quantita_leggibile(quantity, &view.row.unit),
                     "quantità personalizzata",
                 ),
                 _ => (calculated.clone(), "quantità calcolata"),
@@ -872,7 +875,9 @@ fn history_override_value(
 ) -> String {
     let state = match value {
         Some(("escluso", _)) => "escluso".to_string(),
-        Some(("quantita", Some(quantity))) => format!("{} {}", format_quantity(quantity), unit),
+        Some(("quantita", Some(quantity))) => {
+            crate::modules::dispensa::formatta_quantita_leggibile(quantity, unit)
+        }
         _ => "quantità calcolata".to_string(),
     };
     format!("{recipe_name} · {ingredient_name}: {state}")
@@ -898,7 +903,9 @@ fn list_keyboard(
         .map(|item| {
             let marker = ingredient_marker(item.row.override_kind.as_deref());
             let value = match item.final_quantity {
-                Some(quantity) => format!("{} {}", format_quantity(quantity), item.row.unit),
+                Some(quantity) => {
+                    crate::modules::dispensa::formatta_quantita_leggibile(quantity, &item.row.unit)
+                }
                 None => "escluso".to_string(),
             };
             vec![button(
@@ -1050,24 +1057,11 @@ fn from_base36(value: &str) -> Option<i64> {
     i64::from_str_radix(value, 36).ok()
 }
 
+/// Un numero scritto a mano, letto come nel resto del bot
+/// (`lista_spesa::leggi_numero_scritto`: virgola, punto, migliaia).
 fn parse_quantity(text: &str) -> Option<f64> {
-    let value = text.trim().replace(',', ".").parse::<f64>().ok()?;
-    (value.is_finite() && value > 0.0).then_some(value)
-}
-
-fn format_quantity(value: f64) -> String {
-    if value.fract().abs() < 1e-9 {
-        format!("{value:.0}")
-    } else {
-        let mut rendered = format!("{value:.2}");
-        while rendered.ends_with('0') {
-            rendered.pop();
-        }
-        if rendered.ends_with('.') {
-            rendered.pop();
-        }
-        rendered.replace('.', ",")
-    }
+    let value = crate::modules::lista_spesa::leggi_numero_scritto(text)?;
+    (value > 0.0).then_some(value)
 }
 
 fn page_count(total: i64) -> i64 {

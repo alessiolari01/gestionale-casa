@@ -1394,8 +1394,15 @@ async fn apply_field_input(
                     .reply_markup(keyboard)
                     .await?;
             }
+            // L'errore sopra la domanda, come per le quantità (collaudo di
+            // bfe1169, nota su E2).
             Err(errore) => {
-                bot.send_message(chat_id, errore.messaggio(&oggi(pool).await))
+                let testo = format!(
+                    "{}\n\n{}",
+                    errore.messaggio(&oggi(pool).await),
+                    field_prompt(DraftField::PurchaseDate, &draft)
+                );
+                bot.send_message(chat_id, testo)
                     .reply_markup(field_keyboard(DraftField::PurchaseDate, &draft))
                     .await?;
             }
@@ -3319,66 +3326,21 @@ impl ErroreData {
 /// perché ha rifiutato: fino al 29 settembre 2026 `31/12/2099` passava, e
 /// `01/01/1800` riceveva "usa GG/MM/AAAA" (collaudo di 9307a33).
 fn leggi_data_acquisto(input: &str, oggi: &str) -> Result<String, ErroreData> {
-    let (anno_oggi, mese_oggi, giorno_oggi) = componenti_data(oggi).ok_or(ErroreData::Formato)?;
-    let oggi_data = chrono::NaiveDate::from_ymd_opt(anno_oggi, mese_oggi, giorno_oggi)
-        .ok_or(ErroreData::Formato)?;
-    let data = match input.trim().to_lowercase().as_str() {
-        "oggi" => oggi_data,
-        "ieri" => oggi_data.pred_opt().ok_or(ErroreData::Formato)?,
-        _ => {
-            let (anno, mese, giorno) = componenti_data(input).ok_or(ErroreData::Formato)?;
-            if anno < 1900 && valid_date(2000, mese, giorno) {
-                return Err(ErroreData::TroppoVecchia);
-            }
-            if !valid_date(anno, mese, giorno) {
-                return Err(ErroreData::Formato);
-            }
-            chrono::NaiveDate::from_ymd_opt(anno, mese, giorno).ok_or(ErroreData::Formato)?
-        }
-    };
-    if data > oggi_data {
+    // C20: "ieri", "15/11", "15-11-26"… come in tutto il bot. Un acquisto
+    // senza anno cade nel passato.
+    let data = crate::modules::calendario::leggi_data_scritta(
+        input,
+        oggi,
+        crate::modules::calendario::Verso::Passato,
+    )
+    .ok_or(ErroreData::Formato)?;
+    if data.as_str() < "1900-01-01" {
+        return Err(ErroreData::TroppoVecchia);
+    }
+    if data.as_str() > oggi {
         return Err(ErroreData::NelFuturo);
     }
-    use chrono::Datelike;
-    Ok(format!(
-        "{:04}-{:02}-{:02}",
-        data.year(),
-        data.month(),
-        data.day()
-    ))
-}
-
-/// Anno, mese e giorno da `GG/MM/AAAA` o `AAAA-MM-GG`, senza controllare
-/// che la data esista.
-fn componenti_data(input: &str) -> Option<(i32, u32, u32)> {
-    let value = input.trim();
-    if value.contains('/') {
-        let mut parts = value.split('/');
-        let day = parts.next()?.parse::<u32>().ok()?;
-        let month = parts.next()?.parse::<u32>().ok()?;
-        let year = parts.next()?.parse::<i32>().ok()?;
-        parts.next().is_none().then_some((year, month, day))
-    } else {
-        let mut parts = value.split('-');
-        let year = parts.next()?.parse::<i32>().ok()?;
-        let month = parts.next()?.parse::<u32>().ok()?;
-        let day = parts.next()?.parse::<u32>().ok()?;
-        parts.next().is_none().then_some((year, month, day))
-    }
-}
-
-fn valid_date(year: i32, month: u32, day: u32) -> bool {
-    if !(1900..=2200).contains(&year) || !(1..=12).contains(&month) {
-        return false;
-    }
-    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-    let max_day = match month {
-        2 if leap => 29,
-        2 => 28,
-        4 | 6 | 9 | 11 => 30,
-        _ => 31,
-    };
-    (1..=max_day).contains(&day)
+    Ok(data)
 }
 
 fn format_money(cents: i64) -> String {

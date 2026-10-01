@@ -32,6 +32,7 @@ pub const CHAT: i64 = 4242;
 
 #[derive(Debug, Clone)]
 pub struct Chiamata {
+    pub metodo: String,
     pub corpo: Value,
 }
 
@@ -91,6 +92,15 @@ impl TelegramFinto {
 
     pub fn ultimo_testo(&self) -> String {
         self.testi().pop().unwrap_or_default()
+    }
+
+    /// I messaggi del bot che sono stati cancellati, nell'ordine.
+    pub fn cancellati(&self) -> Vec<i64> {
+        self.chiamate()
+            .into_iter()
+            .filter(|chiamata| chiamata.metodo.eq_ignore_ascii_case("deleteMessage"))
+            .filter_map(|chiamata| chiamata.corpo.get("message_id").and_then(Value::as_i64))
+            .collect()
     }
 
     /// Le etichette dei pulsanti dell'ultimo messaggio che ne aveva.
@@ -180,7 +190,7 @@ async fn servi(
         chiamate
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .push(Chiamata { corpo });
+            .push(Chiamata { metodo, corpo });
 
         let testo = json!({ "ok": true, "result": risultato }).to_string();
         let risposta_http = format!(

@@ -891,10 +891,9 @@ pub async fn handle_message(
             .await
             {
                 Ok(()) => format!(
-                    "✅ {}: ora {} {}.",
+                    "✅ {}: ora {}.",
                     food.name,
-                    display_quantity(quantity),
-                    unit.symbol
+                    crate::modules::dispensa::formatta_quantita_leggibile(quantity, &unit.symbol)
                 ),
                 Err(error) => format!("⚠️ {error}"),
             };
@@ -3378,9 +3377,11 @@ async fn show_recipe_detail(
                     .map(|note| format!(" · {note}"))
                     .unwrap_or_default();
                 text.push_str(&format!(
-                    "\n• {} {} {}{}{}{}",
-                    display_quantity(ingredient.quantity),
-                    ingredient.unit_symbol,
+                    "\n• {} {}{}{}{}",
+                    crate::modules::dispensa::formatta_quantita_leggibile(
+                        ingredient.quantity,
+                        &ingredient.unit_symbol
+                    ),
                     ingredient.food_name,
                     product,
                     optional,
@@ -4260,26 +4261,42 @@ fn ingredient_amount_keyboard(recipe_id: i64) -> InlineKeyboardMarkup {
     ])
 }
 
-/// Etichetta di un ingrediente nella schermata di modifica: nome e
-/// quantità, su una riga. Il prodotto specifico sta in `nota_ingrediente`.
+/// Etichetta di un ingrediente nella schermata di modifica: **la quantità
+/// davanti**, poi il nome corto. Il pulsante è largo mezza riga, perché
+/// accanto c'è 🗑, e con il nome davanti la fine tagliata era l'unità:
+/// "Olio extravergine di oliva · 20" (collaudo di bfe1169, F2). Come nella
+/// lista della spesa, la quantità è la cosa che non si può perdere. Il nome
+/// intero e il prodotto specifico stanno nel testo (`nota_ingrediente`).
 fn ingredient_button_label(ingredient: &IngredientRecord) -> String {
-    let base = format!(
-        "{} · {} {}",
-        crate::modules::liste::tronca(&ingredient.food_name, 28),
-        display_quantity(ingredient.quantity),
-        ingredient.unit_symbol
-    );
-    base
+    format!(
+        "{} · {}",
+        crate::modules::dispensa::formatta_quantita_leggibile(
+            ingredient.quantity,
+            &ingredient.unit_symbol
+        ),
+        crate::modules::liste::tronca(&ingredient.food_name, 16)
+    )
 }
 
-/// Il prodotto specifico di un ingrediente, per il testo della schermata:
-/// sul pulsante stava dopo un `\n` che Telegram ignora, e si perdeva per
-/// primo (C19).
+/// Quello che sul pulsante di un ingrediente non entra, per il testo della
+/// schermata (C19): il nome intero, quando il pulsante lo taglia, e il
+/// prodotto specifico, che sul pulsante stava dopo un `\n` ignorato da
+/// Telegram. Un ingrediente con nome corto e senza prodotto non ha niente da
+/// aggiungere, e nel testo non compare.
 fn nota_ingrediente(ingredient: &IngredientRecord) -> Option<String> {
-    ingredient
-        .product_label
-        .as_ref()
-        .map(|label| format!("🛒 {}: {label}", ingredient.food_name))
+    let tagliato = ingredient.food_name.chars().count() > 16;
+    match (&ingredient.product_label, tagliato) {
+        (Some(label), _) => Some(format!("🛒 {}: {label}", ingredient.food_name)),
+        (None, true) => Some(format!(
+            "• {} · {}",
+            crate::modules::dispensa::formatta_quantita_leggibile(
+                ingredient.quantity,
+                &ingredient.unit_symbol
+            ),
+            ingredient.food_name
+        )),
+        (None, false) => None,
+    }
 }
 
 /// L'ingrediente da modificare, con alimento e unità pronti per il flusso di
@@ -4938,9 +4955,11 @@ async fn show_draft_ingredients(
                 .map(|label| format!(" · 🛒 {label}"))
                 .unwrap_or_default();
             text.push_str(&format!(
-                "\n\n• {} {} {}{}",
-                display_quantity(ingredient.quantity),
-                ingredient.unit_symbol,
+                "\n\n• {} {}{}",
+                crate::modules::dispensa::formatta_quantita_leggibile(
+                    ingredient.quantity,
+                    &ingredient.unit_symbol
+                ),
                 ingredient.food_name,
                 product
             ));
@@ -7669,12 +7688,11 @@ fn parse_nonnegative_i64(raw: &str) -> Option<i64> {
     raw.parse::<i64>().ok().filter(|value| *value >= 0)
 }
 
+/// Un numero positivo scritto a mano, letto come nel resto del bot (C20):
+/// "1.000", "1,5", e anche con l'unità attaccata, "500g".
 fn parse_positive_number(raw: &str) -> Option<f64> {
-    let normalized = raw.trim().replace(',', ".");
-    normalized
-        .parse::<f64>()
-        .ok()
-        .filter(|value| value.is_finite() && *value > 0.0)
+    let (numero, _) = crate::modules::lista_spesa::separa_quantita(raw);
+    crate::modules::lista_spesa::leggi_numero_scritto(&numero).filter(|value| *value > 0.0)
 }
 
 fn parse_two_positive_ids(raw: &str) -> Option<(i64, i64)> {
@@ -7947,7 +7965,7 @@ mod tests {
             optional: 0,
             notes: None,
         };
-        assert_eq!(ingredient_button_label(&record), "Pomodori · 400 g");
+        assert_eq!(ingredient_button_label(&record), "400 g · Pomodori");
         assert_eq!(
             nota_ingrediente(&record).as_deref(),
             Some("🛒 Pomodori: Mutti · Polpa fine")

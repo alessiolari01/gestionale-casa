@@ -187,20 +187,10 @@ pub fn formatta_quantita_leggibile(quantita: f64, unita: &str) -> String {
 /// La validazione è semantica, non solo di forma: `30/02/2026` viene
 /// rifiutata qui invece di diventare `NULL` una volta arrivata a SQLite --
 /// stessa lezione già imparata con le date del planner.
-pub fn interpreta_scadenza(testo: &str) -> Option<String> {
-    let testo = testo.trim();
-    if calendario::valid_date(testo) {
-        return Some(testo.to_string());
-    }
-    let parti: Vec<&str> = testo.split(['/', '-', '.']).collect();
-    if parti.len() != 3 {
-        return None;
-    }
-    let giorno: u32 = parti[0].parse().ok()?;
-    let mese: u32 = parti[1].parse().ok()?;
-    let anno: i32 = parti[2].parse().ok()?;
-    let iso = format!("{anno:04}-{mese:02}-{giorno:02}");
-    calendario::valid_date(&iso).then_some(iso)
+pub fn interpreta_scadenza(testo: &str, oggi: &str) -> Option<String> {
+    // C20 (1 ottobre 2026): anche "domani", "15/11" o "15/11/26". Una
+    // scadenza senza anno cade nel futuro.
+    calendario::leggi_data_scritta(testo, oggi, calendario::Verso::Futuro)
 }
 
 /// Una singola confezione (un "lotto") in un posto di conservazione.
@@ -382,18 +372,39 @@ pub fn frase_confezioni(lotti: &[Scorta]) -> String {
 /// solo entrando (Miglioramento 18). `nome_gruppo` e' il nome dell'alimento:
 /// ripeterlo sul pulsante non direbbe niente di nuovo.
 pub fn etichetta_lotto(lotto: &Scorta, nome_gruppo: &str) -> String {
-    let scadenza = match lotto.scadenza.as_deref() {
-        Some(data) => format!("scade {}", calendario::display_date(data)),
-        None => "senza scadenza".to_string(),
-    };
     // Come nell'elenco: "1,59 kg", non "1590 g" (osservazione C5).
-    let quantita = formatta_quantita_leggibile(lotto.quantita, &lotto.unita_simbolo);
-    let marca = lotto.descrizione.trim();
-    if marca.is_empty() || marca.eq_ignore_ascii_case(nome_gruppo.trim()) {
-        format!("{quantita} · {scadenza}")
-    } else {
-        format!("{quantita} · {} · {scadenza}", liste::tronca(marca, 24))
+    let mut etichetta = formatta_quantita_leggibile(lotto.quantita, &lotto.unita_simbolo);
+    if let Some(marca) = marca_del_lotto(lotto, nome_gruppo) {
+        etichetta.push_str(&format!(" · {}", liste::tronca(marca, MARCA_SUL_PULSANTE)));
     }
+    // "senza scadenza" non va più sul pulsante: è il caso normale, e
+    // occupava la metà dell'etichetta che faceva tagliare la marca
+    // (collaudo di bfe1169, M1).
+    if let Some(data) = lotto.scadenza.as_deref() {
+        etichetta.push_str(&format!(" · 📅 {}", calendario::display_date(data)));
+    }
+    etichetta
+}
+
+/// Quanti caratteri della marca entrano sul pulsante di una confezione.
+const MARCA_SUL_PULSANTE: usize = 14;
+
+/// La marca di una confezione, se ne ha una diversa dal nome dell'alimento.
+fn marca_del_lotto<'a>(lotto: &'a Scorta, nome_gruppo: &str) -> Option<&'a str> {
+    let marca = lotto.descrizione.trim();
+    (!marca.is_empty() && !marca.eq_ignore_ascii_case(nome_gruppo.trim())).then_some(marca)
+}
+
+/// La riga di testo di una confezione con la marca tagliata sul pulsante:
+/// il nome intero (C19). Prima non compariva da nessuna parte.
+pub fn nota_lotto(lotto: &Scorta, nome_gruppo: &str) -> Option<String> {
+    let marca = marca_del_lotto(lotto, nome_gruppo)?;
+    (marca.chars().count() > MARCA_SUL_PULSANTE).then(|| {
+        format!(
+            "• {} — {marca}",
+            formatta_quantita_leggibile(lotto.quantita, &lotto.unita_simbolo)
+        )
+    })
 }
 
 /// Etichetta di un gruppo su un pulsante: nome e totale, su una riga sola.
@@ -1862,9 +1873,10 @@ pub async fn handle_message(
             let query = text.trim();
             if query.is_empty() {
                 bot.send_message(msg.chat.id, "⚠️ Scrivi un nome da cercare.")
-                    .reply_markup(InlineKeyboardMarkup::new(vec![annulla_row(
-                        "dispensa:menu",
-                    )]))
+                    .reply_markup(InlineKeyboardMarkup::new(vec![annulla_row(&format!(
+                        "dispensa:annulla:{}",
+                        dove.token()
+                    ))]))
                     .await?;
                 return Ok(true);
             }
@@ -1887,9 +1899,10 @@ pub async fn handle_message(
                 Err(errore) => {
                     tracing::warn!(?errore, "Ricerca nel catalogo fallita");
                     bot.send_message(msg.chat.id, "⚠️ Non riesco a cercare nel catalogo.")
-                        .reply_markup(InlineKeyboardMarkup::new(vec![annulla_row(
-                            "dispensa:menu",
-                        )]))
+                        .reply_markup(InlineKeyboardMarkup::new(vec![annulla_row(&format!(
+                            "dispensa:annulla:{}",
+                            dove.token()
+                        ))]))
                         .await?;
                 }
             }
@@ -1910,16 +1923,18 @@ pub async fn handle_message(
                         msg.chat.id,
                         format!("➕ {descrizione}\n\nScrivi quantità e unità (es. \"500 g\")."),
                     )
-                    .reply_markup(InlineKeyboardMarkup::new(vec![annulla_row(
-                        "dispensa:menu",
-                    )]))
+                    .reply_markup(InlineKeyboardMarkup::new(vec![annulla_row(&format!(
+                        "dispensa:annulla:{}",
+                        dove.token()
+                    ))]))
                     .await?;
                 }
                 Err(errore) => {
                     bot.send_message(msg.chat.id, format!("⚠️ {errore}"))
-                        .reply_markup(InlineKeyboardMarkup::new(vec![annulla_row(
-                            "dispensa:menu",
-                        )]))
+                        .reply_markup(InlineKeyboardMarkup::new(vec![annulla_row(&format!(
+                            "dispensa:annulla:{}",
+                            dove.token()
+                        ))]))
                         .await?;
                 }
             }
@@ -1963,9 +1978,10 @@ pub async fn handle_message(
                     testo_quantita(&descrizione, unita_default.as_deref())
                 );
                 bot.send_message(msg.chat.id, testo)
-                    .reply_markup(InlineKeyboardMarkup::new(vec![annulla_row(
-                        "dispensa:menu",
-                    )]))
+                    .reply_markup(InlineKeyboardMarkup::new(vec![annulla_row(&format!(
+                        "dispensa:annulla:{}",
+                        dove.token()
+                    ))]))
                     .await?;
             }
         },
@@ -2003,7 +2019,13 @@ pub async fn handle_message(
                         "🗑 Elimina la confezione",
                         format!("dispensa:del:ask:{scorta_id}"),
                     )]);
-                    "⚠️ Con 0 la confezione è finita: se vuoi toglierla, eliminala.".to_string()
+                    // Con il nome: il messaggio da solo non diceva di che
+                    // cosa (collaudo di bfe1169, nota su C3).
+                    let nome = match scorta_per_id(pool, scorta_id).await {
+                        Ok(Some(scorta)) => format!("«{}»", scorta.descrizione),
+                        _ => "la confezione".to_string(),
+                    };
+                    format!("⚠️ Con 0 {nome} è finita: se vuoi toglierla, eliminala.")
                 } else {
                     format!(
                         "⚠️ {}",
@@ -2020,7 +2042,11 @@ pub async fn handle_message(
             }
         },
         DispensaConversationState::AwaitingScadenza { scorta_id } => {
-            match interpreta_scadenza(text) {
+            let oggi: String = sqlx::query_scalar("SELECT date('now','localtime')")
+                .fetch_one(pool)
+                .await
+                .unwrap_or_else(|_| "2026-01-01".to_string());
+            match interpreta_scadenza(text, &oggi) {
                 Some(data) => {
                     sessions.clear_chat(chat_id);
                     if let Err(errore) = imposta_scadenza(pool, scorta_id, Some(&data)).await {
@@ -2129,6 +2155,19 @@ pub async fn handle_callback(
         return Ok(true);
     }
     // Elenco di un luogo: "dispensa:luogo:{token}:{pagina}".
+    // ❌ Annulla da una nuova scorta: si torna al posto da cui si era
+    // partiti, non al menù delle Scorte (collaudo di bfe1169, nota su C4),
+    // e l'attesa della quantità si chiude — tornare al posto e basta la
+    // lascerebbe viva dietro la schermata.
+    if let Some(token) = data.strip_prefix("dispensa:annulla:") {
+        sessions.clear_chat(chat_id.0);
+        bot.annulla_e_avvisa(chat_id.0, "❌ Operazione annullata.");
+        match Conservazione::da_token(token) {
+            Some(dove) => mostra_luogo(bot, chat_id, pool, dove, 0, None).await?,
+            None => mostra_menu(bot, chat_id, pool, None).await?,
+        }
+        return Ok(true);
+    }
     if let Some(resto) = data.strip_prefix("dispensa:luogo:") {
         let mut parti = resto.split(':');
         let Some(dove) = parti.next().and_then(Conservazione::da_token) else {
@@ -2176,9 +2215,10 @@ pub async fn handle_callback(
                     },
                 );
                 bot.send_message(chat_id, testo_quantita(&nome, unita_default.as_deref()))
-                    .reply_markup(InlineKeyboardMarkup::new(vec![annulla_row(
-                        "dispensa:menu",
-                    )]))
+                    .reply_markup(InlineKeyboardMarkup::new(vec![annulla_row(&format!(
+                        "dispensa:annulla:{}",
+                        dove.token()
+                    ))]))
                     .await?;
             }
             _ => invalid(bot, chat_id).await?,
@@ -2207,9 +2247,10 @@ pub async fn handle_callback(
                     },
                 );
                 bot.send_message(chat_id, testo_quantita(&descrizione, Some(&unita_default)))
-                    .reply_markup(InlineKeyboardMarkup::new(vec![annulla_row(
-                        "dispensa:menu",
-                    )]))
+                    .reply_markup(InlineKeyboardMarkup::new(vec![annulla_row(&format!(
+                        "dispensa:annulla:{}",
+                        dove.token()
+                    ))]))
                     .await?;
             }
             _ => invalid(bot, chat_id).await?,
@@ -2226,9 +2267,10 @@ pub async fn handle_callback(
             DispensaConversationState::AwaitingDescrizione { dove },
         );
         bot.send_message(chat_id, "📝 Scrivi cosa hai (es. \"Passata di pomodoro\").")
-            .reply_markup(InlineKeyboardMarkup::new(vec![annulla_row(
-                "dispensa:menu",
-            )]))
+            .reply_markup(InlineKeyboardMarkup::new(vec![annulla_row(&format!(
+                "dispensa:annulla:{}",
+                dove.token()
+            ))]))
             .await?;
         return Ok(true);
     }
@@ -2245,9 +2287,10 @@ pub async fn handle_callback(
             chat_id,
             "🔎 Scrivi il nome di un alimento (es. \"pasta\") o di un prodotto (es. \"de cecco\").",
         )
-        .reply_markup(InlineKeyboardMarkup::new(vec![annulla_row(
-            "dispensa:menu",
-        )]))
+        .reply_markup(InlineKeyboardMarkup::new(vec![annulla_row(&format!(
+            "dispensa:annulla:{}",
+            dove.token()
+        ))]))
         .await?;
         return Ok(true);
     }
@@ -2297,9 +2340,9 @@ pub async fn handle_callback(
         bot.send_message(
             chat_id,
             format!(
-                "✏️ {}\n\nScrivi la quantità che resta (es. \"{}\") -- uso \"{}\", oppure scrivi anche un'altra unità.",
+                "✏️ {}\n\nOra: {}. Scrivi quanta ne resta: solo il numero vale in {}, oppure scrivi anche un'altra unità.",
                 scorta.descrizione,
-                formatta_quantita(scorta.quantita),
+                formatta_quantita_leggibile(scorta.quantita, &scorta.unita_simbolo),
                 scorta.unita_simbolo
             ),
         )
@@ -2686,6 +2729,15 @@ async fn mostra_gruppo(
             .collect();
         testo.push_str(&format!("\n\n🏠 Ne hai anche in {}", righe.join(", ")));
     }
+    // Le marche che sul pulsante non entrano, per intero (C19).
+    let note: Vec<String> = gruppo
+        .lotti
+        .iter()
+        .filter_map(|lotto| nota_lotto(lotto, &gruppo.descrizione))
+        .collect();
+    if !note.is_empty() {
+        testo.push_str(&format!("\n\n{}", note.join("\n")));
+    }
     let mut rows: Vec<Vec<InlineKeyboardButton>> = gruppo
         .lotti
         .iter()
@@ -2988,21 +3040,30 @@ mod tests {
 
     #[test]
     fn scadenza_accetta_i_due_formati_e_rifiuta_una_data_impossibile() {
+        let oggi = "2026-10-01";
         assert_eq!(
-            interpreta_scadenza("31/12/2026"),
+            interpreta_scadenza("31/12/2026", oggi),
             Some("2026-12-31".to_string())
         );
         assert_eq!(
-            interpreta_scadenza("2026-12-31"),
+            interpreta_scadenza("2026-12-31", oggi),
             Some("2026-12-31".to_string())
         );
         assert_eq!(
-            interpreta_scadenza("1/2/2026"),
+            interpreta_scadenza("1/2/2026", oggi),
             Some("2026-02-01".to_string())
         );
         // Semantica, non solo forma: il 30 febbraio non esiste.
-        assert_eq!(interpreta_scadenza("30/02/2026"), None);
-        assert_eq!(interpreta_scadenza("domani"), None);
+        assert_eq!(interpreta_scadenza("30/02/2026", oggi), None);
+        // C20: come la dice una persona.
+        assert_eq!(
+            interpreta_scadenza("domani", oggi),
+            Some("2026-10-02".to_string())
+        );
+        assert_eq!(
+            interpreta_scadenza("15/3", oggi),
+            Some("2027-03-15".to_string())
+        );
     }
 
     #[test]
@@ -3580,14 +3641,24 @@ mod tests {
 
         // La confezione generica si chiama come l'alimento: ripeterlo sul
         // pulsante non aggiunge niente.
-        assert_eq!(
-            etichetta_lotto(&generico, "Parmigiano Reggiano"),
-            "1,59 kg · senza scadenza"
-        );
-        // Quella di marca la dice, ed e' l'unica cosa che le distingue.
+        assert_eq!(etichetta_lotto(&generico, "Parmigiano Reggiano"), "1,59 kg");
+        // Quella di marca la dice, ed e' l'unica cosa che le distingue: corta
+        // sul pulsante, intera nel testo (collaudo di bfe1169, M1).
         assert_eq!(
             etichetta_lotto(&di_marca, "Parmigiano Reggiano"),
-            "200 g · Parmareggio Parmigiano 2… · senza scadenza"
+            "200 g · Parmareggio Pa…"
+        );
+        assert_eq!(
+            nota_lotto(&di_marca, "Parmigiano Reggiano").as_deref(),
+            Some("• 200 g — Parmareggio Parmigiano 24 mesi")
+        );
+        assert_eq!(nota_lotto(&generico, "Parmigiano Reggiano"), None);
+        let mut con_data = generico.clone();
+        con_data.scadenza = Some("2026-11-15".to_string());
+        assert!(
+            etichetta_lotto(&con_data, "Parmigiano Reggiano").starts_with("1,59 kg · 📅 "),
+            "{}",
+            etichetta_lotto(&con_data, "Parmigiano Reggiano")
         );
 
         // Nessuna delle due ha scadenza: la frase non deve dire il contrario.

@@ -722,9 +722,24 @@ in uno stato che lo schermo non mostra.
 passano dai gestori veri, e con le funzioni pure di lettura dei numeri e delle
 date — una tabella di casi scritti "male" per ognuna.
 
-**Stato**: regola decisa, **da applicare**. È il primo lavoro del giro
-successivo al 1 ottobre 2026 (`STATO.md`, sezione 6): un giro su ogni punto
-del bot che legge testo scritto a mano.
+**Applicata il 1 ottobre 2026**, in funzioni condivise da tutto il bot:
+
+- **quantità**: `lista_spesa::separa_quantita` (numero e unità attaccati o
+  staccati) e `normalizza_unita` (`gr`, `grammi`, `G`, `chili`, `lt`,
+  `litri`, `pezzi`, `cucchiai`… al simbolo del catalogo), usate dalla lista
+  della spesa, dalle scorte e dai formati dei prodotti;
+- **numeri**: `lista_spesa::leggi_numero_scritto` ovunque si legge un numero
+  a mano (lista, scorte, ricette, porzioni, formati, valori nutrizionali);
+- **date**: `calendario::leggi_data_scritta` per scadenze e acquisti
+  ("oggi", "ieri", "domani", "15/11", "15-11-26", "15 11 2026"), con l'anno
+  mancante nel verso giusto;
+- **orari**: `turni::valida_orario` ("13", "13.30", "ore 13", "1330"), usata
+  anche dal planner, dalla distribuzione e dagli inviti;
+- **prezzi**: `mercato::interpreta_prezzo` ("3 euro", "€ 3", "3€").
+
+**Resta da fare**: le ricerche che non trovano un nome scritto con accenti o
+maiuscole diversi dal catalogo; e il giro sul flusso dei pulsanti va tenuto a
+ogni modifica, non è un lavoro che si chiude una volta.
 
 ---
 

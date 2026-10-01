@@ -633,15 +633,12 @@ async fn async_main() -> anyhow::Result<()> {
             Vec::new()
         }
     };
-    for chat_id in admin_chat_ids {
-        if let Err(error) = send_online_menu(&bot, ChatId(chat_id)).await {
-            tracing::warn!(
-                chat_id,
-                ?error,
-                "Impossibile inviare la notifica di avvio all'amministratore"
-            );
-        }
-    }
+    annuncia_riaccensione(
+        &bot,
+        &admin_chat_ids,
+        std::path::Path::new(FILE_MESSAGGI_OFFLINE),
+    )
+    .await;
 
     let sessions = SessionStore::new();
     let location_sessions = LocationSessionStore::new();
@@ -777,18 +774,12 @@ async fn async_main() -> anyhow::Result<()> {
             Vec::new()
         }
     };
-    for chat_id in shutdown_chat_ids {
-        if let Err(error) = shutdown_bot
-            .send_message_without_improve(ChatId(chat_id), "🔴 Gestionale Casa è offline.")
-            .await
-        {
-            tracing::warn!(
-                chat_id,
-                ?error,
-                "Impossibile inviare la notifica di spegnimento all'amministratore"
-            );
-        }
-    }
+    annuncia_spegnimento(
+        &shutdown_bot,
+        &shutdown_chat_ids,
+        std::path::Path::new(FILE_MESSAGGI_OFFLINE),
+    )
+    .await;
 
     tracing::info!("Gestionale Casa offline");
     Ok(())
@@ -1940,8 +1931,13 @@ async fn handle_authorized_callback(
                     "🗑 Sì, buttala",
                     "menu:main:scarta",
                 )],
+                // Senza "⬅️" davanti: `context_bot` completa una riga che
+                // comincia con ⬅️ con 💡 e 🏠, e su un terzo di riga
+                // l'etichetta arrivava tagliata ("No, torna alla sche…"), con
+                // accanto un 🏠 ambiguo proprio in questa domanda (collaudo di
+                // bfe1169, E3b).
                 vec![InlineKeyboardButton::callback(
-                    "⬅️ No, torna alla scheda",
+                    "📝 No, torna alla scheda",
                     "oggetti:draft:back",
                 )],
             ]))
@@ -2468,6 +2464,85 @@ async fn badge_alimentazione(pool: &SqlitePool, actor: &identity::AuditActor) ->
         Err(error) => {
             tracing::warn!(?error, "Errore lettura novità viste, badge nascosto");
             false
+        }
+    }
+}
+
+/// Dove lo spegnimento si ricorda i messaggi "offline" da togliere alla
+/// riaccensione: **fuori dal database**, accanto al pid del bot.
+const FILE_MESSAGGI_OFFLINE: &str = "data/run/messaggi_offline.txt";
+
+/// Manda "🔴 Gestionale Casa è offline." agli amministratori, e se ne
+/// ricorda gli id in `file`. Ritorna gli id mandati.
+///
+/// Il messaggio è anche la schermata attiva salvata nel database, che la
+/// riaccensione sostituisce. Ma un **ripristino del database** fra lo
+/// spegnimento e la riaccensione riporta la schermata attiva di allora, e
+/// l'id dell'offline si perdeva: il messaggio restava in chat (visto da
+/// Alessio il 1 ottobre 2026, dopo i ripristini dei collaudi). Il file non
+/// lo tocca nessun ripristino.
+async fn annuncia_spegnimento(
+    bot: &Bot,
+    chat_ids: &[i64],
+    file: &std::path::Path,
+) -> Vec<MessageId> {
+    let mut mandati = Vec::new();
+    let mut righe = String::new();
+    for chat_id in chat_ids {
+        match bot
+            .send_message_without_improve(ChatId(*chat_id), "🔴 Gestionale Casa è offline.")
+            .await
+        {
+            Ok(messaggio) => {
+                righe.push_str(&format!("{chat_id} {}\n", messaggio.id.0));
+                mandati.push(messaggio.id);
+            }
+            Err(error) => tracing::warn!(
+                chat_id,
+                ?error,
+                "Impossibile inviare la notifica di spegnimento all'amministratore"
+            ),
+        }
+    }
+    if !righe.is_empty() {
+        if let Err(error) = tokio::fs::write(file, righe).await {
+            tracing::warn!(?error, "Messaggi offline non ricordati");
+        }
+    }
+    mandati
+}
+
+/// Manda "🟢 Gestionale Casa è online." agli amministratori, poi toglie i
+/// messaggi "offline" che lo spegnimento si era segnato in `file`.
+async fn annuncia_riaccensione(bot: &Bot, chat_ids: &[i64], file: &std::path::Path) {
+    let offline = tokio::fs::read_to_string(file).await.unwrap_or_default();
+    for riga in offline.lines() {
+        let mut parti = riga.split_whitespace();
+        let (Some(Ok(chat_id)), Some(Ok(message_id))) = (
+            parti.next().map(str::parse::<i64>),
+            parti.next().map(str::parse::<i32>),
+        ) else {
+            continue;
+        };
+        // Se era ancora la schermata attiva, l'ha già tolta "online" qui
+        // sotto, o la toglierà: cancellarla due volte non fa danni.
+        if let Err(error) = bot
+            .delete_message(ChatId(chat_id), MessageId(message_id))
+            .await
+        {
+            tracing::debug!(chat_id, message_id, ?error, "Messaggio offline già tolto");
+        }
+    }
+    if !offline.is_empty() {
+        let _ = tokio::fs::remove_file(file).await;
+    }
+    for chat_id in chat_ids {
+        if let Err(error) = send_online_menu(bot, ChatId(*chat_id)).await {
+            tracing::warn!(
+                chat_id,
+                ?error,
+                "Impossibile inviare la notifica di avvio all'amministratore"
+            );
         }
     }
 }
@@ -3705,6 +3780,100 @@ mod runtime_tests {
                 "ultimo testo: {}",
                 banco.telegram.ultimo_testo()
             );
+        }
+
+        /// Visto da Alessio il 1 ottobre 2026, dopo il deploy di bfe1169:
+        /// riaccendendo il bot, "🔴 Gestionale Casa è offline." restava in
+        /// chat. Lo spegnimento lo manda come schermata attiva, e
+        /// "🟢 online" dovrebbe prenderne il posto.
+        #[tokio::test]
+        async fn alla_riaccensione_il_messaggio_offline_se_ne_va() {
+            let banco = banco().await;
+            sqlx::query(
+                "UPDATE utenti SET ruolo_sistema = 'admin', telegram_chat_id = ? WHERE id = ?",
+            )
+            .bind(CHAT)
+            .bind(banco.actor.utente_id)
+            .execute(&banco.pool)
+            .await
+            .ok();
+
+            // Il processo che si spegne.
+            let spento = banco.telegram.bot(&banco.pool);
+            let offline = spento
+                .send_message_without_improve(ChatId(CHAT), "🔴 Gestionale Casa è offline.")
+                .await
+                .expect("offline");
+
+            // Il processo nuovo: memoria vuota, rilegge lo stato salvato.
+            let acceso = banco.telegram.bot(&banco.pool);
+            acceso.restore_persisted_ui().await;
+            send_online_menu(&acceso, ChatId(CHAT))
+                .await
+                .expect("online");
+
+            assert!(
+                banco
+                    .telegram
+                    .cancellati()
+                    .contains(&i64::from(offline.id.0)),
+                "il messaggio offline ({}) non è stato cancellato: {:?}",
+                offline.id.0,
+                banco.telegram.cancellati()
+            );
+        }
+
+        /// Il caso vero (1 ottobre 2026): spegnimento, poi il database
+        /// **ripristinato** da un backup di prima, poi la riaccensione. Con
+        /// il backup torna anche la schermata attiva di allora, e l'id del
+        /// messaggio "offline" si perde: "online" cancellava la schermata
+        /// vecchia, ormai sparita, e l'offline restava in chat.
+        #[tokio::test]
+        async fn anche_dopo_un_ripristino_il_messaggio_offline_se_ne_va() {
+            let banco = banco().await;
+            let cartella =
+                std::env::temp_dir().join(format!("gestionale_offline_{}", std::process::id()));
+            std::fs::create_dir_all(&cartella).expect("cartella");
+            let file = cartella.join("offline.txt");
+
+            // Una schermata di prima, salvata nel database: è quella che un
+            // backup si porta dietro.
+            let vecchio = banco.telegram.bot(&banco.pool);
+            vecchio
+                .send_message_without_improve(ChatId(CHAT), "🏠 Menù di stamattina")
+                .await
+                .expect("schermata di prima");
+            let schermata_del_backup: (i64, i64) =
+                sqlx::query_as("SELECT chat_id, active_message_id FROM telegram_ui_state")
+                    .fetch_one(&banco.pool)
+                    .await
+                    .expect("stato salvato");
+
+            // Lo spegnimento.
+            let spento = banco.telegram.bot(&banco.pool);
+            let offline = annuncia_spegnimento(&spento, &[CHAT], &file).await;
+
+            // Il ripristino riporta la schermata di prima.
+            sqlx::query("UPDATE telegram_ui_state SET active_message_id = ? WHERE chat_id = ?")
+                .bind(schermata_del_backup.1)
+                .bind(schermata_del_backup.0)
+                .execute(&banco.pool)
+                .await
+                .expect("ripristino");
+
+            // La riaccensione.
+            let acceso = banco.telegram.bot(&banco.pool);
+            acceso.restore_persisted_ui().await;
+            annuncia_riaccensione(&acceso, &[CHAT], &file).await;
+
+            let offline = offline.first().copied().expect("offline mandato");
+            assert!(
+                banco.telegram.cancellati().contains(&i64::from(offline.0)),
+                "il messaggio offline ({}) è rimasto: cancellati {:?}",
+                offline.0,
+                banco.telegram.cancellati()
+            );
+            std::fs::remove_dir_all(&cartella).ok();
         }
 
         /// Collaudo di 9307a33, H4.1b: un comando che non esiste. Il bot

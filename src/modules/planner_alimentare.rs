@@ -1086,7 +1086,7 @@ pub async fn handle_callback(
         planner_set_draft(chat_id.0, draft);
         bot.send_message(
             chat_id,
-            "✏️ Scrivi l'orario nel formato HH:MM (va bene anche solo 7:30).",
+            "✏️ Scrivi l'orario: va bene 7:30, 7.30 o anche solo 7.",
         )
         .reply_markup(InlineKeyboardMarkup::new(vec![
             vec![planner_button("➖ Nessun orario", "planner:orario:skip")],
@@ -3370,10 +3370,9 @@ async fn planner_snapshot_totals(pool: &SqlitePool, meal_id: i64) -> anyhow::Res
         .into_iter()
         .map(|row| {
             format!(
-                "• {}: {} {}",
+                "• {}: {}",
                 row.name,
-                planner_format_quantity(row.quantity),
-                row.unit
+                crate::modules::dispensa::formatta_quantita_leggibile(row.quantity, &row.unit)
             )
         })
         .collect())

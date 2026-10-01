@@ -140,6 +140,10 @@ pub fn valida_minuti(testo: &str) -> Result<i64, &'static str> {
 /// Valida un orario scritto a mano nel formato `HH:MM` e lo normalizza a
 /// due cifre per ciascuna parte (es. "9:5" diventa "09:05").
 pub fn valida_orario(testo: &str) -> Result<String, &'static str> {
+    // C20: prima la lettura comune a tutto il bot ("3", "3.00", "ore 3"…).
+    if let Ok(orario) = crate::modules::turni::valida_orario(testo) {
+        return Ok(orario);
+    }
     let testo = testo.trim();
     let (ore_testo, minuti_testo) = testo
         .split_once(':')

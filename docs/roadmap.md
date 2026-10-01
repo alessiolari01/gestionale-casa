@@ -151,6 +151,9 @@ pulsanti si pensa mentre si scrive il codice. Da allora vale anche per ogni
 modulo nuovo. Dettagli in `docs/convenzioni-telegram.md` (C20) e nella
 sezione 6 di `STATO.md`.
 
+**Fatto il 1 ottobre 2026** per quantità, unità, numeri, date, orari e prezzi
+(STATO.md, sezione 2novovicies); resta il giro sulle ricerche.
+
 ### Prossimo giro, chiesto da Alessio il 17 settembre 2026
 
 Quattro moduli nuovi da aggiungere al menù principale, ciascuno da
