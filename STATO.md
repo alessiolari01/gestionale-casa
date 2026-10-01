@@ -3188,6 +3188,15 @@ qualunque modulo nuovo:
   va pensato mentre si scrive il codice (doppi tocchi, uscite a metà, testo
   dove serve un pulsante), non scoperto al collaudo. Si comincia con un
   elenco di tutti gli input testuali del bot e di cosa accettano oggi.
+- **Il messaggio "🔴 Gestionale Casa è offline." resta in chat** dopo la
+  riaccensione (visto da Alessio il 1 ottobre 2026, dopo il deploy di
+  `bfe1169`). Lo manda lo spegnimento come schermata tracciata
+  (`send_message_without_improve` in `main.rs`), e "🟢 Gestionale Casa è
+  online." dovrebbe sostituirlo. Due ipotesi da verificare, non ancora
+  verificate: il processo esce prima che quella schermata sia salvata in
+  `telegram_ui_state`, oppure il messaggio di avvio parte prima di
+  `restore_persisted_ui`. Prima una prova che lo riproduce, poi la
+  correzione.
 - **Il collaudo "da umano distratto" è sospeso**: da qui si verificano solo
   le modifiche fatte (la Fase 1 dei copioni). Il copione di `bfe1169` è
   `Collaudo_bfe1169_prompt.md` nella cartella di lavoro, con la Fase 2
