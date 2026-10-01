@@ -3101,6 +3101,18 @@ per la memoria del telefono) e `avvia-bot.sh` avvia quella.
 
 6 nuovi test (e quelli sulle aggiunte riscritti sul modello nuovo). Totale 504.
 
+**Distribuito sull'S9 il 1 ottobre 2026** (commit `f6f2567`): CI verde, 504
+test e clippy verdi anche sul telefono, la migration 66 provata su una copia
+e applicata (`applied_migrations=66`), `Gestionale Casa online`, zero
+`panicked`, il processo è `target/release/gestionale-casa`.
+
+Una trappola da ricordare: `aggiorna-s9.sh` aggiorna se stesso con `git
+pull` mentre gira, ma bash continua a eseguire la versione che aveva già
+aperto. Il passo nuovo della build ottimizzata quindi non è partito la prima
+volta, ed è stata lanciata a mano (34 minuti la prima volta; le successive
+ricompilano solo quello che cambia). Dalla prossima esecuzione lo script la
+fa da sé.
+
 **Collaudo dal vivo su Telegram da fare** (solo le modifiche).
 
 ## 3. Stato tecnico verificato
