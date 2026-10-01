@@ -3292,6 +3292,25 @@ src/modules/novita.rs               registro delle novità e badge "🆕" propag
 
 **Prossimi passi**, dopo il giro del 1 ottobre 2026 (sezione 2novovicies):
 
+- **`/clear` e `/clc`** (chiesti da Alessio il 2 ottobre 2026, da fare al
+  prossimo giro): due nomi per lo stesso comando, usabile in qualsiasi
+  momento, che toglie dalla chat i messaggi rimasti a vista e che non
+  dovrebbero esserci — suoi e del bot — e lascia come schermata finale
+  l'ultima che il bot aveva mandato prima del comando. Note per farlo:
+  - in una chat privata il bot può cancellare anche i messaggi dell'utente,
+    e gli id dei messaggi sono consecutivi per chat: il comando può
+    ripercorrere all'indietro gli id a partire dal proprio, senza bisogno di
+    ricordare ogni messaggio;
+  - si salta la schermata attiva (`telegram_ui_state`), che resta; si
+    toglie anche il messaggio `/clear` stesso;
+  - **limite di Telegram**: si cancella solo quello che ha meno di 48 ore.
+    Il resto non si può togliere, e il comando lo dice invece di fingere;
+  - va chiuso anche quello che il comando interrompe (le attese di testo,
+    come `/start`, `Procedure::chiudi_tutte`), e va pensato il caso del
+    doppio `/clear` e di un `/clear` a metà procedura (C20);
+  - quanto indietro andare (un numero massimo di id, o fino a dove i
+    messaggi risultano più vecchi di 48 ore) è da decidere scrivendolo, con
+    una prova sul Telegram finto.
 - i **moduli nuovi**, nell'ordine concordato: Documenti, Promemoria,
   Palestra, Soldi (`docs/roadmap.md`), ognuno scritto con la C20 in mente;
 - **C20, quello che resta**: le ricerche con accenti e maiuscole diversi dal
