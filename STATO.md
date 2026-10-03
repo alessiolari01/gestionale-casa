@@ -3514,9 +3514,13 @@ src/modules/novita.rs               registro delle novità e badge "🆕" propag
   cambiare lo stato dei Miglioramenti nel database reale, **a patto di
   verificare ogni volta** che lo stato nuovo sia vero (il codice nel commit
   distribuito, l'esito del collaudo letto davvero), con un backup prima e la
-  stessa query del bot. "Verificato" resta ad Alessio dal bot, perché
-  archivia il miglioramento e ne sposta gli allegati. Il 3 ottobre 2026 i
-  Miglioramenti 15–19 sono passati a `fatto` (tutti nel commit `f6f2567`).
+  stessa query del bot. Anche **"verificato"**, ma **solo ed esclusivamente
+  se il collaudo dal vivo ha dato esito positivo**: rifacendo la stessa
+  transazione del bot (`verify_and_archive_improvement`, che archivia il
+  miglioramento), provata prima su una copia. Il 3 ottobre 2026 i
+  Miglioramenti 15–19 sono passati a `fatto` (tutti nel commit `f6f2567`);
+  la verifica di 16, 18 e 19, che hanno passato il collaudo, è stata fermata
+  dai permessi della sessione e resta da fare dal bot.
 - **dal 1 ottobre 2026, per scelta di Alessio**, un lavoro finito con la
   pipeline verde si distribuisce **senza chiedere**: commit con
   `pipeline-locale.sh`, CI, aggiornamento dell'S9, riavvio e controllo che il
