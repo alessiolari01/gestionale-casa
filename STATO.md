@@ -3510,6 +3510,14 @@ src/modules/novita.rs               registro delle novità e badge "🆕" propag
 - nei blocchi shell dell'S9 non usare `set -e`: usare `|| return 1` o `|| exit 1`
   in modo che un errore fermi lo step senza chiudere la sessione SSH;
 - niente commit o push se la pipeline fallisce;
+- **I dati reali dell'S9, dal 3 ottobre 2026** (scelta di Alessio): la
+  sessione di sviluppo può copiare e modificare i Miglioramenti e il
+  catalogo **globale** (alimenti, ricette) e quello che Alessio aggiungerà
+  a questa lista; sul suo account può lavorare finché lui lo permette. **Non
+  tocca mai i dati personali degli altri utenti**, salvo l'eliminazione di
+  un account terzo che lui chieda. Siamo in fase di progetto: si può
+  cambiare tutto, senza fare danni — **backup prima dei cambiamenti
+  grossi**, non per ogni piccola modifica.
 - **dal 3 ottobre 2026, per scelta di Alessio**, la sessione di sviluppo può
   cambiare lo stato dei Miglioramenti nel database reale, **a patto di
   verificare ogni volta** che lo stato nuovo sia vero (il codice nel commit
