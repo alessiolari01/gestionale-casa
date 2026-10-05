@@ -3113,7 +3113,45 @@ volta, ed è stata lanciata a mano (34 minuti la prima volta; le successive
 ricompilano solo quello che cambia). Dalla prossima esecuzione lo script la
 fa da sé.
 
-**Collaudo dal vivo su Telegram da fare** (solo le modifiche).
+**Collaudo dal vivo fatto il 4–5 ottobre 2026** (`collaudi/2026-10-01_f6f2567/`,
+via Telegram Web): **18 OK, 1 non provato (A4: nessun pasto pianificato),
+nessun difetto**. Un solo rallentamento (~2 minuti su A6): nel log
+`Network is unreachable` alle 23:57, il telefono era senza rete, non è il
+codice. Il database **non** è stato ripristinato (backup
+`collaudo_c_00_prima_20261003_201619.db` e `collaudo_c_01_dopo.db`).
+Miglioramenti 16, 18, 19 verificati il 3 ottobre; il 15 resta `fatto`
+perché il collaudo ha provato una sola delle sue quattro strade, il 17 perché
+serve una chiusura fra mezzanotte e le due.
+
+## 2tricies. `/clear` e `/clc` (6 ottobre 2026)
+
+Chiesto da Alessio il 2 ottobre 2026: un comando, usabile in qualsiasi
+momento, che toglie dalla chat i messaggi rimasti a vista — suoi e del bot —
+e lascia come schermata finale l'ultima che il bot aveva mandato.
+
+- **Come funziona.** In una chat privata gli id dei messaggi sono
+  consecutivi fra utente e bot: il comando ripercorre all'indietro i 500 id
+  prima del proprio e li cancella a blocchi di 100 (`deleteMessages`),
+  saltando la schermata attiva e i media che la accompagnano
+  (`ContextBot::pulisci_chat`). Telegram salta da solo i messaggi già
+  cancellati e quelli di più di 48 ore.
+- **Il limite delle 48 ore** non si può aggirare, e il bot lo dice: un
+  avviso "🧹 Chat pulita. I messaggi di più di 48 ore Telegram non li lascia
+  togliere." che si toglie da solo dopo 4 secondi, senza diventare la
+  schermata attiva.
+- **Non chiude le attese**, a differenza di `/start` (decisione presa
+  scrivendolo, contro la nota di §6): la schermata che resta è l'ultima del
+  bot, e se era una domanda ("scrivi la quantità") deve valere ancora. Va
+  però riconosciuto **prima** che un modulo in attesa legga il testo,
+  altrimenti la Dispensa lo leggeva come una quantità sbagliata.
+- **C20:** `/clc` è lo stesso comando; vale anche con la maiuscola che il
+  telefono mette da solo (`/Clear`) e con il nome del bot attaccato.
+- **Senza schermata da lasciare** (chat appena ripulita a mano, bot appena
+  installato) rimette il menù principale, per non lasciare la chat vuota.
+- Il doppio `/clear` è innocuo: il secondo non trova niente da togliere.
+
+4 nuovi test sul Telegram finto (che ora conta anche le cancellazioni in
+blocco e accetta messaggi con un id scelto). Totale 508.
 
 ## 3. Stato tecnico verificato
 
@@ -3130,7 +3168,7 @@ fa da sé.
 - pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa,
   punto 1 della sezione 6): `fmt`, `check --locked`,
   `clippy --all-targets --locked -- -D warnings`, `test --locked` —
-  **504 test** (498 prima della sezione 2novovicies, 477 prima della sezione 2octovicies, 475 prima della sezione 2sexvicies, 474 prima della sezione
+  **508 test** (504 prima della sezione 2tricies, 498 prima della sezione 2novovicies, 477 prima della sezione 2octovicies, 475 prima della sezione 2sexvicies, 474 prima della sezione
   2quattuorvicies, 472 prima della
   sezione 2trevicies, 471 prima della sezione
   2duovicies, 469 prima della sezione
@@ -3290,27 +3328,18 @@ src/modules/novita.rs               registro delle novità e badge "🆕" propag
 
 ## 6. Punti aperti
 
-**Prossimi passi**, dopo il giro del 1 ottobre 2026 (sezione 2novovicies):
+**Prossimi passi**, dopo il giro del 6 ottobre 2026 (sezione 2tricies):
 
-- **`/clear` e `/clc`** (chiesti da Alessio il 2 ottobre 2026, da fare al
-  prossimo giro): due nomi per lo stesso comando, usabile in qualsiasi
-  momento, che toglie dalla chat i messaggi rimasti a vista e che non
-  dovrebbero esserci — suoi e del bot — e lascia come schermata finale
-  l'ultima che il bot aveva mandato prima del comando. Note per farlo:
-  - in una chat privata il bot può cancellare anche i messaggi dell'utente,
-    e gli id dei messaggi sono consecutivi per chat: il comando può
-    ripercorrere all'indietro gli id a partire dal proprio, senza bisogno di
-    ricordare ogni messaggio;
-  - si salta la schermata attiva (`telegram_ui_state`), che resta; si
-    toglie anche il messaggio `/clear` stesso;
-  - **limite di Telegram**: si cancella solo quello che ha meno di 48 ore.
-    Il resto non si può togliere, e il comando lo dice invece di fingere;
-  - va chiuso anche quello che il comando interrompe (le attese di testo,
-    come `/start`, `Procedure::chiudi_tutte`), e va pensato il caso del
-    doppio `/clear` e di un `/clear` a metà procedura (C20);
-  - quanto indietro andare (un numero massimo di id, o fino a dove i
-    messaggi risultano più vecchi di 48 ore) è da decidere scrivendolo, con
-    una prova sul Telegram finto.
+- **`/clear` e `/clc`: fatti** (sezione 2tricies), collaudo dal vivo da fare;
+- **al prossimo copione**: il Miglioramento 15 sulle strade non ancora
+  provate (Scorte spente, ingresso automatico spento, prodotto di marca) e
+  A4 (riga unica con un pasto pianificato); il 17 con una chiusura fra
+  mezzanotte e le due;
+- **l'S9 perde la rete ogni 1–2 ore** (56 volte dal 1 al 5 ottobre nel log,
+  `Network is unreachable`): il bot si ricollega da solo in un secondo, ma un
+  tocco in quel momento aspetta. Probabile risparmio energetico di Android
+  (Wi-Fi o Termux in pausa): da guardare nelle impostazioni del telefono,
+  con Alessio;
 - i **moduli nuovi**, nell'ordine concordato: Documenti, Promemoria,
   Palestra, Soldi (`docs/roadmap.md`), ognuno scritto con la C20 in mente;
 - **C20, quello che resta**: le ricerche con accenti e maiuscole diversi dal

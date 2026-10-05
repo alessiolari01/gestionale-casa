@@ -948,6 +948,24 @@ async fn handle_authorized_message(
         procedure.chiudi_tutte(chat_id);
     }
 
+    // `/clear` e `/clc` puliscono la chat e basta: la schermata che resta è
+    // l'ultima del bot, e se era una domanda la domanda vale ancora. Per
+    // questo non chiudono le attese, a differenza di `/start`, e vanno
+    // riconosciuti prima che un modulo in attesa legga il testo.
+    if msg
+        .text()
+        .and_then(first_command)
+        .is_some_and(e_comando_pulizia)
+    {
+        let ha_schermata = bot.pulisci_chat(msg.chat.id, msg.id).await;
+        if !ha_schermata {
+            send_main_menu(&bot, msg.chat.id, &pool, &actor).await?;
+        }
+        bot.avviso_che_sparisce(msg.chat.id, AVVISO_PULIZIA, AVVISO_PULIZIA_DURA)
+            .await;
+        return respond(());
+    }
+
     // Gli inviti spazi possono attendere un orario digitato manualmente.
     // La gestione è attiva solo quando il relativo picker ha aperto l'attesa.
     if modules::spazi_membri::handle_message(&bot, &msg, &pool, &actor).await? {
@@ -3615,6 +3633,16 @@ fn command_args(text: &str) -> &str {
         .map_or("", |(_, args)| args.trim())
 }
 
+const AVVISO_PULIZIA: &str =
+    "🧹 Chat pulita. I messaggi di più di 48 ore Telegram non li lascia togliere.";
+const AVVISO_PULIZIA_DURA: std::time::Duration = std::time::Duration::from_secs(4);
+
+/// `/clear` e `/clc`, anche con la maiuscola che il telefono mette da solo
+/// (C20).
+fn e_comando_pulizia(comando: &str) -> bool {
+    comando.eq_ignore_ascii_case("/clear") || comando.eq_ignore_ascii_case("/clc")
+}
+
 fn first_command(text: &str) -> Option<&str> {
     let token = text.split_whitespace().next()?;
     if !token.starts_with('/') {
@@ -3651,7 +3679,7 @@ mod runtime_tests {
 
     mod flusso {
         use super::super::*;
-        use crate::telegram_finto::{messaggio, TelegramFinto, CHAT};
+        use crate::telegram_finto::{messaggio, messaggio_con_id, TelegramFinto, CHAT};
         use sqlx::sqlite::SqlitePoolOptions;
 
         struct Banco {
@@ -3712,12 +3740,21 @@ mod runtime_tests {
 
         impl Banco {
             async fn scrivi(&self, testo: &str) {
+                self.scrivi_messaggio(messaggio(testo)).await;
+            }
+
+            async fn scrivi_con_id(&self, testo: &str, message_id: i32) {
+                self.scrivi_messaggio(messaggio_con_id(testo, message_id))
+                    .await;
+            }
+
+            async fn scrivi_messaggio(&self, msg: Message) {
                 let p = self.procedure.clone();
                 identity::with_actor(
                     self.actor.clone(),
                     handle_authorized_message(
                         self.bot.clone(),
-                        messaggio(testo),
+                        msg,
                         self.pool.clone(),
                         p.sessions,
                         p.location_sessions,
@@ -3739,6 +3776,159 @@ mod runtime_tests {
                 .await
                 .expect("messaggio");
             }
+        }
+
+        /// Chiesto da Alessio il 2 ottobre 2026: `/clear` toglie i messaggi
+        /// rimasti a vista, suoi e del bot, e lascia come schermata finale
+        /// l'ultima che il bot aveva mandato.
+        #[tokio::test]
+        async fn clear_toglie_i_messaggi_rimasti_e_lascia_la_schermata() {
+            let banco = banco().await;
+            let schermata = banco
+                .bot
+                .send_message(ChatId(CHAT), "📋 La schermata di adesso")
+                .await
+                .expect("schermata");
+            let rimasto = banco
+                .bot
+                .send_message_untracked(ChatId(CHAT), "Un avviso rimasto in chat")
+                .await
+                .expect("avviso");
+            // L'utente ha scritto qualcosa che è rimasto (rimasto.id + 1),
+            // poi `/clear`.
+            let clear = rimasto.id.0 + 2;
+
+            banco.scrivi_con_id("/clear", clear).await;
+
+            let cancellati = banco.telegram.tutti_i_cancellati();
+            for id in [rimasto.id.0, rimasto.id.0 + 1] {
+                assert!(
+                    cancellati.contains(&i64::from(id)),
+                    "{id} è rimasto in chat: {cancellati:?}"
+                );
+            }
+            assert!(
+                !cancellati.contains(&i64::from(schermata.id.0)),
+                "ha tolto anche la schermata attiva: {cancellati:?}"
+            );
+            assert!(
+                cancellati.iter().all(|id| *id <= i64::from(clear)),
+                "ha toccato messaggi venuti dopo il comando: {cancellati:?}"
+            );
+            assert!(
+                !banco
+                    .telegram
+                    .testi()
+                    .iter()
+                    .any(|t| t.contains("Comando non riconosciuto")),
+                "testi: {:?}",
+                banco.telegram.testi()
+            );
+        }
+
+        /// Dal telefono la prima lettera viene spesso maiuscola (C20), e
+        /// `/clc` è l'altro nome dello stesso comando.
+        #[tokio::test]
+        async fn clc_e_le_maiuscole_valgono_come_clear() {
+            for comando in [
+                "/clc",
+                "/Clear",
+                "/CLC",
+                "/clear@Gestionale_personalizzato_Bot",
+            ] {
+                let banco = banco().await;
+                banco
+                    .bot
+                    .send_message(ChatId(CHAT), "📋 La schermata di adesso")
+                    .await
+                    .expect("schermata");
+                let rimasto = banco
+                    .bot
+                    .send_message_untracked(ChatId(CHAT), "Un avviso rimasto in chat")
+                    .await
+                    .expect("avviso");
+
+                banco.scrivi_con_id(comando, rimasto.id.0 + 1).await;
+
+                assert!(
+                    banco
+                        .telegram
+                        .tutti_i_cancellati()
+                        .contains(&i64::from(rimasto.id.0)),
+                    "{comando}: l'avviso è rimasto"
+                );
+            }
+        }
+
+        /// `/clear` a metà di una procedura non la interrompe: la schermata
+        /// che resta è la domanda, e la domanda vale ancora. Non deve
+        /// nemmeno essere letto come la risposta ("Scrivi quantità…").
+        #[tokio::test]
+        async fn clear_a_meta_procedura_lascia_la_domanda_aperta() {
+            let banco = banco().await;
+            let pasta: i64 = sqlx::query_scalar(
+                "SELECT id FROM alimenti WHERE nome_normalizzato = 'pasta' AND spazio_id IS NULL",
+            )
+            .fetch_one(&banco.pool)
+            .await
+            .expect("Pasta nel catalogo");
+            identity::with_actor(banco.actor.clone(), async {
+                modules::dispensa::handle_callback(
+                    &banco.bot,
+                    ChatId(CHAT),
+                    &banco.pool,
+                    &banco.procedure.dispensa_sessions,
+                    &format!("dispensa:pick:alimento:dispensa:{pasta}"),
+                )
+                .await
+                .expect("🌾 Pasta");
+            })
+            .await;
+            let testi_prima = banco.telegram.testi().len();
+
+            banco.scrivi_con_id("/clear", 2000).await;
+
+            assert!(
+                banco.procedure.dispensa_sessions.has_active(CHAT),
+                "la Dispensa non aspetta più la quantità"
+            );
+            let nuovi = banco.telegram.testi()[testi_prima..].to_vec();
+            assert!(
+                nuovi.iter().all(|t| t.starts_with("🧹")),
+                "/clear è stato letto da un modulo: {nuovi:?}"
+            );
+
+            banco.scrivi("500 g").await;
+            let quantita: f64 = sqlx::query_scalar(
+                "SELECT s.quantita FROM scorte s JOIN alimenti a ON a.id = s.alimento_id \
+                 WHERE a.nome_normalizzato = 'pasta'",
+            )
+            .fetch_one(&banco.pool)
+            .await
+            .expect("la Pasta è entrata in Dispensa");
+            assert!(
+                (quantita - 500.0).abs() < f64::EPSILON,
+                "quantità {quantita}"
+            );
+        }
+
+        /// Senza una schermata da lasciare (per esempio una chat appena
+        /// ripulita) il comando non lascia la chat vuota: rimette il menù.
+        #[tokio::test]
+        async fn clear_senza_schermata_rimette_il_menu() {
+            let banco = banco().await;
+
+            banco.scrivi_con_id("/clear", 50).await;
+
+            assert!(
+                banco
+                    .telegram
+                    .testi()
+                    .iter()
+                    .any(|t| t.contains("Scegli una sezione")),
+                "testi: {:?}",
+                banco.telegram.testi()
+            );
         }
 
         /// Collaudo di 9307a33, H3.4: `🥫 Scorte → 🧺 Dispensa → ➕ Nuova

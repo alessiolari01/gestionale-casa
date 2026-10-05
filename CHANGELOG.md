@@ -2,6 +2,17 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_CLEAR_20261006 -->
+# 06/10/2026 — `/clear` e `/clc`
+
+- **Un comando per ripulire la chat**, in qualsiasi momento: `/clear` (o
+  `/clc`, anche con la maiuscola) toglie i messaggi rimasti a vista, tuoi e
+  del bot, e lascia la schermata che il bot ti aveva mostrato per ultima.
+- Se eri a metà di qualcosa (per esempio il bot aspettava una quantità), la
+  domanda resta e vale ancora.
+- Telegram non lascia togliere i messaggi di più di 48 ore: il bot lo dice
+  in un avviso che sparisce da solo.
+
 <!-- CHANGELOG_COLLAUDO_BFE1169_20261001 -->
 # 01/10/2026 — Dal collaudo di bfe1169: le aggiunte rifatte, la C20, l'offline
 

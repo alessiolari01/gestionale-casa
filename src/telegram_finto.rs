@@ -103,6 +103,34 @@ impl TelegramFinto {
             .collect()
     }
 
+    /// Tutti i messaggi cancellati, uno per volta (`deleteMessage`) o in
+    /// blocco (`deleteMessages`), nell'ordine.
+    pub fn tutti_i_cancellati(&self) -> Vec<i64> {
+        self.chiamate()
+            .into_iter()
+            .flat_map(|chiamata| {
+                let metodo = chiamata.metodo.to_ascii_lowercase();
+                if metodo == "deletemessage" {
+                    chiamata
+                        .corpo
+                        .get("message_id")
+                        .and_then(Value::as_i64)
+                        .into_iter()
+                        .collect::<Vec<_>>()
+                } else if metodo == "deletemessages" {
+                    chiamata
+                        .corpo
+                        .get("message_ids")
+                        .and_then(Value::as_array)
+                        .map(|ids| ids.iter().filter_map(Value::as_i64).collect())
+                        .unwrap_or_default()
+                } else {
+                    Vec::new()
+                }
+            })
+            .collect()
+    }
+
     /// Le etichette dei pulsanti dell'ultimo messaggio che ne aveva.
     pub fn ultimi_pulsanti(&self) -> Vec<String> {
         self.chiamate()
@@ -131,8 +159,14 @@ impl TelegramFinto {
 
 /// Un messaggio di testo scritto dall'utente.
 pub fn messaggio(testo: &str) -> Message {
+    messaggio_con_id(testo, 1)
+}
+
+/// Un messaggio dell'utente con un id scelto: in una chat privata gli id
+/// sono consecutivi fra utente e bot, e `/clear` ci conta.
+pub fn messaggio_con_id(testo: &str, message_id: i32) -> Message {
     serde_json::from_value(json!({
-        "message_id": 1,
+        "message_id": message_id,
         "date": 1_759_000_000,
         "chat": { "id": CHAT, "type": "private", "first_name": "Alessio" },
         "from": { "id": CHAT, "is_bot": false, "first_name": "Alessio" },

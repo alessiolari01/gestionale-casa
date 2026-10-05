@@ -270,6 +270,10 @@ quando si esce da una procedura in un modo diverso da `❌ Annulla`:
 - **`/start` chiude ogni attesa, sempre.** È la via d'uscita di Telegram, e
   deve esserlo anche a metà di una procedura: prima la Dispensa, in attesa
   di una quantità, lo leggeva come una quantità sbagliata.
+- **`/clear` e `/clc` puliscono senza chiudere** (6 ottobre 2026). Tolgono i
+  messaggi rimasti a vista e lasciano la schermata attiva: se era una
+  domanda, la domanda vale ancora. Come `/start`, vanno riconosciuti prima
+  che un modulo in attesa legga il testo.
 - **Il menù riaperto da "⚠️ Questa schermata non è più attiva" chiude ogni
   attesa.** Prima sullo schermo c'era il menù principale e il bot aspettava
   ancora la ricerca degli Oggetti: uno stato nascosto. Le attese si chiudono

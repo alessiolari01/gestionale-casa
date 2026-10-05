@@ -36,6 +36,10 @@ const MAX_TYPED_TEXT_CHARS: usize = 100;
 /// Quanto a lungo un secondo tocco sulla stessa schermata conta come un
 /// doppio tocco, e si ignora, invece che come una schermata vecchia.
 const FINESTRA_DOPPIO_TOCCO: Duration = Duration::from_secs(10);
+/// Quanti id `/clear` ripercorre all'indietro: cinque blocchi da 100. I
+/// messaggi rimasti a vista sono quasi sempre recenti, perché ogni
+/// schermata nuova cancella già la precedente.
+const PULIZIA_QUANTI: i32 = 500;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ImproveContextSnapshot {
@@ -377,6 +381,36 @@ impl ImproveContextStore {
         true
     }
 
+    /// I messaggi che `/clear` deve lasciare: la schermata attiva e i media
+    /// che la accompagnano (le foto dei passaggi di una ricetta).
+    fn da_lasciare(&self, chat_id: i64) -> Vec<MessageId> {
+        let state = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state
+            .ui
+            .get(&chat_id)
+            .map(|ui| {
+                ui.active_ui
+                    .into_iter()
+                    .chain(ui.transient_media.iter().copied())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn ha_schermata(&self, chat_id: i64) -> bool {
+        let state = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state
+            .ui
+            .get(&chat_id)
+            .is_some_and(|ui| ui.active_ui.is_some())
+    }
+
     fn is_current_message(&self, chat_id: i64, message_id: MessageId) -> bool {
         let state = self
             .inner
@@ -464,6 +498,53 @@ impl ContextBot {
                 );
             }
         }
+    }
+
+    /// `/clear` e `/clc` (chiesti da Alessio il 2 ottobre 2026): toglie i
+    /// messaggi rimasti a vista, suoi e del bot, e lascia la schermata
+    /// attiva. In una chat privata gli id sono consecutivi fra utente e bot,
+    /// quindi basta ripercorrere all'indietro gli id prima del comando, a
+    /// blocchi di 100 (`deleteMessages`): Telegram salta da solo quelli già
+    /// cancellati e quelli di più di 48 ore, che non si possono togliere.
+    /// Restituisce se c'è una schermata da lasciare.
+    pub async fn pulisci_chat(&self, chat_id: ChatId, comando: MessageId) -> bool {
+        let da_lasciare = self.contexts.da_lasciare(chat_id.0);
+        let primo = comando.0.saturating_sub(PULIZIA_QUANTI).max(1);
+        let ids: Vec<MessageId> = (primo..comando.0)
+            .rev()
+            .map(MessageId)
+            .filter(|id| !da_lasciare.contains(id))
+            .collect();
+        for blocco in ids.chunks(100) {
+            if let Err(error) = self.inner.delete_messages(chat_id, blocco.to_vec()).await {
+                tracing::debug!(chat_id = chat_id.0, ?error, "Pulizia della chat incompleta");
+            }
+        }
+        self.contexts.ha_schermata(chat_id.0)
+    }
+
+    /// Un avviso che si toglie da solo dopo `dura`: non diventa la
+    /// schermata attiva, così quella resta l'ultima del bot.
+    pub async fn avviso_che_sparisce(
+        &self,
+        chat_id: ChatId,
+        testo: &str,
+        dura: std::time::Duration,
+    ) {
+        let avviso = match self.inner.send_message(chat_id, testo).await {
+            Ok(avviso) => avviso,
+            Err(error) => {
+                tracing::debug!(chat_id = chat_id.0, ?error, "Avviso non mandato");
+                return;
+            }
+        };
+        let bot = self.inner.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(dura).await;
+            if let Err(error) = bot.delete_message(chat_id, avviso.id).await {
+                tracing::debug!(chat_id = chat_id.0, ?error, "Avviso non eliminabile");
+            }
+        });
     }
 
     pub async fn delete_user_input(&self, chat_id: ChatId, message_id: MessageId) {
