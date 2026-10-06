@@ -319,6 +319,13 @@ sparirebbe, perché `avvia-bot.sh` riscrive `bot.out` da zero), cerca la riga
 `data/run/guardiano.pausa` e `avvia-bot.sh` lo rimuove, così uno swap del
 binario non diventa una lotta fra due script.
 
+**Un riavvio chiesto dal bot non è una caduta** (6 ottobre 2026): il
+pulsante che cambia database (🛠️ Amministrazione) lascia
+`data/run/riavvio.richiesto` e spegne il bot. Il guardiano lo trova, lo
+toglie, scrive "riavvio chiesto dal bot" e riaccende subito, senza referto e
+senza contarlo fra le riaccensioni. Il cambio quindi funziona solo se il
+guardiano è acceso: senza, il bot resta spento.
+
 **Si arrende dopo cinque riaccensioni in mezz'ora**, scrivendo "MI ARRENDO"
 nel log e mettendosi in pausa. Un bot che cade appena parte non si aggiusta
 riaccendendolo: insistere nasconderebbe il guasto, che è precisamente

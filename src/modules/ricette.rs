@@ -8742,13 +8742,19 @@ mod tests {
         .expect("categorie doppie");
         assert_eq!(doppie, 0, "un alimento con due categorie");
 
-        let con_ean: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM prodotti_alimentari WHERE codice_ean IS NOT NULL",
+        // Nessun codice a barre inventato: l'unico è quello scansionato da
+        // Alessio nel bot vero (migration del 6 ottobre 2026).
+        let con_ean: Vec<String> = sqlx::query_scalar(
+            "SELECT codice_ean FROM prodotti_alimentari WHERE codice_ean IS NOT NULL",
         )
-        .fetch_one(&pool)
+        .fetch_all(&pool)
         .await
-        .expect("conteggio ean");
-        assert_eq!(con_ean, 0, "nessun codice a barre inventato");
+        .expect("codici ean");
+        assert_eq!(
+            con_ean,
+            vec!["8076800195057".to_string()],
+            "nessun codice a barre inventato"
+        );
 
         let barilla: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM prodotti_alimentari p JOIN alimenti a ON a.id = p.alimento_id \

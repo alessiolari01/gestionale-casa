@@ -44,6 +44,7 @@ PIDFILE_BOT="$CARTELLA_RUN/bot.pid"
 LOG_BOT="$CARTELLA_RUN/bot.out"
 PIDFILE_GUARDIANO="$CARTELLA_RUN/guardiano.pid"
 PAUSA="$CARTELLA_RUN/guardiano.pausa"
+RIAVVIO_RICHIESTO="$CARTELLA_RUN/riavvio.richiesto"
 LOG="$CARTELLA_LOG/guardiano.log"
 
 INTERVALLO="${GUARDIANO_INTERVALLO:-60}"
@@ -86,6 +87,19 @@ controlla_una_volta() {
         return 0
     fi
     if bot_vivo; then
+        return 0
+    fi
+    # Il bot si e' spento da solo per ripartire su un altro database (il
+    # pulsante in Amministrazione, 6 ottobre 2026): non e' una caduta, non
+    # conta fra le riaccensioni e non lascia un referto.
+    if [ -f "$RIAVVIO_RICHIESTO" ]; then
+        rm -f "$RIAVVIO_RICHIESTO"
+        scrivi "riavvio chiesto dal bot ($(cat "$CARTELLA_RUN/database_attivo" 2>/dev/null || echo reale))"
+        if ./scripts/avvia-bot.sh >>"$LOG" 2>&1; then
+            scrivi "riavvio riuscito"
+        else
+            scrivi "riaccensione fallita"
+        fi
         return 0
     fi
     scrivi "bot non vivo: provo a riaccenderlo"

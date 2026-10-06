@@ -6,6 +6,7 @@ mod access_control;
 mod auth;
 mod config;
 mod context_bot;
+mod database_attivo;
 mod db;
 mod identity;
 mod modules;
@@ -555,7 +556,13 @@ async fn async_main() -> anyhow::Result<()> {
         "Configurazione caricata"
     );
 
-    let pool = db::connect(&config.database_url).await?;
+    // Il database reale o quello di prova, scelto da 🛠️ Amministrazione
+    // (`database_attivo`, 6 ottobre 2026).
+    let database =
+        database_attivo::Database::leggi(std::path::Path::new(database_attivo::FILE_SCELTA));
+    database.imposta_attivo();
+    tracing::info!(database = database.nome(), "Database scelto");
+    let pool = db::connect(&database.url(&config.database_url)).await?;
     let database_status = db::status(&pool).await?;
     tracing::info!(
         applied_migrations = database_status.applied_migrations,
@@ -2164,6 +2171,65 @@ async fn handle_authorized_callback(
                 }
             }
         }
+        "admin:database" => {
+            if ensure_primary_admin_access(&bot, chat_id, &pool, &actor).await? {
+                let verso = database_attivo::Database::attivo().altro();
+                bot.send_message(chat_id, testo_conferma_cambio_database(verso))
+                    .reply_markup(InlineKeyboardMarkup::new(vec![
+                        vec![InlineKeyboardButton::callback(
+                            "✅ Sì, carica".to_string(),
+                            "admin:database:conferma".to_string(),
+                        )],
+                        vec![InlineKeyboardButton::callback(
+                            "❌ Annulla".to_string(),
+                            "admin:menu".to_string(),
+                        )],
+                    ]))
+                    .await?;
+            }
+        }
+        "admin:database:conferma" => {
+            if ensure_primary_admin_access(&bot, chat_id, &pool, &actor).await? {
+                let cartella = std::path::Path::new(database_attivo::FILE_SCELTA)
+                    .parent()
+                    .unwrap_or_else(|| std::path::Path::new("."));
+                let verso = database_attivo::Database::attivo().altro();
+                if let Err(error) = database_attivo::prepara_cambio(cartella, verso) {
+                    tracing::error!(?error, "Cambio di database non preparato");
+                    bot.send_message(
+                        chat_id,
+                        "⚠️ Non sono riuscito a preparare il cambio di database: resto dove sono.",
+                    )
+                    .reply_markup(admin_back_keyboard())
+                    .await?;
+                } else {
+                    bot.send_message_without_improve(
+                        chat_id,
+                        format!(
+                            "⏳ Carico il database {}: torno fra circa un minuto.",
+                            verso.nome()
+                        ),
+                    )
+                    .await?;
+                    if !shutdown_controller.request() {
+                        // Niente spegnimento: si torna come prima, altrimenti
+                        // al prossimo riavvio il bot cambierebbe database
+                        // senza che nessuno lo sappia.
+                        let _ = database_attivo::prepara_cambio(
+                            cartella,
+                            database_attivo::Database::attivo(),
+                        );
+                        let _ = std::fs::remove_file(cartella.join("riavvio.richiesto"));
+                        bot.send_message(
+                            chat_id,
+                            "⚠️ Non sono riuscito a spegnermi: resto sul database di adesso.",
+                        )
+                        .reply_markup(admin_back_keyboard())
+                        .await?;
+                    }
+                }
+            }
+        }
         "admin:status" | "system:status" => {
             send_status(&bot, chat_id, &pool, &actor).await?;
         }
@@ -2568,7 +2634,10 @@ async fn annuncia_riaccensione(bot: &Bot, chat_ids: &[i64], file: &std::path::Pa
 async fn send_online_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
-        "🟢 Gestionale Casa è online.\n\n🏠 Menù principale\nScegli una sezione.",
+        format!(
+            "🟢 Gestionale Casa è online.\n\n🏠 Menù principale\nScegli una sezione.{}",
+            nota_database(database_attivo::Database::attivo())
+        ),
     )
     // Notifica di avvio, mandata subito dopo il boot: niente attore
     // risolto a questo punto, il badge si aggiorna comunque alla prossima
@@ -2581,6 +2650,42 @@ async fn send_online_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     ))
     .await?;
     Ok(())
+}
+
+fn testo_conferma_cambio_database(verso: database_attivo::Database) -> String {
+    match verso {
+        database_attivo::Database::Prova => format!(
+            "{}\n\nMi spengo e mi riaccendo sul database di prova, per i collaudi. \
+             I tuoi dati veri restano dove sono, intatti. Ci vuole circa un minuto.\n\n\
+             Per tornare: 🛠️ Amministrazione → {}.",
+            verso.altro().pulsante_per_cambiare(),
+            verso.pulsante_per_cambiare()
+        ),
+        database_attivo::Database::Reale => format!(
+            "{}\n\nMi spengo e mi riaccendo sui tuoi dati veri. Quello che hai fatto \
+             nel database di prova resta lì per il prossimo collaudo. Ci vuole circa \
+             un minuto.",
+            verso.altro().pulsante_per_cambiare()
+        ),
+    }
+}
+
+/// Sul database di prova il menù lo dice, in fondo: la prima riga resta
+/// "🏠 Gestionale Casa", che è come si riconosce la schermata.
+fn nota_database(database: database_attivo::Database) -> &'static str {
+    match database {
+        database_attivo::Database::Reale => "",
+        database_attivo::Database::Prova => {
+            "\n\n🧪 Stai usando il database di prova: i tuoi dati veri non si toccano."
+        }
+    }
+}
+
+fn testo_menu_principale(database: database_attivo::Database) -> String {
+    format!(
+        "🏠 Gestionale Casa\n\nScegli una sezione.{}",
+        nota_database(database)
+    )
 }
 
 async fn send_main_menu(
@@ -2602,14 +2707,17 @@ async fn send_main_menu(
     let badge = badge_miglioramenti(pool, actor).await;
     let badge_alimentazione = badge_alimentazione(pool, actor).await;
     let funzioni = modules::impostazioni::funzioni(pool).await;
-    bot.send_message(chat_id, "🏠 Gestionale Casa\n\nScegli una sezione.")
-        .reply_markup(modules::oggetti::main_menu_keyboard(
-            is_admin,
-            badge_alimentazione,
-            badge,
-            &funzioni,
-        ))
-        .await?;
+    bot.send_message(
+        chat_id,
+        testo_menu_principale(database_attivo::Database::attivo()),
+    )
+    .reply_markup(modules::oggetti::main_menu_keyboard(
+        is_admin,
+        badge_alimentazione,
+        badge,
+        &funzioni,
+    ))
+    .await?;
     Ok(())
 }
 
@@ -3567,6 +3675,12 @@ fn admin_menu_keyboard(
             "admin:distribuzione".to_string(),
         )]);
         rows.push(vec![InlineKeyboardButton::callback(
+            database_attivo::Database::attivo()
+                .pulsante_per_cambiare()
+                .to_string(),
+            "admin:database".to_string(),
+        )]);
+        rows.push(vec![InlineKeyboardButton::callback(
             "⏻ Spegni gestionale".to_string(),
             "admin:shutdown".to_string(),
         )]);
@@ -3776,6 +3890,43 @@ mod runtime_tests {
                 .await
                 .expect("messaggio");
             }
+        }
+
+        /// Il codice a barre scansionato nel bot vero arriva con le
+        /// migration in ogni database, compreso quello di prova.
+        #[tokio::test]
+        async fn il_catalogo_porta_il_codice_a_barre_dello_spaghetti() {
+            let banco = banco().await;
+            let ean: Option<String> = sqlx::query_scalar(
+                "SELECT codice_ean FROM prodotti_alimentari \
+                 WHERE marca = 'Barilla' AND nome_commerciale = 'Spaghetti n.5'",
+            )
+            .fetch_one(&banco.pool)
+            .await
+            .expect("Spaghetti n.5 nel catalogo");
+            assert_eq!(ean.as_deref(), Some("8076800195057"));
+        }
+
+        /// Sul database di prova il menù principale lo dice, ma la prima
+        /// riga resta quella che fa riconoscere la schermata.
+        #[test]
+        fn il_menu_dice_quando_si_e_sul_database_di_prova() {
+            let reale = testo_menu_principale(database_attivo::Database::Reale);
+            let prova = testo_menu_principale(database_attivo::Database::Prova);
+            assert!(!reale.contains("🧪"), "{reale}");
+            assert!(prova.contains("database di prova"), "{prova}");
+            assert!(prova.starts_with("🏠 Gestionale Casa\n"), "{prova}");
+        }
+
+        /// La conferma nomina il pulsante premuto e, andando sulla prova,
+        /// dice come tornare.
+        #[test]
+        fn la_conferma_del_cambio_dice_come_tornare() {
+            let verso_prova = testo_conferma_cambio_database(database_attivo::Database::Prova);
+            assert!(verso_prova.starts_with("🧪 Carica database di prova"));
+            assert!(verso_prova.contains("🏠 Carica database reale"));
+            let verso_reale = testo_conferma_cambio_database(database_attivo::Database::Reale);
+            assert!(verso_reale.starts_with("🏠 Carica database reale"));
         }
 
         /// Chiesto da Alessio il 2 ottobre 2026: `/clear` toglie i messaggi

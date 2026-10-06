@@ -3153,9 +3153,54 @@ e lascia come schermata finale l'ultima che il bot aveva mandato.
 4 nuovi test sul Telegram finto (che ora conta anche le cancellazioni in
 blocco e accetta messaggi con un id scelto). Totale 508.
 
+**Distribuito sull'S9 il 6 ottobre 2026** (commit `ab9ccbd`). Provato da
+Alessio dal vivo lo stesso giorno: "ha funzionato correttamente".
+
+## 2untricies. Due database e un catalogo; il database reale ripulito (6 ottobre 2026)
+
+Deciso con Alessio il 6 ottobre 2026 (dettagli in `docs/database.md`, "Due
+database, un catalogo"):
+
+- **Il catalogo comune vive nelle migration.** Alimenti, prodotti, ricette e
+  negozi comuni si aggiungono o correggono con una migration, non scrivendo
+  nel database: arrivano identici ovunque. La 67ª
+  (`20261006090000_ean_spaghetti_barilla.sql`) riporta l'unico dato del
+  catalogo nato nel bot vero, il codice a barre dello Spaghetti n.5 Barilla.
+- **Due database, un bot.** `gestionale.db` per i dati veri, `prova.db` per
+  i collaudi. Il secondo bot su Telegram, considerato, per ora non serve:
+  il bot lo usa solo Alessio. Si cambia da 🛠️ Amministrazione con un
+  pulsante solo, che dice dove porta (richiesta di Alessio): "🧪 Carica
+  database di prova" sul reale, "🏠 Carica database reale" sulla prova. Il
+  bot scrive la scelta in `data/run/database_attivo` e il segnale
+  `data/run/riavvio.richiesto`, si spegne, e il guardiano lo riaccende entro
+  un minuto senza contarlo come una caduta. Sul database di prova il menù
+  principale lo dice in fondo ("🧪 Stai usando il database di prova…").
+  Il database di prova nasce dalle migration al primo avvio, e il primo
+  account che entra diventa amministratore: il pulsante per tornare c'è
+  sempre.
+- **Un database per utente no**: gli spazi si condividono, e la riservatezza
+  sta già nello `spazio_id`.
+- **Il database reale ripulito** (Alessio: "tenere solo i miglioramenti").
+  Un utente solo (Alessio) e uno spazio. Ricostruito un database nuovo dalle
+  migration e ricopiati solo account, account Telegram, spazio e membri,
+  preferenze e funzioni spente, impostazioni della distribuzione, novità
+  lette, schermata attiva e Miglioramenti (17 aperti, 3 archiviati, con gli
+  allegati). Andati via: scorte, liste e spese chiuse, planner, i 2 profili
+  alimentari, i 3 modelli di turno, prezzi, negozi e ricette personali (tutti
+  di prova: "pasta", "Pasta prova", "negozio test"…), lo Storico. Prima,
+  la ricostruzione è stata provata su una copia e confrontata col vecchio:
+  catalogo comune identico riga per riga (a parte la numerazione delle
+  ricette e dei prodotti, che si è ricompattata) e il codice a barre di cui
+  sopra.
+
+9 nuovi test: la scelta del database (6), il menù e la conferma del cambio
+(2), il codice a barre che arriva con le migration (1). Totale 517.
+
 ## 3. Stato tecnico verificato
 
-- **66 migration** nel repository. La 66ª (`liste_spesa_scorte_usate`,
+- **67 migration** nel repository. La 67ª (`ean_spaghetti_barilla`, sezione
+  2untricies) si applica al primo avvio dopo il deploy del 6 ottobre 2026.
+  La 66ª (`liste_spesa_scorte_usate`,
   sezione 2novovicies) si applica al primo avvio dopo il deploy del 1
   ottobre 2026: va verificata leggendo `applied_migrations=66` nel log, non
   dedotta. Le 65 di prima sono applicate al database reale dell'S9 dal 24
@@ -3168,7 +3213,7 @@ blocco e accetta messaggi con un id scelto). Totale 508.
 - pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa,
   punto 1 della sezione 6): `fmt`, `check --locked`,
   `clippy --all-targets --locked -- -D warnings`, `test --locked` —
-  **508 test** (504 prima della sezione 2tricies, 498 prima della sezione 2novovicies, 477 prima della sezione 2octovicies, 475 prima della sezione 2sexvicies, 474 prima della sezione
+  **517 test** (508 prima della sezione 2untricies, 504 prima della sezione 2tricies, 498 prima della sezione 2novovicies, 477 prima della sezione 2octovicies, 475 prima della sezione 2sexvicies, 474 prima della sezione
   2quattuorvicies, 472 prima della
   sezione 2trevicies, 471 prima della sezione
   2duovicies, 469 prima della sezione
@@ -3330,7 +3375,11 @@ src/modules/novita.rs               registro delle novità e badge "🆕" propag
 
 **Prossimi passi**, dopo il giro del 6 ottobre 2026 (sezione 2tricies):
 
-- **`/clear` e `/clc`: fatti** (sezione 2tricies), collaudo dal vivo da fare;
+- **`/clear` e `/clc`: fatti** (sezione 2tricies), provati da Alessio;
+- **il prossimo collaudo gira sul database di prova** (sezione 2untricies):
+  il copione deve partire da "🛠️ Amministrazione → 🧪 Carica database di
+  prova" e preparare da sé i dati che servono (il database di prova nasce
+  vuoto, con il solo catalogo);
 - **al prossimo copione**: il Miglioramento 15 sulle strade non ancora
   provate (Scorte spente, ingresso automatico spento, prodotto di marca) e
   A4 (riga unica con un pasto pianificato); il 17 con una chiusura fra
@@ -3542,7 +3591,9 @@ src/modules/novita.rs               registro delle novità e badge "🆕" propag
 - **I dati reali dell'S9, dal 3 ottobre 2026** (scelta di Alessio): la
   sessione di sviluppo può copiare e modificare i Miglioramenti e il
   catalogo **globale** (alimenti, ricette, **anche crearne di nuovi**) e
-  quello che Alessio aggiungerà a questa lista; sul suo account può lavorare
+  quello che Alessio aggiungerà a questa lista — **dal 6 ottobre 2026 il
+  catalogo si cambia solo con una migration**, mai scrivendo nel database
+  (sezione 2untricies); sul suo account può lavorare
   finché lui lo permette. **Non tocca mai i dati personali degli altri
   utenti**, cioè tutto ciò che appartiene allo spazio o all'account di altri
   (oggetti, scorte, liste, profili, foto, miglioramenti scritti da loro),
@@ -3560,8 +3611,19 @@ src/modules/novita.rs               registro delle novità e badge "🆕" propag
   transazione del bot (`verify_and_archive_improvement`, che archivia il
   miglioramento), provata prima su una copia. Il 3 ottobre 2026 i
   Miglioramenti 15–19 sono passati a `fatto` (tutti nel commit `f6f2567`);
-  la verifica di 16, 18 e 19, che hanno passato il collaudo, è stata fermata
-  dai permessi della sessione e resta da fare dal bot.
+  16, 18 e 19 sono stati verificati lo stesso giorno. "Effettivamente
+  verificato" vuol dire che il collaudo ha provato **tutto** quello che il
+  miglioramento promette (il 15, provato su una sola delle sue quattro
+  strade, resta `fatto`).
+- **dal 6 ottobre 2026 i collaudi si fanno sul database di prova** (🛠️
+  Amministrazione → 🧪 Carica database di prova), non sui dati veri: niente
+  più ripristini da backup dopo un collaudo. I Miglioramenti restano nel
+  database reale, e lì si segnano.
+- **aggiornare l'S9**: `aggiorna-s9.sh --solo-controlli` → `ferma-bot.sh` →
+  `setsid ./scripts/avvia-bot.sh`. Mai `aggiorna-s9.sh` senza
+  `--solo-controlli` con un bot acceso: il suo ultimo passo è un `cargo run`
+  che **non** ferma il bot vecchio, e il 6 ottobre 2026 due bot si sono
+  contesi Telegram per otto ore e mezza (`TerminatedByOtherGetUpdates`).
 - **dal 1 ottobre 2026, per scelta di Alessio**, un lavoro finito con la
   pipeline verde si distribuisce **senza chiedere**: commit con
   `pipeline-locale.sh`, CI, aggiornamento dell'S9, riavvio e controllo che il

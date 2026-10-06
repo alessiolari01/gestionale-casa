@@ -26,6 +26,30 @@ Prima di applicare una migration al database reale — lo fa
 Il conteggio delle migration e quali sono applicate stanno in `STATO.md`.
 L'elenco file per file e' in `migrations/README.md`, accanto ai file stessi.
 
+## Due database, un catalogo (6 ottobre 2026)
+
+Deciso con Alessio il 6 ottobre 2026:
+
+- **il catalogo comune vive solo nelle migration**: alimenti, prodotti,
+  formati, ricette comuni, negozi comuni, categorie, unità. Aggiungere o
+  correggere qualcosa del catalogo vuol dire scrivere una migration, non
+  scrivere nel database: così arriva identico in ogni database e resta nella
+  storia di git. La prima è `20261006090000_ean_spaghetti_barilla.sql`, un
+  codice a barre scansionato nel bot vero che altrimenti si sarebbe perso;
+- **i database sono due**, con lo stesso schema: `data/db/gestionale.db`, i
+  dati veri, e `data/db/prova.db`, per i collaudi, nella stessa cartella
+  (o dove dice `DATABASE_PROVA_URL`). Quale si usa lo dice
+  `data/run/database_attivo`, letto all'avvio (`src/database_attivo.rs`); si
+  cambia da 🛠️ Amministrazione. Il database di prova nasce vuoto dalle
+  migration al primo avvio, con il catalogo, e il primo account che entra
+  diventa amministratore;
+- **un database per utente no**: gli spazi si condividono fra più persone,
+  e la riservatezza sta già nello `spazio_id` di ogni riga.
+
+Lo stesso giorno il database reale è stato ricostruito pulito: un database
+nuovo dalle migration, in cui sono stati ricopiati solo account, spazio,
+impostazioni e Miglioramenti (STATO.md, sezione 2untricies).
+
 ## Tabelle mai usate
 
 Esistono nello schema ma **nessuna riga di codice le legge o le scrive**:

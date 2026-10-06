@@ -2,6 +2,21 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_DUE_DATABASE_20261006 -->
+# 06/10/2026 — Un database per le prove
+
+- **In 🛠️ Amministrazione un pulsante cambia database**: "🧪 Carica database
+  di prova" ti porta su un database fatto per i collaudi, "🏠 Carica database
+  reale" ti riporta sui tuoi dati. Il bot si spegne e si riaccende da solo,
+  in circa un minuto. Sul database di prova il menù principale te lo ricorda.
+- **I collaudi non toccano più i tuoi dati**, e dopo non serve più
+  ripristinare un backup.
+- **Ricette e alimenti comuni stanno nel codice**: sono uguali in tutti e due
+  i database, e quelli nuovi arrivano con gli aggiornamenti.
+- **Il tuo database è stato ripulito**: restano il tuo account, le
+  impostazioni e i Miglioramenti; i dati di prova dei collaudi non ci sono
+  più.
+
 <!-- CHANGELOG_CLEAR_20261006 -->
 # 06/10/2026 — `/clear` e `/clc`
 
