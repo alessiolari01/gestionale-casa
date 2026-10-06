@@ -3196,6 +3196,16 @@ database, un catalogo"):
 9 nuovi test: la scelta del database (6), il menù e la conferma del cambio
 (2), il codice a barre che arriva con le migration (1). Totale 517.
 
+**Distribuito sull'S9 il 6 ottobre 2026** (commit `b8b7738`), con il database
+reale ripulito lo stesso giorno (backup `gestionale_pre_pulizia_20261006_123551.db`,
+`applied_migrations=67`). Alessio ha provato il pulsante: il guardiano ha
+riacceso il bot sul database di prova in pochi secondi, ma **la chat è
+rimasta vuota** con il solo "AVVIA". Il database di prova appena nato non ha
+account, quindi nessun amministratore a cui mandare "🟢 online", mentre
+"offline" era già stato tolto. Corretto: senza amministratori si avvisano le
+chat autorizzate della configurazione (`chat_da_avvisare_all_avvio`), e
+toccando il menù l'account nasce da solo. 2 test, totale 519.
+
 ## 3. Stato tecnico verificato
 
 - **67 migration** nel repository. La 67ª (`ean_spaghetti_barilla`, sezione
@@ -3213,7 +3223,7 @@ database, un catalogo"):
 - pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa,
   punto 1 della sezione 6): `fmt`, `check --locked`,
   `clippy --all-targets --locked -- -D warnings`, `test --locked` —
-  **517 test** (508 prima della sezione 2untricies, 504 prima della sezione 2tricies, 498 prima della sezione 2novovicies, 477 prima della sezione 2octovicies, 475 prima della sezione 2sexvicies, 474 prima della sezione
+  **519 test** (508 prima della sezione 2untricies, 504 prima della sezione 2tricies, 498 prima della sezione 2novovicies, 477 prima della sezione 2octovicies, 475 prima della sezione 2sexvicies, 474 prima della sezione
   2quattuorvicies, 472 prima della
   sezione 2trevicies, 471 prima della sezione
   2duovicies, 469 prima della sezione

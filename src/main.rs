@@ -633,13 +633,7 @@ async fn async_main() -> anyhow::Result<()> {
     // Le notifiche tecniche di avvio sono riservate agli amministratori del
     // gestionale. Gli utenti normali non devono ricevere messaggi operativi
     // legati al runtime del bot.
-    let admin_chat_ids = match identity::list_system_admin_chat_ids(&pool).await {
-        Ok(chat_ids) => chat_ids,
-        Err(error) => {
-            tracing::warn!(?error, "Impossibile leggere gli amministratori all'avvio");
-            Vec::new()
-        }
-    };
+    let admin_chat_ids = chat_da_avvisare_all_avvio(&pool, &config.allowed_chat_ids).await;
     annuncia_riaccensione(
         &bot,
         &admin_chat_ids,
@@ -2598,6 +2592,22 @@ async fn annuncia_spegnimento(
 
 /// Manda "🟢 Gestionale Casa è online." agli amministratori, poi toglie i
 /// messaggi "offline" che lo spegnimento si era segnato in `file`.
+/// Chi avvisare con "🟢 online" all'accensione: gli amministratori. Un
+/// database appena nato — il primo passaggio a quello di prova — non ne ha
+/// ancora nessuno, e allora si avvisano le chat autorizzate della
+/// configurazione: altrimenti "offline" spariva e la chat restava vuota
+/// (Alessio, 6 ottobre 2026). Toccando il menù l'account nasce da solo.
+async fn chat_da_avvisare_all_avvio(pool: &SqlitePool, autorizzate: &[i64]) -> Vec<i64> {
+    match identity::list_system_admin_chat_ids(pool).await {
+        Ok(chat_ids) if !chat_ids.is_empty() => chat_ids,
+        Ok(_) => autorizzate.to_vec(),
+        Err(error) => {
+            tracing::warn!(?error, "Impossibile leggere gli amministratori all'avvio");
+            autorizzate.to_vec()
+        }
+    }
+}
+
 async fn annuncia_riaccensione(bot: &Bot, chat_ids: &[i64], file: &std::path::Path) {
     let offline = tokio::fs::read_to_string(file).await.unwrap_or_default();
     for riga in offline.lines() {
@@ -3890,6 +3900,43 @@ mod runtime_tests {
                 .await
                 .expect("messaggio");
             }
+        }
+
+        /// Visto da Alessio il 6 ottobre 2026: passando al database di
+        /// prova, appena nato e senza account, la chat restava vuota con
+        /// "AVVIA". Senza amministratori si avvisano le chat autorizzate.
+        #[tokio::test]
+        async fn su_un_database_nuovo_l_online_arriva_lo_stesso() {
+            let banco = banco().await;
+            assert_eq!(
+                chat_da_avvisare_all_avvio(&banco.pool, &[CHAT]).await,
+                vec![CHAT],
+                "nessuno da avvisare su un database senza amministratori"
+            );
+        }
+
+        /// Con un amministratore collegato a Telegram si avvisa lui, come
+        /// prima.
+        #[tokio::test]
+        async fn con_un_amministratore_si_avvisa_lui() {
+            let banco = banco().await;
+            sqlx::query("UPDATE utenti SET ruolo_sistema = 'admin' WHERE id = ?")
+                .bind(banco.actor.utente_id)
+                .execute(&banco.pool)
+                .await
+                .expect("admin");
+            sqlx::query(
+                "INSERT INTO account_telegram (utente_id, telegram_user_id, chat_id, nome_snapshot) \
+                 VALUES (?, 77, 7777, 'Alessio')",
+            )
+            .bind(banco.actor.utente_id)
+            .execute(&banco.pool)
+            .await
+            .expect("account");
+            assert_eq!(
+                chat_da_avvisare_all_avvio(&banco.pool, &[CHAT]).await,
+                vec![7777]
+            );
         }
 
         /// Il codice a barre scansionato nel bot vero arriva con le
