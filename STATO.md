@@ -3206,6 +3206,15 @@ account, quindi nessun amministratore a cui mandare "🟢 online", mentre
 chat autorizzate della configurazione (`chat_da_avvisare_all_avvio`), e
 toccando il menù l'account nasce da solo. 2 test, totale 519.
 
+Lo stesso pomeriggio, mentre l'S9 compilava questa correzione, Alessio ha
+cambiato database: il guardiano ha riacceso il bot con `avvia-bot.sh`, che
+allora faceva `cargo run` e ha cominciato a compilare anche lui. Due build
+insieme: memoria finita, tutte e due uccise (SIGKILL), **bot spento dalle
+18:09 alle 18:12**, riacceso a mano lanciando il binario già compilato.
+Corretto negli script (sezione 7, "aggiornare l'S9"): `avvia-bot.sh` non
+compila più, e `aggiorna-s9.sh` alla fine ferma il bot vecchio e riavvia con
+`avvia-bot.sh`.
+
 ## 3. Stato tecnico verificato
 
 - **67 migration** nel repository. La 67ª (`ean_spaghetti_barilla`, sezione
@@ -3629,11 +3638,16 @@ src/modules/novita.rs               registro delle novità e badge "🆕" propag
   Amministrazione → 🧪 Carica database di prova), non sui dati veri: niente
   più ripristini da backup dopo un collaudo. I Miglioramenti restano nel
   database reale, e lì si segnano.
-- **aggiornare l'S9**: `aggiorna-s9.sh --solo-controlli` → `ferma-bot.sh` →
-  `setsid ./scripts/avvia-bot.sh`. Mai `aggiorna-s9.sh` senza
-  `--solo-controlli` con un bot acceso: il suo ultimo passo è un `cargo run`
-  che **non** ferma il bot vecchio, e il 6 ottobre 2026 due bot si sono
-  contesi Telegram per otto ore e mezza (`TerminatedByOtherGetUpdates`).
+- **aggiornare l'S9**: `aggiorna-s9.sh --solo-controlli` (con il bot
+  acceso: compila e basta) → `ferma-bot.sh` → `setsid ./scripts/avvia-bot.sh`.
+  **Nessuno compila mentre `aggiorna-s9.sh` compila**: il telefono non ha
+  memoria per due build. Due incidenti del 6 ottobre 2026, entrambi chiusi
+  nel codice: l'ultimo passo di `aggiorna-s9.sh` era un `cargo run` che non
+  fermava il bot vecchio (due bot hanno conteso Telegram per otto ore e
+  mezza), e `avvia-bot.sh` faceva `cargo run`, quindi un riavvio del
+  guardiano durante una build compilava a sua volta (memoria finita, tutte
+  e due uccise, bot spento). Ora `aggiorna-s9.sh` ferma e riavvia con
+  `avvia-bot.sh`, e `avvia-bot.sh` avvia il binario già compilato.
 - **dal 1 ottobre 2026, per scelta di Alessio**, un lavoro finito con la
   pipeline verde si distribuisce **senza chiedere**: commit con
   `pipeline-locale.sh`, CI, aggiornamento dell'S9, riavvio e controllo che il

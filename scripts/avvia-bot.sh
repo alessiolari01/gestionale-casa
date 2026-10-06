@@ -5,10 +5,9 @@
 # coerente con la scelta gia' fatta nel progetto di evitare complessita'
 # extra (niente Docker, niente container -- docs/architettura.md, 2.4).
 #
-# Sotto-step 2/5 del punto 6 del ciclo (deploy). Non e' pensato per l'uso
-# quotidiano sull'S9: li' resta aggiorna-s9.sh, che fa "cargo run" in
-# foreground in una sessione Termux tenuta aperta. Questo script serve
-# all'agente, via SSH, per lo swap del binario.
+# Sotto-step 2/5 del punto 6 del ciclo (deploy). Lo usano il guardiano (a
+# ogni riaccensione, compreso il cambio di database), aggiorna-s9.sh alla
+# fine e l'agente via SSH. Avvia il binario gia' compilato: non compila mai.
 #
 # Uso (sull'S9, o da remoto con: ssh s9 'cd ~/gestionale-casa && ./scripts/avvia-bot.sh'):
 #   ./scripts/avvia-bot.sh
@@ -46,17 +45,23 @@ if [ -f "$PIDFILE" ]; then
     rm -f "$PIDFILE"
 fi
 
-# Stesse variabili di aggiorna-s9.sh: proteggono il collegamento sull'S9
-# (memoria in fase di link) anche per un avvio dato da questo script.
-export CARGO_BUILD_JOBS=1
-export CARGO_INCREMENTAL=0
-
+# Si avvia il binario gia' compilato, mai `cargo run`: dal 6 ottobre 2026
+# il guardiano riaccende il bot anche a ogni cambio di database, e un
+# `cargo run` che trova codice nuovo compila. Quel giorno un riavvio e'
+# partito mentre aggiorna-s9.sh compilava: due compilazioni insieme hanno
+# finito la memoria del telefono, sono state uccise tutte e due e il bot e'
+# rimasto spento. Compilare e' compito di aggiorna-s9.sh, e solo suo.
+BINARIO="$PWD/target/release/gestionale-casa"
+if [ ! -x "$BINARIO" ]; then
+    echo "Manca il binario $BINARIO: compilalo con ./scripts/aggiorna-s9.sh --solo-controlli." >&2
+    exit 1
+fi
 if [ "$RISERVATO" = "1" ]; then
     echo "Avvio in background, modalita' riservata (nohup, log in $LOGFILE)..."
-    RISERVATO=1 nohup cargo run --release --locked > "$LOGFILE" 2>&1 &
+    RISERVATO=1 nohup "$BINARIO" > "$LOGFILE" 2>&1 &
 else
     echo "Avvio in background (nohup, log in $LOGFILE)..."
-    nohup cargo run --release --locked > "$LOGFILE" 2>&1 &
+    nohup "$BINARIO" > "$LOGFILE" 2>&1 &
 fi
 PID=$!
 disown
@@ -66,9 +71,10 @@ echo "PID: $PID"
 
 # "Gestionale Casa online" e' la riga vera che il codice scrive dopo
 # essersi collegato a Telegram con successo (src/main.rs, dopo get_me()) --
-# non e' un segnale inventato. cargo run puo' dover compilare, quindi non
-# basta che il processo esista subito dopo averlo lanciato: si aspetta fino
-# a un massimo, controllando che resti vivo nel frattempo.
+# non e' un segnale inventato. Il bot puo' metterci qualche secondo (le
+# migration, la rete del telefono), quindi non basta che il processo esista
+# subito dopo averlo lanciato: si aspetta fino a un massimo, controllando
+# che resti vivo nel frattempo.
 ATTESA=0
 MASSIMO=180
 while [ "$ATTESA" -lt "$MASSIMO" ]; do

@@ -326,6 +326,12 @@ toglie, scrive "riavvio chiesto dal bot" e riaccende subito, senza referto e
 senza contarlo fra le riaccensioni. Il cambio quindi funziona solo se il
 guardiano è acceso: senza, il bot resta spento.
 
+**Riaccendere non compila** (6 ottobre 2026): `avvia-bot.sh` avvia
+`target/release/gestionale-casa` già compilato, mai `cargo run`. Con
+`cargo run`, un riavvio durante una build di `aggiorna-s9.sh` faceva partire
+una seconda compilazione: la memoria del telefono non basta per due, e
+quel giorno sono state uccise entrambe lasciando il bot spento.
+
 **Si arrende dopo cinque riaccensioni in mezz'ora**, scrivendo "MI ARRENDO"
 nel log e mettendosi in pausa. Un bot che cade appena parte non si aggiusta
 riaccendendolo: insistere nasconderebbe il guasto, che è precisamente

@@ -17,8 +17,12 @@
 # Ogni esecuzione lascia il log completo dei controlli in data/log/. Serve
 # perche' sullo schermo di Termux l'errore vero di rustc scorre via e resta
 # visibile solo l'ultima riga ("could not compile ... due to 1 previous
-# error"), che da sola non dice niente. L'avvio del bot NON viene registrato:
-# un bot lasciato acceso riempirebbe il disco.
+# error"), che da sola non dice niente. Il bot, alla fine, lo accende
+# avvia-bot.sh in background: il suo output va in data/run/bot.out, non qui.
+#
+# Backup e prova delle migration riguardano il database reale. Quello di
+# prova (data/db/prova.db) riceve le migration al primo avvio, senza prova
+# su copia: e' fatto per essere buttato.
 #
 # Backup e log vengono ruotati: si tengono solo i piu' recenti.
 #
@@ -306,7 +310,12 @@ if [ "$DA_APPLICARE" -gt 0 ]; then
     echo "L'avvio applichera' $DA_APPLICARE migration al database reale."
     echo "Il backup e' in $(basename "$BACKUP")."
 fi
-# Da qui in poi non si registra piu' nulla: il bot puo' restare acceso per
-# ore e il suo output riempirebbe il log fino a esaurire il disco.
 echo "log dei controlli: $LOG"
-cargo run --release --locked
+# Fino al 6 ottobre 2026 qui c'era un `cargo run` in primo piano, che non
+# fermava il bot gia' acceso: quel giorno due bot si sono contesi Telegram
+# per otto ore e mezza. Ora si ferma quello vecchio (se c'e') e si avvia il
+# binario appena compilato, come fa il guardiano.
+if [ -f "$PROGETTO/data/run/bot.pid" ]; then
+    "$PROGETTO/scripts/ferma-bot.sh" || exit 1
+fi
+"$PROGETTO/scripts/avvia-bot.sh"
