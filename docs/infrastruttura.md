@@ -326,6 +326,13 @@ toglie, scrive "riavvio chiesto dal bot" e riaccende subito, senza referto e
 senza contarlo fra le riaccensioni. Il cambio quindi funziona solo se il
 guardiano è acceso: senza, il bot resta spento.
 
+**Tiene d'occhio la rete** (6 ottobre 2026): a ogni controllo legge
+l'indirizzo del Wi-Fi e il router verso internet, e quando cambiano scrive
+una riga in `data/log/rete.log` (lo stato attuale sta in
+`data/run/rete.stato`). Serve a capire se le cadute di rete del telefono,
+ogni 70-90 minuti, coincidono con un cambio d'indirizzo prima di mettere
+mano al router.
+
 **Riaccendere non compila** (6 ottobre 2026): `avvia-bot.sh` avvia
 `target/release/gestionale-casa` già compilato, mai `cargo run`. Con
 `cargo run`, un riavvio durante una build di `aggiorna-s9.sh` faceva partire

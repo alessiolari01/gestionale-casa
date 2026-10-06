@@ -3416,7 +3416,11 @@ src/modules/novita.rs               registro delle novità e badge "🆕" propag
   `Network is unreachable`): il bot si ricollega da solo in un secondo, ma un
   tocco in quel momento aspetta. Probabile risparmio energetico di Android
   (Wi-Fi o Termux in pausa): da guardare nelle impostazioni del telefono,
-  con Alessio;
+  con Alessio. Termux tiene già il wake lock. Dal 6 ottobre 2026 il
+  guardiano annota indirizzo e router in `data/log/rete.log` quando
+  cambiano: se le cadute coincidono con un cambio d'indirizzo, si dà
+  all'S9 un indirizzo fisso nel router (decisione di Alessio: prima
+  guardare, poi il router);
 - i **moduli nuovi**, nell'ordine concordato: Documenti, Promemoria,
   Palestra, Soldi (`docs/roadmap.md`), ognuno scritto con la C20 in mente;
 - **C20, quello che resta**: le ricerche con accenti e maiuscole diversi dal

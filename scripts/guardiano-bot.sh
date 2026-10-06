@@ -82,7 +82,25 @@ salva_ultime_righe() {
     done
 }
 
+# La rete del telefono (6 ottobre 2026): il bot perde Telegram ogni 70-90
+# minuti ("Network is unreachable"), e prima di toccare il router si guarda
+# se l'indirizzo cambia. Una riga in data/log/rete.log solo quando qualcosa
+# cambia: indirizzo del Wi-Fi o strada verso internet. Gira a ogni
+# controllo, anche col bot in pausa.
+osserva_rete() {
+    local indirizzo strada adesso_rete prima
+    indirizzo="$(ip -4 -o addr show wlan0 2>/dev/null | awk '{print $4}' | head -1)"
+    strada="$(ip route get 1.1.1.1 2>/dev/null | awk '/via/ {for (i = 1; i <= NF; i++) if ($i == "via") print $(i + 1)}' | head -1)"
+    adesso_rete="ip=${indirizzo:-nessuno} router=${strada:-nessuno}"
+    prima="$(cat "$CARTELLA_RUN/rete.stato" 2>/dev/null)"
+    if [ "$adesso_rete" != "$prima" ]; then
+        echo "$(adesso) $adesso_rete (prima: ${prima:-mai visto})" >>"$CARTELLA_LOG/rete.log"
+        echo "$adesso_rete" >"$CARTELLA_RUN/rete.stato"
+    fi
+}
+
 controlla_una_volta() {
+    osserva_rete
     if [ -f "$PAUSA" ]; then
         return 0
     fi
