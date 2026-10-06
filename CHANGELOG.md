@@ -2,6 +2,25 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_PROMEMORIA_20261007 -->
+# 07/10/2026 — ⏰ Promemoria
+
+- **Una sezione nuova nel menù principale: ⏰ Promemoria.** Scrivi cosa e
+  quando, come ti viene: "domani alle 9", "fra 2 ore", "15/10 18:30",
+  "venerdì alle 20". Una volta sola, oppure ogni giorno, dal lunedì al
+  venerdì, ogni settimana, ogni mese o ogni anno.
+- Quando arriva il momento **il bot ti scrive da solo**. Sul messaggio:
+  `✅ Fatto` per toglierlo, `⏰ 10 min`, `⏰ 1 ora` o `⏰ Domani` per
+  rimandarlo.
+- **🔁 Automatici**, se li accendi: un avviso prima di ogni pasto del
+  planner (scegli quanto prima, e pasto per pasto puoi cambiare o dire "non
+  ricordarmelo"), e ogni mattina all'ora che vuoi le scorte che stanno per
+  scadere. Nascono spenti.
+- Se il bot era spento quando doveva scriverti, te lo manda appena riparte
+  e ti dice che è in ritardo.
+- Non ti serve? `⚙️ Impostazioni → 🧩 Sezioni → ⏰ Promemoria` la spegne, e il
+  bot non ti scrive più da solo.
+
 <!-- CHANGELOG_SCRITTA_PROVA_20261006 -->
 # 06/10/2026 — Sai sempre su che database sei
 

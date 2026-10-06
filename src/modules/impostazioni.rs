@@ -50,6 +50,7 @@ pub enum Funzione {
     Oggetti,
     Luoghi,
     Storico,
+    Promemoria,
     ScorteIngresso,
     ScorteScaricoPasti,
     ListaAggiornamento,
@@ -57,7 +58,7 @@ pub enum Funzione {
 }
 
 /// Le sezioni, nell'ordine dei menù.
-pub const SEZIONI: [Funzione; 11] = [
+pub const SEZIONI: [Funzione; 12] = [
     Funzione::Alimentazione,
     Funzione::Ricette,
     Funzione::ProfiliAlimentari,
@@ -69,6 +70,7 @@ pub const SEZIONI: [Funzione; 11] = [
     Funzione::Oggetti,
     Funzione::Luoghi,
     Funzione::Storico,
+    Funzione::Promemoria,
 ];
 
 /// Quello che il bot fa da solo, senza che nessuno lo chieda.
@@ -104,6 +106,7 @@ impl Funzione {
             Funzione::Oggetti => "oggetti",
             Funzione::Luoghi => "luoghi",
             Funzione::Storico => "storico",
+            Funzione::Promemoria => "promemoria",
             Funzione::ScorteIngresso => "scorte_ingresso",
             Funzione::ScorteScaricoPasti => "scorte_scarico_pasti",
             Funzione::ListaAggiornamento => "lista_aggiornamento",
@@ -134,6 +137,7 @@ impl Funzione {
             Funzione::Oggetti => "🏷️ Oggetti",
             Funzione::Luoghi => "🏠 Case, stanze e contenitori",
             Funzione::Storico => "📜 Storico",
+            Funzione::Promemoria => "⏰ Promemoria",
             Funzione::ScorteIngresso => "📥 La spesa chiusa entra in casa",
             Funzione::ScorteScaricoPasti => "🍲 I pasti scalano le scorte",
             Funzione::ListaAggiornamento => "🔄 La lista si aggiorna da sola",
@@ -156,6 +160,7 @@ impl Funzione {
             Funzione::Oggetti => "Gli oggetti di casa con marca, prezzo e garanzia.",
             Funzione::Luoghi => "Case, stanze e contenitori dove sta la roba.",
             Funzione::Storico => "L'elenco di tutto quello che è successo.",
+            Funzione::Promemoria => "I promemoria e gli avvisi automatici. Spenta, il bot non ti scrive più da solo.",
             Funzione::ScorteIngresso => "Chiudendo la spesa la roba comprata entra da sola nel suo posto.",
             Funzione::ScorteScaricoPasti => "Un pasto preparato o consumato toglie i suoi ingredienti dalle scorte.",
             Funzione::ListaAggiornamento => "La lista si ricalcola da sola quando cambia qualcosa.",
@@ -206,6 +211,7 @@ impl Funzione {
             Funzione::Oggetti => &["oggetti:"],
             Funzione::Luoghi => &["loc:"],
             Funzione::Storico => &["history:"],
+            Funzione::Promemoria => &["remind:"],
             _ => &[],
         }
     }
@@ -296,6 +302,12 @@ pub async fn funzioni(pool: &SqlitePool) -> Funzioni {
     else {
         return Funzioni::tutte_accese();
     };
+    funzioni_di(pool, utente_id).await
+}
+
+/// Le funzioni di un utente qualsiasi, senza un attore: le usa chi scrive
+/// da solo, come i promemoria (7 ottobre 2026).
+pub async fn funzioni_di(pool: &SqlitePool, utente_id: i64) -> Funzioni {
     let mut spente: HashSet<String> =
         sqlx::query_scalar::<_, String>("SELECT funzione FROM funzioni_spente WHERE utente_id = ?")
             .bind(utente_id)

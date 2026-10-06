@@ -237,5 +237,5 @@ Vedi `docs/database.md` per i campi.
   la quantità che era in lista, non quella della confezione presa. È il
   punto 1 di "Cosa manca" in `docs/previsto/dispensa.md`; nel frattempo si
   corregge a mano con `✏️ Quantità`.
-- **Avvisi di scadenza**: richiedono i promemoria, che non esistono ancora
-  (`docs/previsto/reminder.md`).
+- **Avvisi di scadenza**: dal 7 ottobre 2026 li manda ⏰ Promemoria → 🔁 Automatici
+  (`docs/moduli/promemoria.md`).

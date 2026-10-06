@@ -164,8 +164,10 @@ Alessio, risposte ancora da raccogliere):
   fisica (case, stanze, contenitori annidati come "sottoscaffali") e una
   copia digitale (file caricato o link), in una gerarchia di cartelle per
   tipologia come in Drive;
-- **⏰ Promemoria** — vedi `docs/previsto/reminder.md`; richiede che il bot
-  possa scrivere da solo a un orario, cosa che oggi non fa;
+- **⏰ Promemoria** — **COSTRUITO il 7 ottobre 2026**, vedi
+  `docs/moduli/promemoria.md`: promemoria liberi con ripetizione, pasti del
+  planner, scorte che scadono, rimandare. È il motore con cui il bot scrive
+  da solo, e lo useranno anche gli altri moduli;
 - **🏋️ Palestra** — da definire;
 - **💰 Soldi** — entrate e uscite con data, importo e categoria; salvadenaio,
   portafoglio e carte con spostamenti fra loro; un'analisi di dove si spende

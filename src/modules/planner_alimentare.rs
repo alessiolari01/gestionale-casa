@@ -2345,6 +2345,18 @@ async fn planner_show_meal_detail(
                 format!("planner:delete:ask:{}", meal.id),
             ),
         ]);
+        // Il promemoria di questo pasto (7 ottobre 2026): solo con un
+        // orario, e solo con i Promemoria accesi.
+        if meal.orario.is_some()
+            && crate::modules::impostazioni::funzioni(pool)
+                .await
+                .attiva(crate::modules::impostazioni::Funzione::Promemoria)
+        {
+            rows.push(vec![planner_button(
+                "⏰ Promemoria",
+                format!("remind:meal:{}", meal.id),
+            )]);
+        }
     }
     // Dopo aver mangiato non si sostituisce: si corregge cosa si è segnato
     // ("avevo pianificato la pasta, ho mangiato la pizza"). Stesso flusso di

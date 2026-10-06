@@ -20,7 +20,7 @@ use std::{
 use crate::database_attivo::Database;
 use sqlx::SqlitePool;
 use teloxide::{
-    payloads::{SendAnimation, SendMessage, SendPhoto, SendVideo},
+    payloads::{SendAnimation, SendMessage, SendMessageSetters, SendPhoto, SendVideo},
     prelude::Requester,
     requests::{HasPayload, Output, Payload, Request},
     types::{
@@ -581,6 +581,21 @@ impl ContextBot {
                 tracing::debug!(chat_id = chat_id.0, ?error, "Avviso non eliminabile");
             }
         });
+    }
+
+    /// Un messaggio che il bot manda da solo, come un promemoria (7 ottobre
+    /// 2026): non è una schermata, quindi non prende il posto di quella su
+    /// cui si sta lavorando, e i suoi pulsanti li gestisce chi lo manda.
+    pub async fn manda_avviso(
+        &self,
+        chat_id: ChatId,
+        testo: String,
+        tastiera: InlineKeyboardMarkup,
+    ) -> Result<Message, teloxide::RequestError> {
+        self.inner
+            .send_message(chat_id, self.con_scritta_database(testo))
+            .reply_markup(tastiera)
+            .await
     }
 
     pub async fn delete_user_input(&self, chat_id: ChatId, message_id: MessageId) {

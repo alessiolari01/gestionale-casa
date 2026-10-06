@@ -3265,9 +3265,49 @@ caduta di rete nel log del bot (22:24:49), **senza cambio d'indirizzo** in
 
 3 test nuovi, totale 523.
 
+## 2tretricies. ⏰ Promemoria (7 ottobre 2026)
+
+Primo dei moduli nuovi, scelto da Alessio il 6 ottobre con "tutte le
+possibilità, e l'utente poi decide cosa usare". Scheda in
+`docs/moduli/promemoria.md`, codice in `src/modules/promemoria.rs`,
+migration 68 (`20261007090000_promemoria`).
+
+- **Promemoria liberi**: cosa e quando, scritto come lo scrive una persona
+  (`leggi_quando`: "domani alle 9", "fra 2 ore", "15/10 18:30", "15 ottobre",
+  "venerdì alle 20", "stasera alle 9" = 21, "alle 21" = oggi o domani); una
+  volta sola o ogni giorno, dal lunedì al venerdì, ogni settimana, ogni mese,
+  ogni anno. Scheda con testo, quando, ripetizione, sospendi, elimina (C16).
+- **Pasti del planner**: una regola generale (all'ora, 15 min, 30 min, 1 ora,
+  2 ore prima) e, dal dettaglio del pasto, `⏰ Promemoria` per l'eccezione di
+  quel pasto, anche "non ricordarmelo".
+- **Scorte che scadono**: un riepilogo al giorno all'ora scelta, entro i
+  giorni scelti, con lo scaduto; zitto se non scade niente.
+- **Rimandare**: ogni avviso ha `✅ Fatto` (lo toglie) e `⏰ 10 min / 1 ora /
+  Domani` (un promemoria nuovo, una volta sola).
+- Pasti e scadenze **nascono spenti**. `⚙️ Impostazioni → 🧩 Sezioni →
+  ⏰ Promemoria` spegne tutto, avvisi compresi.
+
+Come funziona dentro: un controllo ogni 30 secondi nel processo del bot
+(`controlla`, che riceve l'ora da fuori così le prove la decidono). Ogni
+invio ha una chiave unica per utente in `promemoria_invii`, prenotata
+**prima** di mandare: lo stesso avviso non parte mai due volte. Dopo un bot
+spento, un promemoria arretrato arriva una volta e dice "🕐 In ritardo"; uno
+che si ripete salta le volte perse. L'avviso **non è una schermata**
+(`ContextBot::manda_avviso`): non prende il posto di quella su cui si lavora,
+e i suoi pulsanti vengono gestiti prima del controllo sulle schermate vecchie.
+Porta anche la scritta del database di prova.
+
+La tabella si chiama `promemoria_liberi` perché `promemoria` esisteva già,
+dal primo schema: legata agli oggetti, mai usata, vuota sia nel database
+reale sia in quello di prova (controllato), contata da `db::status`.
+
+Nel banco delle prove di flusso c'è ora `premi`, per i pulsanti. 16 test
+nuovi (9 sul dominio, 7 sul flusso e sul motore), totale 539.
+
 ## 3. Stato tecnico verificato
 
-- **67 migration** nel repository. La 67ª (`ean_spaghetti_barilla`, sezione
+- **68 migration** nel repository. La 68ª (`promemoria`, sezione 2tretricies) si
+  applica al primo avvio dopo il deploy del 7 ottobre 2026. La 67ª (`ean_spaghetti_barilla`, sezione
   2untricies) si applica al primo avvio dopo il deploy del 6 ottobre 2026.
   La 66ª (`liste_spesa_scorte_usate`,
   sezione 2novovicies) si applica al primo avvio dopo il deploy del 1
@@ -3282,7 +3322,7 @@ caduta di rete nel log del bot (22:24:49), **senza cambio d'indirizzo** in
 - pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa,
   punto 1 della sezione 6): `fmt`, `check --locked`,
   `clippy --all-targets --locked -- -D warnings`, `test --locked` —
-  **523 test** (520 prima della sezione 2duotricies, 508 prima della sezione 2untricies, 504 prima della sezione 2tricies, 498 prima della sezione 2novovicies, 477 prima della sezione 2octovicies, 475 prima della sezione 2sexvicies, 474 prima della sezione
+  **539 test** (523 prima della sezione 2tretricies, 520 prima della sezione 2duotricies, 508 prima della sezione 2untricies, 504 prima della sezione 2tricies, 498 prima della sezione 2novovicies, 477 prima della sezione 2octovicies, 475 prima della sezione 2sexvicies, 474 prima della sezione
   2quattuorvicies, 472 prima della
   sezione 2trevicies, 471 prima della sezione
   2duovicies, 469 prima della sezione
@@ -3450,6 +3490,9 @@ src/modules/novita.rs               registro delle novità e badge "🆕" propag
 - **conferma breve della sezione 2duotricies** (la scritta della prova,
   Rimuovi voci, Dispensa con la marca, orario nel planner); il
   Miglioramento 17 con una chiusura fra mezzanotte e le due;
+- **collaudo di ⏰ Promemoria** (sezione 2tretricies), sul database di
+  prova; poi, nell'ordine concordato, Documenti, Palestra, Soldi, che
+  useranno lo stesso motore per scadenze e ricorrenze;
 - **l'S9 perde la rete ogni 1–2 ore** (56 volte dal 1 al 5 ottobre nel log,
   `Network is unreachable`): il bot si ricollega da solo in un secondo, ma un
   tocco in quel momento aspetta. Probabile risparmio energetico di Android
@@ -3459,8 +3502,8 @@ src/modules/novita.rs               registro delle novità e badge "🆕" propag
   cambiano: se le cadute coincidono con un cambio d'indirizzo, si dà
   all'S9 un indirizzo fisso nel router (decisione di Alessio: prima
   guardare, poi il router);
-- i **moduli nuovi**, nell'ordine concordato: Documenti, Promemoria,
-  Palestra, Soldi (`docs/roadmap.md`), ognuno scritto con la C20 in mente;
+- i **moduli nuovi** che restano: Documenti, Palestra, Soldi (Promemoria
+  fatto, sezione 2tretricies; `docs/roadmap.md`), ognuno con la C20 in mente;
 - **C20, quello che resta**: le ricerche con accenti e maiuscole diversi dal
   catalogo (`docs/convenzioni-telegram.md`);
 - **unire `lista-della-spesa` su `main`**;

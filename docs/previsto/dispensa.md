@@ -87,7 +87,7 @@ lasciare vuoto non costa niente a chi non lo usa.
 
 Quando ci sarà una data, il passo successivo naturale è l'avviso "sta per
 scadere" — che però richiede l'infrastruttura dei reminder, oggi
-inesistente (`docs/previsto/reminder.md`).
+inesistente (`docs/moduli/promemoria.md`).
 
 ### 4. La chiusura della spesa è il gancio, ed **esiste già**
 
@@ -152,4 +152,4 @@ quantità presa, ed è quella che entra in casa alla chiusura
 **Restano da fare**:
 
 1. gli **avvisi di scadenza**, quando esisterà l'infrastruttura dei reminder
-   (`docs/previsto/reminder.md`).
+   (`docs/moduli/promemoria.md`).

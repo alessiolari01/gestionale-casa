@@ -31,6 +31,7 @@ pub mod porzioni;
 pub mod porzioni_ingredienti;
 pub mod porzioni_profili;
 pub mod profili_alimentari;
+pub mod promemoria;
 pub mod ricette;
 pub mod spazi_membri;
 pub mod storico;

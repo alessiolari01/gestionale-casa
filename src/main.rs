@@ -332,12 +332,39 @@ impl Procedure {
             || self.lista_spesa_sessions.has_active(chat_id)
             || self.dispensa_sessions.has_active(chat_id)
             || self.turni_sessions.has_active(chat_id)
+            || modules::promemoria::attesa_attiva(chat_id)
     }
 
     /// Chiude ogni attesa della chat, comprese le due che non stanno in una
     /// mappa di sessione: l'orario scritto a mano degli inviti e quello del
     /// planner.
     fn chiudi_tutte(&self, chat_id: i64) {
+        self.sessions.clear_chat(chat_id);
+        self.location_sessions.clear_chat(chat_id);
+        self.container_sessions.clear_chat(chat_id);
+        self.photo_sessions.clear_chat(chat_id);
+        self.food_sessions.clear_chat(chat_id);
+        self.profile_sessions.clear_chat(chat_id);
+        self.improvement_sessions.clear_chat(chat_id);
+        self.recipe_sessions.clear_chat(chat_id);
+        self.identity_sessions.clear_chat(chat_id);
+        self.distribuzione_sessions.clear_chat(chat_id);
+        self.lista_spesa_sessions.clear_chat(chat_id);
+        self.dispensa_sessions.clear_chat(chat_id);
+        self.turni_sessions.clear_chat(chat_id);
+        modules::spazi_membri::clear_pending_input(chat_id);
+        modules::planner_alimentare::chiudi_attesa_orario(chat_id);
+        modules::promemoria::chiudi_attesa(chat_id);
+    }
+
+    /// Tutte tranne quella dei promemoria: quando è lei ad aver appena
+    /// risposto, e la sua attesa deve restare per il passo dopo.
+    fn chiudi_tranne_promemoria(&self, chat_id: i64) {
+        let promemoria_aperto = modules::promemoria::attesa_attiva(chat_id);
+        if !promemoria_aperto {
+            self.chiudi_tutte(chat_id);
+            return;
+        }
         self.sessions.clear_chat(chat_id);
         self.location_sessions.clear_chat(chat_id);
         self.container_sessions.clear_chat(chat_id);
@@ -641,6 +668,20 @@ async fn async_main() -> anyhow::Result<()> {
         std::path::Path::new(FILE_MESSAGGI_OFFLINE),
     )
     .await;
+
+    // ⏰ Promemoria (7 ottobre 2026): ogni trenta secondi si manda quello
+    // che è arrivato il momento di mandare. Parte dopo "online", così un
+    // promemoria arretrato non arriva prima che la chat sia pronta.
+    let promemoria_bot = bot.clone();
+    let promemoria_pool = pool.clone();
+    let _promemoria_task = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(30));
+        loop {
+            interval.tick().await;
+            let adesso = modules::promemoria::adesso_locale(&promemoria_pool).await;
+            modules::promemoria::controlla(&promemoria_bot, &promemoria_pool, adesso).await;
+        }
+    });
 
     let sessions = SessionStore::new();
     let location_sessions = LocationSessionStore::new();
@@ -1083,6 +1124,7 @@ async fn handle_authorized_message(
         photo_sessions.clear_chat(chat_id);
         improvement_sessions.clear_chat(chat_id);
         recipe_sessions.clear_chat(chat_id);
+        modules::promemoria::chiudi_attesa(chat_id);
         if command != Some("/spazio_nuovo")
             && command != Some("/spazio_rinomina")
             && command != Some("/annulla")
@@ -1222,6 +1264,11 @@ async fn handle_authorized_message(
             }
             return respond(());
         }
+    }
+
+    if modules::promemoria::handle_message(&bot, &msg, &pool, text).await? {
+        procedure.chiudi_tranne_promemoria(chat_id);
+        return respond(());
     }
 
     if modules::planner_alimentare::handle_message(&bot, &msg, &pool, text).await? {
@@ -1597,6 +1644,17 @@ async fn handle_callback(
         }
     }
 
+    // I pulsanti di un promemoria arrivato (7 ottobre 2026): l'avviso non è
+    // una schermata, e deve rispondere anche dopo che la schermata è
+    // cambiata.
+    if data.starts_with("remind:act:") {
+        return identity::with_actor(
+            actor,
+            modules::promemoria::gestisci_avviso(&bot, chat_id, &pool, message.id, &data),
+        )
+        .await;
+    }
+
     match bot.rivendica(chat_id.0, message.id, &data) {
         context_bot::Rivendicazione::Nuova => {}
         // Un secondo tocco in fretta: il primo sta già lavorando, e la
@@ -1666,6 +1724,14 @@ async fn handle_authorized_callback(
 ) -> ResponseResult<()> {
     let data = data.as_str();
 
+    // Un'altra schermata chiude l'attesa dei promemoria: un testo scritto
+    // dopo non deve finire in un promemoria lasciato a metà. Prima di tutto,
+    // Impostazioni comprese.
+    let promemoria_aperto = modules::promemoria::attesa_attiva(chat_id.0);
+    if !data.starts_with("remind:") {
+        modules::promemoria::chiudi_attesa(chat_id.0);
+    }
+
     // ⚙️ Impostazioni, prima di tutto il resto: è la schermata da cui si
     // riaccende quello che si è spento, quindi non può dipendere da niente.
     if data.starts_with("settings:")
@@ -1718,10 +1784,31 @@ async fn handle_authorized_callback(
             || distribuzione_sessions.has_active(chat_id.0)
             || lista_spesa_sessions.has_active(chat_id.0)
             || dispensa_sessions.has_active(chat_id.0)
-            || turni_sessions.has_active(chat_id.0));
+            || turni_sessions.has_active(chat_id.0)
+            || promemoria_aperto);
     let avviso_uscita = lista_spesa_sessions
         .avviso_uscita(chat_id.0)
         .unwrap_or("❌ Operazione annullata.");
+
+    if data.starts_with("remind:")
+        && modules::promemoria::handle_callback(&bot, chat_id, &pool, data).await?
+    {
+        sessions.clear_chat(chat_id.0);
+        location_sessions.clear_chat(chat_id.0);
+        container_sessions.clear_chat(chat_id.0);
+        photo_sessions.clear_chat(chat_id.0);
+        food_sessions.clear_chat(chat_id.0);
+        profile_sessions.clear_chat(chat_id.0);
+        improvement_sessions.clear_chat(chat_id.0);
+        recipe_sessions.clear_chat(chat_id.0);
+        identity_sessions.clear_chat(chat_id.0);
+        distribuzione_sessions.clear_chat(chat_id.0);
+        lista_spesa_sessions.clear_chat(chat_id.0);
+        dispensa_sessions.clear_chat(chat_id.0);
+        turni_sessions.clear_chat(chat_id.0);
+        modules::planner_alimentare::chiudi_attesa_orario(chat_id.0);
+        return respond(());
+    }
 
     if (data.starts_with("improve:")
         || (data == "menu:main" && improvement_sessions.has_active(chat_id.0)))
@@ -3884,9 +3971,409 @@ mod runtime_tests {
                 .await
                 .expect("messaggio");
             }
+
+            /// Un pulsante premuto, come lo instrada `handle_callback` dopo
+            /// i controlli su chi è e su quale schermata è attiva.
+            async fn premi(&self, data: &str) {
+                let p = self.procedure.clone();
+                identity::with_actor(
+                    self.actor.clone(),
+                    handle_authorized_callback(
+                        self.bot.clone(),
+                        ChatId(CHAT),
+                        self.pool.clone(),
+                        p.sessions,
+                        p.location_sessions,
+                        p.container_sessions,
+                        p.photo_sessions,
+                        p.food_sessions,
+                        p.profile_sessions,
+                        p.improvement_sessions,
+                        p.recipe_sessions,
+                        p.identity_sessions,
+                        p.distribuzione_sessions,
+                        p.lista_spesa_sessions,
+                        p.dispensa_sessions,
+                        p.turni_sessions,
+                        ShutdownController::default(),
+                        ModalitaRiservata::new(false),
+                        CollaudoStore::default(),
+                        self.actor.clone(),
+                        data.to_string(),
+                    ),
+                )
+                .await
+                .expect("pulsante");
+            }
+
+            /// L'account Telegram di Alessio, a cui arrivano i promemoria.
+            async fn collega_telegram(&self) {
+                sqlx::query(
+                    "INSERT INTO account_telegram (utente_id, telegram_user_id, chat_id, nome_snapshot) \
+                     VALUES (?, ?, ?, 'Alessio')",
+                )
+                .bind(self.actor.utente_id)
+                .bind(CHAT)
+                .bind(CHAT)
+                .execute(&self.pool)
+                .await
+                .expect("account");
+            }
         }
 
-        /// Visto da Alessio il 6 ottobre 2026: passando al database di
+        fn alle(data: &str, ora: &str) -> chrono::NaiveDateTime {
+            modules::promemoria::leggi_ora_db(&format!("{data} {ora}")).expect("ora di prova")
+        }
+
+        async fn promemoria_salvati(pool: &SqlitePool) -> Vec<(String, String, String, String)> {
+            sqlx::query_as(
+                "SELECT testo, prossimo_il, ripetizione, stato FROM promemoria_liberi ORDER BY id",
+            )
+            .fetch_all(pool)
+            .await
+            .expect("promemoria")
+        }
+
+        /// I messaggi mandati con un testo che comincia così.
+        fn mandati_che_iniziano(banco: &Banco, inizio: &str) -> usize {
+            banco
+                .telegram
+                .testi()
+                .iter()
+                .filter(|testo| testo.starts_with(inizio))
+                .count()
+        }
+
+        /// ⏰ Promemoria (7 ottobre 2026): dal pulsante al promemoria
+        /// salvato, scrivendo il quando come lo scrive una persona.
+        #[tokio::test]
+        async fn un_promemoria_nuovo_dal_testo_alla_scheda() {
+            let banco = banco().await;
+            banco.premi("remind:new").await;
+            assert!(banco
+                .telegram
+                .ultimo_testo()
+                .contains("Cosa ti devo ricordare?"));
+            banco.scrivi("Chiama il medico").await;
+            assert!(banco
+                .telegram
+                .ultimo_testo()
+                .contains("Quando te lo ricordo?"));
+            banco.scrivi("boh").await;
+            assert!(
+                banco
+                    .telegram
+                    .ultimo_testo()
+                    .starts_with("⚠️ Non ho capito quando."),
+                "{}",
+                banco.telegram.ultimo_testo()
+            );
+            banco.scrivi("domani alle 9").await;
+            assert!(banco.telegram.ultimo_testo().starts_with("🔁 Si ripete?"));
+            banco.premi("remind:rep:new:settimana").await;
+
+            let adesso = modules::promemoria::adesso_locale(&banco.pool).await;
+            let domani_alle_9 = adesso
+                .date()
+                .succ_opt()
+                .and_then(|domani| domani.and_hms_opt(9, 0, 0))
+                .expect("domani");
+            assert_eq!(
+                promemoria_salvati(&banco.pool).await,
+                vec![(
+                    "Chiama il medico".to_string(),
+                    modules::promemoria::scrivi_ora_db(domani_alle_9),
+                    "settimana".to_string(),
+                    "attivo".to_string()
+                )]
+            );
+            let scheda = banco.telegram.ultimo_testo();
+            assert!(
+                scheda.starts_with("✅ Promemoria salvato: te lo ricordo domani alle 09:00."),
+                "{scheda}"
+            );
+            assert!(!modules::promemoria::attesa_attiva(CHAT));
+
+            // Un'altra schermata chiude il promemoria lasciato a metà: un
+            // testo scritto dopo non deve diventare un promemoria. Nella
+            // stessa prova, perché l'attesa è per chat e le prove girano
+            // insieme sulla stessa chat finta.
+            banco.premi("remind:new").await;
+            assert!(modules::promemoria::attesa_attiva(CHAT));
+            banco.premi("settings:menu").await;
+            assert!(!modules::promemoria::attesa_attiva(CHAT));
+            banco.scrivi("Stendi i panni").await;
+            assert_eq!(promemoria_salvati(&banco.pool).await.len(), 1);
+        }
+
+        /// Il motore manda un promemoria una volta sola, anche se lo si
+        /// controlla due volte, e chiude quelli che non si ripetono.
+        #[tokio::test]
+        async fn un_promemoria_arriva_una_volta_sola() {
+            let banco = banco().await;
+            banco.collega_telegram().await;
+            let utente = banco.actor.utente_id.expect("utente");
+            modules::promemoria::crea(
+                &banco.pool,
+                utente,
+                Some(banco.actor.spazio_id),
+                "Chiama il medico",
+                alle("2026-10-07", "09:00"),
+                modules::promemoria::Ripetizione::Mai,
+                "libero",
+            )
+            .await
+            .expect("promemoria");
+
+            modules::promemoria::controlla(&banco.bot, &banco.pool, alle("2026-10-07", "08:59"))
+                .await;
+            assert_eq!(
+                mandati_che_iniziano(&banco, "⏰ Chiama il medico"),
+                0,
+                "non ancora"
+            );
+
+            modules::promemoria::controlla(&banco.bot, &banco.pool, alle("2026-10-07", "09:00"))
+                .await;
+            modules::promemoria::controlla(&banco.bot, &banco.pool, alle("2026-10-07", "09:00"))
+                .await;
+            assert_eq!(mandati_che_iniziano(&banco, "⏰ Chiama il medico"), 1);
+            assert_eq!(banco.telegram.ultimo_testo(), "⏰ Chiama il medico");
+            assert_eq!(
+                banco.telegram.ultimi_pulsanti(),
+                vec!["✅ Fatto", "⏰ 10 min", "⏰ 1 ora", "⏰ Domani"]
+            );
+            assert_eq!(promemoria_salvati(&banco.pool).await[0].3, "concluso");
+        }
+
+        /// Un promemoria quotidiano rimasto indietro (bot spento tre giorni)
+        /// arriva una volta, dice che è in ritardo e riparte da domani.
+        #[tokio::test]
+        async fn un_promemoria_in_ritardo_lo_dice_e_salta_le_volte_perse() {
+            let banco = banco().await;
+            banco.collega_telegram().await;
+            let utente = banco.actor.utente_id.expect("utente");
+            modules::promemoria::crea(
+                &banco.pool,
+                utente,
+                None,
+                "Medicine",
+                alle("2026-10-04", "21:00"),
+                modules::promemoria::Ripetizione::Giorno,
+                "libero",
+            )
+            .await
+            .expect("promemoria");
+            modules::promemoria::controlla(&banco.bot, &banco.pool, alle("2026-10-07", "10:00"))
+                .await;
+            assert_eq!(mandati_che_iniziano(&banco, "⏰ Medicine"), 1);
+            assert!(banco
+                .telegram
+                .ultimo_testo()
+                .contains("🕐 In ritardo: era per Dom 4 Ott alle 21:00."));
+            assert_eq!(
+                promemoria_salvati(&banco.pool).await[0].1,
+                "2026-10-07 21:00",
+                "la prossima volta è stasera, non le tre perse"
+            );
+        }
+
+        /// Con ⏰ Promemoria spento il bot non scrive; la volta passa lo
+        /// stesso, invece di arrivare tutta insieme alla riaccensione.
+        #[tokio::test]
+        async fn con_la_sezione_spenta_non_arriva_niente() {
+            let banco = banco().await;
+            banco.collega_telegram().await;
+            let utente = banco.actor.utente_id.expect("utente");
+            sqlx::query(
+                "INSERT INTO funzioni_spente (utente_id, funzione) VALUES (?, 'promemoria')",
+            )
+            .bind(utente)
+            .execute(&banco.pool)
+            .await
+            .expect("spenta");
+            modules::promemoria::crea(
+                &banco.pool,
+                utente,
+                None,
+                "Chiama il medico",
+                alle("2026-10-07", "09:00"),
+                modules::promemoria::Ripetizione::Mai,
+                "libero",
+            )
+            .await
+            .expect("promemoria");
+            modules::promemoria::controlla(&banco.bot, &banco.pool, alle("2026-10-07", "09:00"))
+                .await;
+            assert_eq!(mandati_che_iniziano(&banco, "⏰"), 0);
+            assert_eq!(promemoria_salvati(&banco.pool).await[0].3, "concluso");
+        }
+
+        async fn pasto_alle(banco: &Banco, data: &str, orario: &str) -> i64 {
+            let utente = banco.actor.utente_id.expect("utente");
+            sqlx::query(
+                "INSERT INTO planner_alimentari (proprietario_utente_id, spazio_id, nome, nome_normalizzato, data_inizio, data_fine) \
+                 VALUES (?, ?, 'Settimana', 'settimana', '2026-10-05', '2026-10-11') ON CONFLICT DO NOTHING",
+            )
+            .bind(utente)
+            .bind(banco.actor.spazio_id)
+            .execute(&banco.pool)
+            .await
+            .expect("planner");
+            let planner: i64 = sqlx::query_scalar(
+                "SELECT id FROM planner_alimentari WHERE nome_normalizzato = 'settimana'",
+            )
+            .fetch_one(&banco.pool)
+            .await
+            .expect("planner");
+            sqlx::query_scalar(
+                "INSERT INTO planner_pasti (planner_id, data_pasto, tipo_pasto, ricetta_nome_snapshot, ricetta_porzione_base_snapshot, orario) \
+                 VALUES (?, ?, 'pranzo', 'Caprese', 1, ?) RETURNING id",
+            )
+            .bind(planner)
+            .bind(data)
+            .bind(orario)
+            .fetch_one(&banco.pool)
+            .await
+            .expect("pasto")
+        }
+
+        /// I pasti del planner, con la regola generale e l'eccezione di un
+        /// pasto.
+        #[tokio::test]
+        async fn i_pasti_arrivano_con_l_anticipo_scelto() {
+            let banco = banco().await;
+            banco.collega_telegram().await;
+            let pasto = pasto_alle(&banco, "2026-10-07", "13:00").await;
+
+            // La regola nasce spenta: niente.
+            modules::promemoria::controlla(&banco.bot, &banco.pool, alle("2026-10-07", "12:30"))
+                .await;
+            assert_eq!(mandati_che_iniziano(&banco, "🍽️"), 0, "spenta di nascita");
+
+            banco.premi("remind:auto:pasti:30").await;
+            modules::promemoria::controlla(&banco.bot, &banco.pool, alle("2026-10-07", "12:29"))
+                .await;
+            assert_eq!(mandati_che_iniziano(&banco, "🍽️"), 0, "troppo presto");
+            modules::promemoria::controlla(&banco.bot, &banco.pool, alle("2026-10-07", "12:30"))
+                .await;
+            modules::promemoria::controlla(&banco.bot, &banco.pool, alle("2026-10-07", "12:31"))
+                .await;
+            assert_eq!(mandati_che_iniziano(&banco, "🍽️"), 1);
+            assert!(banco
+                .telegram
+                .testi()
+                .contains(&"🍽️ Pranzo · Caprese alle 13:00\n\nÈ fra 30 minuti.".to_string()));
+
+            // "Non ricordarmelo" per un altro pasto vince sulla regola.
+            let altro = pasto_alle(&banco, "2026-10-08", "13:00").await;
+            banco.premi(&format!("remind:meal:{altro}:off")).await;
+            modules::promemoria::controlla(&banco.bot, &banco.pool, alle("2026-10-08", "12:30"))
+                .await;
+            assert_eq!(mandati_che_iniziano(&banco, "🍽️"), 1);
+            let _ = pasto;
+        }
+
+        /// Le scorte che scadono: una volta al giorno, dall'ora scelta, e
+        /// niente se non scade niente.
+        #[tokio::test]
+        async fn il_riepilogo_delle_scadenze_arriva_una_volta_al_giorno() {
+            let banco = banco().await;
+            banco.collega_telegram().await;
+            let utente = banco.actor.utente_id.expect("utente");
+            banco.premi("remind:auto:scad:giorni:0900:2").await;
+            modules::promemoria::controlla(&banco.bot, &banco.pool, alle("2026-10-07", "09:00"))
+                .await;
+            assert_eq!(
+                mandati_che_iniziano(&banco, "🥫 Scorte che scadono"),
+                0,
+                "niente scade"
+            );
+
+            for (nome, dove, scadenza) in [
+                ("Mozzarella", "frigo", "2026-10-08"),
+                ("Yogurt", "frigo", "2026-10-05"),
+                ("Riso", "dispensa", "2027-05-01"),
+            ] {
+                sqlx::query(
+                    "INSERT INTO scorte (proprietario_utente_id, spazio_id, conservazione, descrizione, quantita, unita_simbolo, scadenza) \
+                     VALUES (?, ?, ?, ?, 1, 'pz', ?)",
+                )
+                .bind(utente)
+                .bind(banco.actor.spazio_id)
+                .bind(dove)
+                .bind(nome)
+                .bind(scadenza)
+                .execute(&banco.pool)
+                .await
+                .expect("scorta");
+            }
+            modules::promemoria::controlla(&banco.bot, &banco.pool, alle("2026-10-08", "08:59"))
+                .await;
+            assert_eq!(
+                mandati_che_iniziano(&banco, "🥫 Scorte che scadono"),
+                0,
+                "non è ora"
+            );
+            modules::promemoria::controlla(&banco.bot, &banco.pool, alle("2026-10-08", "09:00"))
+                .await;
+            modules::promemoria::controlla(&banco.bot, &banco.pool, alle("2026-10-08", "15:00"))
+                .await;
+            assert_eq!(mandati_che_iniziano(&banco, "🥫 Scorte che scadono"), 1);
+            let riepilogo = banco.telegram.ultimo_testo();
+            assert!(riepilogo.contains("• Yogurt"), "{riepilogo}");
+            assert!(riepilogo.contains("scaduto"), "{riepilogo}");
+            assert!(riepilogo.contains("• Mozzarella"), "{riepilogo}");
+            assert!(riepilogo.contains("scade oggi"), "{riepilogo}");
+            assert!(!riepilogo.contains("Riso"), "{riepilogo}");
+        }
+
+        /// "⏰ 1 ora" su un avviso arrivato: l'avviso sparisce e nasce un
+        /// promemoria nuovo, una volta sola, con lo stesso testo.
+        #[tokio::test]
+        async fn rimandare_crea_un_promemoria_nuovo() {
+            let banco = banco().await;
+            banco.collega_telegram().await;
+            let utente = banco.actor.utente_id.expect("utente");
+            modules::promemoria::crea(
+                &banco.pool,
+                utente,
+                None,
+                "Stendi i panni",
+                alle("2026-10-07", "09:00"),
+                modules::promemoria::Ripetizione::Giorno,
+                "libero",
+            )
+            .await
+            .expect("promemoria");
+            modules::promemoria::controlla(&banco.bot, &banco.pool, alle("2026-10-07", "09:00"))
+                .await;
+            let invio: i64 = sqlx::query_scalar("SELECT id FROM promemoria_invii")
+                .fetch_one(&banco.pool)
+                .await
+                .expect("invio");
+            identity::with_actor(
+                banco.actor.clone(),
+                modules::promemoria::gestisci_avviso(
+                    &banco.bot,
+                    ChatId(CHAT),
+                    &banco.pool,
+                    teloxide::types::MessageId(1000),
+                    &format!("remind:act:{invio}:60"),
+                ),
+            )
+            .await
+            .expect("rimanda");
+            assert!(banco.telegram.cancellati().contains(&1000));
+            let salvati = promemoria_salvati(&banco.pool).await;
+            assert_eq!(salvati.len(), 2);
+            assert_eq!(salvati[1].0, "Stendi i panni");
+            assert_eq!(salvati[1].2, "mai");
+            assert_eq!(
+                salvati[0].1, "2026-10-08 09:00",
+                "quello di ogni giorno va avanti"
+            );
+        }
         /// prova, appena nato e senza account, la chat restava vuota con
         /// "AVVIA". Senza amministratori si avvisano le chat autorizzate.
         #[tokio::test]
