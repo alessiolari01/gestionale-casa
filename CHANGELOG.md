@@ -9,8 +9,8 @@
   di prova" ti porta su un database fatto per i collaudi, "🏠 Carica database
   reale" ti riporta sui tuoi dati. Il bot si spegne e si riaccende da solo,
   in circa un minuto. Sul database di prova il menù principale te lo ricorda.
-- La prima volta che passi al database di prova la chat non resta più vuota:
-  arriva il menù "🟢 online" come sempre.
+- Dopo un cambio di database o un aggiornamento la chat non sembra più
+  vuota: non serve uscire e rientrare per vedere il menù "🟢 online".
 - **I collaudi non toccano più i tuoi dati**, e dopo non serve più
   ripristinare un backup.
 - **Ricette e alimenti comuni stanno nel codice**: sono uguali in tutti e due

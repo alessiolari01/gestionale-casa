@@ -2590,8 +2590,6 @@ async fn annuncia_spegnimento(
     mandati
 }
 
-/// Manda "🟢 Gestionale Casa è online." agli amministratori, poi toglie i
-/// messaggi "offline" che lo spegnimento si era segnato in `file`.
 /// Chi avvisare con "🟢 online" all'accensione: gli amministratori. Un
 /// database appena nato — il primo passaggio a quello di prova — non ne ha
 /// ancora nessuno, e allora si avvisano le chat autorizzate della
@@ -2608,7 +2606,21 @@ async fn chat_da_avvisare_all_avvio(pool: &SqlitePool, autorizzate: &[i64]) -> V
     }
 }
 
+/// Manda "🟢 Gestionale Casa è online." agli amministratori, poi toglie i
+/// messaggi "offline" che lo spegnimento si era segnato in `file`. In
+/// quest'ordine: al contrario, per un attimo la chat restava senza messaggi
+/// e l'app di Telegram si fermava sulla schermata vuota con "AVVIA" finché
+/// non si usciva e rientrava (Alessio, 6 ottobre 2026).
 async fn annuncia_riaccensione(bot: &Bot, chat_ids: &[i64], file: &std::path::Path) {
+    for chat_id in chat_ids {
+        if let Err(error) = send_online_menu(bot, ChatId(*chat_id)).await {
+            tracing::warn!(
+                chat_id,
+                ?error,
+                "Impossibile inviare la notifica di avvio all'amministratore"
+            );
+        }
+    }
     let offline = tokio::fs::read_to_string(file).await.unwrap_or_default();
     for riga in offline.lines() {
         let mut parti = riga.split_whitespace();
@@ -2619,7 +2631,7 @@ async fn annuncia_riaccensione(bot: &Bot, chat_ids: &[i64], file: &std::path::Pa
             continue;
         };
         // Se era ancora la schermata attiva, l'ha già tolta "online" qui
-        // sotto, o la toglierà: cancellarla due volte non fa danni.
+        // sopra: cancellarla due volte non fa danni.
         if let Err(error) = bot
             .delete_message(ChatId(chat_id), MessageId(message_id))
             .await
@@ -2629,15 +2641,6 @@ async fn annuncia_riaccensione(bot: &Bot, chat_ids: &[i64], file: &std::path::Pa
     }
     if !offline.is_empty() {
         let _ = tokio::fs::remove_file(file).await;
-    }
-    for chat_id in chat_ids {
-        if let Err(error) = send_online_menu(bot, ChatId(*chat_id)).await {
-            tracing::warn!(
-                chat_id,
-                ?error,
-                "Impossibile inviare la notifica di avvio all'amministratore"
-            );
-        }
     }
 }
 
@@ -4216,6 +4219,54 @@ mod runtime_tests {
         /// il backup torna anche la schermata attiva di allora, e l'id del
         /// messaggio "offline" si perde: "online" cancellava la schermata
         /// vecchia, ormai sparita, e l'offline restava in chat.
+        #[tokio::test]
+        async fn la_chat_non_resta_mai_vuota_fra_offline_e_online() {
+            // Visto da Alessio il 6 ottobre 2026: dopo ogni cambio di
+            // database la chat sembrava vuota ("AVVIA") finché non usciva e
+            // rientrava. Il bot toglieva "offline" prima di mandare
+            // "online": per un attimo la chat non aveva messaggi, e l'app
+            // restava sulla schermata vuota.
+            let banco = banco().await;
+            let cartella = std::env::temp_dir()
+                .join(format!("gestionale_ordine_online_{}", std::process::id()));
+            std::fs::create_dir_all(&cartella).expect("cartella");
+            let file = cartella.join("offline.txt");
+
+            let spento = banco.telegram.bot(&banco.pool);
+            let offline = annuncia_spegnimento(&spento, &[CHAT], &file).await;
+            let offline = i64::from(offline.first().copied().expect("offline mandato").0);
+
+            let acceso = banco.telegram.bot(&banco.pool);
+            acceso.restore_persisted_ui().await;
+            annuncia_riaccensione(&acceso, &[CHAT], &file).await;
+
+            let chiamate = banco.telegram.chiamate();
+            let online = chiamate
+                .iter()
+                .position(|c| {
+                    c.corpo
+                        .get("text")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|t| t.contains("è online"))
+                })
+                .expect("online mandato");
+            let tolto = chiamate
+                .iter()
+                .position(|c| {
+                    c.metodo.eq_ignore_ascii_case("deleteMessage")
+                        && c.corpo
+                            .get("message_id")
+                            .and_then(serde_json::Value::as_i64)
+                            == Some(offline)
+                })
+                .expect("offline tolto");
+            assert!(
+                online < tolto,
+                "offline tolto (chiamata {tolto}) prima di mandare online (chiamata {online})"
+            );
+            std::fs::remove_dir_all(&cartella).ok();
+        }
+
         #[tokio::test]
         async fn anche_dopo_un_ripristino_il_messaggio_offline_se_ne_va() {
             let banco = banco().await;

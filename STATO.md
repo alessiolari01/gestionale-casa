@@ -3215,6 +3215,15 @@ Corretto negli script (sezione 7, "aggiornare l'S9"): `avvia-bot.sh` non
 compila più, e `aggiorna-s9.sh` alla fine ferma il bot vecchio e riavvia con
 `avvia-bot.sh`.
 
+**Dopo ogni cambio di database la chat sembrava vuota** finché Alessio non
+usciva e rientrava. All'accensione il bot toglieva "🔴 offline" **prima** di
+mandare "🟢 online", contro quello che diceva il suo stesso commento: per un
+attimo la chat non aveva messaggi, e l'app di Telegram restava sulla
+schermata vuota con "AVVIA". Succedeva anche prima, a ogni aggiornamento
+(è la "schermata completamente vuota" della mattina del 6 ottobre), ma con il
+pulsante è diventato quotidiano. Ora prima "online", poi via "offline". 1
+test, totale 520.
+
 ## 3. Stato tecnico verificato
 
 - **67 migration** nel repository. La 67ª (`ean_spaghetti_barilla`, sezione
@@ -3232,7 +3241,7 @@ compila più, e `aggiorna-s9.sh` alla fine ferma il bot vecchio e riavvia con
 - pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa,
   punto 1 della sezione 6): `fmt`, `check --locked`,
   `clippy --all-targets --locked -- -D warnings`, `test --locked` —
-  **519 test** (508 prima della sezione 2untricies, 504 prima della sezione 2tricies, 498 prima della sezione 2novovicies, 477 prima della sezione 2octovicies, 475 prima della sezione 2sexvicies, 474 prima della sezione
+  **520 test** (508 prima della sezione 2untricies, 504 prima della sezione 2tricies, 498 prima della sezione 2novovicies, 477 prima della sezione 2octovicies, 475 prima della sezione 2sexvicies, 474 prima della sezione
   2quattuorvicies, 472 prima della
   sezione 2trevicies, 471 prima della sezione
   2duovicies, 469 prima della sezione
