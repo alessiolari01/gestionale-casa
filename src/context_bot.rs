@@ -17,6 +17,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::database_attivo::Database;
 use sqlx::SqlitePool;
 use teloxide::{
     payloads::{SendAnimation, SendMessage, SendPhoto, SendVideo},
@@ -422,11 +423,23 @@ impl ImproveContextStore {
     }
 }
 
+/// La scritta in fondo a ogni schermata quando il bot gira sul database di
+/// prova (Alessio, 6 ottobre 2026: "se sei in mezzo alle sezioni non hai
+/// idea in quale database ti trovi"). In fondo e non in cima: la prima riga
+/// è il titolo della schermata, ed è quella che finisce nel contesto di un
+/// Miglioramento.
+pub(crate) const SCRITTA_DATABASE_PROVA: &str =
+    "🧪 Database di prova: i tuoi dati veri non si toccano.";
+
+/// Il limite di Telegram per il testo di un messaggio.
+const LUNGHEZZA_MASSIMA: usize = 4096;
+
 #[derive(Clone)]
 pub(crate) struct ContextBot {
     inner: TelegramBot,
     contexts: ImproveContextStore,
     pool: SqlitePool,
+    database: Database,
 }
 
 impl ContextBot {
@@ -435,7 +448,30 @@ impl ContextBot {
             inner,
             contexts,
             pool,
+            database: Database::Reale,
         }
+    }
+
+    /// Il database su cui gira questo processo: sulla prova ogni schermata
+    /// lo dice (`SCRITTA_DATABASE_PROVA`).
+    pub fn sul_database(mut self, database: Database) -> Self {
+        self.database = database;
+        self
+    }
+
+    /// Il testo di una schermata con la scritta della prova in fondo, se
+    /// serve e se ci sta.
+    fn con_scritta_database(&self, testo: String) -> String {
+        if self.database != Database::Prova {
+            return testo;
+        }
+        let con_scritta = format!("{testo}\n\n{SCRITTA_DATABASE_PROVA}");
+        // Una schermata già al limite perderebbe tutto per la scritta:
+        // meglio senza che rifiutata da Telegram.
+        if con_scritta.chars().count() > LUNGHEZZA_MASSIMA {
+            return testo;
+        }
+        con_scritta
     }
 
     pub async fn restore_persisted_ui(&self) {
@@ -568,7 +604,8 @@ impl ContextBot {
         T: Into<String>,
     {
         ContextRequest::new(
-            self.inner.send_message(chat_id, text),
+            self.inner
+                .send_message(chat_id, self.con_scritta_database(text.into())),
             self.contexts.clone(),
             self.inner.clone(),
             OutputMode::Ui,
@@ -671,7 +708,8 @@ impl ContextBot {
         T: Into<String>,
     {
         ContextRequest::new(
-            self.inner.send_message(chat_id, text),
+            self.inner
+                .send_message(chat_id, self.con_scritta_database(text.into())),
             self.contexts.clone(),
             self.inner.clone(),
             OutputMode::Ui,

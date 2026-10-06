@@ -3224,6 +3224,47 @@ schermata vuota con "AVVIA". Succedeva anche prima, a ogni aggiornamento
 pulsante è diventato quotidiano. Ora prima "online", poi via "offline". 1
 test, totale 520.
 
+## 2duotricies. Dal collaudo di f0b373c, e la scritta del database di prova (6 ottobre 2026)
+
+Collaudo di f0b373c (esiti in `collaudi/2026-10-06_f0b373c/`): 18 OK, 1
+difetto, 2 migliorie, 2 non provati, il bot mai fermo. Il cambio di
+database torna online in circa un minuto in tutte e due le direzioni, senza
+chat vuota. Il **Miglioramento 15 è verificato**: le tre strade che
+mancavano (Scorte spente, ingresso automatico spento, prodotto di marca) e
+la riga unica con un pasto sono tutte OK. Il **17 resta da provare** fra
+mezzanotte e le due.
+
+- **B2, difetto**: in `🗑️ Rimuovi voci` il pulsante diceva "Riso · 100 g
+  chiesti" per 300 g chiesti con 200 g in casa. Dal 1 ottobre le aggiunte
+  dal catalogo sono nette, e "chiesti" era rimasto dai tempi delle aggiunte
+  lorde. Ora pulsante e conferma dicono "Riso · 100 g", lo stesso numero
+  della lista, e la spiegazione dice che una riga più grande in lista ha
+  dentro anche i pasti del planner.
+- **C3, miglioria**: in Dispensa una confezione di Barilla Spaghetti n.5
+  compariva come "Pasta · 500 g". Ora una riga fatta solo di confezioni
+  dello stesso prodotto porta il nome del prodotto; le righe miste (marca +
+  generico) restano col nome dell'alimento, come deciso col punto F3.
+- **D, miglioria**: nel giorno del planner la riga del pasto dice l'orario,
+  "○ 13:00 Pranzo · Caprese".
+- **La scritta del database di prova** (chiesta da Alessio lo stesso giorno:
+  "se sei in mezzo alle sezioni non hai idea in quale database ti trovi"):
+  sul database di prova ogni schermata finisce con "🧪 Database di prova: i
+  tuoi dati veri non si toccano.". La mette `ContextBot` in `send_message`,
+  quindi vale per tutte le sezioni senza toccarle una a una; in fondo e non
+  in cima, perché la prima riga è il titolo che finisce nel contesto dei
+  Miglioramenti. La nota che prima stava solo sul menù è sparita, assorbita
+  da questa. Gli avvisi che spariscono da soli e le foto non la portano.
+
+Il copione aveva un errore mio: il blocco D metteva il pasto alle 13:00, e
+alle 22 il pasto era già passato (il bot ne scala da solo le scorte). Nei
+prossimi copioni un pasto da provare va messo in un orario futuro.
+
+La lentezza di più di 15 secondi vista in fondo al collaudo coincide con una
+caduta di rete nel log del bot (22:24:49), **senza cambio d'indirizzo** in
+`data/log/rete.log`: un primo indizio che il router non c'entra.
+
+3 test nuovi, totale 523.
+
 ## 3. Stato tecnico verificato
 
 - **67 migration** nel repository. La 67ª (`ean_spaghetti_barilla`, sezione
@@ -3241,7 +3282,7 @@ test, totale 520.
 - pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa,
   punto 1 della sezione 6): `fmt`, `check --locked`,
   `clippy --all-targets --locked -- -D warnings`, `test --locked` —
-  **520 test** (508 prima della sezione 2untricies, 504 prima della sezione 2tricies, 498 prima della sezione 2novovicies, 477 prima della sezione 2octovicies, 475 prima della sezione 2sexvicies, 474 prima della sezione
+  **523 test** (520 prima della sezione 2duotricies, 508 prima della sezione 2untricies, 504 prima della sezione 2tricies, 498 prima della sezione 2novovicies, 477 prima della sezione 2octovicies, 475 prima della sezione 2sexvicies, 474 prima della sezione
   2quattuorvicies, 472 prima della
   sezione 2trevicies, 471 prima della sezione
   2duovicies, 469 prima della sezione
@@ -3401,17 +3442,14 @@ src/modules/novita.rs               registro delle novità e badge "🆕" propag
 
 ## 6. Punti aperti
 
-**Prossimi passi**, dopo il giro del 6 ottobre 2026 (sezione 2tricies):
+**Prossimi passi**, dopo il giro del 6 ottobre 2026 (sezione 2duotricies):
 
-- **`/clear` e `/clc`: fatti** (sezione 2tricies), provati da Alessio;
-- **il prossimo collaudo gira sul database di prova** (sezione 2untricies):
-  il copione deve partire da "🛠️ Amministrazione → 🧪 Carica database di
-  prova" e preparare da sé i dati che servono (il database di prova nasce
-  vuoto, con il solo catalogo);
-- **al prossimo copione**: il Miglioramento 15 sulle strade non ancora
-  provate (Scorte spente, ingresso automatico spento, prodotto di marca) e
-  A4 (riga unica con un pasto pianificato); il 17 con una chiusura fra
-  mezzanotte e le due;
+- **i collaudi girano sul database di prova** (sezione 2untricies): il
+  copione parte da "🛠️ Amministrazione → 🧪 Carica database di prova" e
+  prepara da sé i dati che servono;
+- **conferma breve della sezione 2duotricies** (la scritta della prova,
+  Rimuovi voci, Dispensa con la marca, orario nel planner); il
+  Miglioramento 17 con una chiusura fra mezzanotte e le due;
 - **l'S9 perde la rete ogni 1–2 ore** (56 volte dal 1 al 5 ottobre nel log,
   `Network is unreachable`): il bot si ricollega da solo in un secondo, ma un
   tocco in quel momento aspetta. Probabile risparmio energetico di Android

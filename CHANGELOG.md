@@ -2,6 +2,18 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_SCRITTA_PROVA_20261006 -->
+# 06/10/2026 — Sai sempre su che database sei
+
+- **Sul database di prova ogni schermata lo dice**, in fondo: "🧪 Database
+  di prova: i tuoi dati veri non si toccano." Sul tuo database non compare
+  niente.
+- In 🗑️ Rimuovi voci la quantità è la stessa che vedi in lista ("Riso ·
+  100 g"), non più un "chiesti" che non tornava.
+- In 🥫 Scorte una confezione di marca si chiama con la marca ("Barilla
+  Spaghetti n.5 · 500 g"), non più solo "Pasta".
+- Nel giorno del planner il pasto dice l'orario: "○ 13:00 Pranzo · Caprese".
+
 <!-- CHANGELOG_DUE_DATABASE_20261006 -->
 # 06/10/2026 — Un database per le prove
 

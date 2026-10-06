@@ -622,7 +622,8 @@ async fn async_main() -> anyhow::Result<()> {
         .context("Impossibile configurare il client HTTP Telegram")?;
     let telegram_bot = teloxide::Bot::with_client(config.telegram_token.clone(), telegram_client);
     let improve_contexts = context_bot::ImproveContextStore::default();
-    let bot = Bot::new(telegram_bot.clone(), improve_contexts.clone(), pool.clone());
+    let bot = Bot::new(telegram_bot.clone(), improve_contexts.clone(), pool.clone())
+        .sul_database(database);
     bot.restore_persisted_ui().await;
     let me = bot
         .get_me()
@@ -2647,10 +2648,7 @@ async fn annuncia_riaccensione(bot: &Bot, chat_ids: &[i64], file: &std::path::Pa
 async fn send_online_menu(bot: &Bot, chat_id: ChatId) -> ResponseResult<()> {
     bot.send_message(
         chat_id,
-        format!(
-            "🟢 Gestionale Casa è online.\n\n🏠 Menù principale\nScegli una sezione.{}",
-            nota_database(database_attivo::Database::attivo())
-        ),
+        "🟢 Gestionale Casa è online.\n\n🏠 Menù principale\nScegli una sezione.",
     )
     // Notifica di avvio, mandata subito dopo il boot: niente attore
     // risolto a questo punto, il badge si aggiorna comunque alla prossima
@@ -2683,23 +2681,9 @@ fn testo_conferma_cambio_database(verso: database_attivo::Database) -> String {
     }
 }
 
-/// Sul database di prova il menù lo dice, in fondo: la prima riga resta
-/// "🏠 Gestionale Casa", che è come si riconosce la schermata.
-fn nota_database(database: database_attivo::Database) -> &'static str {
-    match database {
-        database_attivo::Database::Reale => "",
-        database_attivo::Database::Prova => {
-            "\n\n🧪 Stai usando il database di prova: i tuoi dati veri non si toccano."
-        }
-    }
-}
-
-fn testo_menu_principale(database: database_attivo::Database) -> String {
-    format!(
-        "🏠 Gestionale Casa\n\nScegli una sezione.{}",
-        nota_database(database)
-    )
-}
+// Sul database di prova il menù lo dice in fondo, come ogni altra
+// schermata: la scritta la mette `ContextBot` (`SCRITTA_DATABASE_PROVA`).
+const TESTO_MENU_PRINCIPALE: &str = "🏠 Gestionale Casa\n\nScegli una sezione.";
 
 async fn send_main_menu(
     bot: &Bot,
@@ -2720,17 +2704,14 @@ async fn send_main_menu(
     let badge = badge_miglioramenti(pool, actor).await;
     let badge_alimentazione = badge_alimentazione(pool, actor).await;
     let funzioni = modules::impostazioni::funzioni(pool).await;
-    bot.send_message(
-        chat_id,
-        testo_menu_principale(database_attivo::Database::attivo()),
-    )
-    .reply_markup(modules::oggetti::main_menu_keyboard(
-        is_admin,
-        badge_alimentazione,
-        badge,
-        &funzioni,
-    ))
-    .await?;
+    bot.send_message(chat_id, TESTO_MENU_PRINCIPALE)
+        .reply_markup(modules::oggetti::main_menu_keyboard(
+            is_admin,
+            badge_alimentazione,
+            badge,
+            &funzioni,
+        ))
+        .await?;
     Ok(())
 }
 
@@ -3957,15 +3938,44 @@ mod runtime_tests {
             assert_eq!(ean.as_deref(), Some("8076800195057"));
         }
 
-        /// Sul database di prova il menù principale lo dice, ma la prima
-        /// riga resta quella che fa riconoscere la schermata.
-        #[test]
-        fn il_menu_dice_quando_si_e_sul_database_di_prova() {
-            let reale = testo_menu_principale(database_attivo::Database::Reale);
-            let prova = testo_menu_principale(database_attivo::Database::Prova);
-            assert!(!reale.contains("🧪"), "{reale}");
-            assert!(prova.contains("database di prova"), "{prova}");
-            assert!(prova.starts_with("🏠 Gestionale Casa\n"), "{prova}");
+        /// Alessio, 6 ottobre 2026: "se sei in mezzo alle sezioni non hai
+        /// idea in quale database ti trovi". Sul database di prova **ogni**
+        /// schermata finisce con la scritta, una volta sola; la prima riga
+        /// resta quella che fa riconoscere la schermata. Sul reale niente.
+        #[tokio::test]
+        async fn sul_database_di_prova_ogni_schermata_lo_dice() {
+            let banco = banco().await;
+            let prova = banco
+                .bot
+                .clone()
+                .sul_database(database_attivo::Database::Prova);
+            send_main_menu(&prova, ChatId(CHAT), &banco.pool, &banco.actor)
+                .await
+                .expect("menù");
+            let menu = banco.telegram.ultimo_testo();
+            assert!(menu.starts_with("🏠 Gestionale Casa\n"), "{menu}");
+            assert!(
+                menu.ends_with(context_bot::SCRITTA_DATABASE_PROVA),
+                "{menu}"
+            );
+            assert_eq!(menu.matches("🧪").count(), 1, "{menu}");
+
+            prova
+                .send_message(ChatId(CHAT), "🛒 Lista della spesa")
+                .await
+                .expect("schermata");
+            assert_eq!(
+                banco.telegram.ultimo_testo(),
+                format!(
+                    "🛒 Lista della spesa\n\n{}",
+                    context_bot::SCRITTA_DATABASE_PROVA
+                )
+            );
+
+            send_main_menu(&banco.bot, ChatId(CHAT), &banco.pool, &banco.actor)
+                .await
+                .expect("menù");
+            assert!(!banco.telegram.ultimo_testo().contains("🧪"));
         }
 
         /// La conferma nomina il pulsante premuto e, andando sulla prova,

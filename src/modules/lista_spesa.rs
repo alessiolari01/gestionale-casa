@@ -939,11 +939,31 @@ mod domain_tests {
         assert_eq!(
             etichette_rimovibili(&voci),
             vec![
-                "🗑️ 1ª · Riso · 200 g chiesti",
-                "🗑️ Farina 00 · 500 g chiesti",
-                "🗑️ 2ª · Riso · 200 g chiesti",
+                "🗑️ 1ª · Riso · 200 g",
+                "🗑️ Farina 00 · 500 g",
+                "🗑️ 2ª · Riso · 200 g",
             ]
         );
+    }
+
+    /// Collaudo di f0b373c, B2: 300 g di Riso chiesti con 200 g in casa
+    /// salvano un'aggiunta da 100 g (le aggiunte sono nette dal 1 ottobre
+    /// 2026), e il pulsante diceva "Riso · 100 g chiesti". Il numero è
+    /// quello della lista: niente "chiesti", né sul pulsante né nella
+    /// conferma, e la spiegazione non parla più di richiesta.
+    #[test]
+    fn la_voce_da_rimuovere_dice_quanto_c_e_in_lista() {
+        let voce = VoceRimovibile {
+            id: 1,
+            origine: OrigineRimovibile::Catalogo,
+            descrizione: "Riso".to_string(),
+            quantita: Some(100.0),
+            unita_simbolo: Some("g".to_string()),
+        };
+        assert_eq!(etichetta_rimovibile(&voce), "🗑️ Riso · 100 g");
+        assert_eq!(descrivi_da_rimuovere("Riso", 100.0, "g"), "«Riso» (100 g)");
+        assert!(!SPIEGAZIONE_RIMUOVI.contains("chiest"));
+        assert!(SPIEGAZIONE_RIMUOVI.contains("planner"));
     }
 
     fn info_massa() -> InfoUnita {
@@ -8361,12 +8381,7 @@ pub async fn handle_callback(
         .flatten();
         let cosa = nome.map_or_else(
             || "questa voce".to_string(),
-            |(nome, quantita, unita)| {
-                format!(
-                    "«{nome}» ({} chiesti)",
-                    crate::modules::dispensa::formatta_quantita_leggibile(quantita, &unita)
-                )
-            },
+            |(nome, quantita, unita)| descrivi_da_rimuovere(&nome, quantita, &unita),
         );
         let (testo, markup) = conferma_eliminazione_markup(
             &cosa,
@@ -9184,19 +9199,32 @@ async fn muovi_e_mostra_riordino(
 /// Etichetta di una voce rimovibile: `🗑️ descrizione · quantità unità`, o
 /// senza quantità per una voce manuale libera che non ne ha (ammesso, vedi
 /// `aggiungi_voce_manuale`).
-/// Qui la quantita' e' quella **chiesta**, mentre in lista si vede quella da
-/// comprare (il netto delle scorte): "2000 g" qui e "210 g" la' sono la stessa
-/// voce, e senza dirlo si sembra un errore (Alessio, collaudo del 25 settembre
-/// 2026). La parola "chiesti" lo dice.
+/// La quantità è quella dell'aggiunta, già netta delle scorte (dal 1 ottobre
+/// 2026): la stessa che si vede in lista. Fino al collaudo di f0b373c (B2)
+/// diceva "chiesti", rimasto dai tempi delle aggiunte lorde.
 fn etichetta_rimovibile(voce: &VoceRimovibile) -> String {
     let quantita = match (voce.quantita, &voce.unita_simbolo) {
         (Some(valore), Some(unita)) => format!(
-            " · {} chiesti",
+            " · {}",
             crate::modules::dispensa::formatta_quantita_leggibile(valore, unita)
         ),
         _ => String::new(),
     };
     format!("🗑️ {}{quantita}", liste::tronca(&voce.descrizione, 30))
+}
+
+/// Fino al collaudo di f0b373c (B2) diceva "la quantità è quella che avevi
+/// chiesto": vero finché le aggiunte erano lorde, falso dal 1 ottobre 2026.
+/// Ora il numero è quello che hai messo in lista tu; la riga in lista può
+/// essere più grande perché ci si sommano i pasti.
+const SPIEGAZIONE_RIMUOVI: &str = "La quantità è quella che hai messo in lista tu: se in lista la riga è più grande, il resto viene dai pasti del planner.";
+
+/// La voce nella conferma di eliminazione: `«Riso» (100 g)`.
+fn descrivi_da_rimuovere(nome: &str, quantita: f64, unita: &str) -> String {
+    format!(
+        "«{nome}» ({})",
+        crate::modules::dispensa::formatta_quantita_leggibile(quantita, unita)
+    )
 }
 
 /// Le etichette di tutte le voci da rimuovere. Due aggiunte uguali (stesso
@@ -9281,11 +9309,9 @@ async fn show_lista_rimuovi(
         testo.push_str("\n\n");
     }
     testo.push_str("🗑️ Rimuovi voci\n\nSolo le voci aggiunte a mano o dal catalogo: quelle generate dai pasti pianificati le gestisce il planner.");
-    // "500 g chiesti" qui e "300 g" in lista sembravano due numeri in
-    // contraddizione (collaudo di 9307a33, H1.10): qui c'è la richiesta,
-    // in lista quello che manca ancora.
     if !voci.is_empty() {
-        testo.push_str("\n\nLa quantità è quella che avevi chiesto di comprare: in lista vedi quella che manca ancora, tolto quello che hai già preso.");
+        testo.push_str("\n\n");
+        testo.push_str(SPIEGAZIONE_RIMUOVI);
     }
     if voci.is_empty() {
         testo.push_str("\n\nNessuna voce da rimuovere.");

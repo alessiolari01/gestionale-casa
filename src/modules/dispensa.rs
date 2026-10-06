@@ -325,6 +325,19 @@ pub fn raggruppa_scorte(
     let mut risultato: Vec<GruppoScorte> = gruppi.into_iter().map(|(_, gruppo)| gruppo).collect();
     for gruppo in &mut risultato {
         ordina_per_scadenza(&mut gruppo.lotti);
+        // Tutte confezioni dello stesso prodotto: la riga dice la marca
+        // (collaudo di f0b373c, C3: "Pasta · 500 g" era una Barilla). Le
+        // righe miste restano col nome dell'alimento (punto F3).
+        if let Some(prima) = gruppo.lotti.first() {
+            let stesso_prodotto = prima.prodotto_alimentare_id.is_some()
+                && gruppo.lotti.iter().all(|lotto| {
+                    lotto.prodotto_alimentare_id == prima.prodotto_alimentare_id
+                        && lotto.descrizione == prima.descrizione
+                });
+            if stesso_prodotto {
+                gruppo.descrizione = prima.descrizione.clone();
+            }
+        }
     }
     // Prima i gruppi con una scadenza (dalla più vicina), poi gli altri in
     // ordine alfabetico: una scadenza vicina è la cosa da vedere per prima.
@@ -3694,10 +3707,33 @@ mod tests {
             "la riga si chiama come l'alimento"
         );
 
-        // Una confezione di marca da sola: la riga porta comunque il nome
-        // dell'alimento, non quello del prodotto (punto F3 del collaudo).
+        // Una confezione di marca da sola: la riga si chiama come il prodotto
+        // (collaudo di f0b373c, C3: "Pasta · 500 g" nascondeva la Barilla).
+        // Il punto F3 resta vero per le righe miste, qui sopra.
         let gruppi = raggruppa_scorte(&[di_marca], info);
-        assert_eq!(gruppi[0].descrizione, "Parmigiano Reggiano");
+        assert_eq!(gruppi[0].descrizione, "Parmareggio Parmigiano");
+    }
+
+    /// Collaudo di f0b373c, C3: la spesa ha portato in Dispensa una
+    /// confezione di Barilla Spaghetti n.5 e l'elenco diceva "Pasta · 500 g".
+    /// Se tutte le confezioni della riga sono lo stesso prodotto, la riga
+    /// porta il suo nome; se sono miste, quello dell'alimento.
+    #[test]
+    fn la_riga_di_un_solo_prodotto_dice_la_marca() {
+        let barilla = |id: i64| {
+            let mut s = scorta(id, Some(5), "Barilla Spaghetti n.5", 500.0, "g", None);
+            s.prodotto_alimentare_id = Some(11);
+            s.alimento_nome = Some("Pasta".to_string());
+            s
+        };
+        let gruppi = raggruppa_scorte(&[barilla(1), barilla(2)], info);
+        assert_eq!(gruppi.len(), 1);
+        assert_eq!(etichetta_gruppo(&gruppi[0]), "Barilla Spaghetti n.5 · 1 kg");
+
+        let mut generica = scorta(3, Some(5), "Pasta", 500.0, "g", None);
+        generica.alimento_nome = Some("Pasta".to_string());
+        let gruppi = raggruppa_scorte(&[barilla(1), generica], info);
+        assert_eq!(gruppi[0].descrizione, "Pasta");
     }
 
     /// Collaudo del 23 settembre 2026, punto 12: lo stesso alimento non deve

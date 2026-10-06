@@ -331,9 +331,34 @@ struct PlannerMealRow {
     recipe_snapshot_version: Option<String>,
     current_recipe_version: Option<String>,
     prepared_at: Option<String>,
+    orario: Option<String>,
 }
 
 impl PlannerMealRow {
+    /// Il pulsante del pasto nel giorno: `○ Pranzo · Caprese`.
+    fn etichetta_nel_giorno(&self, oggi: &str) -> String {
+        // Un'icona sola per riga, quella dello stato (19 settembre 2026):
+        // con anche l'icona del tipo di pasto le due stavano attaccate
+        // (`🍲 ☕ Colazione`) e l'occhio non sapeva quale guardare. Il tipo
+        // resta scritto per esteso, e la sua icona resta dove non c'è uno
+        // stato accanto (scelta del tipo, dettaglio del pasto).
+        let label = MealType::from_token(&self.meal_type)
+            .map(|value| value.label().to_string())
+            .unwrap_or_else(|| "Pasto".to_string());
+        // L'orario davanti al tipo (collaudo di f0b373c, D): prima si vedeva
+        // solo aprendo il pasto.
+        let orario = self
+            .orario
+            .as_deref()
+            .map(|valore| format!("{valore} "))
+            .unwrap_or_default();
+        format!(
+            "{} {orario}{label} · {}",
+            self.marker(oggi),
+            self.recipe_name
+        )
+    }
+
     /// La ricetta e' cambiata dopo la pianificazione di questo pasto.
     ///
     /// Stessa regola del dettaglio: un pasto completato o saltato e' congelato
@@ -1728,17 +1753,8 @@ async fn planner_show_day(
         text.push_str("\nNessun pasto pianificato.\n");
     } else {
         for meal in &meals {
-            // Un'icona sola per riga, quella dello stato (19 settembre 2026):
-            // con anche l'icona del tipo di pasto le due stavano attaccate
-            // (`🍲 ☕ Colazione`) e l'occhio non sapeva quale guardare. Il tipo
-            // resta scritto per esteso, e la sua icona resta dove non c'è uno
-            // stato accanto (scelta del tipo, dettaglio del pasto).
-            let meal_type = MealType::from_token(&meal.meal_type);
-            let label = meal_type
-                .map(|value| value.label().to_string())
-                .unwrap_or_else(|| "Pasto".to_string());
             rows.push(vec![planner_button(
-                format!("{} {label} · {}", meal.marker(&oggi), meal.recipe_name),
+                meal.etichetta_nel_giorno(&oggi),
                 format!("planner:view:{}", meal.id),
             )]);
         }
@@ -2593,7 +2609,7 @@ async fn planner_load_meals(pool: &SqlitePool, date: &str) -> anyhow::Result<Vec
                 pp.ricetta_aggiornato_il_snapshot AS recipe_snapshot_version, \
                 (SELECT r.aggiornato_il FROM ricette r WHERE r.id = pp.ricetta_id) \
                     AS current_recipe_version, \
-                pp.preparato_il AS prepared_at \
+                pp.preparato_il AS prepared_at, pp.orario AS orario \
          FROM planner_pasti pp WHERE pp.planner_id = ? AND pp.data_pasto = ? \
          ORDER BY CASE pp.tipo_pasto \
            WHEN 'colazione' THEN 1 WHEN 'spuntino_mattina' THEN 2 \
@@ -3875,7 +3891,20 @@ mod telegram_tests {
             recipe_snapshot_version: snapshot.map(str::to_string),
             current_recipe_version: corrente.map(str::to_string),
             prepared_at: None,
+            orario: None,
         }
+    }
+
+    /// Collaudo di f0b373c, D: nel giorno la riga era "○ Pranzo · Caprese"
+    /// e l'orario si vedeva solo aprendo il pasto. Ora sta davanti al tipo;
+    /// senza orario la riga resta com'era.
+    #[test]
+    fn la_riga_del_pasto_dice_l_orario() {
+        let mut pasto = riga_pasto(OGGI, "pianificato", None, None, None);
+        pasto.recipe_name = "Caprese".to_string();
+        assert_eq!(pasto.etichetta_nel_giorno(OGGI), "○ Pranzo · Caprese");
+        pasto.orario = Some("13:00".to_string());
+        assert_eq!(pasto.etichetta_nel_giorno(OGGI), "○ 13:00 Pranzo · Caprese");
     }
 
     #[test]
