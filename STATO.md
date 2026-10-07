@@ -3361,9 +3361,43 @@ ora **una chat finta ciascuna** (`banco_in_chat`): la loro attesa vale per
 chat, e girando insieme alle altre un `/start` altrui poteva chiuderla a
 metà — passavano, ma per caso. 6 test nuovi, totale 546.
 
+## 2sextricies. 📄 Documenti (7 ottobre 2026)
+
+Secondo dei moduli nuovi. Scelte di Alessio (7 ottobre): copia digitale con
+foto/PDF **e** link; scadenze con priorità come i Promemoria; "solo mio" o
+"dello spazio" scelto per documento; cartelle già pronte che si possono
+anche eliminare. Scheda in `docs/moduli/documenti.md`, codice in
+`src/modules/documenti.rs`, migration 71 (`documenti`).
+
+- **Cartelle** dello spazio, annidate, con le otto iniziali (Identità, Casa,
+  Auto, Salute, Lavoro, Tasse, Garanzie e scontrini, Banca e
+  assicurazioni) create alla prima apertura una volta sola
+  (`documenti_iniziati`): eliminate, non tornano. Si rinominano, si
+  spostano (mai dentro sé stesse) e si eliminano solo vuote — contando
+  anche i documenti "solo miei" di altri, che non si vedono.
+- **Documento**: titolo, cartella, numero, chi l'ha rilasciato, data di
+  rilascio (scritta come viene, C20), note, link, dov'è (casa → stanza →
+  contenitori annidati, con un dettaglio libero), file, scadenze.
+- **"Solo mio"**: la condizione `VISIBILE` sta in ogni lettura, ricerca
+  compresa. Solo il proprietario cambia chi lo vede.
+- **File**: foto e PDF in `data/media/documenti/<id>/`, con il file_id di
+  Telegram; si mandano uno dopo l'altro (fronte e retro). Si rivedono come
+  media temporanei, come le foto degli Oggetti.
+- **Scadenze**: righe di `scadenze` con `documento_id`, quindi gli stessi
+  avvisi con priorità dei Promemoria; eliminando il documento vanno via.
+  `📅 In scadenza` elenca i documenti che scadono entro 60 giorni.
+- **🔎 Cerca** in titolo, numero, ente e note, senza badare a maiuscole e
+  accenti.
+
+Non c'è `items`: il suo vincolo sul tipo non ammette "documento", e
+cambiarlo vuol dire ricostruire la tabella di tutti gli oggetti.
+
+5 test nuovi, totale 551.
+
 ## 3. Stato tecnico verificato
 
-- **70 migration** nel repository. La 70ª (`scadenze_e_cose_da_fare`, sezione
+- **71 migration** nel repository. La 71ª (`documenti`, sezione 2sextricies), la
+  70ª (`scadenze_e_cose_da_fare`, sezione
   2quinquetricies), la 69ª (`promemoria_esito_il`, sezione
   2quattuortricies) e la 68ª (`promemoria`, sezione 2tretricies) si
   applicano al primo avvio dopo il deploy del 7 ottobre 2026. La 67ª (`ean_spaghetti_barilla`, sezione
@@ -3381,7 +3415,7 @@ metà — passavano, ma per caso. 6 test nuovi, totale 546.
 - pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa,
   punto 1 della sezione 6): `fmt`, `check --locked`,
   `clippy --all-targets --locked -- -D warnings`, `test --locked` —
-  **546 test** (540 prima della sezione 2quinquetricies, 539 prima della sezione 2quattuortricies, 523 prima della sezione 2tretricies, 520 prima della sezione 2duotricies, 508 prima della sezione 2untricies, 504 prima della sezione 2tricies, 498 prima della sezione 2novovicies, 477 prima della sezione 2octovicies, 475 prima della sezione 2sexvicies, 474 prima della sezione
+  **551 test** (546 prima della sezione 2sextricies, 540 prima della sezione 2quinquetricies, 539 prima della sezione 2quattuortricies, 523 prima della sezione 2tretricies, 520 prima della sezione 2duotricies, 508 prima della sezione 2untricies, 504 prima della sezione 2tricies, 498 prima della sezione 2novovicies, 477 prima della sezione 2octovicies, 475 prima della sezione 2sexvicies, 474 prima della sezione
   2quattuorvicies, 472 prima della
   sezione 2trevicies, 471 prima della sezione
   2duovicies, 469 prima della sezione
@@ -3549,8 +3583,9 @@ src/modules/novita.rs               registro delle novità e badge "🆕" propag
 - **conferma breve della sezione 2duotricies** (la scritta della prova,
   Rimuovi voci, Dispensa con la marca, orario nel planner); il
   Miglioramento 17 con una chiusura fra mezzanotte e le due;
-- **⏰ Promemoria collaudato** (sezioni 2tretricies e 2quattuortricies); ora,
-  nell'ordine concordato, Documenti, Palestra, Soldi, che
+- **collaudo di 📅 Scadenze, 📝 Da fare e 📄 Documenti** (sezioni 2quinquetricies
+  e 2sextricies), sul database di prova; poi,
+  nell'ordine concordato, Palestra e Soldi, che
   useranno lo stesso motore per scadenze e ricorrenze;
 - **l'S9 perde la rete ogni 1–2 ore** (56 volte dal 1 al 5 ottobre nel log,
   `Network is unreachable`): il bot si ricollega da solo in un secondo, ma un
@@ -3561,8 +3596,8 @@ src/modules/novita.rs               registro delle novità e badge "🆕" propag
   cambiano: se le cadute coincidono con un cambio d'indirizzo, si dà
   all'S9 un indirizzo fisso nel router (decisione di Alessio: prima
   guardare, poi il router);
-- i **moduli nuovi** che restano: Documenti, Palestra, Soldi (Promemoria
-  fatto, sezione 2tretricies; `docs/roadmap.md`), ognuno con la C20 in mente;
+- i **moduli nuovi** che restano: Palestra, Soldi (Promemoria e Documenti
+  fatti, sezioni 2tretricies e 2sextricies; `docs/roadmap.md`), con la C20 in mente;
 - **C20, quello che resta**: le ricerche con accenti e maiuscole diversi dal
   catalogo (`docs/convenzioni-telegram.md`);
 - **`lista-della-spesa` unito su `main`** il 7 ottobre 2026, dopo il collaudo di bc29b7b;

@@ -17,6 +17,7 @@ pub mod collaudo;
 pub mod contenitori;
 pub mod dispensa;
 pub mod distribuzione;
+pub mod documenti;
 pub mod foto;
 pub mod impostazioni;
 pub mod lista_spesa;

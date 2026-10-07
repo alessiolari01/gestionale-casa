@@ -1,7 +1,8 @@
 # 📄 Documenti
 
-**Stato: PREVISTO, decisioni prese il 7 ottobre 2026.** Si costruisce dopo
-le scadenze dei Promemoria (`docs/moduli/promemoria.md`), che usa.
+**Stato: COSTRUITO il 7 ottobre 2026** (`src/modules/documenti.rs`, migration
+`20261007220000_documenti`). Usa
+le scadenze dei Promemoria (`docs/moduli/promemoria.md`).
 
 ## Le scelte di Alessio (7 ottobre 2026)
 

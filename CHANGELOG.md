@@ -2,6 +2,26 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_DOCUMENTI_20261007 -->
+# 07/10/2026 — 📄 Documenti
+
+- **Una sezione nuova nel menù principale: 📄 Documenti.** Ogni documento ha
+  la sua scheda: numero, chi l'ha rilasciato, quando, note.
+- **Dov'è**: la casa, la stanza e il contenitore (anche dentro un altro
+  contenitore), più un dettaglio tuo come "busta blu".
+- **La copia**: mandi la foto o il PDF (fronte e retro, uno dopo l'altro) e
+  il bot li conserva; oppure incolli un link. Con 📎 Mostra la copia li
+  rivedi quando ti servono.
+- **Le scadenze**: un documento può averne una o più, con la priorità, e ti
+  avvisa come le scadenze dei Promemoria. `📅 In scadenza` ti mostra cosa
+  scade nei prossimi due mesi.
+- **🔒 Solo mio o 👥 dello spazio**, documento per documento: quello solo tuo
+  non lo vede nessun altro, neanche cercando.
+- **Le cartelle** partono già pronte (Identità, Casa, Auto, Salute, Lavoro,
+  Tasse, Garanzie e scontrini, Banca e assicurazioni): le rinomini, le
+  sposti, ci crei dentro sottocartelle e, se non ti servono, le elimini.
+- **🔎 Cerca** per titolo, numero, chi l'ha rilasciato o note.
+
 <!-- CHANGELOG_SCADENZE_20261007 -->
 # 07/10/2026 — Scadenze con priorità e cose da fare
 

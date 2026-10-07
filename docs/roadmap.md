@@ -163,7 +163,8 @@ Alessio, risposte ancora da raccogliere):
 - **📄 Documenti** — documenti trattati come oggetti, con la posizione
   fisica (case, stanze, contenitori annidati come "sottoscaffali") e una
   copia digitale (file caricato o link), in una gerarchia di cartelle per
-  tipologia come in Drive;
+  tipologia come in Drive. **COSTRUITO il 7 ottobre 2026**, vedi
+  `docs/moduli/documenti.md`;
 - **⏰ Promemoria** — **COSTRUITO il 7 ottobre 2026**, vedi
   `docs/moduli/promemoria.md`: promemoria liberi con ripetizione, pasti del
   planner, scorte che scadono, rimandare. È il motore con cui il bot scrive

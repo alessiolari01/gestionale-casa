@@ -335,6 +335,9 @@ pub fn main_menu_keyboard(
     if funzioni.attiva(Funzione::Promemoria) {
         rows.push(vec![button("⏰ Promemoria", "remind:menu")]);
     }
+    if funzioni.attiva(Funzione::Documenti) {
+        rows.push(vec![button("📄 Documenti", "doc:menu")]);
+    }
     if funzioni.attiva(Funzione::Oggetti) {
         rows.push(vec![button("🏷️ Oggetti", "oggetti:menu")]);
     }

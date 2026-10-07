@@ -898,7 +898,7 @@ async fn data_scelta(
 
 /// Il testo scritto per una delle attese di questo file. `false` se
 /// l'attesa non è di qui.
-pub async fn gestisci_testo(
+pub(super) async fn gestisci_testo(
     bot: &Bot,
     chat_id: ChatId,
     pool: &SqlitePool,

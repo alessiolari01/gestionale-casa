@@ -23,7 +23,7 @@ use teloxide::{
 
 use crate::modules::{calendario, liste};
 
-mod scadenze;
+pub mod scadenze;
 
 type Bot = crate::context_bot::ContextBot;
 

@@ -333,6 +333,7 @@ impl Procedure {
             || self.dispensa_sessions.has_active(chat_id)
             || self.turni_sessions.has_active(chat_id)
             || modules::promemoria::attesa_attiva(chat_id)
+            || modules::documenti::attesa_attiva(chat_id)
     }
 
     /// Chiude ogni attesa della chat, comprese le due che non stanno in una
@@ -355,6 +356,7 @@ impl Procedure {
         modules::spazi_membri::clear_pending_input(chat_id);
         modules::planner_alimentare::chiudi_attesa_orario(chat_id);
         modules::promemoria::chiudi_attesa(chat_id);
+        modules::documenti::chiudi_attesa(chat_id);
     }
 
     /// Tutte tranne quella dei promemoria: quando è lei ad aver appena
@@ -380,6 +382,7 @@ impl Procedure {
         self.turni_sessions.clear_chat(chat_id);
         modules::spazi_membri::clear_pending_input(chat_id);
         modules::planner_alimentare::chiudi_attesa_orario(chat_id);
+        modules::documenti::chiudi_attesa(chat_id);
     }
 }
 
@@ -1084,6 +1087,12 @@ async fn handle_authorized_message(
         container_sessions.clear_chat(chat_id);
     }
 
+    // Una foto o un PDF che i 📄 Documenti stanno aspettando (7 ottobre
+    // 2026): prima del modulo Foto, che non lo aspetta.
+    if modules::documenti::handle_file(&bot, &msg, &pool).await? {
+        return respond(());
+    }
+
     // I comandi foto e, soprattutto, le foto vere e proprie devono essere
     // gestiti prima del controllo msg.text(), perche' una foto non e' testo.
     if modules::foto::handle_message(&bot, &msg, &pool, &photo_sessions).await? {
@@ -1268,6 +1277,10 @@ async fn handle_authorized_message(
 
     if modules::promemoria::handle_message(&bot, &msg, &pool, text).await? {
         procedure.chiudi_tranne_promemoria(chat_id);
+        return respond(());
+    }
+
+    if modules::documenti::handle_message(&bot, &msg, &pool, text).await? {
         return respond(());
     }
 
@@ -1727,9 +1740,13 @@ async fn handle_authorized_callback(
     // Un'altra schermata chiude l'attesa dei promemoria: un testo scritto
     // dopo non deve finire in un promemoria lasciato a metà. Prima di tutto,
     // Impostazioni comprese.
-    let promemoria_aperto = modules::promemoria::attesa_attiva(chat_id.0);
+    let promemoria_aperto = modules::promemoria::attesa_attiva(chat_id.0)
+        || modules::documenti::attesa_attiva(chat_id.0);
     if !data.starts_with("remind:") {
         modules::promemoria::chiudi_attesa(chat_id.0);
+    }
+    if !data.starts_with("doc:") {
+        modules::documenti::chiudi_attesa(chat_id.0);
     }
 
     // ⚙️ Impostazioni, prima di tutto il resto: è la schermata da cui si
@@ -1790,9 +1807,11 @@ async fn handle_authorized_callback(
         .avviso_uscita(chat_id.0)
         .unwrap_or("❌ Operazione annullata.");
 
-    if data.starts_with("remind:")
-        && modules::promemoria::handle_callback(&bot, chat_id, &pool, data).await?
-    {
+    let del_modulo_nuovo = (data.starts_with("remind:")
+        && modules::promemoria::handle_callback(&bot, chat_id, &pool, data).await?)
+        || (data.starts_with("doc:")
+            && modules::documenti::handle_callback(&bot, chat_id, &pool, data).await?);
+    if del_modulo_nuovo {
         sessions.clear_chat(chat_id.0);
         location_sessions.clear_chat(chat_id.0);
         container_sessions.clear_chat(chat_id.0);
@@ -4281,6 +4300,70 @@ mod runtime_tests {
                     "bassa".to_string()
                 )
             );
+        }
+
+        /// 📄 Documenti (7 ottobre 2026): dal menù a un documento "solo mio"
+        /// nella cartella Identità, con la data di rilascio scritta come
+        /// viene e una scadenza ad alta priorità.
+        #[tokio::test]
+        async fn un_documento_nuovo_con_cartella_rilascio_e_scadenza() {
+            let banco = banco_in_chat(5020).await;
+            banco.premi("doc:menu").await;
+            assert!(banco.telegram.ultimo_testo().starts_with("📄 Documenti"));
+            assert!(banco
+                .telegram
+                .ultimi_pulsanti()
+                .contains(&"📁 Identità · 0".to_string()));
+            let identita: i64 =
+                sqlx::query_scalar("SELECT id FROM cartelle_documenti WHERE nome = 'Identità'")
+                    .fetch_one(&banco.pool)
+                    .await
+                    .expect("cartella");
+
+            banco.premi("doc:new:0").await;
+            banco.scrivi("Carta d'identità").await;
+            assert!(banco
+                .telegram
+                .ultimo_testo()
+                .starts_with("📁 In che cartella?"));
+            banco.premi(&format!("doc:newdir:{identita}")).await;
+            assert!(banco.telegram.ultimo_testo().starts_with("Chi lo vede?"));
+            banco.premi("doc:newpriv:1").await;
+            let scheda = banco.telegram.ultimo_testo();
+            assert!(scheda.starts_with("✅ Documento salvato."), "{scheda}");
+            assert!(scheda.contains("📁 Identità · 🔒 Solo tuo"), "{scheda}");
+            let (id, privato, cartella): (i64, bool, Option<i64>) =
+                sqlx::query_as("SELECT id, privato, cartella_id FROM documenti")
+                    .fetch_one(&banco.pool)
+                    .await
+                    .expect("documento");
+            assert!(privato);
+            assert_eq!(cartella, Some(identita));
+
+            banco.premi(&format!("doc:field:{id}:rilascio")).await;
+            banco.scrivi("15/3/24").await;
+            assert!(banco
+                .telegram
+                .ultimo_testo()
+                .contains("📆 Rilasciato Ven 15 Mar 2024"));
+
+            banco.premi(&format!("doc:scadadd:{id}")).await;
+            banco.scrivi("1/1/2035").await;
+            assert!(banco
+                .telegram
+                .ultimo_testo()
+                .starts_with("🎚 Quanto è importante?"));
+            banco.premi(&format!("doc:scadprio:{id}:alta")).await;
+            let (testo, data, priorita, documento): (String, String, String, Option<i64>) =
+                sqlx::query_as("SELECT testo, data, priorita, documento_id FROM scadenze")
+                    .fetch_one(&banco.pool)
+                    .await
+                    .expect("scadenza");
+            assert_eq!(
+                (testo.as_str(), data.as_str(), priorita.as_str(), documento),
+                ("Carta d'identità", "2035-01-01", "alta", Some(id))
+            );
+            assert!(!modules::documenti::attesa_attiva(banco.chat));
         }
 
         /// Il motore manda un promemoria una volta sola, anche se lo si

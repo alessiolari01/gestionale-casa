@@ -31,7 +31,7 @@ conferma (C16 riguarda le eliminazioni definitive, e qui non si elimina).
 
 Sezioni: 🍽️ Alimentazione, 🍳 Ricette, 👥 Profili alimentari, 📅 Planner
 alimentare, 🛒 Lista della spesa, 🥫 Scorte, 📋 Turni e routine, 💶 Prezzi e
-negozi, 🏷️ Oggetti, 🏠 Case, stanze e contenitori, 📜 Storico, ⏰ Promemoria
+negozi, 🏷️ Oggetti, 🏠 Case, stanze e contenitori, 📜 Storico, ⏰ Promemoria, 📄 Documenti
 (spenta, il bot non scrive più da solo: niente promemoria né avvisi).
 
 Cosa fa da solo: 📥 la spesa chiusa entra in casa, 🍲 i pasti scalano le

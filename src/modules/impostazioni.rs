@@ -51,6 +51,7 @@ pub enum Funzione {
     Luoghi,
     Storico,
     Promemoria,
+    Documenti,
     ScorteIngresso,
     ScorteScaricoPasti,
     ListaAggiornamento,
@@ -58,7 +59,7 @@ pub enum Funzione {
 }
 
 /// Le sezioni, nell'ordine dei menù.
-pub const SEZIONI: [Funzione; 12] = [
+pub const SEZIONI: [Funzione; 13] = [
     Funzione::Alimentazione,
     Funzione::Ricette,
     Funzione::ProfiliAlimentari,
@@ -71,6 +72,7 @@ pub const SEZIONI: [Funzione; 12] = [
     Funzione::Luoghi,
     Funzione::Storico,
     Funzione::Promemoria,
+    Funzione::Documenti,
 ];
 
 /// Quello che il bot fa da solo, senza che nessuno lo chieda.
@@ -107,6 +109,7 @@ impl Funzione {
             Funzione::Luoghi => "luoghi",
             Funzione::Storico => "storico",
             Funzione::Promemoria => "promemoria",
+            Funzione::Documenti => "documenti",
             Funzione::ScorteIngresso => "scorte_ingresso",
             Funzione::ScorteScaricoPasti => "scorte_scarico_pasti",
             Funzione::ListaAggiornamento => "lista_aggiornamento",
@@ -138,6 +141,7 @@ impl Funzione {
             Funzione::Luoghi => "🏠 Case, stanze e contenitori",
             Funzione::Storico => "📜 Storico",
             Funzione::Promemoria => "⏰ Promemoria",
+            Funzione::Documenti => "📄 Documenti",
             Funzione::ScorteIngresso => "📥 La spesa chiusa entra in casa",
             Funzione::ScorteScaricoPasti => "🍲 I pasti scalano le scorte",
             Funzione::ListaAggiornamento => "🔄 La lista si aggiorna da sola",
@@ -161,6 +165,7 @@ impl Funzione {
             Funzione::Luoghi => "Case, stanze e contenitori dove sta la roba.",
             Funzione::Storico => "L'elenco di tutto quello che è successo.",
             Funzione::Promemoria => "I promemoria e gli avvisi automatici. Spenta, il bot non ti scrive più da solo.",
+            Funzione::Documenti => "I documenti con la loro copia, dove sono e quando scadono.",
             Funzione::ScorteIngresso => "Chiudendo la spesa la roba comprata entra da sola nel suo posto.",
             Funzione::ScorteScaricoPasti => "Un pasto preparato o consumato toglie i suoi ingredienti dalle scorte.",
             Funzione::ListaAggiornamento => "La lista si ricalcola da sola quando cambia qualcosa.",
@@ -212,6 +217,7 @@ impl Funzione {
             Funzione::Luoghi => &["loc:"],
             Funzione::Storico => &["history:"],
             Funzione::Promemoria => &["remind:"],
+            Funzione::Documenti => &["doc:"],
             _ => &[],
         }
     }
