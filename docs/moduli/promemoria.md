@@ -109,6 +109,39 @@ L'avviso che arriva:
   e le scorte sono quelli degli spazi di cui si è membri. I promemoria
   condivisi con altri membri di uno spazio sono un passo successivo.
 
+## Scadenze e cose da fare (7 ottobre 2026, seconda parte)
+
+Alessio, rispondendo sulle scadenze dei Documenti: "dove c'è una scadenza
+vorrei dare dei livelli di priorità: più si avvicina alla scadenza e più
+questo dovrà essere avvisato più volte. Un promemoria può anche non avere
+scadenze, magari la facciamo rientrare in una to do list".
+
+Da qui un promemoria nuovo è di uno di **tre tipi**, scelto subito dopo il
+testo:
+
+- **⏰ A un'ora precisa**: quello di prima.
+- **📅 Scadenza**: una data entro cui fare qualcosa, con una priorità. Gli
+  avvisi arrivano all'ora delle scadenze (09:00, cambiabile in
+  `🔁 Automatici`) nei giorni che la priorità decide, e smettono quando si
+  preme `✅ Fatto`:
+
+  | Priorità | Giorni prima | Il giorno stesso | Dopo, se non è fatta |
+  |---|---|---|---|
+  | 🟢 Bassa | 7 | sì | niente |
+  | 🟡 Media | 30, 7, 1 | sì | il giorno dopo |
+  | 🔴 Alta | 30, 14, 7, 3, 2, 1 | sì | ogni giorno per una settimana |
+
+  Una scadenza creata a ridosso della data salta i gradini già passati. Le
+  scadenze dei Documenti sono scadenze come queste, legate al documento.
+- **📝 Da fare**: una cosa senza data né priorità, in una lista. Si spunta
+  toccandola; `🧹 Togli le fatte` le toglie (con conferma). Una voce può
+  diventare una scadenza.
+
+Tabelle nuove: `scadenze` (una per ogni data da rispettare, con
+`documento_id` quando arriverà il modulo Documenti) e `cose_da_fare`. Gli
+avvisi passano dallo stesso motore e dalla stessa `promemoria_invii`, con
+la chiave `scadenza:<id>:<AAAA-MM-GG>`: un avviso al giorno al massimo.
+
 ## Dopo
 
 - promemoria per un altro membro dello spazio;

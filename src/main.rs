@@ -3874,7 +3874,7 @@ mod runtime_tests {
 
     mod flusso {
         use super::super::*;
-        use crate::telegram_finto::{messaggio, messaggio_con_id, TelegramFinto, CHAT};
+        use crate::telegram_finto::{messaggio_in_chat, TelegramFinto, CHAT};
         use sqlx::sqlite::SqlitePoolOptions;
 
         struct Banco {
@@ -3883,9 +3883,17 @@ mod runtime_tests {
             bot: Bot,
             procedure: Procedure,
             actor: identity::AuditActor,
+            /// La chat finta. Le prove dei promemoria ne hanno una ciascuna:
+            /// la loro attesa di testo vale per chat, e girando insieme alle
+            /// altre prove un "/start" altrui la chiuderebbe a metà.
+            chat: i64,
         }
 
         async fn banco() -> Banco {
+            banco_in_chat(CHAT).await
+        }
+
+        async fn banco_in_chat(chat: i64) -> Banco {
             let pool = SqlitePoolOptions::new()
                 .max_connections(1)
                 .connect("sqlite::memory:")
@@ -3930,16 +3938,18 @@ mod runtime_tests {
                 telegram,
                 bot,
                 procedure: Procedure::default(),
+                chat,
             }
         }
 
         impl Banco {
             async fn scrivi(&self, testo: &str) {
-                self.scrivi_messaggio(messaggio(testo)).await;
+                self.scrivi_messaggio(messaggio_in_chat(testo, 1, self.chat))
+                    .await;
             }
 
             async fn scrivi_con_id(&self, testo: &str, message_id: i32) {
-                self.scrivi_messaggio(messaggio_con_id(testo, message_id))
+                self.scrivi_messaggio(messaggio_in_chat(testo, message_id, self.chat))
                     .await;
             }
 
@@ -3980,7 +3990,7 @@ mod runtime_tests {
                     self.actor.clone(),
                     handle_authorized_callback(
                         self.bot.clone(),
-                        ChatId(CHAT),
+                        ChatId(self.chat),
                         self.pool.clone(),
                         p.sessions,
                         p.location_sessions,
@@ -4013,8 +4023,8 @@ mod runtime_tests {
                      VALUES (?, ?, ?, 'Alessio')",
                 )
                 .bind(self.actor.utente_id)
-                .bind(CHAT)
-                .bind(CHAT)
+                .bind(self.chat)
+                .bind(self.chat)
                 .execute(&self.pool)
                 .await
                 .expect("account");
@@ -4048,13 +4058,15 @@ mod runtime_tests {
         /// salvato, scrivendo il quando come lo scrive una persona.
         #[tokio::test]
         async fn un_promemoria_nuovo_dal_testo_alla_scheda() {
-            let banco = banco().await;
+            let banco = banco_in_chat(5001).await;
             banco.premi("remind:new").await;
             assert!(banco
                 .telegram
                 .ultimo_testo()
                 .contains("Cosa ti devo ricordare?"));
             banco.scrivi("Chiama il medico").await;
+            assert!(banco.telegram.ultimo_testo().starts_with("Che cos'è?"));
+            banco.premi("remind:tipo:orario").await;
             assert!(banco
                 .telegram
                 .ultimo_testo()
@@ -4098,25 +4110,184 @@ mod runtime_tests {
                 banco.telegram.dove_porta("⬅️ Indietro").as_deref(),
                 Some("remind:menu")
             );
-            assert!(!modules::promemoria::attesa_attiva(CHAT));
+            assert!(!modules::promemoria::attesa_attiva(banco.chat));
 
             // Un'altra schermata chiude il promemoria lasciato a metà: un
             // testo scritto dopo non deve diventare un promemoria. Nella
             // stessa prova, perché l'attesa è per chat e le prove girano
             // insieme sulla stessa chat finta.
             banco.premi("remind:new").await;
-            assert!(modules::promemoria::attesa_attiva(CHAT));
+            assert!(modules::promemoria::attesa_attiva(banco.chat));
             banco.premi("settings:menu").await;
-            assert!(!modules::promemoria::attesa_attiva(CHAT));
+            assert!(!modules::promemoria::attesa_attiva(banco.chat));
             banco.scrivi("Stendi i panni").await;
             assert_eq!(promemoria_salvati(&banco.pool).await.len(), 1);
+        }
+
+        /// 📅 Una scadenza (7 ottobre 2026): testo, tipo, data, priorità;
+        /// poi gli avvisi nei giorni della priorità, uno al giorno, fino a
+        /// "✅ Fatto" premuto sull'avviso.
+        #[tokio::test]
+        async fn una_scadenza_avvisa_sempre_piu_spesso_fino_a_fatto() {
+            let banco = banco_in_chat(5002).await;
+            banco.collega_telegram().await;
+            banco.premi("remind:new").await;
+            banco.scrivi("Rinnovo patente").await;
+            banco.premi("remind:tipo:scadenza").await;
+            assert!(banco
+                .telegram
+                .ultimo_testo()
+                .starts_with("📅 Entro quando?"));
+            banco.scrivi("boh").await;
+            assert!(banco
+                .telegram
+                .ultimo_testo()
+                .starts_with("⚠️ Non ho capito la data."));
+            banco.scrivi("15/12/2030").await;
+            assert!(banco
+                .telegram
+                .ultimo_testo()
+                .starts_with("🎚 Quanto è importante?"));
+            banco.premi("remind:scad:prio:new:alta").await;
+            assert!(
+                banco
+                    .telegram
+                    .ultimo_testo()
+                    .starts_with("✅ Scadenza salvata: avvisi 30, 14, 7, 3, 2 e 1 giorni prima"),
+                "{}",
+                banco.telegram.ultimo_testo()
+            );
+            assert!(!modules::promemoria::attesa_attiva(banco.chat));
+
+            let avvisi = |banco: &Banco| mandati_che_iniziano(banco, "📅 Rinnovo patente");
+            // 31 giorni prima: niente. 30 giorni prima, prima delle 9: niente.
+            modules::promemoria::controlla(&banco.bot, &banco.pool, alle("2030-11-14", "10:00"))
+                .await;
+            modules::promemoria::controlla(&banco.bot, &banco.pool, alle("2030-11-15", "08:59"))
+                .await;
+            assert_eq!(avvisi(&banco), 0);
+            // 30 giorni prima, alle 9: uno, anche controllando due volte.
+            modules::promemoria::controlla(&banco.bot, &banco.pool, alle("2030-11-15", "09:00"))
+                .await;
+            modules::promemoria::controlla(&banco.bot, &banco.pool, alle("2030-11-15", "18:00"))
+                .await;
+            assert_eq!(avvisi(&banco), 1);
+            assert!(banco
+                .telegram
+                .ultimo_testo()
+                .contains("🔴 Scade fra 30 giorni"));
+            // 29 giorni prima: niente; 2 giorni prima: sì.
+            modules::promemoria::controlla(&banco.bot, &banco.pool, alle("2030-11-16", "09:00"))
+                .await;
+            modules::promemoria::controlla(&banco.bot, &banco.pool, alle("2030-12-13", "09:00"))
+                .await;
+            assert_eq!(avvisi(&banco), 2);
+
+            // "✅ Fatto" sull'avviso chiude la scadenza: il giorno dopo niente.
+            let invio: i64 = sqlx::query_scalar(
+                "SELECT id FROM promemoria_invii WHERE chiave LIKE 'scadenza:%' ORDER BY id DESC",
+            )
+            .fetch_one(&banco.pool)
+            .await
+            .expect("invio");
+            identity::with_actor(
+                banco.actor.clone(),
+                modules::promemoria::gestisci_avviso(
+                    &banco.bot,
+                    ChatId(banco.chat),
+                    &banco.pool,
+                    teloxide::types::MessageId(1000),
+                    &format!("remind:act:{invio}:fatto"),
+                ),
+            )
+            .await
+            .expect("fatto");
+            modules::promemoria::controlla(&banco.bot, &banco.pool, alle("2030-12-14", "09:00"))
+                .await;
+            assert_eq!(avvisi(&banco), 2);
+            let stato: String = sqlx::query_scalar("SELECT stato FROM scadenze")
+                .fetch_one(&banco.pool)
+                .await
+                .expect("stato");
+            assert_eq!(stato, "fatta");
+        }
+
+        /// 📝 Da fare: più voci insieme, una per riga; si spuntano, si
+        /// tolgono le fatte con una conferma, e una può diventare scadenza.
+        #[tokio::test]
+        async fn le_cose_da_fare_si_spuntano_e_si_tolgono() {
+            let banco = banco_in_chat(5003).await;
+            banco.premi("remind:todo:add").await;
+            banco
+                .scrivi("Chiamare l'idraulico\n- comprare lampadine\n")
+                .await;
+            assert!(banco
+                .telegram
+                .ultimo_testo()
+                .starts_with("✅ Aggiunte 2 voci."));
+            assert_eq!(
+                banco.telegram.ultimi_pulsanti()[..2],
+                ["☐ Chiamare l'idraulico", "☐ comprare lampadine"]
+            );
+            let id = |testo: &'static str| {
+                let pool = banco.pool.clone();
+                async move {
+                    sqlx::query_scalar::<_, i64>("SELECT id FROM cose_da_fare WHERE testo = ?")
+                        .bind(testo)
+                        .fetch_one(&pool)
+                        .await
+                        .expect("voce")
+                }
+            };
+            let idraulico = id("Chiamare l'idraulico").await;
+            banco.premi(&format!("remind:todo:flip:{idraulico}")).await;
+            assert!(banco
+                .telegram
+                .ultimi_pulsanti()
+                .contains(&"✅ Chiamare l'idraulico".to_string()));
+            banco.premi("remind:todo:clean:ask").await;
+            assert!(banco
+                .telegram
+                .ultimo_testo()
+                .starts_with("⚠️ Togliere la voce fatta"));
+            banco.premi("remind:todo:clean:yes").await;
+            assert!(banco
+                .telegram
+                .ultimo_testo()
+                .starts_with("✅ Tolta la voce fatta."));
+
+            // Una voce che diventa scadenza esce dalla lista.
+            let lampadine = id("comprare lampadine").await;
+            banco
+                .premi(&format!("remind:todo:toscad:{lampadine}"))
+                .await;
+            banco.scrivi("31/12/2030").await;
+            banco.premi("remind:scad:prio:new:bassa").await;
+            let rimaste: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM cose_da_fare")
+                .fetch_one(&banco.pool)
+                .await
+                .expect("conto");
+            assert_eq!(rimaste, 0);
+            let scadenza: (String, String, String) =
+                sqlx::query_as("SELECT testo, data, priorita FROM scadenze")
+                    .fetch_one(&banco.pool)
+                    .await
+                    .expect("scadenza");
+            assert_eq!(
+                scadenza,
+                (
+                    "comprare lampadine".to_string(),
+                    "2030-12-31".to_string(),
+                    "bassa".to_string()
+                )
+            );
         }
 
         /// Il motore manda un promemoria una volta sola, anche se lo si
         /// controlla due volte, e chiude quelli che non si ripetono.
         #[tokio::test]
         async fn un_promemoria_arriva_una_volta_sola() {
-            let banco = banco().await;
+            let banco = banco_in_chat(5004).await;
             banco.collega_telegram().await;
             let utente = banco.actor.utente_id.expect("utente");
             modules::promemoria::crea(
@@ -4156,7 +4327,7 @@ mod runtime_tests {
         /// arriva una volta, dice che è in ritardo e riparte da domani.
         #[tokio::test]
         async fn un_promemoria_in_ritardo_lo_dice_e_salta_le_volte_perse() {
-            let banco = banco().await;
+            let banco = banco_in_chat(5005).await;
             banco.collega_telegram().await;
             let utente = banco.actor.utente_id.expect("utente");
             modules::promemoria::crea(
@@ -4188,7 +4359,7 @@ mod runtime_tests {
         /// stesso, invece di arrivare tutta insieme alla riaccensione.
         #[tokio::test]
         async fn con_la_sezione_spenta_non_arriva_niente() {
-            let banco = banco().await;
+            let banco = banco_in_chat(5006).await;
             banco.collega_telegram().await;
             let utente = banco.actor.utente_id.expect("utente");
             sqlx::query(
@@ -4248,7 +4419,7 @@ mod runtime_tests {
         /// pasto.
         #[tokio::test]
         async fn i_pasti_arrivano_con_l_anticipo_scelto() {
-            let banco = banco().await;
+            let banco = banco_in_chat(5007).await;
             banco.collega_telegram().await;
             let pasto = pasto_alle(&banco, "2026-10-07", "13:00").await;
 
@@ -4284,7 +4455,7 @@ mod runtime_tests {
         /// niente se non scade niente.
         #[tokio::test]
         async fn il_riepilogo_delle_scadenze_arriva_una_volta_al_giorno() {
-            let banco = banco().await;
+            let banco = banco_in_chat(5008).await;
             banco.collega_telegram().await;
             let utente = banco.actor.utente_id.expect("utente");
             banco.premi("remind:auto:scad:giorni:0900:2").await;
@@ -4338,7 +4509,7 @@ mod runtime_tests {
         /// promemoria nuovo, una volta sola, con lo stesso testo.
         #[tokio::test]
         async fn rimandare_crea_un_promemoria_nuovo() {
-            let banco = banco().await;
+            let banco = banco_in_chat(5009).await;
             banco.collega_telegram().await;
             let utente = banco.actor.utente_id.expect("utente");
             modules::promemoria::crea(
@@ -4362,7 +4533,7 @@ mod runtime_tests {
                 banco.actor.clone(),
                 modules::promemoria::gestisci_avviso(
                     &banco.bot,
-                    ChatId(CHAT),
+                    ChatId(banco.chat),
                     &banco.pool,
                     teloxide::types::MessageId(1000),
                     &format!("remind:act:{invio}:60"),

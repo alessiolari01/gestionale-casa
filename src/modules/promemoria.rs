@@ -23,6 +23,8 @@ use teloxide::{
 
 use crate::modules::{calendario, liste};
 
+mod scadenze;
+
 type Bot = crate::context_bot::ContextBot;
 
 /// Oltre questo ritardo un avviso dice che è in ritardo.
@@ -575,8 +577,30 @@ enum Attesa {
     Testo { id: i64 },
     /// Un quando nuovo per un promemoria che c'è già.
     Quando { id: i64 },
-    /// L'ora del riepilogo delle scadenze, scritta a mano.
+    /// L'ora del riepilogo delle scorte che scadono, scritta a mano.
     OraScadenze,
+    /// "Che cos'è?": solo pulsanti (a un'ora, scadenza, da fare).
+    NuovoTipo { testo: String },
+    /// "Entro quando?" per una scadenza nuova. `da_fare` è la voce della
+    /// lista da cui nasce, se nasce da lì: salvata la scadenza, la voce va
+    /// via.
+    NuovaScadenzaData { testo: String, da_fare: Option<i64> },
+    /// "Quanto è importante?": solo pulsanti.
+    NuovaScadenzaPriorita {
+        testo: String,
+        data: String,
+        da_fare: Option<i64>,
+    },
+    /// Un testo nuovo per una scadenza.
+    ScadenzaTesto { id: i64 },
+    /// Una data nuova per una scadenza.
+    ScadenzaData { id: i64 },
+    /// Le voci nuove della lista delle cose da fare, una per riga.
+    DaFareNuove,
+    /// Un testo nuovo per una voce da fare.
+    DaFareTesto { id: i64 },
+    /// L'ora degli avvisi delle scadenze, scritta a mano.
+    OraAvvisiScadenze,
 }
 
 fn attese() -> &'static Mutex<HashMap<i64, Attesa>> {
@@ -819,13 +843,18 @@ async fn elimina(pool: &SqlitePool, utente_id: i64, id: i64) -> bool {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Regole {
     pub pasti_minuti_prima: Option<i64>,
+    /// L'ora del riepilogo delle scorte che scadono (spento se `None`).
     pub scadenze_ora: Option<String>,
     pub scadenze_giorni: i64,
+    /// L'ora a cui arrivano gli avvisi delle scadenze (📅).
+    pub ora_avvisi_scadenze: String,
 }
 
+const ORA_AVVISI_SCADENZE: &str = "09:00";
+
 pub async fn regole(pool: &SqlitePool, utente_id: i64) -> Regole {
-    let riga: Option<(Option<i64>, Option<String>, i64)> = sqlx::query_as(
-        "SELECT pasti_minuti_prima, scadenze_ora, scadenze_giorni \
+    let riga: Option<(Option<i64>, Option<String>, i64, String)> = sqlx::query_as(
+        "SELECT pasti_minuti_prima, scadenze_ora, scadenze_giorni, ora_avvisi_scadenze \
          FROM promemoria_regole WHERE utente_id = ?",
     )
     .bind(utente_id)
@@ -834,13 +863,15 @@ pub async fn regole(pool: &SqlitePool, utente_id: i64) -> Regole {
     .ok()
     .flatten();
     match riga {
-        Some((pasti, ora, giorni)) => Regole {
+        Some((pasti, ora, giorni, ora_avvisi)) => Regole {
             pasti_minuti_prima: pasti,
             scadenze_ora: ora,
             scadenze_giorni: giorni,
+            ora_avvisi_scadenze: ora_avvisi,
         },
         None => Regole {
             scadenze_giorni: 3,
+            ora_avvisi_scadenze: ORA_AVVISI_SCADENZE.to_string(),
             ..Regole::default()
         },
     }
@@ -848,16 +879,19 @@ pub async fn regole(pool: &SqlitePool, utente_id: i64) -> Regole {
 
 async fn salva_regole(pool: &SqlitePool, utente_id: i64, regole: &Regole) -> anyhow::Result<()> {
     sqlx::query(
-        "INSERT INTO promemoria_regole (utente_id, pasti_minuti_prima, scadenze_ora, scadenze_giorni) \
-         VALUES (?, ?, ?, ?) \
+        "INSERT INTO promemoria_regole \
+             (utente_id, pasti_minuti_prima, scadenze_ora, scadenze_giorni, ora_avvisi_scadenze) \
+         VALUES (?, ?, ?, ?, ?) \
          ON CONFLICT (utente_id) DO UPDATE SET pasti_minuti_prima = excluded.pasti_minuti_prima, \
              scadenze_ora = excluded.scadenze_ora, scadenze_giorni = excluded.scadenze_giorni, \
+             ora_avvisi_scadenze = excluded.ora_avvisi_scadenze, \
              aggiornato_il = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
     )
     .bind(utente_id)
     .bind(regole.pasti_minuti_prima)
     .bind(&regole.scadenze_ora)
     .bind(regole.scadenze_giorni)
+    .bind(&regole.ora_avvisi_scadenze)
     .execute(pool)
     .await
     .context("Impossibile salvare le regole dei promemoria")?;
@@ -990,7 +1024,13 @@ pub async fn controlla(bot: &Bot, pool: &SqlitePool, adesso: NaiveDateTime) {
         tracing::warn!(?errore, "Promemoria dei pasti non controllati");
     }
     if let Err(errore) = controlla_scadenze(bot, pool, adesso).await {
-        tracing::warn!(?errore, "Promemoria delle scadenze non controllati");
+        tracing::warn!(
+            ?errore,
+            "Promemoria delle scorte che scadono non controllati"
+        );
+    }
+    if let Err(errore) = scadenze::controlla_scadenze(bot, pool, adesso).await {
+        tracing::warn!(?errore, "Avvisi delle scadenze non controllati");
     }
 }
 
@@ -1277,15 +1317,15 @@ pub async fn gestisci_avviso(
     let Ok(invio) = invio.parse::<i64>() else {
         return Ok(());
     };
-    let testo: Option<String> =
-        sqlx::query_scalar("SELECT testo FROM promemoria_invii WHERE id = ? AND utente_id = ?")
+    let invio_letto: Option<(String, String)> =
+        sqlx::query_as("SELECT testo, chiave FROM promemoria_invii WHERE id = ? AND utente_id = ?")
             .bind(invio)
             .bind(utente_id)
             .fetch_optional(pool)
             .await
             .ok()
             .flatten();
-    let Some(testo) = testo else {
+    let Some((testo, chiave)) = invio_letto else {
         let _ = bot.delete_message(chat_id, message_id).await;
         return Ok(());
     };
@@ -1297,6 +1337,10 @@ pub async fn gestisci_avviso(
         "domani" => Some(adesso + Duration::days(1)),
         _ => return Ok(()),
     };
+    // Fatto su una scadenza la chiude: niente più avvisi per lei.
+    if quando.is_none() && chiave.starts_with("scadenza:") {
+        scadenze::fatto_da_avviso(pool, utente_id, &chiave, adesso).await;
+    }
     let esito = if quando.is_some() {
         "rimandato"
     } else {
@@ -1406,10 +1450,38 @@ pub async fn mostra_menu(
         .take(5)
         .map(|riga| riga_elenco(riga, adesso))
         .collect();
-    if in_arrivo.is_empty() {
+    let scadenze_aperte = scadenze::scadenze_aperte(pool, utente_id).await;
+    let vicine: Vec<String> = scadenze_aperte
+        .iter()
+        .take(3)
+        .map(|scadenza| {
+            let giorni = calendario::parse_date(&scadenza.data)
+                .map(|data| (data - adesso.date()).num_days())
+                .unwrap_or(0);
+            format!(
+                "• {} {} — {}",
+                scadenza.priorita().emoji(),
+                scadenza.testo,
+                scadenze::quanto_manca(giorni)
+            )
+        })
+        .collect();
+    let da_fare = scadenze::cose_da_fare(pool, utente_id)
+        .await
+        .iter()
+        .filter(|voce| voce.fatta_il.is_none())
+        .count();
+    if in_arrivo.is_empty() && vicine.is_empty() && da_fare == 0 {
         testo.push_str("\n\nNessun promemoria in arrivo.\nCreane uno con ➕ Nuovo promemoria.");
-    } else {
+    }
+    if !in_arrivo.is_empty() {
         testo.push_str(&format!("\n\nIn arrivo:\n{}", in_arrivo.join("\n")));
+    }
+    if !vicine.is_empty() {
+        testo.push_str(&format!("\n\n📅 Scadenze:\n{}", vicine.join("\n")));
+    }
+    if da_fare > 0 {
+        testo.push_str(&format!("\n\n📝 Da fare: {da_fare}."));
     }
     let regole = regole(pool, utente_id).await;
     let mut automatici = Vec::new();
@@ -1426,10 +1498,20 @@ pub async fn mostra_menu(
     let mut rows = vec![vec![button("➕ Nuovo promemoria", "remind:new")]];
     if !tutti.is_empty() {
         rows.push(vec![button(
-            liste::etichetta_con_conteggio("📋 Tutti i promemoria", tutti.len() as i64),
+            liste::etichetta_con_conteggio("⏰ A un'ora precisa", tutti.len() as i64),
             "remind:list:0",
         )]);
     }
+    rows.push(vec![
+        button(
+            liste::etichetta_con_conteggio("📅 Scadenze", scadenze_aperte.len() as i64),
+            "remind:scad:list:0",
+        ),
+        button(
+            liste::etichetta_con_conteggio("📝 Da fare", da_fare as i64),
+            "remind:todo:list",
+        ),
+    ]);
     rows.push(vec![button("🔁 Automatici", "remind:auto")]);
     rows.push(vec![button("🏠 Menù principale", "menu:main")]);
     bot.send_message(chat_id, testo)
@@ -1456,7 +1538,7 @@ async fn mostra_elenco(
     let pagina = liste::pagina_valida(pagina, totale);
     let testo = format!(
         "{}\n\n⏸ = sospeso, 🔁 = si ripete.",
-        liste::intestazione("📋 Tutti i promemoria", totale, pagina)
+        liste::intestazione("⏰ A un'ora precisa", totale, pagina)
     );
     let mut rows: Vec<Vec<InlineKeyboardButton>> = tutti
         .iter()
@@ -1700,12 +1782,19 @@ async fn mostra_automatici(
     if regole.scadenze_ora.is_some() && !funzioni.attiva(Funzione::Scorte) {
         testo.push_str("\n⚠️ Le Scorte sono spente nelle Impostazioni: non arriva niente.");
     }
+    testo.push_str(&format!(
+        "\n\n📅 Avvisi delle scadenze: alle {}, nei giorni che decide la priorità di ognuna.",
+        regole.ora_avvisi_scadenze
+    ));
     testo.push_str(
         "\n\nUn pasto alla volta si cambia dal suo dettaglio nel planner: ⏰ Promemoria.",
     );
+    // "🥫 Scorte" e non più "🥫 Scadenze" (7 ottobre 2026): con le 📅
+    // Scadenze dei promemoria i due pulsanti si confondevano.
     let rows = vec![
         vec![button("🍽️ Pasti: cambia", "remind:auto:pasti")],
-        vec![button("🥫 Scadenze: cambia", "remind:auto:scad")],
+        vec![button("🥫 Scorte: cambia", "remind:auto:scad")],
+        vec![button("📅 Ora delle scadenze", "remind:scad:orask")],
         nav_row("remind:menu"),
     ];
     bot.send_message(chat_id, testo)
@@ -2064,13 +2153,8 @@ pub async fn handle_message(
                 chiedi_testo(bot, chat_id, Some("⚠️ Scrivi cosa ti devo ricordare.")).await?;
                 return Ok(true);
             }
-            aspetta(
-                chat_id.0,
-                Attesa::NuovoQuando {
-                    testo: scritto.to_string(),
-                },
-            );
-            chiedi_quando(bot, chat_id, pool, scritto, None).await?;
+            // Prima che cos'è: a un'ora, una scadenza, una cosa da fare.
+            scadenze::chiedi_tipo(bot, chat_id, scritto).await?;
         }
         Attesa::NuovoQuando { testo } => {
             let adesso = adesso_locale(pool).await;
@@ -2129,6 +2213,7 @@ pub async fn handle_message(
                 .await?
             }
         },
+        altra => return scadenze::gestisci_testo(bot, chat_id, pool, &altra, scritto).await,
     }
     Ok(true)
 }
@@ -2192,6 +2277,9 @@ async fn gestisci_con_argomento(
     utente_id: i64,
     resto: &str,
 ) -> ResponseResult<bool> {
+    if scadenze::gestisci_pulsante(bot, chat_id, pool, utente_id, resto).await? {
+        return Ok(true);
+    }
     if let Some(scelta) = resto.strip_prefix("auto:pasti:") {
         let mut nuove = regole(pool, utente_id).await;
         nuove.pasti_minuti_prima = if scelta == "off" {

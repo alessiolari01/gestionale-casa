@@ -191,11 +191,17 @@ pub fn messaggio(testo: &str) -> Message {
 /// Un messaggio dell'utente con un id scelto: in una chat privata gli id
 /// sono consecutivi fra utente e bot, e `/clear` ci conta.
 pub fn messaggio_con_id(testo: &str, message_id: i32) -> Message {
+    messaggio_in_chat(testo, message_id, CHAT)
+}
+
+/// Lo stesso, in un'altra chat: per le prove che non devono pestarsi i
+/// piedi con le altre (le attese che valgono per chat).
+pub fn messaggio_in_chat(testo: &str, message_id: i32, chat: i64) -> Message {
     serde_json::from_value(json!({
         "message_id": message_id,
         "date": 1_759_000_000,
-        "chat": { "id": CHAT, "type": "private", "first_name": "Alessio" },
-        "from": { "id": CHAT, "is_bot": false, "first_name": "Alessio" },
+        "chat": { "id": chat, "type": "private", "first_name": "Alessio" },
+        "from": { "id": chat, "is_bot": false, "first_name": "Alessio" },
         "text": testo,
     }))
     .expect("messaggio di prova")

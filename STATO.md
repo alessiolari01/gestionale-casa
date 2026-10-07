@@ -3329,9 +3329,42 @@ Le due migliorie:
 Il Telegram finto ha `dove_porta(etichetta)`, il `callback_data` di un
 pulsante. 1 test nuovo e due allargati, totale 540.
 
+## 2quinquetricies. Scadenze con priorità e cose da fare (7 ottobre 2026)
+
+Rispondendo sulle scadenze dei Documenti, Alessio ha chiesto la stessa
+cosa per tutti i promemoria: "dove c'è una scadenza vorrei dare dei livelli
+di priorità: più si avvicina alla scadenza e più questo dovrà essere
+avvisato più volte. Un promemoria può anche non avere scadenze, magari la
+facciamo rientrare in una to do list". Fatto prima dei Documenti, che lo
+useranno. Dettagli in `docs/moduli/promemoria.md`.
+
+- Un promemoria nuovo, dopo il testo, chiede **che cos'è**: ⏰ a un'ora
+  precisa (quello di prima), 📅 una scadenza, 📝 da fare.
+- **📅 Scadenze** (`src/modules/promemoria/scadenze.rs`, tabella
+  `scadenze`): data e priorità. Gli avvisi arrivano all'ora delle scadenze
+  (09:00, da `🔁 Automatici → 📅 Ora delle scadenze`) nei giorni decisi
+  dalla priorità — 🟢 7 giorni prima e il giorno stesso; 🟡 30, 7, 1, il
+  giorno stesso e il giorno dopo; 🔴 30, 14, 7, 3, 2, 1, il giorno stesso e
+  ogni giorno per una settimana — uno al giorno al massimo (chiave
+  `scadenza:<id>:<giorno>`), finché `✅ Fatto` non la chiude. Cambiare la
+  data la riapre (un documento rinnovato).
+- **📝 Da fare** (tabella `cose_da_fare`): più voci insieme, una per riga;
+  si spuntano toccandole; `🧹 Togli le fatte` con conferma; una voce può
+  diventare una scadenza.
+- Nel menù ⏰ Promemoria: le tre scadenze più vicine, quante cose da fare, e
+  i pulsanti `⏰ A un'ora precisa`, `📅 Scadenze`, `📝 Da fare`. In
+  `🔁 Automatici` il riepilogo delle scorte si chiama ora `🥫 Scorte`, per
+  non confonderlo con le 📅 Scadenze.
+
+Migration 70 (`scadenze_e_cose_da_fare`). Le prove dei promemoria hanno
+ora **una chat finta ciascuna** (`banco_in_chat`): la loro attesa vale per
+chat, e girando insieme alle altre un `/start` altrui poteva chiuderla a
+metà — passavano, ma per caso. 6 test nuovi, totale 546.
+
 ## 3. Stato tecnico verificato
 
-- **69 migration** nel repository. La 69ª (`promemoria_esito_il`, sezione
+- **70 migration** nel repository. La 70ª (`scadenze_e_cose_da_fare`, sezione
+  2quinquetricies), la 69ª (`promemoria_esito_il`, sezione
   2quattuortricies) e la 68ª (`promemoria`, sezione 2tretricies) si
   applicano al primo avvio dopo il deploy del 7 ottobre 2026. La 67ª (`ean_spaghetti_barilla`, sezione
   2untricies) si applica al primo avvio dopo il deploy del 6 ottobre 2026.
@@ -3348,7 +3381,7 @@ pulsante. 1 test nuovo e due allargati, totale 540.
 - pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa,
   punto 1 della sezione 6): `fmt`, `check --locked`,
   `clippy --all-targets --locked -- -D warnings`, `test --locked` —
-  **540 test** (539 prima della sezione 2quattuortricies, 523 prima della sezione 2tretricies, 520 prima della sezione 2duotricies, 508 prima della sezione 2untricies, 504 prima della sezione 2tricies, 498 prima della sezione 2novovicies, 477 prima della sezione 2octovicies, 475 prima della sezione 2sexvicies, 474 prima della sezione
+  **546 test** (540 prima della sezione 2quinquetricies, 539 prima della sezione 2quattuortricies, 523 prima della sezione 2tretricies, 520 prima della sezione 2duotricies, 508 prima della sezione 2untricies, 504 prima della sezione 2tricies, 498 prima della sezione 2novovicies, 477 prima della sezione 2octovicies, 475 prima della sezione 2sexvicies, 474 prima della sezione
   2quattuorvicies, 472 prima della
   sezione 2trevicies, 471 prima della sezione
   2duovicies, 469 prima della sezione

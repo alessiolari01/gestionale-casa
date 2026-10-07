@@ -2,6 +2,24 @@
 > documenti dell'epoca. La cartella e' stata riordinata il 2 settembre 2026:
 > la mappa attuale e' nel `README.md`.
 
+<!-- CHANGELOG_SCADENZE_20261007 -->
+# 07/10/2026 — Scadenze con priorità e cose da fare
+
+- Creando un promemoria, dopo il testo scegli **che cos'è**: ⏰ a un'ora
+  precisa, 📅 una scadenza, 📝 da fare.
+- **📅 Scadenze**: una data entro cui fare qualcosa e una priorità. Più è
+  importante, più avvisi ricevi man mano che la data si avvicina:
+  - 🟢 bassa: 7 giorni prima e il giorno stesso;
+  - 🟡 media: 30, 7 e 1 giorno prima, il giorno stesso e il giorno dopo se
+    non l'hai fatta;
+  - 🔴 alta: 30, 14, 7, 3, 2 e 1 giorno prima, il giorno stesso, poi ogni
+    giorno per una settimana.
+  `✅ Fatto` sull'avviso la chiude. Gli avvisi arrivano alle 9; l'ora la
+  cambi in `🔁 Automatici`.
+- **📝 Da fare**: una lista senza date. Scrivi più cose insieme, una per
+  riga; tocca una voce per spuntarla; `🧹 Togli le fatte` le toglie. Una
+  voce può diventare una scadenza.
+
 <!-- CHANGELOG_PROMEMORIA_20261007 -->
 # 07/10/2026 — ⏰ Promemoria
 
