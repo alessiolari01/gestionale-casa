@@ -131,6 +131,32 @@ impl TelegramFinto {
             .collect()
     }
 
+    /// Dove porta un pulsante dell'ultimo messaggio che ne aveva: il suo
+    /// `callback_data`, cercato per etichetta.
+    pub fn dove_porta(&self, etichetta: &str) -> Option<String> {
+        self.chiamate()
+            .into_iter()
+            .rev()
+            .find_map(|chiamata| {
+                chiamata
+                    .corpo
+                    .get("reply_markup")
+                    .and_then(|markup| markup.get("inline_keyboard"))
+                    .and_then(Value::as_array)
+                    .cloned()
+            })
+            .unwrap_or_default()
+            .iter()
+            .flat_map(|riga| riga.as_array().cloned().unwrap_or_default())
+            .find(|pulsante| pulsante.get("text").and_then(Value::as_str) == Some(etichetta))
+            .and_then(|pulsante| {
+                pulsante
+                    .get("callback_data")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+    }
+
     /// Le etichette dei pulsanti dell'ultimo messaggio che ne aveva.
     pub fn ultimi_pulsanti(&self) -> Vec<String> {
         self.chiamate()

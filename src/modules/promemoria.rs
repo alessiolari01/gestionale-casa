@@ -1302,8 +1302,9 @@ pub async fn gestisci_avviso(
     } else {
         "fatto"
     };
-    let _ = sqlx::query("UPDATE promemoria_invii SET esito = ? WHERE id = ?")
+    let _ = sqlx::query("UPDATE promemoria_invii SET esito = ?, esito_il = ? WHERE id = ?")
         .bind(esito)
+        .bind(scrivi_ora_db(adesso))
         .bind(invio)
         .execute(pool)
         .await;
@@ -1497,12 +1498,24 @@ async fn mostra_elenco(
     Ok(())
 }
 
+/// La scheda di un promemoria, con "Indietro" verso l'elenco.
 async fn mostra_scheda(
     bot: &Bot,
     chat_id: ChatId,
     pool: &SqlitePool,
     id: i64,
     avviso: Option<&str>,
+) -> ResponseResult<()> {
+    mostra_scheda_con_indietro(bot, chat_id, pool, id, avviso, "remind:list:0").await
+}
+
+async fn mostra_scheda_con_indietro(
+    bot: &Bot,
+    chat_id: ChatId,
+    pool: &SqlitePool,
+    id: i64,
+    avviso: Option<&str>,
+    indietro: &str,
 ) -> ResponseResult<()> {
     chiudi_attesa(chat_id.0);
     let Some((utente_id, _)) = utente_corrente() else {
@@ -1553,7 +1566,7 @@ async fn mostra_scheda(
             pausa,
         ],
         vec![button("🗑️ Elimina", format!("remind:del:ask:{id}"))],
-        nav_row("remind:list:0"),
+        nav_row(indietro),
     ];
     bot.send_message(chat_id, testo)
         .reply_markup(InlineKeyboardMarkup::new(rows))
@@ -1939,7 +1952,9 @@ async fn salva_nuovo(
                 "✅ Promemoria salvato: te lo ricordo {}.",
                 quando_leggibile(quando, adesso)
             );
-            mostra_scheda(bot, chat_id, pool, id, Some(&avviso)).await
+            // Appena creato si torna da dove si era partiti, il menù
+            // (collaudo di bc29b7b).
+            mostra_scheda_con_indietro(bot, chat_id, pool, id, Some(&avviso), "remind:menu").await
         }
         Err(errore) => {
             tracing::warn!(?errore, "Promemoria non salvato");

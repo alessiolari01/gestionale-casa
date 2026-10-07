@@ -97,7 +97,8 @@ L'avviso che arriva:
   bisestili.
 - **Le tabelle**: `promemoria_liberi` (i promemoria scritti a mano e
   quelli rimandati), `promemoria_invii` (ogni avviso mandato, con la sua
-  chiave), `promemoria_regole` (gli automatici, una riga per utente),
+  chiave, e l'ora in cui è stato premuto `✅ Fatto` o `⏰`, `esito_il`),
+  `promemoria_regole` (gli automatici, una riga per utente),
   `promemoria_pasti` (l'eccezione di un pasto). `promemoria`, senza
   suffisso, è una tabella del primo schema legata agli oggetti, mai usata e
   vuota: resta perché `db::status` la conta.

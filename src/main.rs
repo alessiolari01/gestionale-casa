@@ -4092,6 +4092,12 @@ mod runtime_tests {
                 scheda.starts_with("✅ Promemoria salvato: te lo ricordo domani alle 09:00."),
                 "{scheda}"
             );
+            // Collaudo di bc29b7b: appena creato, "Indietro" torna al menù
+            // dei promemoria, da cui si era partiti, non all'elenco.
+            assert_eq!(
+                banco.telegram.dove_porta("⬅️ Indietro").as_deref(),
+                Some("remind:menu")
+            );
             assert!(!modules::promemoria::attesa_attiva(CHAT));
 
             // Un'altra schermata chiude il promemoria lasciato a metà: un
@@ -4365,6 +4371,19 @@ mod runtime_tests {
             .await
             .expect("rimanda");
             assert!(banco.telegram.cancellati().contains(&1000));
+            // Collaudo di bc29b7b: un avviso sparito per un "✅ Fatto"
+            // premuto per sbaglio non si poteva datare. Ora l'esito ha l'ora.
+            let (esito, esito_il): (Option<String>, Option<String>) =
+                sqlx::query_as("SELECT esito, esito_il FROM promemoria_invii WHERE id = ?")
+                    .bind(invio)
+                    .fetch_one(&banco.pool)
+                    .await
+                    .expect("esito");
+            assert_eq!(esito.as_deref(), Some("rimandato"));
+            assert!(
+                esito_il.is_some_and(|ora| ora.len() == 16),
+                "l'ora del tocco, AAAA-MM-GG HH:MM"
+            );
             let salvati = promemoria_salvati(&banco.pool).await;
             assert_eq!(salvati.len(), 2);
             assert_eq!(salvati[1].0, "Stendi i panni");

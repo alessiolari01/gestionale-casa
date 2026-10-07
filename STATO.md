@@ -3304,10 +3304,36 @@ reale sia in quello di prova (controllato), contata da `db::status`.
 Nel banco delle prove di flusso c'è ora `premi`, per i pulsanti. 16 test
 nuovi (9 sul dominio, 7 sul flusso e sul motore), totale 539.
 
+## 2quattuortricies. Dal collaudo di bc29b7b (7 ottobre 2026)
+
+Collaudo positivo (esiti in `collaudi/2026-10-07_bc29b7b/`): il promemoria
+libero e il riepilogo delle scadenze sono arrivati al minuto, tutte le
+scritture del quando lette come atteso, il bot mai fermo. Le correzioni del
+6 ottobre (sezione 2duotricies) sono confermate.
+
+L'unico "difetto", **il promemoria del pasto mai arrivato**, non era del
+bot: `promemoria_invii` dice che è partito alle 16:44 (messaggio 12515) e
+che subito dopo è stato premuto `✅ Fatto`, l'unico pulsante che scrive
+`esito = 'fatto'`. Quasi certamente un clic della sessione di collaudo
+finito sull'avviso appena comparso in fondo alla chat (la stessa sessione
+annota "i pulsanti a volte non rispondono al primo clic"). Per poterlo
+dire con certezza la prossima volta, `promemoria_invii.esito_il` (migration
+69) registra l'ora del tocco.
+
+Le due migliorie:
+- nel dettaglio di un pasto la riga del tipo era "🍴 🍽️ Cena": ora
+  "🍽️ Cena" (`riga_tipo_pasto`);
+- appena creato un promemoria, `⬅️ Indietro` torna al menù ⏰ Promemoria,
+  da cui si era partiti; dall'elenco resta l'elenco.
+
+Il Telegram finto ha `dove_porta(etichetta)`, il `callback_data` di un
+pulsante. 1 test nuovo e due allargati, totale 540.
+
 ## 3. Stato tecnico verificato
 
-- **68 migration** nel repository. La 68ª (`promemoria`, sezione 2tretricies) si
-  applica al primo avvio dopo il deploy del 7 ottobre 2026. La 67ª (`ean_spaghetti_barilla`, sezione
+- **69 migration** nel repository. La 69ª (`promemoria_esito_il`, sezione
+  2quattuortricies) e la 68ª (`promemoria`, sezione 2tretricies) si
+  applicano al primo avvio dopo il deploy del 7 ottobre 2026. La 67ª (`ean_spaghetti_barilla`, sezione
   2untricies) si applica al primo avvio dopo il deploy del 6 ottobre 2026.
   La 66ª (`liste_spesa_scorte_usate`,
   sezione 2novovicies) si applica al primo avvio dopo il deploy del 1
@@ -3322,7 +3348,7 @@ nuovi (9 sul dominio, 7 sul flusso e sul motore), totale 539.
 - pipeline verde sia in locale sul PC sia sull'S9 (toolchain diversa,
   punto 1 della sezione 6): `fmt`, `check --locked`,
   `clippy --all-targets --locked -- -D warnings`, `test --locked` —
-  **539 test** (523 prima della sezione 2tretricies, 520 prima della sezione 2duotricies, 508 prima della sezione 2untricies, 504 prima della sezione 2tricies, 498 prima della sezione 2novovicies, 477 prima della sezione 2octovicies, 475 prima della sezione 2sexvicies, 474 prima della sezione
+  **540 test** (539 prima della sezione 2quattuortricies, 523 prima della sezione 2tretricies, 520 prima della sezione 2duotricies, 508 prima della sezione 2untricies, 504 prima della sezione 2tricies, 498 prima della sezione 2novovicies, 477 prima della sezione 2octovicies, 475 prima della sezione 2sexvicies, 474 prima della sezione
   2quattuorvicies, 472 prima della
   sezione 2trevicies, 471 prima della sezione
   2duovicies, 469 prima della sezione
@@ -3490,8 +3516,8 @@ src/modules/novita.rs               registro delle novità e badge "🆕" propag
 - **conferma breve della sezione 2duotricies** (la scritta della prova,
   Rimuovi voci, Dispensa con la marca, orario nel planner); il
   Miglioramento 17 con una chiusura fra mezzanotte e le due;
-- **collaudo di ⏰ Promemoria** (sezione 2tretricies), sul database di
-  prova; poi, nell'ordine concordato, Documenti, Palestra, Soldi, che
+- **⏰ Promemoria collaudato** (sezioni 2tretricies e 2quattuortricies); ora,
+  nell'ordine concordato, Documenti, Palestra, Soldi, che
   useranno lo stesso motore per scadenze e ricorrenze;
 - **l'S9 perde la rete ogni 1–2 ore** (56 volte dal 1 al 5 ottobre nel log,
   `Network is unreachable`): il bot si ricollega da solo in un secondo, ma un
@@ -3506,7 +3532,7 @@ src/modules/novita.rs               registro delle novità e badge "🆕" propag
   fatto, sezione 2tretricies; `docs/roadmap.md`), ognuno con la C20 in mente;
 - **C20, quello che resta**: le ricerche con accenti e maiuscole diversi dal
   catalogo (`docs/convenzioni-telegram.md`);
-- **unire `lista-della-spesa` su `main`**;
+- **`lista-della-spesa` unito su `main`** il 7 ottobre 2026, dopo il collaudo di bc29b7b;
 - **Il collaudo "da umano distratto" resta sospeso**: si verificano solo le
   modifiche fatte (la Fase 1 dei copioni, in `collaudi/`).
 

@@ -260,6 +260,16 @@ use teloxide::{
 type PlannerBot = crate::context_bot::ContextBot;
 const PLANNER_PAGE_SIZE: i64 = 5;
 
+/// La riga del tipo nel dettaglio del pasto: `🍽️ Cena`. Fino al collaudo
+/// di bc29b7b aveva anche un 🍴 davanti, e si leggeva "🍴 🍽️ Cena".
+fn riga_tipo_pasto(tipo: Option<MealType>) -> String {
+    format!(
+        "{} {}",
+        tipo.map(MealType::emoji).unwrap_or("🍴"),
+        tipo.map(MealType::label).unwrap_or("Pasto")
+    )
+}
+
 impl MealType {
     fn emoji(self) -> &'static str {
         match self {
@@ -2252,13 +2262,12 @@ async fn planner_show_meal_detail(
     // La data leggibile (C17) contiene già il giorno della settimana: prima
     // qui c'era anche `weekday_name`, e si leggeva "Venerdì · Ven 18 Set".
     let mut text = format!(
-        "{}🍽️ Dettaglio pasto\n\n📅 {}\n🍴 {} {}\n🍳 Ricetta: {}\n👥 Profili: {}\n📌 Stato: {}",
+        "{}🍽️ Dettaglio pasto\n\n📅 {}\n{}\n🍳 Ricetta: {}\n👥 Profili: {}\n📌 Stato: {}",
         notice
             .map(|value| format!("{value}\n\n"))
             .unwrap_or_default(),
         calendario::display_date(&meal.date),
-        meal_type.map(MealType::emoji).unwrap_or("🍴"),
-        meal_type.map(MealType::label).unwrap_or("Pasto"),
+        riga_tipo_pasto(meal_type),
         meal.recipe_name,
         if profiles.is_empty() {
             "nessuno".to_string()
@@ -3910,6 +3919,15 @@ mod telegram_tests {
     /// Collaudo di f0b373c, D: nel giorno la riga era "○ Pranzo · Caprese"
     /// e l'orario si vedeva solo aprendo il pasto. Ora sta davanti al tipo;
     /// senza orario la riga resta com'era.
+    /// Collaudo di bc29b7b, 5.4: nel dettaglio del pasto si leggeva
+    /// "🍴 🍽️ Cena", due icone attaccate. Una sola, quella del tipo.
+    #[test]
+    fn il_tipo_del_pasto_ha_un_icona_sola() {
+        assert_eq!(riga_tipo_pasto(Some(MealType::Dinner)), "🍽️ Cena");
+        assert_eq!(riga_tipo_pasto(Some(MealType::Lunch)), "🍝 Pranzo");
+        assert_eq!(riga_tipo_pasto(None), "🍴 Pasto");
+    }
+
     #[test]
     fn la_riga_del_pasto_dice_l_orario() {
         let mut pasto = riga_pasto(OGGI, "pianificato", None, None, None);
